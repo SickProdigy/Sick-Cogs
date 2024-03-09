@@ -63,3 +63,4 @@ class Coc(commands.Cog):
         
         await ctx.send(f"`{result}`")
 
+        # ig should send results to discord that you called the command in.
