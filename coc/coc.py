@@ -1,4 +1,3 @@
-from redbot.core import commands
 import aiohttp
 
 from redbot.core import Config, commands, checks
@@ -20,12 +19,9 @@ class Coc(commands.Cog):
         self.config = Config.get_conf(self, 5218831554)
         self.config.register_guild(**default_global)
 
-
-
-
     @commands.command()
     async def coc(self, ctx):
-        """Update on if in war or not"""
+        """Clash of Clan update on if in war or not"""
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
@@ -42,13 +38,18 @@ class Coc(commands.Cog):
 
         #return Current war endpoint
         try:
-            async with aiohttp.request( 'GET','https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
+            async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
                 if response.status != 200:
                     return await ctx.send("Oops! Couldn't return results from COC api...")
-                user_json = await response.json()
-        except aiohttp.ClientConnectionError:
-            return await ctx.send("Oops! Couldn't return results from COC api...")
-        
+                # user_json = await response.json()
+                else:
+                    user_json = await response.text(encoding="UTF-8")
+        except aiohttp.ClientConnectionError as e:
+            return await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
+
+        except Exception as e:
+            return await ctx.send(f"An unexpected error occurred: {e}")
+
         await ctx.send(f"'{user_json}'") # return results in json format
 
 
