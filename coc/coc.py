@@ -5,7 +5,7 @@ from redbot.core.utils.chat_formatting import box, pagify
 from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 
 class Coc(commands.Cog):
-    """Clash of Clans API Link"""
+    """Clash of Clans War Updates"""
 
     async def red_delete_data_for_user(self, **kwargs):
         """ Nothing to delete """
@@ -13,7 +13,6 @@ class Coc(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.session = aiohttp.ClientSession()
         default_global = {"COC_API_KEY": None}
 
         self.config = Config.get_conf(self, 5218831554)
@@ -32,30 +31,27 @@ class Coc(commands.Cog):
             'authorization': 'Bearer ' + api_key
         }
 
-        clanNameSearch = ''
         clanNameKeyInput = '2QLUUJYVL'
         clanNameConcat = '%23' + clanNameKeyInput
-
+        truncated_text = ''
         #return Current war endpoint
         try:
             async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
                 if response.status != 200:
                     return await ctx.send("Oops! Couldn't return results from COC api...")
-                # user_json = await response.json()
-                else:
-                    user_json = await response.text(encoding="UTF-8")
+                user_json = await response.json()
+                truncated_text = str(user_json)[:1000]
         except aiohttp.ClientConnectionError as e:
-            return await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
-
+            await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
         except Exception as e:
-            return await ctx.send(f"An unexpected error occurred: {e}")
+            await ctx.send(f"An unexpected error occurred: {e}")
 
-        await ctx.send(f"'{user_json}'") # return results in json format
+        await ctx.send(f"'{truncated_text}'") # return results in json format
 
 
     @checks.is_owner()
     @commands.command(name="setcocapi", aliases=["setcoc"])
-    async def _setwolframapi(self, ctx, key: str):
+    async def _setcocapi(self, ctx, key: str):
         """Set the api-key for Clash of Clans. Go to clash developer portal for access. Ex: 'Bearer abcdefghijklmnop123456789'"""
 
         if key:
