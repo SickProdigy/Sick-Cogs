@@ -1,9 +1,9 @@
 from redbot.core import commands
 import aiohttp
-import requests
-from dotenv import load_dotenv
-import os
 
+from redbot.core import Config, commands, checks
+from redbot.core.utils.chat_formatting import box, pagify
+from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 
 class Coc(commands.Cog):
     """Clash of Clans API Link"""
@@ -14,53 +14,49 @@ class Coc(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.session = aiohttp.ClientSession()
+        default_global = {"COC_API_KEY": None}
+
+        self.config = Config.get_conf(self, 5218831554)
+        self.config.register_guild(**default_global)
+
+
+
 
     @commands.command()
     async def coc(self, ctx):
         """Update on if in war or not"""
 
+        api_key = await self.config.COC_API_KEY()
+        if not api_key:
+            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
 
-        
-        # Start of custom script
-        load_dotenv()
-        
-        auth_key_coc = os.environ.get("AUTH_KEY_COC")
-        
         headers = {
             'Accept': 'application/json',
-            'authorization': auth_key_coc
+            'authorization': 'Bearer ' + api_key
         }
-        
-        def clan_current_war():
-            #return user profile inofrmation
-            response = requests.get('https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers)
-            user_json = response.json()
-            print(user_json)
-            
-        def search_clan():
-            # sbumit a clan search
-            response = requests.get('https://api.clashofclans.com/v1/clans?name=' + clanNameSearch, headers=headers)
-            clan_json = response.json()
-            for clan in clan_json['items']:
-                print(clan['name'] + ': is level ' + str(clan['clanLevel'])) # if you dont ' ' name will show undefined?
-        
+
         clanNameSearch = ''
         clanNameKeyInput = '2QLUUJYVL'
         clanNameConcat = '%23' + clanNameKeyInput
 
+        #return Current war endpoint
         try:
-            async with clan_current_war() as r:
-                if r.status != 200:
-                    return await ctx.send("Oops! There was an error with COC...")
-                result = await r.text(encoding="UTF-8")
+            async with aiohttp.request( 'GET','https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
+                if response.status != 200:
+                    return await ctx.send("Oops! Couldn't return results from COC api...")
+                user_json = await response.json()
         except aiohttp.ClientConnectionError:
-            return await ctx.send("Oops! There was an error with COC...")
+            return await ctx.send("Oops! Couldn't return results from COC api...")
         
-        # clan_current_war()
-        # search_clan()
-        
-        # end of custom script
-        
-        await ctx.send(f"`{result}`")
+        await ctx.send(f"'{user_json}'") # return results in json format
 
-        # ig should send results to discord that you called the command in.
+
+    @checks.is_owner()
+    @commands.command(name="setcocapi", aliases=["setcoc"])
+    async def _setwolframapi(self, ctx, key: str):
+        """Set the api-key for Clash of Clans. Go to clash developer portal for access. Ex: 'Bearer abcdefghijklmnop123456789'"""
+
+        if key:
+            await self.config.COC_API_KEY.set(key)
+            await ctx.send("Key set.")
