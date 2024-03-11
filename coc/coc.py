@@ -1,5 +1,5 @@
 import aiohttp
-
+import discord
 from redbot.core import Config, commands, checks
 from redbot.core.utils.chat_formatting import box, pagify
 from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
@@ -45,8 +45,27 @@ class Coc(commands.Cog):
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
         except Exception as e:
             await ctx.send(f"An unexpected error occurred: {e}")
-
-        await ctx.send(f"'{truncated_text}'") # return results in json format
+        clan_name = str(user_json['clan']['name'])
+        clan_tag = user_json['clan']['tag']
+        state_war = user_json['state']
+        team_size = user_json['teamSize']
+        embed = discord.Embed(
+            description='Clan tag: ' + clan_tag,
+            color=0x5CDBF0,
+            timestamp=None
+        )
+        image1 = user_json['clan']['badgeUrls']['large']
+        image2 = 'https://i.imgur.com/TFTXZvP.png'
+        embed.set_author(name=clan_name, icon_url=image1)
+        embed.add_field(name ='War State:', value=state_war)
+        embed.add_field(name='Team Size:', value=team_size)
+        embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
+        embed.set_thumbnail(url=image1)
+        
+        await ctx.send(embed=embed)
+        # await ctx.send (f"image1")
+        # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") # return results in json format
+        # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") 
 
 
     @checks.is_owner()
