@@ -1,5 +1,6 @@
 import aiohttp
 import discord
+import json
 from datetime import datetime, timedelta
 from redbot.core import Config, commands, checks
 from redbot.core.utils.chat_formatting import box, pagify
@@ -55,7 +56,8 @@ class Coc(commands.Cog):
         clan_name = str(user_json['name'])
         clan_tag = user_json['tag']
         clan_description = user_json['description']
-        members = user_json['members']
+        members_count = user_json['members']
+        war_frequency = user_json['warFrequency']
         
         embed = discord.Embed(
             description=clan_description,
@@ -66,14 +68,29 @@ class Coc(commands.Cog):
         image2 = 'https://i.imgur.com/TFTXZvP.png' # sg logo
         image3 = 'https://i.imgur.com/WAZjzZr.jpeg' # coc logo
         embed.set_author(name=clan_name, icon_url=image1)
+        
         embed.add_field(name='Join Tag:', value=clan_tag)
-        embed.add_field(name='Member Count:', value=members)
+        embed.add_field(name='Member Count:', value=members_count)
+        embed.add_field(name='War Frequency:', value=war_frequency)
         
         embed.set_image(url=image3)
         embed.set_thumbnail(url=image1)
         embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
         
         await ctx.send(embed=embed)
+        # await ctx.send(user_json['memberList']) # too much characters
+        
+        memberList = user_json['memberList']
+        counter = 0
+        # json_dict = json.loads(user_json)   # says it's already dict, must be str, bytes or bytearray to run this command
+        for member_list in memberList:
+            member_name = member_list.get('name', 'No name provided')
+            member_tag = member_list.get('tag', 'No tag provided')
+            th_level = member_list.get('townHallLevel', 'No th level?!')
+            league_name = member_list.get('league', {}).get('name', 'No league provided')
+            counter += 1
+            await ctx.send(f"**User {counter}**\n🫅 Name: {member_name}, 👤 Tag: {member_tag}\n🏠 TH {th_level}, 🛡️ {league_name}")
+        
         
     @commands.command()
     async def war(self, ctx):
@@ -189,6 +206,7 @@ class Coc(commands.Cog):
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") 
 
 
+
     @checks.is_owner()
     @commands.command(name="setcocapi", aliases=["setcoc"])
     async def _setcocapi(self, ctx, key: str):
@@ -205,4 +223,13 @@ class Coc(commands.Cog):
 
         if key:
             await self.config.COC_CLAN_KEY.set(key)
+            await ctx.send("Key set.")
+
+    @checks.guildowner()
+    @commands.command(name="setcocwarchannel", aliases=["setwarchannel"])
+    async def _setcocwarchannel(self, ctx, key: str):
+        """Set the channel for Clash of Clans war updates."""
+
+        if key:
+            await self.config.COC_WAR_CHANNEL.set(key)
             await ctx.send("Key set.")
