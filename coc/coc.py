@@ -44,6 +44,17 @@ class Coc(commands.Cog):
         # prevent spamming of messages if true run next command, false continues on
         # the problem is that after 1 hour will post another so need a min time until posting
         last_notification_timestamp = await self.config.LAST_NOTIFICATION_TIMESTAMP()
+        api_key = await self.config.COC_API_KEY()
+        if not api_key:
+            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
+        clan_key = await self.config.COC_CLAN_KEY()
+        if '#' in clanNameKeyInput:
+            clanNameKeyInput = clanNameKeyInput.replace('#', "")
+        clanNameConcat = '%23' + clanNameKeyInput
+        headers = {
+            'Accept': 'application/json',
+            'authorization': 'Bearer ' + api_key
+        }
         if not last_notification_timestamp:
             # must be first run so let's pull data incase everything is empty
             try:
@@ -308,7 +319,9 @@ class Coc(commands.Cog):
             embed.set_image(url=image3)
             embed.set_thumbnail(url=image1)
             embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
-        
+        await self.config.WAR_START_TIME.set(user_json['startTime'])
+        await self.config.WAR_END_TIME.set(user_json['endTime'])
+        await self.config.LAST_API_PULL.set(datetime.now()-timedelta(hours=5))
         await ctx.send(embed=embed)
         # await ctx.send (f"image1")
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") # return results in json format
