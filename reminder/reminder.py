@@ -232,6 +232,7 @@ class Reminder(commands.Cog):
             return None
         return offset
 
+# Saves reminder here username, timestamp, and reminder
     async def start_saved_reminders(self):
         await self.bot.wait_until_red_ready()
         user_configs = await self.config.all_users()
