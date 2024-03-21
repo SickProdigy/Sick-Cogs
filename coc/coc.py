@@ -1,10 +1,20 @@
 import aiohttp
 import discord
-import json
+from discord.ext import tasks
+from typing import Optional, Union
 from datetime import datetime, timedelta
+from red_commons.logging import getLogger
 from redbot.core import Config, commands, checks
+from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import box, pagify
 from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
+
+GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
+_ = Translator("Coc", __file__)
+log = getLogger("red.Sick-Cogs.Coc")
+
+# TODO:
+# last_notification_timestamp saved into config based off guild?
 
 class Coc(commands.Cog):
     """Clash of Clans War Updates"""
@@ -16,17 +26,70 @@ class Coc(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         default_global = {"COC_API_KEY": None, }
-        default_guild = {"COC_CLAN_KEY": None}
+        default_guild = {
+            "COC_CLAN_KEY": None,
+            "COC_WAR_CHANNEL": None,
+            "WAR_START_TIME": None,
+            "WAR_END_TIME": None,
+            "WAR_PRE_HOURS_END": 1,
+            "LAST_NOTIFICATION_TIMESTAMP": None,
+            "LAST_API_PULL": None
+            }
         self.config = Config.get_conf(self, 5218831554)
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
     
+    @tasks.loop(seconds=10)
+    async def war_notification(self) -> None:
+        # prevent spamming of messages if true run next command, false continues on
+        # the problem is that after 1 hour will post another so need a min time until posting
+        last_notification_timestamp = await self.config.LAST_NOTIFICATION_TIMESTAMP()
+        if not last_notification_timestamp:
+            # must be first run so let's pull data incase everything is empty
+            try:
+                async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
+                    if response.status != 200:
+                        return await ctx.send("Oops! Couldn't return results from COC api...")
+                    user_json = await response.json()
+                    await self.config.WAR_START_TIME.set(user_json['startTime'])
+                    await self.config.WAR_END_TIME.set(user_json['endTime'])
+                    await self.config.LAST_API_PULL.set(datetime.now()-timedelta(hours=5))
+            except aiohttp.ClientConnectionError as e:
+                await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
+            except Exception as e:
+                await ctx.send(f"An unexpected error occurred: {e}")
         
-    
-    @commands.command()
-    async def coc(self, ctx):
-        """Clash of Clan information and war results"""
-        """use -cocsetapi and -setcocclankey"""
+        war_prep_time = user_json['preparationStartTime']
+        war_start_time = user_json['startTime']
+        war_end_time = user_json['endTime']
+
+        current_time = datetime.now() - timedelta(hours=5)
+        one_hour_ago = current_time - timedelta(hours=1)
+        
+        # no notifcations in past hour
+        if last_notification_timestamp < current_time - timedelta(hours=1):
+            # check if current time is 10 min before or after war start, notify, 
+            # then if  current time within war end range - [war_pre_hours_end]
+            # notify about it. Might have to extend notifications a bit more than 1 hour
+            # for initial if check
+            asdf
+            
+        # if one_hour_ago < last_notification_timestamp < war_end_time:
+        #     if current_time > war_start_time:
+        #     asdf
+        #     # notify war start
+
+    @commands.group(invoke_without_command=True, aliases='clashofclans', name='coc')
+    async def command_coc(self, ctx):
+        """
+        Clash of Clan information and war results
+        
+        use -cocsetapi and -setcocclankey
+        Examples:
+        '-coc' list current clans details
+        '-coc war' will show current war stats
+        '-coc warnotification' Toggle war notications'
+        """
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
@@ -80,21 +143,20 @@ class Coc(commands.Cog):
         await ctx.send(embed=embed)
         # await ctx.send(user_json['memberList']) # too much characters
         
-        memberList = user_json['memberList']
-        counter = 0
-        # json_dict = json.loads(user_json)   # says it's already dict, must be str, bytes or bytearray to run this command
-        for member_list in memberList:
-            member_name = member_list.get('name', 'No name provided')
-            member_tag = member_list.get('tag', 'No tag provided')
-            th_level = member_list.get('townHallLevel', 'No th level?!')
-            league_name = member_list.get('league', {}).get('name', 'No league provided')
-            counter += 1
-            await ctx.send(f"**User {counter}**\n🫅 Name: {member_name}, 👤 Tag: {member_tag}\n🏠 TH {th_level}, 🛡️ {league_name}")
+        # memberList = user_json['memberList']
+        # counter = 0
+        # # json_dict = json.loads(user_json)   # says it's already dict, must be str, bytes or bytearray to run this command
+        # for member_list in memberList:
+        #     member_name = member_list.get('name', 'No name provided')
+        #     member_tag = member_list.get('tag', 'No tag provided')
+        #     th_level = member_list.get('townHallLevel', 'No th level?!')
+        #     league_name = member_list.get('league', {}).get('name', 'No league provided')
+        #     counter += 1
+        #     await ctx.send(f"**User {counter}**\n🫅 Name: {member_name}, 👤 Tag: {member_tag}\n🏠 TH {th_level}, 🛡️ {league_name}")
         
-        
-    @commands.command()
-    async def war(self, ctx):
-        """Clash of Clan update on if in war or not"""
+    @command_coc.command()
+    async def command_coc_war(self, ctx):
+        """Clash of Clan, quick WAR update."""
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
@@ -117,7 +179,6 @@ class Coc(commands.Cog):
                 if response.status != 200:
                     return await ctx.send("Oops! Couldn't return results from COC api...")
                 user_json = await response.json()
-                truncated_text = str(user_json)[:1000]
         except aiohttp.ClientConnectionError as e:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
         except Exception as e:
@@ -146,7 +207,7 @@ class Coc(commands.Cog):
         team_attacks_full_amount = user_json['teamSize']*user_json['attacksPerMember']
         if state_war == "preparation":
             embed = discord.Embed(
-                description='Clash of Clan War Status',
+                description='Clash of Clan War Status. Time is in EST',
                 color=0x2ecc71,
                 timestamp=None
             )
@@ -155,7 +216,7 @@ class Coc(commands.Cog):
             image3 = 'https://i.imgur.com/WAZjzZr.jpeg' # coc logo
             embed.set_author(name=clan_name, icon_url=image1)
             
-            embed.add_field(name ='War State:', value=state_war)
+            embed.add_field(name ='War State:', value='PREPARATION')
             embed.add_field(name='Team Size:', value=team_size)
             embed.add_field(name='Attacks available:', value=team_attacks_full_amount)
             
@@ -167,7 +228,6 @@ class Coc(commands.Cog):
             embed.set_image(url=image3)
             embed.set_thumbnail(url=image1)
             embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
-
         elif state_war == "inWar":
             embed = discord.Embed(
                 description='Clash of Clan War Status. Time is in EST',
@@ -179,7 +239,7 @@ class Coc(commands.Cog):
             image3 = 'https://i.imgur.com/WAZjzZr.jpeg' # coc logo
             embed.set_author(name=clan_name, icon_url=image1)
             
-            embed.add_field(name ='War State:', value=state_war)
+            embed.add_field(name ='War State:', value='STARTED')
             embed.add_field(name='Team Size:', value=team_size)
             embed.add_field(name='Total Attacks:', value=team_attacks_full_amount)
             
@@ -200,35 +260,115 @@ class Coc(commands.Cog):
             embed.set_image(url=image3)
             embed.set_thumbnail(url=image1)
             embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
+        elif state_war == "warEnded":
+            embed = discord.Embed(
+                description='Clash of Clan War Status. Time is in EST',
+                color=0x992d22,
+                timestamp=None
+            )
+            image1 = user_json['clan']['badgeUrls']['large']
+            image2 = 'https://i.imgur.com/TFTXZvP.png'
+            image3 = 'https://i.imgur.com/WAZjzZr.jpeg' # coc logo
+            embed.set_author(name=clan_name, icon_url=image1)
+            
+            embed.add_field(name ='War State:', value='ENDED')
+            embed.add_field(name='Team Size:', value=team_size)
+            embed.add_field(name='Total Attacks:', value=team_attacks_full_amount)
+            
+            embed.add_field(name ='War Prep time:', value=wptc_est.strftime("%I:%M %p %b-%d-%Y"))
+            embed.add_field(name ='War Start time:', value=wstc_est.strftime("%I:%M %p %b-%d-%Y"))
+            embed.add_field(name ='War End time:', value=wetc_est.strftime("%I:%M %p %b-%d-%Y"))
+            
+            # splits them up in 3's automagically, how can I change this?
+            embed.add_field(name ='Attacks Used:', value=team_attacks)
+            embed.add_field(name ='Stars Gained:', value=team_stars)
+            embed.add_field(name ='Team Destruction:', value=team_destruction)
+            
+            embed.add_field(name='Opponent Attacks:', value=opponent_attacks)
+            embed.add_field(name='Opponent Stars:', value=opponent_stars)
+            embed.add_field(name='Opponent Destruction:', value=opponent_destruction)
+            
+
+            embed.set_image(url=image3)
+            embed.set_thumbnail(url=image1)
+            embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
+        elif state_war == "notInWar":
+            embed = discord.Embed(
+                description='Clash of Clan War Status.',
+                color=0x992d22,
+                timestamp=None
+            )
+            image1 = user_json['clan']['badgeUrls']['large']
+            image2 = 'https://i.imgur.com/TFTXZvP.png'
+            image3 = 'https://i.imgur.com/WAZjzZr.jpeg' # coc logo
+            embed.set_author(name=clan_name, icon_url=image1)
+            
+            embed.add_field(name ='War State:', value='NOT IN WAR')
+            embed.add_field(name='Contact Admin', value="Tell Admins to start war search")
+            embed.set_image(url=image3)
+            embed.set_thumbnail(url=image1)
+            embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
+        
         await ctx.send(embed=embed)
         # await ctx.send (f"image1")
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") # return results in json format
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") 
+        
+    @command_coc.command()
+    async def command_coc_warnotification(self, ctx, channel: GuildMessageable, url: str):
+        """Clash of Clan, Toggle WAR notification"""
 
-
+        api_key = await self.config.COC_API_KEY()
+        if not api_key:
+            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/ and use -setcocapi")
+        
+        clan_key = await self.config.COC_CLAN_KEY()
+        if not clan_key:
+            return await ctx.send("No Clan key set for Clash of Clans. Check clan profile, share, copy, paste. use -setcocclankey")
+        
+        coc_war_channel = await self.config.COC_WAR_CHANNEL()
+        if not coc_war_channel:
+            return await ctx.send("No Channel set for clan warn notifications")
+        
+        guild = ctx.message.guild
+        guild_settings = await self.config.guild(guild).EMBED()
+        await self.config.guild(guild).EMBED.set(not guild_settings)
+        if guild_settings:
+            verb = _("off")
+        else:
+            verb = _("on")
+        await ctx.send(_("Notifications turned {verb}").format(verb=verb))
 
     @checks.is_owner()
-    @commands.command(name="setcocapi", aliases=["setcoc"])
-    async def _setcocapi(self, ctx, key: str):
+    @command_coc.command(name="setcocapi", aliases=["setcoc"])
+    async def command_coc_setcocapi(self, ctx, key: str):
         """Set the api-key for Clash of Clans. Go to clash developer portal for key. Ex: 'abcdefghijklmnop123456789'"""
 
         if key:
             await self.config.COC_API_KEY.set(key)
             await ctx.send("Key set.")
 
-    @checks.guildowner()
-    @commands.command(name="setcocclankey", aliases=["setcocclan"])
-    async def _setcocclankey(self, ctx, key: str):
+    @commands.guild_only()
+    @commands.group()
+    @checks.mod_or_permissions(manage_channels=True)
+    @command_coc.command(name="setcocclankey", aliases=["setcocclan"])
+    async def command_coc_setcocclankey(self, ctx, key: str):
         """Set the Clan Tag for Clash of Clans auto updates."""
 
         if key:
             await self.config.COC_CLAN_KEY.set(key)
             await ctx.send("Key set.")
 
-    @checks.guildowner()
-    @commands.command(name="setcocwarchannel", aliases=["setwarchannel"])
-    async def _setcocwarchannel(self, ctx, key: str):
-        """Set the channel for Clash of Clans war updates."""
+    @commands.guild_only()
+    @commands.group()
+    @checks.mod_or_permissions(manage_channels=True)
+    @command_coc.command(name="setcocwarchannel", aliases=["setwarchannel"])
+    async def command_coc_setcocwarchannel(self, ctx, key: str):
+        """
+        Set the channel for Clash of Clans war updates.
+        
+        Copy channel id and use '-coc setwarchannel <keyhere>'
+        """
 
         if key:
             await self.config.COC_WAR_CHANNEL.set(key)
