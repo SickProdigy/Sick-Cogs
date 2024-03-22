@@ -15,6 +15,8 @@ log = getLogger("red.Sick-Cogs.Coc")
 
 # TODO:
 # last_notification_timestamp saved into config based off guild?
+# Finished
+# Next? 
 
 class Coc(commands.Cog):
     """Clash of Clans War Updates"""
