@@ -27,7 +27,10 @@ class Coc(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        # default global variables. registered below in self.config.register_global
         default_global = {"COC_API_KEY": None, }
+        # these can be named default_settings, default_bot-msg, etc.
+        # default_guild is just to remind me guild settings, registered below in self.config.register_guild
         default_guild = {
             "COC_CLAN_KEY": None,
             "COC_WAR_CHANNEL": None,
@@ -41,22 +44,18 @@ class Coc(commands.Cog):
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
     
+    # war notification loop 1 method, asyncio could be another
     @tasks.loop(seconds=10)
     async def war_notification(self) -> None:
-        # prevent spamming of messages if true run next command, false continues on
-        # the problem is that after 1 hour will post another so need a min time until posting
+        
+        # grab coc_war_channel from config and check if there? 
+        # do I need to double check these idk
+        coc_war_channel = await self.config.COC_WAR_CHANNEL()
+        if not coc_war_channel:
+            return await ctx.send("No Channel set for clan warn notifications")
+        
+        # grab last notification timestamp from config if not there process one
         last_notification_timestamp = await self.config.LAST_NOTIFICATION_TIMESTAMP()
-        api_key = await self.config.COC_API_KEY()
-        if not api_key:
-            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
-        clan_key = await self.config.COC_CLAN_KEY()
-        if '#' in clanNameKeyInput:
-            clanNameKeyInput = clanNameKeyInput.replace('#', "")
-        clanNameConcat = '%23' + clanNameKeyInput
-        headers = {
-            'Accept': 'application/json',
-            'authorization': 'Bearer ' + api_key
-        }
         if not last_notification_timestamp:
             # must be first run so let's pull data incase everything is empty
             try:
@@ -71,6 +70,25 @@ class Coc(commands.Cog):
                 await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
             except Exception as e:
                 await ctx.send(f"An unexpected error occurred: {e}")
+
+        # grab api key from config
+        api_key = await self.config.COC_API_KEY()
+        if not api_key:
+            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
+        clan_key = await self.config.COC_CLAN_KEY()
+        
+        #clan key cleanup script
+        if '#' in clanNameKeyInput:
+            clanNameKeyInput = clanNameKeyInput.replace('#', "")
+        clanNameConcat = '%23' + clanNameKeyInput
+        headers = {
+            'Accept': 'application/json',
+            'authorization': 'Bearer ' + api_key
+        }
+        
+        # we have last_notification_timestamp check, and api key check. 
+        # we haven't checked to see if toggeled on or off coc_warnotification
+        # They should first toggle on and this should stop there if not
         
         war_prep_time = user_json['preparationStartTime']
         war_start_time = user_json['startTime']
@@ -91,6 +109,11 @@ class Coc(commands.Cog):
         #     if current_time > war_start_time:
         #     asdf
         #     # notify war start
+
+    # make sure bot is ready before loop
+    @war_notification.before_loop
+    async def before_group_war_notification(self):
+        await self.bot.wait_until_red_ready()
 
     @commands.group(invoke_without_command=True, aliases='clashofclans', name='coc')
     async def command_coc(self, ctx):
@@ -345,6 +368,7 @@ class Coc(commands.Cog):
         if not coc_war_channel:
             return await ctx.send("No Channel set for clan warn notifications")
         
+        # not really sure what it embedding, nothing in default_guild here..
         guild = ctx.message.guild
         guild_settings = await self.config.guild(guild).EMBED()
         await self.config.guild(guild).EMBED.set(not guild_settings)
