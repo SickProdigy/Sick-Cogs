@@ -112,7 +112,7 @@ class Coc(commands.Cog):
 
     # make sure bot is ready before loop
     @war_notification.before_loop
-    async def before_group_war_notification(self):
+    async def before_war_notification(self):
         await self.bot.wait_until_red_ready()
 
     @commands.group(invoke_without_command=True, aliases='clashofclans', name='coc')
