@@ -44,6 +44,7 @@ class Reminder(commands.Cog):
     ):
         await self.config.user_from_id(user_id).clear()
 
+# start_saved_reminders mentioned here and at bottom
     def __init__(self, bot: Red):
         super().__init__()
         self.bot = bot
