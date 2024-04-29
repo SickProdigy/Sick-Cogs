@@ -103,7 +103,8 @@ class Coc(commands.Cog):
             # then if  current time within war end range - [war_pre_hours_end]
             # notify about it. Might have to extend notifications a bit more than 1 hour
             # for initial if check
-            asdf
+            
+            # asdf
             
         # if one_hour_ago < last_notification_timestamp < war_end_time:
         #     if current_time > war_start_time:
