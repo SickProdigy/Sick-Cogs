@@ -1,2 +1,4 @@
 *.cpython-311.pyc
 .env
+AGENTS.md
+/.github/copilot-instructions.md
