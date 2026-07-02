@@ -1,0 +1,14 @@
+{
+  "author": ["GitHub Copilot"],
+  "description": "Query a configurable AzerothCore REST bridge for server info, online players, and account creation.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild configuration such as API endpoint settings and allowed role IDs. It does not persist user-provided account data.",
+  "hidden": false,
+  "install_msg": "Configure the bridge with `[p]ac set baseurl`, then set your auth token and account creation roles with `[p]ac set token` and `[p]ac set accountcreationrole`. Use `[p]ac set realmlist` for the public WoW connection line, and `[p]ac set createbody` / `[p]ac set createmethod` to match your account creation endpoint. Public users can use `[p]ac info` and `[p]ac online`; approved roles can use `[p]ac createuser`.",
+  "min_bot_version": "3.5.0",
+  "name": "AzerothCore",
+  "requirements": ["aiohttp"],
+  "short": "Interact with an AzerothCore server through a REST bridge",
+  "tags": ["api", "gaming", "world-of-warcraft", "azerothcore"],
+  "type": "COG"
+}
