@@ -1,4 +1,6 @@
 *.cpython-311.pyc
 .env
+.venv-red/
+.red-runtime/
 AGENTS.md
 /.github/copilot-instructions.md
