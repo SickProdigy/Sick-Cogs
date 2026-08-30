@@ -1,6 +1,31 @@
-*.cpython-311.pyc
-.env
-.venv-red/
-.red-runtime/
+# Local agent/editor files
 AGENTS.md
 /.github/copilot-instructions.md
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Packaging/build output
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+.venv-red/
+venv/
+env/
+redenv/
+.red-runtime/
