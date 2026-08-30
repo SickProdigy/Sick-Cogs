@@ -1,0 +1,12 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Grabs information from Clash of Clans API",
+    "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
+    "install_msg": "Get updates on current wars and search other clans.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["attach_files", "embed_links"],
+    "requirements": ["aiohttp"],
+    "short": "Clash of clans",
+    "tags": ["clash", "coc", "clashofclans"],
+    "type": "COG"
+}
