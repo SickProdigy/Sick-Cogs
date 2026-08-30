@@ -1,17 +1,14 @@
 import aiohttp
 import discord
 from discord.ext import tasks
-from typing import Optional, Union
 from datetime import datetime, timedelta
 from red_commons.logging import getLogger
 from redbot.core import Config, commands, checks
-from redbot.core.i18n import Translator, cog_i18n
-from redbot.core.utils.chat_formatting import box, pagify
-from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
+from redbot.core.i18n import Translator
 
-GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 _ = Translator("Coc", __file__)
 log = getLogger("red.Sick-Cogs.Coc")
+COC_DEVELOPER_URL = "https://developer.clashofclans.com/"
 
 # TODO:
 # last_notification_timestamp saved into config based off guild?
@@ -43,101 +40,83 @@ class Coc(commands.Cog):
         self.config = Config.get_conf(self, 5218831554)
         self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
+
+    @staticmethod
+    def _clean_clan_tag(clan_tag: str) -> str:
+        return "%23" + clan_tag.replace("#", "")
+
+    async def _get_clan_tag(self, ctx: commands.Context) -> str:
+        return await self.config.guild(ctx.guild).COC_CLAN_KEY()
+
+    async def _get_war_channel_id(self, ctx: commands.Context) -> str:
+        return await self.config.guild(ctx.guild).COC_WAR_CHANNEL()
+
+    @staticmethod
+    def _missing_api_key_message(ctx: commands.Context) -> str:
+        return (
+            "No API key set for Clash of Clans. Bot owners can get one at "
+            f"{COC_DEVELOPER_URL} and set it with "
+            f"`{ctx.clean_prefix}coc setapi <api_key>`."
+        )
+
+    @staticmethod
+    def _missing_clan_key_message(ctx: commands.Context) -> str:
+        return (
+            "No clan tag set for Clash of Clans. Copy the clan tag from the "
+            f"clan profile, then use `{ctx.clean_prefix}coc setclan <clan_tag>`."
+        )
+
+    @staticmethod
+    async def _send_api_error(ctx: commands.Context, response: aiohttp.ClientResponse) -> None:
+        detail = ""
+        try:
+            payload = await response.json(content_type=None)
+            detail = payload.get("reason") or payload.get("message") or ""
+        except Exception:
+            detail = (await response.text()).strip()
+
+        if detail:
+            detail = f": {detail[:300]}"
+
+        await ctx.send(
+            f"Oops! Clash of Clans API returned HTTP {response.status}{detail}. "
+            "If this is 403, check the API key and allowed IP address. "
+            "If this is 404, check the clan tag."
+        )
     
     # war notification loop 1 method, asyncio could be another
     @tasks.loop(seconds=10)
     async def war_notification(self) -> None:
-        
-        # grab coc_war_channel from config and check if there? 
-        # do I need to double check these idk
-        coc_war_channel = await self.config.COC_WAR_CHANNEL()
-        if not coc_war_channel:
-            return await ctx.send("No Channel set for clan warn notifications")
-        
-        # grab last notification timestamp from config if not there process one
-        last_notification_timestamp = await self.config.LAST_NOTIFICATION_TIMESTAMP()
-        if not last_notification_timestamp:
-            # must be first run so let's pull data incase everything is empty
-            try:
-                async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
-                    if response.status != 200:
-                        return await ctx.send("Oops! Couldn't return results from COC api...")
-                    user_json = await response.json()
-                    await self.config.WAR_START_TIME.set(user_json['startTime'])
-                    await self.config.WAR_END_TIME.set(user_json['endTime'])
-                    await self.config.LAST_API_PULL.set(datetime.now()-timedelta(hours=5))
-            except aiohttp.ClientConnectionError as e:
-                await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
-            except Exception as e:
-                await ctx.send(f"An unexpected error occurred: {e}")
-
-        # grab api key from config
-        api_key = await self.config.COC_API_KEY()
-        if not api_key:
-            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
-        clan_key = await self.config.COC_CLAN_KEY()
-        
-        #clan key cleanup script
-        if '#' in clanNameKeyInput:
-            clanNameKeyInput = clanNameKeyInput.replace('#', "")
-        clanNameConcat = '%23' + clanNameKeyInput
-        headers = {
-            'Accept': 'application/json',
-            'authorization': 'Bearer ' + api_key
-        }
-        
-        # we have last_notification_timestamp check, and api key check. 
-        # we haven't checked to see if toggeled on or off coc_warnotification
-        # They should first toggle on and this should stop there if not
-        
-        war_prep_time = user_json['preparationStartTime']
-        war_start_time = user_json['startTime']
-        war_end_time = user_json['endTime']
-
-        current_time = datetime.now() - timedelta(hours=5)
-        one_hour_ago = current_time - timedelta(hours=1)
-        
-        # no notifcations in past hour
-        if last_notification_timestamp < current_time - timedelta(hours=1):
-            # check if current time is 10 min before or after war start, notify, 
-            # then if  current time within war end range - [war_pre_hours_end]
-            # notify about it. Might have to extend notifications a bit more than 1 hour
-            # for initial if check
-            
-            # asdf
-            
-        # if one_hour_ago < last_notification_timestamp < war_end_time:
-        #     if current_time > war_start_time:
-        #     asdf
-        #     # notify war start
+        log.debug("CoC war notification loop is not implemented yet.")
 
     # make sure bot is ready before loop
     @war_notification.before_loop
     async def before_war_notification(self):
         await self.bot.wait_until_red_ready()
 
-    @commands.group(invoke_without_command=True, aliases='clashofclans', name='coc')
+    @commands.group(invoke_without_command=True, aliases=['clashofclans'], name='coc')
     async def command_coc(self, ctx):
         """
-        Clash of Clan information and war results
-        
-        use -cocsetapi and -setcocclankey
+        Show Clash of Clans clan information and war results.
+
+        Setup:
+        [p]coc setapi <api_key>
+        [p]coc setclan <clan_tag>
+        [p]coc setwarchannel <channel_id>
+
         Examples:
-        '-coc' list current clans details
-        '-coc war' will show current war stats
-        '-coc warnotification' Toggle war notications'
+        [p]coc
+        [p]coc war
+        [p]coc notifications
         """
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
-            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/")
-        clan_key = await self.config.COC_CLAN_KEY()
+            return await ctx.send(self._missing_api_key_message(ctx))
+        clan_key = await self._get_clan_tag(ctx)
         if not clan_key:
-            return await ctx.send("No Clan key set for Clash of Clans. Check clan profile, share, copy, paste behind -setcocclankey")
-        clanNameKeyInput = clan_key
-        if '#' in clanNameKeyInput:
-            clanNameKeyInput = clanNameKeyInput.replace('#', "")
-        clanNameConcat = '%23' + clanNameKeyInput
+            return await ctx.send(self._missing_clan_key_message(ctx))
+        clanNameConcat = self._clean_clan_tag(clan_key)
         headers = {
             'Accept': 'application/json',
             'authorization': 'Bearer ' + api_key
@@ -146,7 +125,7 @@ class Coc(commands.Cog):
         try:
             async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat, headers=headers) as response:
                 if response.status != 200:
-                    return await ctx.send("Oops! Couldn't return results from COC api...")
+                    return await self._send_api_error(ctx, response)
                 user_json = await response.json()
         except aiohttp.ClientConnectionError as e:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
@@ -191,21 +170,18 @@ class Coc(commands.Cog):
         #     counter += 1
         #     await ctx.send(f"**User {counter}**\n🫅 Name: {member_name}, 👤 Tag: {member_tag}\n🏠 TH {th_level}, 🛡️ {league_name}")
         
-    @command_coc.command()
+    @command_coc.command(name="war")
     async def command_coc_war(self, ctx):
-        """Clash of Clan, quick WAR update."""
+        """Show a quick Clash of Clans war update."""
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
-            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/ and use -setcocapi")
+            return await ctx.send(self._missing_api_key_message(ctx))
         
-        clan_key = await self.config.COC_CLAN_KEY()
+        clan_key = await self._get_clan_tag(ctx)
         if not clan_key:
-            return await ctx.send("No Clan key set for Clash of Clans. Check clan profile, share, copy, paste. use -setcocclankey")
-        clanNameKeyInput = clan_key
-        if '#' in clanNameKeyInput:
-            clanNameKeyInput = clanNameKeyInput.replace('#', "")
-        clanNameConcat = '%23' + clanNameKeyInput
+            return await ctx.send(self._missing_clan_key_message(ctx))
+        clanNameConcat = self._clean_clan_tag(clan_key)
         headers = {
             'Accept': 'application/json',
             'authorization': 'Bearer ' + api_key
@@ -214,7 +190,7 @@ class Coc(commands.Cog):
         try:
             async with aiohttp.request('GET', 'https://api.clashofclans.com/v1/clans/' + clanNameConcat + '/currentwar', headers=headers) as response:
                 if response.status != 200:
-                    return await ctx.send("Oops! Couldn't return results from COC api...")
+                    return await self._send_api_error(ctx, response)
                 user_json = await response.json()
         except aiohttp.ClientConnectionError as e:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
@@ -345,27 +321,28 @@ class Coc(commands.Cog):
             embed.set_image(url=image3)
             embed.set_thumbnail(url=image1)
             embed.set_footer(text='Brought to you by SickGaming.net', icon_url=image2)
-        await self.config.WAR_START_TIME.set(user_json['startTime'])
-        await self.config.WAR_END_TIME.set(user_json['endTime'])
-        await self.config.LAST_API_PULL.set(datetime.now()-timedelta(hours=5))
+        guild_config = self.config.guild(ctx.guild)
+        await guild_config.WAR_START_TIME.set(user_json['startTime'])
+        await guild_config.WAR_END_TIME.set(user_json['endTime'])
+        await guild_config.LAST_API_PULL.set(datetime.now()-timedelta(hours=5))
         await ctx.send(embed=embed)
         # await ctx.send (f"image1")
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") # return results in json format
         # await ctx.send(f"'{clan_name}\n{clan_tag}\nState: {state_war}\nTeam Size: {team_size}'") 
         
-    @command_coc.command()
-    async def command_coc_warnotification(self, ctx, channel: GuildMessageable, url: str):
-        """Clash of Clan, Toggle WAR notification"""
+    @command_coc.command(name="notifications", aliases=["notify", "warnotification"])
+    async def command_coc_warnotification(self, ctx):
+        """Toggle Clash of Clans war notifications."""
 
         api_key = await self.config.COC_API_KEY()
         if not api_key:
-            return await ctx.send("No API key set for Clash of Clans. Get one at https://developer.clashofclans.com/ and use -setcocapi")
+            return await ctx.send(self._missing_api_key_message(ctx))
         
-        clan_key = await self.config.COC_CLAN_KEY()
+        clan_key = await self._get_clan_tag(ctx)
         if not clan_key:
-            return await ctx.send("No Clan key set for Clash of Clans. Check clan profile, share, copy, paste. use -setcocclankey")
+            return await ctx.send(self._missing_clan_key_message(ctx))
         
-        coc_war_channel = await self.config.COC_WAR_CHANNEL()
+        coc_war_channel = await self._get_war_channel_id(ctx)
         if not coc_war_channel:
             return await ctx.send("No Channel set for clan warn notifications")
         
@@ -380,36 +357,34 @@ class Coc(commands.Cog):
         await ctx.send(_("Notifications turned {verb}").format(verb=verb))
 
     @checks.is_owner()
-    @command_coc.command(name="setcocapi", aliases=["setcoc"])
+    @command_coc.command(name="setapi", aliases=["setcocapi", "setcoc"])
     async def command_coc_setcocapi(self, ctx, key: str):
-        """Set the api-key for Clash of Clans. Go to clash developer portal for key. Ex: 'abcdefghijklmnop123456789'"""
+        """Set the Clash of Clans API key."""
 
         if key:
             await self.config.COC_API_KEY.set(key)
             await ctx.send("Key set.")
 
     @commands.guild_only()
-    @commands.group()
     @checks.mod_or_permissions(manage_channels=True)
-    @command_coc.command(name="setcocclankey", aliases=["setcocclan"])
+    @command_coc.command(name="setclan", aliases=["setcocclankey", "setcocclan"])
     async def command_coc_setcocclankey(self, ctx, key: str):
-        """Set the Clan Tag for Clash of Clans auto updates."""
+        """Set the Clash of Clans clan tag."""
 
         if key:
-            await self.config.COC_CLAN_KEY.set(key)
+            await self.config.guild(ctx.guild).COC_CLAN_KEY.set(key)
             await ctx.send("Key set.")
 
     @commands.guild_only()
-    @commands.group()
     @checks.mod_or_permissions(manage_channels=True)
-    @command_coc.command(name="setcocwarchannel", aliases=["setwarchannel"])
+    @command_coc.command(name="setwarchannel", aliases=["setcocwarchannel"])
     async def command_coc_setcocwarchannel(self, ctx, key: str):
         """
         Set the channel for Clash of Clans war updates.
         
-        Copy channel id and use '-coc setwarchannel <keyhere>'
+        Copy channel id and use [p]coc setwarchannel <keyhere>
         """
 
         if key:
-            await self.config.COC_WAR_CHANNEL.set(key)
+            await self.config.guild(ctx.guild).COC_WAR_CHANNEL.set(key)
             await ctx.send("Key set.")
