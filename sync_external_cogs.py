@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync selected third-party cogs into this repository.
 
-The script reads scripts/external_cogs.json, sparse-checks out each upstream
+The script reads external_cogs.json, sparse-checks out each upstream
 repository into a local cache, then copies the selected cog folder into this
 repo. By default it only prints what it would do; pass --apply to replace files.
 """
@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import Iterable
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-REPO_ROOT = SCRIPT_DIR.parent
-DEFAULT_MANIFEST = SCRIPT_DIR / "external_cogs.json"
+REPO_ROOT = Path(__file__).resolve().parent
+DEFAULT_MANIFEST = REPO_ROOT / "external_cogs.json"
 DEFAULT_CACHE_DIR = REPO_ROOT / ".external-cogs-cache"
 IGNORE_PATTERNS = shutil.ignore_patterns(
     ".git",
