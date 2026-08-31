@@ -1,18 +1,62 @@
 # Sick-Cogs
 
-## Cogs created by SickProdigy
+Sick-Cogs is a Red-DiscordBot cog repository maintained for SickProdigy's Discord projects.
 
-Cogs in the works:
+The repo is organized around two goals:
 
-- coc (clash of clans - may rename)
-- rlstats (want to find another way to hit api instead of his way, so may open a fork)
+- Keep `main` as the stable release branch.
+- Use `develop` for active work, experiments, and cogs that are still being shaped.
 
-Cogs that are duplicates:
+Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Assistant - https://github.com/vertyco/vrt-cogs
-- DadJokes - https://github.com/aikaterna/aikaterna-cogs 
-- Dictionary - https://github.com/aikaterna/aikaterna-cogs 
-- RLStats - https://github.com/Jackenmen/JackCogs 
-- Wolfram - https://github.com/aikaterna/aikaterna-cogs
+## Maintained Cogs
 
-Using duplicates as an example to work from for now. Till I get an understanding of how implemented. 
+- `azerothcore` - AzerothCore/WoW server utilities using SOAP.
+- `coc` - Clash of Clans clan and war status utilities.
+
+## Experimental or Learning Cogs
+
+These folders may be used for testing, learning, or local customization before they become maintained Sick-Cogs:
+
+- `assistant`
+- `dadjokes`
+- `dictionary`
+- `reminder`
+- `rlstats`
+- `rss`
+- `welcome`
+- `wolfram`
+
+## External Cog Sync Helper
+
+Source links for refreshable external cog folders live in `scripts/external_cogs.json`.
+
+Preview configured sources:
+
+```bash
+python scripts/sync_external_cogs.py --list
+```
+
+Preview a specific sync without replacing files:
+
+```bash
+python scripts/sync_external_cogs.py --only dadjokes
+```
+
+Apply updates to selected local cog folders:
+
+```bash
+python scripts/sync_external_cogs.py --apply --only dadjokes
+```
+
+Apply all configured external cog updates:
+
+```bash
+python scripts/sync_external_cogs.py --apply
+```
+
+The sync helper replaces selected local cog folders from upstream. Commit or stash local edits before using `--apply`.
+
+## License
+
+This repository is intended to use the MIT License for Sick-Cogs original code. Third-party code keeps any license terms that apply to its original source.
