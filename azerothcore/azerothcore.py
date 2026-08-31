@@ -1,7 +1,11 @@
 import asyncio
-import json
+import errno
+import html
 import secrets
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 import discord
@@ -9,47 +13,69 @@ from redbot.core import Config, commands
 from redbot.core.utils.chat_formatting import box, humanize_list, pagify
 
 
+LEGACY_PLACEHOLDER_SOAP_URL = "http://192.168.1.1:17878/"
+LEGACY_SOAP_ENVELOPE_TEMPLATE = (
+    "<?xml version='1.0' encoding='utf-8'?>\n"
+    "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\">\n"
+    "  <soap:Body>\n"
+    "    <Execute>{command}</Execute>\n"
+    "  </soap:Body>\n"
+    "</soap:Envelope>"
+)
+DEFAULT_SOAP_ENVELOPE_TEMPLATE = (
+    "<?xml version='1.0' encoding='utf-8'?>\n"
+    "<SOAP-ENV:Envelope\n"
+    "    xmlns:SOAP-ENV=\"http://schemas.xmlsoap.org/soap/envelope/\"\n"
+    "    xmlns:SOAP-ENC=\"http://schemas.xmlsoap.org/soap/encoding/\"\n"
+    "    xmlns:xsi=\"http://www.w3.org/1999/XMLSchema-instance\"\n"
+    "    xmlns:xsd=\"http://www.w3.org/1999/XMLSchema\"\n"
+    "    xmlns:ns1=\"urn:AC\">\n"
+    "  <SOAP-ENV:Body>\n"
+    "    <ns1:executeCommand>\n"
+    "      <command>{command}</command>\n"
+    "    </ns1:executeCommand>\n"
+    "  </SOAP-ENV:Body>\n"
+    "</SOAP-ENV:Envelope>"
+)
+DEFAULT_INFO_COMMAND = "server info"
+DEFAULT_ONLINE_COMMAND = "account onlinelist"
+DEFAULT_BANNER_FILENAME = "wow-status-banner.png"
+DEFAULT_BANNER_PATH = Path(__file__).parent / "assets" / DEFAULT_BANNER_FILENAME
+
+
 class AzerothCore(commands.Cog):
-    """Interact with an AzerothCore server through a configurable REST bridge."""
+    """Interact with an AzerothCore server through SOAP console commands."""
 
     def __init__(self, bot):
         self.bot = bot
-        self.session = aiohttp.ClientSession()
-        self.config = Config.get_conf(self, 4528967103, force_registration=True)
+        self.session: Optional[aiohttp.ClientSession] = None
+        self.config = Config.get_conf(self, identifier=4528967103, force_registration=True)
         self.config.register_global(
             server_name=None,
             realmlist=None,
             info_description=None,
-            # SOAP-only configuration (defaults to a local network example)
             use_soap=True,
-            soap_url="http://192.168.1.1:17878/",
+            soap_url=None,
             soap_user=None,
             soap_pass=None,
-            soap_envelope_template=(
-                "<?xml version='1.0' encoding='utf-8'?>\n"
-                "<soap:Envelope xmlns:soap=\"http://schemas.xmlsoap.org/soap/envelope/\">\n"
-                "  <soap:Body>\n"
-                "    <Execute>{command}</Execute>\n"
-                "  </soap:Body>\n"
-                "</soap:Envelope>"
-            ),
+            soap_envelope_template=DEFAULT_SOAP_ENVELOPE_TEMPLATE,
             soap_create_command_template="account create {username} {password}",
-            soap_info_command_template="server info",
-            soap_online_command_template="players",
+            soap_info_command_template=DEFAULT_INFO_COMMAND,
+            soap_online_command_template=DEFAULT_ONLINE_COMMAND,
             request_timeout=20,
         )
         self.config.register_guild(allowed_roles=[])
+
+    async def cog_load(self):
+        self.session = aiohttp.ClientSession()
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
         return
 
     def cog_unload(self):
-        self.bot.loop.create_task(self.session.close())
-
-    def _build_url(self, base_url: str, path: str) -> str:
-        base = base_url if base_url.endswith("/") else f"{base_url}/"
-        return base + path.lstrip("/")
+        if self.session and not self.session.closed:
+            self.bot.loop.create_task(self.session.close())
 
     def _render_template(self, value: Any, **replacements: Any) -> Any:
         if isinstance(value, str):
@@ -60,15 +86,160 @@ class AzerothCore(commands.Cog):
             return {key: self._render_template(item, **replacements) for key, item in value.items()}
         return value
 
-    async def _request_json(
-        self,
-        method: str,
-        path: str,
-        *,
-        payload: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Optional[Any], Optional[str]]:
-        # REST transport removed; SOAP-only mode uses `_soap_execute` instead.
-        return None, "REST transport is disabled in this configuration. Use SOAP settings instead."
+    @staticmethod
+    def _redact_url(value: Optional[str]) -> str:
+        if not value or value == LEGACY_PLACEHOLDER_SOAP_URL:
+            return "Not set"
+
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return "Invalid URL"
+
+        if "@" not in parsed.netloc:
+            return value
+
+        host = parsed.hostname or ""
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parsed.scheme, f"***:***@{host}", parsed.path, parsed.query, parsed.fragment))
+
+    @staticmethod
+    def _normalize_soap_url(value: str) -> str:
+        value = value.strip()
+        if "://" not in value:
+            value = f"http://{value}"
+
+        parsed = urlsplit(value)
+        if not parsed.scheme or not parsed.netloc:
+            raise ValueError("SOAP URL must be an IP/hostname with a port, such as `192.168.1.1:7878`.")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("SOAP URL port must be a number.") from exc
+        if port is None:
+            raise ValueError("SOAP URL must include a port, such as `192.168.1.1:7878`.")
+
+        path = parsed.path or "/"
+        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, parsed.fragment))
+
+    @staticmethod
+    def _url_contains_credentials(value: str) -> bool:
+        try:
+            return "@" in urlsplit(value).netloc
+        except ValueError:
+            return False
+
+    @staticmethod
+    def _strip_url_credentials(value: str) -> str:
+        parsed = urlsplit(value)
+        if "@" not in parsed.netloc:
+            return value
+
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        if port:
+            host = f"{host}:{port}"
+        return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+
+    @classmethod
+    def _redact_error(cls, error: Exception, *urls: Optional[str]) -> str:
+        message = str(error)
+        for url in urls:
+            if url:
+                message = message.replace(url, cls._redact_url(url))
+        return message
+
+    @staticmethod
+    def _missing_soap_url_message(ctx: commands.Context) -> str:
+        return (
+            "SOAP URL has not been configured yet. Set it with "
+            f"`{ctx.clean_prefix}ac set soap_url <ip:port>`."
+        )
+
+    @staticmethod
+    async def _try_delete_invocation(ctx: commands.Context) -> None:
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
+
+    async def _configured_soap_url(self) -> Optional[str]:
+        soap_url = await self.config.soap_url()
+        if not soap_url or soap_url == LEGACY_PLACEHOLDER_SOAP_URL:
+            return None
+
+        try:
+            normalized_url = self._normalize_soap_url(soap_url)
+        except ValueError:
+            return soap_url
+
+        if normalized_url != soap_url:
+            await self.config.soap_url.set(normalized_url)
+        return normalized_url
+
+    async def _configured_envelope_template(self) -> str:
+        envelope_template = await self.config.soap_envelope_template()
+        if envelope_template == LEGACY_SOAP_ENVELOPE_TEMPLATE:
+            await self.config.soap_envelope_template.set(DEFAULT_SOAP_ENVELOPE_TEMPLATE)
+            return DEFAULT_SOAP_ENVELOPE_TEMPLATE
+        return envelope_template
+
+    async def _configured_online_command_template(self) -> str:
+        command = await self.config.soap_online_command_template()
+        if not command:
+            return DEFAULT_ONLINE_COMMAND
+        if command.strip().lower() == "players":
+            await self.config.soap_online_command_template.set(DEFAULT_ONLINE_COMMAND)
+            return DEFAULT_ONLINE_COMMAND
+        return command
+
+    @staticmethod
+    def _extract_soap_result(text: str) -> str:
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return text.strip()
+
+        for element in root.iter():
+            if element.tag.rsplit("}", 1)[-1] == "result":
+                return "".join(element.itertext()).strip()
+
+        return "".join(root.itertext()).strip()
+
+    @staticmethod
+    def _extract_soap_fault(text: str) -> str:
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return text.strip()
+
+        fault_fields = {}
+        for element in root.iter():
+            tag = element.tag.rsplit("}", 1)[-1].lower()
+            if tag in {"faultcode", "faultstring", "detail"}:
+                fault_fields[tag] = "".join(element.itertext()).strip()
+
+        if fault_fields:
+            parts = []
+            if fault_fields.get("faultcode"):
+                parts.append(fault_fields["faultcode"])
+            if fault_fields.get("faultstring"):
+                parts.append(fault_fields["faultstring"])
+            if fault_fields.get("detail"):
+                parts.append(fault_fields["detail"])
+            return ": ".join(part for part in parts if part)
+
+        return "".join(root.itertext()).strip()
 
     async def _soap_execute(self, command: str) -> Tuple[Optional[str], Optional[str]]:
         """Execute a SOAP envelope against the configured SOAP endpoint and return the inner text."""
@@ -76,51 +247,77 @@ class AzerothCore(commands.Cog):
         if not use_soap:
             return None, "SOAP is not enabled."
 
-        soap_url = await self.config.soap_url()
+        soap_url = await self._configured_soap_url()
         if not soap_url:
             return None, "SOAP URL has not been configured. Use `ac set soap_url` to set it."
 
-        envelope_template = await self.config.soap_envelope_template()
-        body = envelope_template.format(command=command)
+        envelope_template = await self._configured_envelope_template()
+        body = envelope_template.format(command=html.escape(command, quote=True))
 
-        headers = {"Content-Type": "text/xml; charset=utf-8", "Accept": "text/xml"}
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "Accept": "text/xml",
+            "SOAPAction": "urn:AC#executeCommand",
+        }
         soap_user = await self.config.soap_user()
         soap_pass = await self.config.soap_pass()
         auth = None
+        request_url = soap_url
         if soap_user:
             auth = aiohttp.BasicAuth(soap_user, soap_pass or "")
+            request_url = self._strip_url_credentials(soap_url)
+
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
 
         try:
-            timeout = aiohttp.ClientTimeout(total=await self.config.request_timeout())
-            async with self.session.post(soap_url, data=body.encode(), headers=headers, timeout=timeout, auth=auth) as resp:
-                if resp.status >= 400:
-                    text = await resp.text()
-                    return None, f"SOAP request failed with HTTP {resp.status}: {text[:300]}"
-
+            timeout_seconds = await self.config.request_timeout()
+            timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+            async with self.session.post(request_url, data=body.encode(), headers=headers, timeout=timeout, auth=auth) as resp:
                 text = await resp.text()
-                # Try to extract <Execute>...</Execute> content, otherwise strip tags naively
-                import re
+                if resp.status >= 400:
+                    detail = self._extract_soap_fault(text)
+                    if not detail:
+                        detail = text
+                    return None, f"SOAP request failed with HTTP {resp.status}: {detail[:500]}"
 
-                m = re.search(r"<Execute[^>]*>(.*?)</Execute>", text, flags=re.S | re.I)
-                if m:
-                    return m.group(1).strip(), None
-
-                stripped = re.sub(r"<[^>]+>", "", text).strip()
-                return stripped, None
+                return self._extract_soap_result(text), None
         except asyncio.TimeoutError:
-            return None, "The SOAP request timed out."
+            return None, (
+                f"The SOAP request timed out after {timeout_seconds} seconds while connecting to "
+                f"{self._redact_url(soap_url)}. Check the IP/hostname, port, firewall or Docker port mapping, "
+                "and whether AzerothCore SOAP is enabled."
+            )
+        except aiohttp.ClientConnectorError as exc:
+            if getattr(exc, "os_error", None) and exc.os_error.errno == errno.ECONNREFUSED:
+                return None, (
+                    f"Could not connect to SOAP at {self._redact_url(soap_url)}. "
+                    "The host answered, but nothing is listening on that IP/port. "
+                    "Check the published port and whether SOAP is bound to that network interface."
+                )
+            detail = self._redact_error(exc, soap_url, request_url)
+            return None, f"SOAP connection error: {detail}"
+        except aiohttp.ServerDisconnectedError:
+            return None, (
+                f"SOAP disconnected while talking to {self._redact_url(soap_url)}. "
+                "Something accepted the TCP connection and then closed it. "
+                "Check that this is the AzerothCore SOAP port, not the world/auth port, and verify SOAP auth/access."
+            )
+        except aiohttp.ClientOSError as exc:
+            if getattr(exc, "errno", None) == errno.ECONNRESET:
+                return None, (
+                    f"SOAP connection was reset by {self._redact_url(soap_url)}. "
+                    "Something accepted the TCP connection and then closed it. "
+                    "Check that this is the AzerothCore SOAP port and that SOAP is enabled with valid auth."
+                )
+            detail = self._redact_error(exc, soap_url, request_url)
+            return None, f"SOAP connection error: {detail}"
         except Exception as exc:
-            return None, f"SOAP request error: {exc}"
+            detail = self._redact_error(exc, soap_url, request_url)
+            return None, f"SOAP request error: {detail}"
 
-    def _first_value(self, data: Any, keys: Iterable[str], default: Any = None) -> Any:
-        if not isinstance(data, dict):
-            return default
-        for key in keys:
-            if key in data and data[key] not in (None, ""):
-                return data[key]
-        return default
-
-    def _parse_server_info(self, text: Optional[str]) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_server_info(text: Optional[str]) -> Dict[str, Any]:
         """Parse common server info fields from console output into a dict."""
         out = (text or "").strip()
         result: Dict[str, Any] = {}
@@ -128,6 +325,10 @@ class AzerothCore(commands.Cog):
             return result
 
         import re
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+        if lines and lines[0].lower().startswith("azerothcore"):
+            result["build"] = lines[0]
 
         # Name/Realm
         m = re.search(r"^(?:Server|Realm|Name):\s*(.+)$", out, flags=re.I | re.M)
@@ -145,7 +346,7 @@ class AzerothCore(commands.Cog):
             result["uptime"] = m.group(1).strip()
 
         # Players online
-        m = re.search(r"Players\s*online:\s*(\d+)", out, flags=re.I)
+        m = re.search(r"(?:Players\s*online|Connected\s*players):\s*(\d+)", out, flags=re.I)
         if not m:
             m = re.search(r"Online:\s*(\d+)", out, flags=re.I)
         if m:
@@ -153,6 +354,20 @@ class AzerothCore(commands.Cog):
                 result["online"] = int(m.group(1))
             except Exception:
                 result["online"] = m.group(1)
+
+        m = re.search(r"Characters\s*in\s*world:\s*(\d+)", out, flags=re.I)
+        if m:
+            try:
+                result["characters"] = int(m.group(1))
+            except Exception:
+                result["characters"] = m.group(1)
+
+        m = re.search(r"Connection\s*peak:\s*(\d+)", out, flags=re.I)
+        if m:
+            try:
+                result["peak"] = int(m.group(1))
+            except Exception:
+                result["peak"] = m.group(1)
 
         # Max players / capacity
         m = re.search(r"(Max|Maximum|Capacity):\s*(\d+)", out, flags=re.I)
@@ -173,16 +388,18 @@ class AzerothCore(commands.Cog):
             result["description"] = m.group(1).strip()
         else:
             # fallback: first non-empty line after a header
-            lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
             if lines:
                 result.setdefault("description", lines[0])
 
         return result
 
-    def _parse_players(self, text: Optional[str]) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _parse_players(text: Optional[str]) -> List[Dict[str, Any]]:
         """Parse player list console output into list of player dicts.
 
-        Heuristics: look for lines with 'Name:' and 'Level:', otherwise fallback to first token as name.
+        Heuristics: look for lines with 'Name:' and 'Level:' or a simple
+        character row that includes a level. Generic server-info lines are
+        intentionally ignored.
         """
         out = (text or "").strip()
         if not out:
@@ -212,62 +429,158 @@ class AzerothCore(commands.Cog):
                 players.append(player)
                 continue
 
-            # Simple 'Name Level Zone' column format - try split
-            parts = ln.split()
-            if parts:
-                # assume first token is name
-                player["name"] = parts[0]
-                # try to find a numeric token as level
-                for token in parts[1:]:
-                    if token.isdigit():
-                        player["level"] = int(token)
-                        break
-                players.append(player)
+            if ln.startswith("|-") or set(ln) <= {"|", "-", " "}:
                 continue
 
-            players.append({"raw": ln})
+            # Simple 'Name Level Zone' column format.
+            parts = ln.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                player["name"] = parts[0]
+                player["level"] = int(parts[1])
+                if len(parts) > 2:
+                    player["zone"] = " ".join(parts[2:])
+                players.append(player)
 
         return players
 
-    def _format_online_entry(self, entry: Any) -> str:
-        if isinstance(entry, str):
-            return entry
-
-        if not isinstance(entry, dict):
-            return str(entry)
-
-        name = self._first_value(entry, ("name", "character_name", "character", "player", "username"), "Unknown")
-        level = self._first_value(entry, ("level", "lvl", "character_level"), None)
-        race = self._first_value(entry, ("race", "race_name"), None)
-        char_class = self._first_value(entry, ("class", "class_name", "player_class"), None)
-        guild = self._first_value(entry, ("guild", "guild_name"), None)
-
-        details: List[str] = []
-        if level is not None:
-            details.append(f"lvl {level}")
-        if race:
-            details.append(str(race))
-        if char_class:
-            details.append(str(char_class))
-        if guild:
-            details.append(f"guild {guild}")
-
-        if details:
-            return f"{name} ({', '.join(details)})"
-        return str(name)
-
-    def _extract_online_list(self, data: Any) -> List[Any]:
-        if isinstance(data, list):
-            return data
-        if not isinstance(data, dict):
+    @staticmethod
+    def _parse_online_accounts(text: Optional[str]) -> List[str]:
+        """Parse AzerothCore account online-list output into account names."""
+        out = (text or "").strip()
+        if not out:
             return []
 
-        for key in ("players", "characters", "online", "results", "data", "members"):
-            value = data.get(key)
-            if isinstance(value, list):
-                return value
+        import re
 
-        return []
+        accounts: List[str] = []
+        seen = set()
+        table_name_index: Optional[int] = None
+        saw_account_list_header = False
+        ignored_cells = {
+            "id",
+            "account",
+            "account id",
+            "accounts",
+            "username",
+            "user",
+            "name",
+            "online",
+            "online accounts",
+            "ip",
+            "last ip",
+            "gm",
+            "security",
+            "sec",
+            "realm",
+            "characters",
+            "no",
+            "none",
+        }
+
+        def add_account(candidate: str) -> None:
+            candidate = candidate.strip().strip("`")
+            if not candidate:
+                return
+            lowered = candidate.lower().strip(":")
+            if lowered in ignored_cells:
+                return
+            if candidate.isdigit():
+                return
+            if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", candidate):
+                return
+            if not re.match(r"^[A-Za-z0-9_.@-]{2,32}$", candidate):
+                return
+            if lowered not in seen:
+                seen.add(lowered)
+                accounts.append(candidate)
+
+        for line in out.splitlines():
+            ln = line.strip()
+            if not ln:
+                continue
+
+            lowered = ln.lower()
+            if lowered.startswith("azerothcore"):
+                continue
+            if re.search(r"\bno\b.*\bonline\b.*\baccounts?\b", lowered):
+                continue
+            if re.search(r"\bonline\b.*\baccounts?\b", lowered):
+                saw_account_list_header = True
+            if lowered.startswith("soap-env:") or lowered.startswith("command "):
+                continue
+            if lowered.startswith("online accounts") and ":" not in ln:
+                continue
+            if set(ln) <= {"|", "-", "+", " "}:
+                continue
+
+            keyed = re.search(r"(?:Account|Username|User|Name):\s*([A-Za-z0-9_.@-]{2,32})", ln, flags=re.I)
+            if keyed:
+                add_account(keyed.group(1))
+                continue
+            if ":" in ln:
+                continue
+
+            if "|" in ln:
+                cells = [cell.strip() for cell in ln.strip("|").split("|") if cell.strip()]
+                lowered_cells = [cell.lower().strip(":") for cell in cells]
+                if any(cell in ignored_cells for cell in lowered_cells):
+                    for index, cell in enumerate(lowered_cells):
+                        if cell in {"username", "user", "name", "account"}:
+                            table_name_index = index
+                            break
+                    continue
+
+                if table_name_index is not None and table_name_index < len(cells):
+                    add_account(cells[table_name_index])
+                    continue
+
+                if len(cells) >= 2 and cells[0].isdigit():
+                    add_account(cells[1])
+                    continue
+
+                for cell in cells:
+                    previous_count = len(accounts)
+                    add_account(cell)
+                    if len(accounts) > previous_count:
+                        break
+                continue
+
+            parts = ln.split()
+            if len(parts) == 1 and saw_account_list_header:
+                add_account(parts[0])
+                continue
+
+            if saw_account_list_header:
+                for part in parts:
+                    add_account(part)
+                    if accounts and accounts[-1].lower() == part.lower():
+                        break
+
+        return accounts
+
+    @staticmethod
+    def _is_default_online_summary_command(command: str) -> bool:
+        return command.strip().lower().lstrip(".") == DEFAULT_INFO_COMMAND
+
+    @staticmethod
+    def _is_default_online_list_command(command: str) -> bool:
+        return command.strip().lower().lstrip(".") == DEFAULT_ONLINE_COMMAND
+
+    @classmethod
+    def _format_online_from_server_info(cls, text: Optional[str]) -> Optional[str]:
+        info = cls._parse_server_info(text)
+        if not info:
+            return None
+
+        if info.get("online") is None:
+            return None
+
+        summary = f"Connected players: {info['online']}"
+        if info.get("characters") is not None:
+            summary += f"\nCharacters in world: {info['characters']}"
+        if info.get("peak") is not None:
+            summary += f"\nConnection peak: {info['peak']}"
+        return summary
 
     async def _can_create_accounts(self, ctx: commands.Context) -> bool:
         if ctx.guild is None:
@@ -292,11 +605,43 @@ class AzerothCore(commands.Cog):
             return channel.permissions_for(ctx.me).embed_links
         return True
 
-    async def _send_embed_or_text(self, ctx: commands.Context, embed: discord.Embed, text: str) -> None:
-        if self._can_embed(ctx):
+    def _server_banner_file(self) -> Optional[discord.File]:
+        if DEFAULT_BANNER_PATH.exists():
+            return discord.File(str(DEFAULT_BANNER_PATH), filename=DEFAULT_BANNER_FILENAME)
+        return None
+
+    async def _send_embed(self, ctx: commands.Context, embed: discord.Embed, *, with_banner: bool = False) -> None:
+        file = self._server_banner_file() if with_banner else None
+        if file:
+            await ctx.send(embed=embed, file=file)
+        else:
             await ctx.send(embed=embed)
+
+    async def _send_embed_or_text(
+        self,
+        ctx: commands.Context,
+        embed: discord.Embed,
+        text: str,
+        *,
+        with_banner: bool = False,
+    ) -> None:
+        if self._can_embed(ctx):
+            await self._send_embed(ctx, embed, with_banner=with_banner)
         else:
             await ctx.send(text)
+
+    async def _server_display_name(self) -> str:
+        return await self.config.server_name() or "World of Warcraft"
+
+    async def _decorate_server_embed(self, embed: discord.Embed, *, with_banner: bool = False) -> None:
+        configured_description = await self.config.info_description()
+        configured_realmlist = await self.config.realmlist()
+        if configured_description:
+            embed.description = str(configured_description)[:1900]
+        if configured_realmlist:
+            embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
+        if with_banner and DEFAULT_BANNER_PATH.exists():
+            embed.set_image(url=f"attachment://{DEFAULT_BANNER_FILENAME}")
 
     @commands.group(name="ac", aliases=("azerothcore",), invoke_without_command=True)
     async def ac(self, ctx: commands.Context):
@@ -307,133 +652,150 @@ class AzerothCore(commands.Cog):
     @ac.command(name="info")
     async def ac_info(self, ctx: commands.Context):
         """Show general server information."""
-        # Prefer SOAP if enabled
-        if await self.config.use_soap():
-            cmd_template = await self.config.soap_info_command_template()
-            cmd = self._render_template(cmd_template)
-            out, error = await self._soap_execute(cmd)
-            if error:
-                return await ctx.send(error)
+        if not await self.config.use_soap():
+            return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
 
-            info = self._parse_server_info(out)
-
-            title = info.get("name") or await self.config.server_name() or "AzerothCore"
-            embed = discord.Embed(title=title, color=await ctx.embed_color())
-            configured_realmlist = await self.config.realmlist()
-            if configured_realmlist:
-                embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
-
-            if info.get("online") is not None and info.get("max_players") is not None:
-                embed.add_field(name="Population", value=f"{info.get('online')}/{info.get('max_players')}", inline=True)
-            elif info.get("online") is not None:
-                embed.add_field(name="Online", value=str(info.get("online")), inline=True)
-
-            if info.get("version"):
-                embed.add_field(name="Version", value=str(info.get("version")), inline=True)
-            if info.get("expansion"):
-                embed.add_field(name="Expansion", value=str(info.get("expansion")), inline=True)
-            if info.get("uptime"):
-                embed.add_field(name="Uptime", value=str(info.get("uptime")), inline=True)
-
-            description = info.get("description") or (await self.config.info_description()) or "Server information fetched successfully."
-            embed.description = str(description)[:1900]
-
-            fallback = [f"{title}"]
-            if configured_realmlist:
-                fallback.append(f"Realmlist: {configured_realmlist}")
-            if info.get("online") is not None and info.get("max_players") is not None:
-                fallback.append(f"Population: {info.get('online')}/{info.get('max_players')}")
-            elif info.get("online") is not None:
-                fallback.append(f"Online: {info.get('online')}")
-            if info.get("version"):
-                fallback.append(f"Version: {info.get('version')}")
-            if info.get("expansion"):
-                fallback.append(f"Expansion: {info.get('expansion')}")
-            if info.get("uptime"):
-                fallback.append(f"Uptime: {info.get('uptime')}")
-
-            await self._send_embed_or_text(ctx, embed, "\n".join(fallback))
-            return
-
-        # Fallback to REST bridge
-        data, error = await self._request_json("GET", await self.config.status_path())
+        cmd_template = await self.config.soap_info_command_template()
+        cmd = self._render_template(cmd_template)
+        out, error = await self._soap_execute(cmd)
         if error:
             return await ctx.send(error)
 
-        if isinstance(data, str):
-            return await ctx.send(f"```text\n{data[:1900]}\n```")
+        info = self._parse_server_info(out)
 
-        if not isinstance(data, dict):
-            return await ctx.send("The server returned an unexpected response.")
-
-        configured_name = await self.config.server_name()
+        title = info.get("name") or await self._server_display_name()
+        embed = discord.Embed(title=title, color=await ctx.embed_color())
         configured_realmlist = await self.config.realmlist()
-        configured_description = await self.config.info_description()
-
-        name = configured_name or self._first_value(data, ("name", "server_name", "realm_name", "realm", "title"), "AzerothCore")
-        status = self._first_value(data, ("status", "state", "online", "is_online"), None)
-        online = self._first_value(data, ("online_players", "online_count", "players_online", "population"), None)
-        maximum = self._first_value(data, ("max_players", "max_count", "players_max", "capacity"), None)
-        version = self._first_value(data, ("version", "build", "realm_version"), None)
-        expansion = self._first_value(data, ("expansion", "expansion_name"), None)
-        uptime = self._first_value(data, ("uptime", "uptime_human", "uptime_text"), None)
-
-        embed = discord.Embed(title=str(name), color=await ctx.embed_color())
         if configured_realmlist:
             embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
-        if status is not None:
-            embed.add_field(name="Status", value=str(status), inline=True)
-        if online is not None and maximum is not None:
-            embed.add_field(name="Population", value=f"{online}/{maximum}", inline=True)
-        elif online is not None:
-            embed.add_field(name="Online", value=str(online), inline=True)
-        if version is not None:
-            embed.add_field(name="Version", value=str(version), inline=True)
-        if expansion is not None:
-            embed.add_field(name="Expansion", value=str(expansion), inline=True)
-        if uptime is not None:
-            embed.add_field(name="Uptime", value=str(uptime), inline=True)
 
-        description = self._first_value(
-            data,
-            ("description", "message", "details", "summary"),
-            configured_description or "Server information fetched successfully.",
-        )
-        embed.description = str(description)
+        if info.get("online") is not None and info.get("max_players") is not None:
+            embed.add_field(name="Population", value=f"{info.get('online')}/{info.get('max_players')}", inline=True)
+        elif info.get("online") is not None:
+            embed.add_field(name="Online", value=str(info.get("online")), inline=True)
+        if info.get("characters") is not None:
+            embed.add_field(name="Characters", value=str(info.get("characters")), inline=True)
+        if info.get("peak") is not None:
+            embed.add_field(name="Peak", value=str(info.get("peak")), inline=True)
 
-        fallback = [f"{name}"]
+        if info.get("version"):
+            embed.add_field(name="Version", value=str(info.get("version")), inline=True)
+        elif info.get("build"):
+            embed.add_field(name="Build", value=str(info.get("build"))[:1024], inline=False)
+        if info.get("expansion"):
+            embed.add_field(name="Expansion", value=str(info.get("expansion")), inline=True)
+        if info.get("uptime"):
+            embed.add_field(name="Uptime", value=str(info.get("uptime")), inline=True)
+
+        configured_description = await self.config.info_description()
+        description = configured_description or info.get("description") or "Server information fetched successfully."
+        embed.description = str(description)[:1900]
+
+        fallback = [f"{title}"]
         if configured_realmlist:
             fallback.append(f"Realmlist: {configured_realmlist}")
-        if status is not None:
-            fallback.append(f"Status: {status}")
-        if online is not None and maximum is not None:
-            fallback.append(f"Population: {online}/{maximum}")
-        elif online is not None:
-            fallback.append(f"Online: {online}")
-        if version is not None:
-            fallback.append(f"Version: {version}")
-        if expansion is not None:
-            fallback.append(f"Expansion: {expansion}")
-        if uptime is not None:
-            fallback.append(f"Uptime: {uptime}")
+        if info.get("online") is not None and info.get("max_players") is not None:
+            fallback.append(f"Population: {info.get('online')}/{info.get('max_players')}")
+        elif info.get("online") is not None:
+            fallback.append(f"Online: {info.get('online')}")
+        if info.get("characters") is not None:
+            fallback.append(f"Characters: {info.get('characters')}")
+        if info.get("peak") is not None:
+            fallback.append(f"Peak: {info.get('peak')}")
+        if info.get("version"):
+            fallback.append(f"Version: {info.get('version')}")
+        elif info.get("build"):
+            fallback.append(f"Build: {info.get('build')}")
+        if info.get("expansion"):
+            fallback.append(f"Expansion: {info.get('expansion')}")
+        if info.get("uptime"):
+            fallback.append(f"Uptime: {info.get('uptime')}")
 
         await self._send_embed_or_text(ctx, embed, "\n".join(fallback))
 
     @ac.command(name="online")
     async def ac_online(self, ctx: commands.Context):
         """Show the characters currently online."""
-        # Use SOAP to get online players
+        server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
 
-        cmd_template = await self.config.soap_online_command_template()
+        cmd_template = await self._configured_online_command_template()
         cmd = self._render_template(cmd_template)
-        out, error = await self._soap_execute(cmd)
+        fallback_notice = None
+
+        if self._is_default_online_summary_command(cmd):
+            out, error = await self._soap_execute(DEFAULT_ONLINE_COMMAND)
+            used_command = DEFAULT_ONLINE_COMMAND
+            if error:
+                fallback_notice = (
+                    "Could not get the online account list, so showing server counts instead.\n"
+                    f"{error}"
+                )
+                out, error = await self._soap_execute(cmd)
+                used_command = cmd
+        else:
+            out, error = await self._soap_execute(cmd)
+            used_command = cmd
+
         if error:
             return await ctx.send(error)
 
+        accounts = [] if self._is_default_online_summary_command(used_command) else self._parse_online_accounts(out)
+        if accounts:
+            header = f"Currently online: {len(accounts)} account{'s' if len(accounts) != 1 else ''}"
+            if fallback_notice:
+                header = f"{header}\n\n{fallback_notice}"
+            embed = discord.Embed(title=server_name, color=await ctx.embed_color())
+            await self._decorate_server_embed(embed, with_banner=True)
+
+            if self._can_embed(ctx):
+                pages = list(pagify("\n".join(accounts), delims=["\n"], page_length=900))
+                if len(pages) == 1:
+                    embed.add_field(name="Online Players", value=f"{header}\n{pages[0]}", inline=False)
+                    await self._send_embed(ctx, embed, with_banner=True)
+                    return
+
+                embed.add_field(name="Online Players", value=header, inline=False)
+                await self._send_embed(ctx, embed, with_banner=True)
+                for page in pages:
+                    await ctx.send(page)
+                return
+
+            await ctx.send(f"{server_name}\nOnline Players\n{header}\n" + "\n".join(accounts))
+            return
+
+        summary = self._format_online_from_server_info(out)
+        if summary:
+            if fallback_notice:
+                summary = f"{summary}\n\n{fallback_notice}"
+            embed = discord.Embed(title=server_name, color=await ctx.embed_color())
+            await self._decorate_server_embed(embed, with_banner=True)
+            embed.add_field(name="Online Players", value=summary, inline=False)
+            await self._send_embed_or_text(ctx, embed, f"{server_name}\nOnline Players\n{summary}", with_banner=True)
+            return
+
         players = self._parse_players(out)
         if not players:
+            if self._is_default_online_list_command(cmd):
+                summary_out, summary_error = await self._soap_execute(DEFAULT_INFO_COMMAND)
+                summary = self._format_online_from_server_info(summary_out)
+                if summary and not summary_error:
+                    message = "No account names were returned, so showing server counts instead.\n\n" f"{summary}"
+                    embed = discord.Embed(title=server_name, color=await ctx.embed_color())
+                    await self._decorate_server_embed(embed, with_banner=True)
+                    embed.add_field(name="Online Players", value=message, inline=False)
+                    await self._send_embed_or_text(
+                        ctx,
+                        embed,
+                        f"{server_name}\nOnline Players\n{message}",
+                        with_banner=True,
+                    )
+                    return
             return await ctx.send("No online player information returned.")
 
         formatted = []
@@ -454,21 +816,91 @@ class AzerothCore(commands.Cog):
                 formatted.append(p.get("raw", ""))
 
         header = f"Currently online: {len(formatted)} player{'s' if len(formatted) != 1 else ''}"
-        embed = discord.Embed(title="Online Characters", description=header, color=await ctx.embed_color())
+        embed = discord.Embed(title=server_name, color=await ctx.embed_color())
+        await self._decorate_server_embed(embed, with_banner=True)
 
         if self._can_embed(ctx):
             pages = list(pagify("\n".join(formatted), delims=["\n"], page_length=900))
             if len(pages) == 1:
-                embed.add_field(name="Characters", value=pages[0], inline=False)
-                await ctx.send(embed=embed)
+                embed.add_field(name="Online Players", value=f"{header}\n{pages[0]}", inline=False)
+                await self._send_embed(ctx, embed, with_banner=True)
                 return
 
-            await ctx.send(embed=embed)
+            embed.add_field(name="Online Players", value=header, inline=False)
+            await self._send_embed(ctx, embed, with_banner=True)
             for page in pages:
                 await ctx.send(page)
             return
 
-        await ctx.send(header + "\n" + "\n".join(formatted))
+        await ctx.send(f"{server_name}\nOnline Players\n{header}\n" + "\n".join(formatted))
+
+    @ac.command(name="check")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def ac_check(self, ctx: commands.Context):
+        """Check whether the configured SOAP host and port are reachable."""
+
+        soap_url = await self._configured_soap_url()
+        if not soap_url:
+            return await ctx.send(self._missing_soap_url_message(ctx))
+
+        try:
+            parsed = urlsplit(soap_url)
+            host = parsed.hostname
+            port = parsed.port
+        except ValueError as exc:
+            return await ctx.send(f"SOAP URL is invalid: {exc}")
+
+        if not host or port is None:
+            return await ctx.send("SOAP URL must include a host and port.")
+
+        timeout_seconds = min(await self.config.request_timeout(), 10)
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=timeout_seconds,
+            )
+            writer.close()
+            await writer.wait_closed()
+        except asyncio.TimeoutError:
+            return await ctx.send(
+                f"TCP check timed out after {timeout_seconds} seconds for {self._redact_url(soap_url)}."
+            )
+        except ConnectionRefusedError:
+            return await ctx.send(
+                f"TCP check failed for {self._redact_url(soap_url)}: host answered, but nothing is listening "
+                "on that IP/port."
+            )
+        except ConnectionResetError:
+            return await ctx.send(
+                f"TCP check reached {self._redact_url(soap_url)}, but the connection was reset."
+            )
+        except OSError as exc:
+            return await ctx.send(f"TCP check failed for {self._redact_url(soap_url)}: {exc}")
+
+        await ctx.send(
+            f"TCP check passed for {self._redact_url(soap_url)}. "
+            "This only confirms the port is open; `ac info` or `ac online` still verifies the SOAP request."
+        )
+
+    @ac.command(name="raw")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def ac_raw(self, ctx: commands.Context, *, command: str):
+        """Run a raw SOAP console command and show the response."""
+
+        if not await self.config.use_soap():
+            return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
+
+        out, error = await self._soap_execute(command)
+        if error:
+            return await ctx.send(error)
+
+        response = (out or "").strip() or "Command returned no output."
+        for page in pagify(response, delims=["\n"], page_length=1800):
+            await ctx.send(box(page, lang="text"))
 
     @ac.command(name="createuser", aliases=("createaccount",))
     @commands.guild_only()
@@ -480,6 +912,8 @@ class AzerothCore(commands.Cog):
         # Use SOAP to create account
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
 
         password = secrets.token_urlsafe(12)
         template = await self.config.soap_create_command_template()
@@ -507,7 +941,7 @@ class AzerothCore(commands.Cog):
         if "exists" in lower_out or "already" in lower_out:
             hint = "Account may already exist."
         elif "permission" in lower_out or "denied" in lower_out:
-            hint = "SOAP access denied — check SOAP credentials and server permissions."
+            hint = "SOAP access denied - check SOAP credentials and server permissions."
         else:
             hint = None
 
@@ -524,26 +958,36 @@ class AzerothCore(commands.Cog):
         """Configure the AzerothCore bridge and permissions."""
 
         message = (
-            "AzerothCore settings (SOAP-only):\n"
-            "- `ac set soap_url <url>`\n"
+            "**AzerothCore Module Settings (SOAP-only)**\n\n"
+            "**Basics**\n"
+            "- `ac set soap_url <ip:port>`\n"
             "- `ac set soap_auth <user> <pass>`\n"
+            "- `ac set view`\n"
+            "- `ac check`\n\n"
+            "**Display**\n"
             "- `ac set servername <name>`\n"
             "- `ac set realmlist <text>`\n"
-            "- `ac set infodescription <text>`\n"
+            "- `ac set infodescription <text>`\n\n"
+            "**Account Creation Roles**\n"
             "- `ac set accountcreationrole <role...>`\n"
             "- `ac set roleremove <role...>`\n"
-            "- `ac set rolelist`\n"
-            "- `ac set view`\n"
-            "Example: `ac set soap_url http://soapuser:pass@192.168.1.1:7878/`"
+            "- `ac set rolelist`\n\n"
+            "**Advanced**\n"
+            "- `ac set timeout <seconds>`\n"
+            "- `ac set onlinecommand <command>`\n"
+            "- `ac set infocommand <command>`\n"
+            "- `ac set createcommand <command>`\n"
+            "- `ac raw <command>`\n\n"
+            "Example: `ac set soap_url 192.168.1.1:7878`"
         )
         await ctx.send(message)
 
-    @acset.command(name="baseurl")
+    @acset.command(name="baseurl", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_baseurl(self, ctx: commands.Context, base_url: str):
-        """Set the base URL for the AzerothCore bridge."""
-        # REST transport removed; no-op
+        """Legacy bridge setting. Use soap_url instead."""
+
         await ctx.send("Base URL is managed by SOAP-only configuration. Use `ac set soap_url`.")
 
     @acset.command(name="servername")
@@ -588,52 +1032,52 @@ class AzerothCore(commands.Cog):
         await self.config.info_description.set(info_description)
         await ctx.send("Info description updated.")
 
-    @acset.command(name="token")
+    @acset.command(name="token", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_token(self, ctx: commands.Context, token: Optional[str] = None):
-        """Set or clear the bearer token used for requests."""
-        # REST transport removed; no-op
+        """Legacy bridge setting. Use soap_auth instead."""
+
         await ctx.send("Token is not used in SOAP-only mode. Use `ac set soap_auth` to configure SOAP credentials.")
 
-    @acset.command(name="statuspath")
+    @acset.command(name="statuspath", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_statuspath(self, ctx: commands.Context, path: str):
-        """Set the status endpoint path."""
-        # REST transport removed; no-op
+        """Legacy bridge setting."""
+
         await ctx.send("Status path is not used in SOAP-only mode.")
 
-    @acset.command(name="onlinepath")
+    @acset.command(name="onlinepath", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_onlinepath(self, ctx: commands.Context, path: str):
-        """Set the online players endpoint path."""
-        # REST transport removed; no-op
+        """Legacy bridge setting."""
+
         await ctx.send("Online path is not used in SOAP-only mode.")
 
-    @acset.command(name="createpath")
+    @acset.command(name="createpath", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_createpath(self, ctx: commands.Context, path: str):
-        """Set the account creation endpoint path."""
-        # REST transport removed; no-op
+        """Legacy bridge setting."""
+
         await ctx.send("Create path is not used in SOAP-only mode.")
 
-    @acset.command(name="createmethod")
+    @acset.command(name="createmethod", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_createmethod(self, ctx: commands.Context, method: str):
-        """Set the HTTP method used for account creation."""
-        # REST transport removed; no-op
+        """Legacy bridge setting."""
+
         await ctx.send("Create method is not used in SOAP-only mode.")
 
-    @acset.command(name="createbody")
+    @acset.command(name="createbody", hidden=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_createbody(self, ctx: commands.Context, *, create_body: Optional[str] = None):
-        """Set or clear the JSON payload template used to create accounts."""
-        # REST transport removed; no-op
+        """Legacy bridge setting."""
+
         await ctx.send("Create body JSON template is not used in SOAP-only mode.")
 
     @acset.command(name="accountcreationrole", aliases=("roleadd",))
@@ -694,7 +1138,7 @@ class AzerothCore(commands.Cog):
 
         await ctx.send(f"Roles allowed to create accounts: {humanize_list(role_mentions)}")
 
-    @acset.command(name="soap_url")
+    @acset.command(name="soap_url", aliases=("soapurl",))
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_soap_url(self, ctx: commands.Context, soap_url: Optional[str] = None):
@@ -704,8 +1148,15 @@ class AzerothCore(commands.Cog):
             await self.config.soap_url.clear()
             return await ctx.send("SOAP URL cleared.")
 
-        await self.config.soap_url.set(soap_url)
-        await ctx.send(f"SOAP URL set to {soap_url}")
+        try:
+            normalized_url = self._normalize_soap_url(soap_url)
+        except ValueError as exc:
+            return await ctx.send(str(exc))
+
+        await self.config.soap_url.set(normalized_url)
+        if self._url_contains_credentials(normalized_url):
+            await self._try_delete_invocation(ctx)
+        await ctx.send(f"SOAP URL set to {self._redact_url(normalized_url)}")
 
     @acset.command(name="soap_auth")
     @commands.guild_only()
@@ -720,7 +1171,74 @@ class AzerothCore(commands.Cog):
 
         await self.config.soap_user.set(user)
         await self.config.soap_pass.set(password or "")
+        await self._try_delete_invocation(ctx)
         await ctx.send("SOAP credentials updated.")
+
+    @acset.command(name="timeout")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_timeout(self, ctx: commands.Context, seconds: Optional[int] = None):
+        """Set or show the SOAP request timeout in seconds."""
+
+        if seconds is None:
+            timeout = await self.config.request_timeout()
+            return await ctx.send(f"SOAP request timeout is currently {timeout} seconds.")
+
+        if seconds < 3 or seconds > 120:
+            return await ctx.send("Timeout must be between 3 and 120 seconds.")
+
+        await self.config.request_timeout.set(seconds)
+        await ctx.send(f"SOAP request timeout set to {seconds} seconds.")
+
+    @acset.command(name="onlinecommand")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_onlinecommand(self, ctx: commands.Context, *, command: Optional[str] = None):
+        """Set, show, or reset the SOAP command used by ac online."""
+
+        if command is None:
+            current = await self.config.soap_online_command_template()
+            return await ctx.send(f"SOAP online command is currently `{current}`.")
+        if command.lower() == "reset":
+            await self.config.soap_online_command_template.clear()
+            return await ctx.send(f"SOAP online command reset to `{DEFAULT_ONLINE_COMMAND}`.")
+
+        await self.config.soap_online_command_template.set(command)
+        await ctx.send(f"SOAP online command set to `{command}`.")
+
+    @acset.command(name="infocommand")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_infocommand(self, ctx: commands.Context, *, command: Optional[str] = None):
+        """Set, show, or reset the SOAP command used by ac info."""
+
+        if command is None:
+            current = await self.config.soap_info_command_template()
+            return await ctx.send(f"SOAP info command is currently `{current}`.")
+        if command.lower() == "reset":
+            await self.config.soap_info_command_template.clear()
+            return await ctx.send("SOAP info command reset to `server info`.")
+
+        await self.config.soap_info_command_template.set(command)
+        await ctx.send(f"SOAP info command set to `{command}`.")
+
+    @acset.command(name="createcommand")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_createcommand(self, ctx: commands.Context, *, command: Optional[str] = None):
+        """Set, show, or reset the SOAP command template used by ac createuser."""
+
+        if command is None:
+            current = await self.config.soap_create_command_template()
+            return await ctx.send(f"SOAP create command is currently `{current}`.")
+        if command.lower() == "reset":
+            await self.config.soap_create_command_template.clear()
+            return await ctx.send("SOAP create command reset to `account create {username} {password}`.")
+        if "{username}" not in command or "{password}" not in command:
+            return await ctx.send("Create command must include `{username}` and `{password}` placeholders.")
+
+        await self.config.soap_create_command_template.set(command)
+        await ctx.send("SOAP create command updated.")
 
     @acset.command(name="view")
     @commands.guild_only()
@@ -732,14 +1250,16 @@ class AzerothCore(commands.Cog):
         info_description = await self.config.info_description()
         soap_url = await self.config.soap_url()
         soap_user = await self.config.soap_user()
-        soap_envelope = await self.config.soap_envelope_template()
+        soap_envelope = await self._configured_envelope_template()
         soap_create = await self.config.soap_create_command_template()
         soap_online = await self.config.soap_online_command_template()
+        request_timeout = await self.config.request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
 
         embed = discord.Embed(title="AzerothCore Configuration (SOAP)", color=await ctx.embed_color())
-        embed.add_field(name="SOAP URL", value=soap_url or "Not set", inline=False)
+        embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
+        embed.add_field(name="Timeout", value=f"{request_timeout}s", inline=True)
         embed.add_field(name="Server Name", value=server_name or "Not set", inline=True)
         embed.add_field(name="Realmlist", value=realmlist or "Not set", inline=True)
         embed.add_field(name="Info Description", value=info_description or "Not set", inline=False)
