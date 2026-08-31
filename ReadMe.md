@@ -59,4 +59,4 @@ The sync helper replaces selected local cog folders from upstream. Commit or sta
 
 ## License
 
-This repository is intended to use the MIT License for Sick-Cogs original code. Third-party code keeps any license terms that apply to its original source.
+Sick-Cogs original code is licensed under the MIT License. Third-party code keeps any license terms that apply to its original source.
