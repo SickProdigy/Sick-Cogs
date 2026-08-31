@@ -34,19 +34,19 @@ Thanks for helping improve Sick-Cogs. This repository contains Red-DiscordBot co
 
 ## External Cog Sync
 
-Some cog folders can be refreshed with the helper script. Source links are tracked in `scripts/external_cogs.json`.
+Some cog folders can be refreshed with the helper script. Source links are tracked in `external_cogs.json`.
 
 Before refreshing an external cog folder:
 
 ```bash
-python scripts/sync_external_cogs.py --list
-python scripts/sync_external_cogs.py --only dadjokes
+python sync_external_cogs.py --list
+python sync_external_cogs.py --only dadjokes
 ```
 
 Only apply the sync when you intend to replace the local folder:
 
 ```bash
-python scripts/sync_external_cogs.py --apply --only dadjokes
+python sync_external_cogs.py --apply --only dadjokes
 ```
 
 Commit or stash local edits before applying refreshes.
@@ -62,7 +62,7 @@ Commit or stash local edits before applying refreshes.
 - Keep pull requests focused on one cog or one workflow when possible.
 - Mention any manual testing performed.
 - Call out new dependencies, config changes, or behavior changes in the PR description.
-- Call out when a change updates copied cog code from `scripts/external_cogs.json`.
+- Call out when a change updates copied cog code from `external_cogs.json`.
 
 ## License
 

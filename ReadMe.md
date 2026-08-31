@@ -29,30 +29,30 @@ These folders may be used for testing, learning, or local customization before t
 
 ## External Cog Sync Helper
 
-Source links for refreshable external cog folders live in `scripts/external_cogs.json`.
+Source links for refreshable external cog folders live in `external_cogs.json`.
 
 Preview configured sources:
 
 ```bash
-python scripts/sync_external_cogs.py --list
+python sync_external_cogs.py --list
 ```
 
 Preview a specific sync without replacing files:
 
 ```bash
-python scripts/sync_external_cogs.py --only dadjokes
+python sync_external_cogs.py --only dadjokes
 ```
 
 Apply updates to selected local cog folders:
 
 ```bash
-python scripts/sync_external_cogs.py --apply --only dadjokes
+python sync_external_cogs.py --apply --only dadjokes
 ```
 
 Apply all configured external cog updates:
 
 ```bash
-python scripts/sync_external_cogs.py --apply
+python sync_external_cogs.py --apply
 ```
 
 The sync helper replaces selected local cog folders from upstream. Commit or stash local edits before using `--apply`.
