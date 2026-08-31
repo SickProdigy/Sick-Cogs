@@ -36,11 +36,13 @@ default_settings = {
     "LAST_GREETING": None,
     "FILTER_SETTING": None,
     "LAST_GOODBYE": None,
+    "PENDING": False,
     "MENTIONS": {"users": True, "roles": False, "everyone": False},
     "GOODBYE_MENTIONS": {"users": True, "roles": False, "everyone": False},
     "EMBED_DATA": {
         "title": None,
         "colour": 0,
+        "colour_goodbye": 0,
         "footer": None,
         "thumbnail": "avatar",
         "image": None,
@@ -63,7 +65,7 @@ class Welcome(Events, commands.Cog):
     https://github.com/irdumbs/Dumb-Cogs/blob/master/welcome/welcome.py"""
 
     __author__ = ["irdumb", "TrustyJAID"]
-    __version__ = "2.5.1"
+    __version__ = "2.6.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -141,6 +143,7 @@ class Welcome(Events, commands.Cog):
             "DELETE_AFTER_GREETING": _("Greeting deleted after "),
             "DELETE_AFTER_GOODBYE": _("Goodbye deleted after "),
             "MINIMUM_DAYS": _("Minimum days old to greet "),
+            "PENDING": _("Wait for verification "),
             "WHISPER": _("Whisper "),
             "BOTS_MSG": _("Bots message "),
             "BOTS_ROLE": _("Bots role "),
@@ -243,6 +246,24 @@ class Welcome(Events, commands.Cog):
             await ctx.send(_("I will now group greetings."))
         else:
             await ctx.send(_("I will no longer group greetings."))
+
+    @welcomeset_greeting.command(name="pending")
+    async def welcomeset_greeting_pending(
+        self, ctx: commands.Context, wait_for_pending: bool
+    ) -> None:
+        """Set whether to wait for the user to pass verification to send the welcome
+
+        This checks the `pending` attribute from discord which is automatically removed
+        when the user gains a role or passes the verification processes setup in onboarding.
+
+        - `<wait_for_pending>` `True` or `False` whether to wait for the pending flag
+        before welcoming a user to the server.
+        """
+        await self.config.guild(ctx.guild).PENDING.set(wait_for_pending)
+        if wait_for_pending:
+            await ctx.send(_("I will now wait until the user passes discord verification."))
+        else:
+            await ctx.send(_("I will welcome users as soon as they join."))
 
     @welcomeset_greeting.command(name="add")
     async def welcomeset_greeting_add(self, ctx: commands.Context, *, format_msg: str) -> None:
@@ -710,6 +731,7 @@ class Welcome(Events, commands.Cog):
         await ctx.send(_("Greeting embeds turned {verb}").format(verb=verb))
 
     @_embed.command(aliases=["color"])
+    @commands.bot_has_permissions(embed_links=True)
     async def colour(self, ctx: commands.Context, colour: discord.Colour) -> None:
         """
         Set the embed colour.
@@ -717,7 +739,24 @@ class Welcome(Events, commands.Cog):
         This accepts hex codes and integer value colours.
         """
         await self.config.guild(ctx.guild).EMBED_DATA.colour.set(colour.value)
-        await ctx.tick()
+        em = discord.Embed(
+            colour=colour, description=_("Welcome colour set to `{colour}`").format(colour=colour)
+        )
+        await ctx.send(embed=em)
+
+    @_embed.command(aliases=["gcolor", "goodbyecolor", "gcolour"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def goodbyecolour(self, ctx: commands.Context, colour: discord.Colour) -> None:
+        """
+        Set the embed colour.
+
+        This accepts hex codes and integer value colours.
+        """
+        await self.config.guild(ctx.guild).EMBED_DATA.colour_goodbye.set(colour.value)
+        em = discord.Embed(
+            colour=colour, description=_("Goodbye colour set to `{colour}`").format(colour=colour)
+        )
+        await ctx.send(embed=em)
 
     @_embed.command()
     async def title(self, ctx: commands.Context, *, title: str = "") -> None:

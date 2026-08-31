@@ -5,6 +5,7 @@ from typing import List, Optional, Pattern, Union, cast
 
 import discord
 from red_commons.logging import getLogger
+from redbot import VersionInfo, version_info
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n
@@ -68,7 +69,10 @@ class Events:
                         param = params[0]
             raw_response = raw_response.replace("{" + result[0] + "}", param)
         if has_filter:
-            bad_name = await has_filter.filter_hits(username, guild)
+            if version_info < VersionInfo.from_str("3.5.10"):
+                bad_name = await has_filter.filter_hits(username, guild)
+            else:
+                bad_name = await has_filter.filter_hits(guild, username)
             if bad_name:
                 for word in bad_name:
                     raw_response = re.sub(rf"(?i){word}", filter_setting, raw_response)
@@ -99,13 +103,20 @@ class Events:
         username = str(member)
         if has_filter:
             replace_word = await self.config.guild(guild).FILTER_SETTING() or "[Redacted]"
-            bad_words = await has_filter.filter_hits(username, guild)
+            if version_info < VersionInfo.from_str("3.5.10"):
+                bad_words = await has_filter.filter_hits(username, guild)
+            else:
+                bad_words = await has_filter.filter_hits(guild, username)
             if bad_words:
                 for word in bad_words:
                     username = username.replace(word, replace_word)
-        em = discord.Embed(description=converted_msg)
-        if EMBED_DATA["colour"]:
-            em.colour = EMBED_DATA["colour"]
+        em = discord.Embed(description=converted_msg[:4096])
+        colour = EMBED_DATA.get("colour", 0)
+        goodbye_colour = EMBED_DATA.get("colour_goodbye", 0)
+        em.colour = colour
+        if not is_welcome:
+            em.colour = goodbye_colour or colour
+
         if EMBED_DATA["title"]:
             em.title = await self.convert_parms(member, guild, EMBED_DATA["title"], False)
         if EMBED_DATA["footer"]:
@@ -152,6 +163,20 @@ class Events:
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
         guild = member.guild
+        if await self.config.guild(guild).PENDING() and member.pending:
+            log.debug("Ignoring member join %r to wait for pending", member)
+            return
+        await self.check_member_join(member)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        guild = after.guild
+        if await self.config.guild(guild).PENDING():
+            if before.pending != after.pending:
+                await self.check_member_join(after)
+
+    async def check_member_join(self, member: discord.Member):
+        guild = member.guild
         if not await self.config.guild(guild).ON():
             return
         if guild is None:
@@ -167,9 +192,14 @@ class Events:
         has_filter = self.bot.get_cog("Filter")
         filter_setting = await self.config.guild(guild).FILTER_SETTING()
         if has_filter and filter_setting is None:
-            if await has_filter.filter_hits(member.name, guild):
-                log.info("Member joined with a bad username.")
-                return
+            if version_info < VersionInfo.from_str("3.5.10"):
+                if await has_filter.filter_hits(member.name, guild):
+                    log.info("Member joined with a bad username.")
+                    return
+            else:
+                if await has_filter.filter_hits(guild, member.name):
+                    log.info("Member joined with a bad username.")
+                    return
 
         if datetime.now(timezone.utc).date() > self.today_count["now"].date():
             self.today_count = {"now": datetime.now(timezone.utc)}
@@ -297,7 +327,7 @@ class Events:
                         await member.send(await self.convert_parms(member, guild, msg, False))  # type: ignore
                 except discord.errors.Forbidden:
                     log.info(
-                        "welcome.py: unable to whisper %s. Probably " "doesn't want to be PM'd",
+                        "welcome.py: unable to whisper %s. Probably doesn't want to be PM'd",
                         member,
                     )
                 except Exception:

@@ -8,7 +8,7 @@ import discord
 from red_commons.logging import getLogger
 from redbot.core import commands
 from redbot.core.i18n import Translator
-from redbot.core.utils.chat_formatting import box, escape
+from redbot.core.utils.chat_formatting import escape
 from redbot.vendored.discord.ext import menus
 
 IMAGE_LINKS = re.compile(r"(http[s]?:\/\/[^\"\']*\.(?:png|jpg|jpeg|gif|png|webp))")
@@ -38,7 +38,9 @@ class WelcomePages(menus.ListPageSource):
         self.pages = pages
         self.select_options = []
         for count, page in enumerate(pages):
-            self.select_options.append(discord.SelectOption(label=f"Page {count+1}", value=count))
+            self.select_options.append(
+                discord.SelectOption(label=f"Page {count + 1}", value=count)
+            )
         self.current_page = None
         self.current_selection = None
 
@@ -56,8 +58,14 @@ class WelcomePages(menus.ListPageSource):
             raw_text = _("Deleted Greeting")
             view.disable_extra_buttons()
         self.current_selection = raw_text
+        is_welcome = view.event_type is EventType.greeting
+        colour = await config.guild(view.ctx.guild).EMBED_DATA.colour()
+        colour_goodbye = await config.guild(view.ctx.guild).EMBED_DATA.colour_goodbye()
+        em_colour = discord.Colour(colour)
+        if not is_welcome:
+            em_colour = colour_goodbye or colour
+
         if view.show_preview:
-            is_welcome = view.event_type is EventType.greeting
             grouped = await config.guild(view.ctx.guild).GROUPED()
             members = view.ctx.author if not grouped else [view.ctx.author, view.ctx.me]
             if await config.guild(view.ctx.guild).EMBED():
@@ -74,7 +82,7 @@ class WelcomePages(menus.ListPageSource):
                     event_type=view.event_type.get_name().title(), count=view.current_page + 1
                 ),
                 description=display_text,
-                colour=await view.cog.bot.get_embed_colour(view.ctx.channel),
+                colour=em_colour,
             )
             em.set_footer(text=f"Page {view.current_page + 1}/{self.get_max_pages()}")
             return em
@@ -282,6 +290,12 @@ class EmbedEditModal(discord.ui.Modal):
                                     "`{key}` must contain guild, splash, avatar, or a valid image URL."
                                 ).format(key=key)
                             )
+                        else:
+                            if search.group(1) != self.old_settings[key]:
+                                changes.add(key)
+                                await config.guild(interaction.guild).EMBED_DATA.set_raw(
+                                    key, value=search.group(1)
+                                )
 
         if not changes:
             await interaction.response.send_message(
