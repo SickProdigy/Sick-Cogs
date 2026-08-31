@@ -1,27 +1,54 @@
-from abc import ABCMeta, abstractmethod
+import asyncio
+from abc import ABC, ABCMeta, abstractmethod
 from multiprocessing.pool import Pool
-from typing import Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext.commands.cog import CogMeta
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from redbot.core import commands
 from redbot.core.bot import Red
 
-from .common.models import DB, GuildSettings
+from .common.command_index import CommandIndexStore
+from .common.embedding_store import EmbeddingStore
+from .common.models import DB, Conversation, EndpointProfile, GuildSettings, Skill
 
 
 class CompositeMetaClass(CogMeta, ABCMeta):
     """Type detection"""
 
 
-class MixinMeta(metaclass=ABCMeta):
+class MixinMeta(ABC):
     """Type hinting"""
 
-    bot: Red
-    db: DB
-    mp_pool: Pool
-    registry: Dict[str, Dict[str, dict]]
+    def __init__(self, *_args):
+        self.bot: Red
+        self.db: DB
+        self.mp_pool: Pool
+        self.registry: Dict[str, Dict[str, dict]]
+        self.context_registry: Dict[str, Dict[str, dict]]
+        self.embedding_store: EmbeddingStore
+        self.command_index: CommandIndexStore
+        self.cmdindex_task: Optional[asyncio.Task]
+        self.scheduler: AsyncIOScheduler
+        # Keys: "cached", "cache_write", "total", "model".
+        self.last_cache_stats: Dict[str, object]
+        # Smartmod review state (actually assigned in SmartMod.__init__).
+        self.smartmod_cooldowns: Dict[tuple[int, int], float]
+        self.smartmod_tasks: set
+
+    @abstractmethod
+    async def _fire_reminder(self, reminder_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def _fire_scheduled_task(self, task_id: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_api_key(self, conf: GuildSettings) -> str:
+        raise NotImplementedError
 
     @abstractmethod
     async def openai_status(self) -> str:
@@ -35,7 +62,12 @@ class MixinMeta(metaclass=ABCMeta):
         functions: Optional[List[dict]] = None,
         member: discord.Member = None,
         response_token_override: int = None,
-    ) -> Union[ChatCompletionMessage, str]:
+        model_override: Optional[str] = None,
+        temperature_override: Optional[float] = None,
+        session_id: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        tool_choice: Optional[Union[str, dict]] = None,
+    ) -> ChatCompletionMessage:
         raise NotImplementedError
 
     @abstractmethod
@@ -43,11 +75,72 @@ class MixinMeta(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
+    async def request_embedding_with_info(self, text: str, conf: GuildSettings) -> tuple[List[float], str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def request_embeddings_batch(self, texts: List[str], conf: GuildSettings) -> tuple[List[List[float]], str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def schedule_command_index_sync(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     async def can_call_llm(self, conf: GuildSettings, ctx: Optional[commands.Context] = None) -> bool:
         raise NotImplementedError
 
     @abstractmethod
-    async def resync_embeddings(self, conf: GuildSettings) -> int:
+    async def resync_embeddings(self, conf: GuildSettings, guild_id: int) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_cached_endpoint_profile(self, conf: Optional[GuildSettings] = None) -> Optional[EndpointProfile]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_endpoint_profile(self, conf: Optional[GuildSettings] = None) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def resolve_chat_model(self, requested_model: str, conf: Optional[GuildSettings] = None) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def resolve_embedding_model(self, requested_model: str, conf: Optional[GuildSettings] = None) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_endpoint_chat_model_limit(
+        self, requested_model: Optional[str] = None, conf: Optional[GuildSettings] = None
+    ) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def describe_endpoint_profile(self, profile: EndpointProfile) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_guild_endpoint_url(self, conf: GuildSettings) -> Optional[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def refresh_endpoint_profile(
+        self, conf: Optional[GuildSettings] = None, force: bool = False, save: bool = False
+    ) -> Optional[EndpointProfile]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def endpoint_supports_vision(
+        self,
+        conf: GuildSettings,
+        user: Optional[discord.Member] = None,
+        requested_model: Optional[str] = None,
+    ) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def observe_embedding_runtime(self, model_id: str, dimensions: int, conf: Optional[GuildSettings] = None) -> None:
         raise NotImplementedError
 
     @abstractmethod
@@ -55,27 +148,27 @@ class MixinMeta(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    async def cut_text_by_tokens(self, text: str, conf: GuildSettings, max_tokens: int) -> str:
+    async def cut_text_by_tokens(self, text: str, conf: GuildSettings, user: Optional[discord.Member] = None) -> str:
         raise NotImplementedError
 
     @abstractmethod
-    async def count_payload_tokens(self, messages: List[dict], model: str = "gpt-3.5-turbo"):
+    async def count_payload_tokens(self, messages: List[dict]) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    async def count_function_tokens(self, functions: List[dict], model: str = "gpt-3.5-turbo613"):
+    async def count_function_tokens(self, functions: List[dict]) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    async def count_tokens(self, text: str, model: str) -> int:
+    async def count_tokens(self, text: str) -> int:
         raise NotImplementedError
 
     @abstractmethod
-    async def get_tokens(self, text: str, model: str = "gpt-3.5-turbo") -> list:
+    async def get_tokens(self, text: str) -> list[int]:
         raise NotImplementedError
 
     @abstractmethod
-    async def get_text(self, tokens: list, model: str = "gpt-3.5-turbo") -> str:
+    async def get_text(self, tokens: list) -> str:
         raise NotImplementedError
 
     @abstractmethod
@@ -89,6 +182,37 @@ class MixinMeta(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
+    async def compact_conversation(
+        self,
+        messages: List[dict],
+        function_list: List[dict],
+        conf: GuildSettings,
+        user: Optional[discord.Member],
+        conversation: Optional[Conversation] = None,
+        focus: str = "",
+        force: bool = False,
+    ) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_mention_permissions(self, member: discord.Member) -> discord.AllowedMentions:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def resolve_prompt_context_variables(
+        self,
+        guild: discord.Guild,
+        channel: Optional[Union[discord.TextChannel, discord.Thread, discord.ForumChannel]],
+        author: Optional[discord.Member],
+        conf: GuildSettings,
+        conversation: Conversation,
+        extras: dict,
+        now: Any,
+        prompt_templates: List[str],
+    ) -> Dict[str, str]:
+        raise NotImplementedError
+
+    @abstractmethod
     async def token_pagify(self, text: str, conf: GuildSettings) -> List[str]:
         raise NotImplementedError
 
@@ -97,12 +221,73 @@ class MixinMeta(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
-    async def get_embbedding_menu_embeds(self, conf: GuildSettings, place: int) -> List[discord.Embed]:
+    async def get_embedding_menu_embeds(self, guild_id: int, conf: GuildSettings, place: int) -> List[discord.Embed]:
         raise NotImplementedError
 
     # -------------------------------------------------------
     # -------------------------------------------------------
-    # -------------------- 3rd Partry -----------------------
+    # -------------------- SMARTMOD -------------------------
+    # -------------------------------------------------------
+    # -------------------------------------------------------
+
+    @abstractmethod
+    def resolve_smartmod_key(self, conf: GuildSettings) -> Optional[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def smartmod_passes_filters(self, message: discord.Message, conf: GuildSettings) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def smartmod_match_triggers(self, content: str, conf: GuildSettings) -> List[str]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def smartmod_score(
+        self,
+        content: str,
+        conf: GuildSettings,
+        image_urls: Optional[List[str]] = None,
+    ) -> Optional[Dict[str, float]]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def run_smartmod(self, message: discord.Message, conf: GuildSettings) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def simulate_smartmod(
+        self,
+        message: discord.Message,
+        conf: GuildSettings,
+        tripped: Dict[str, float],
+        content: str,
+        output_channel: discord.abc.Messageable,
+    ) -> tuple:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def execute_mod_action(
+        self,
+        action: str,
+        *,
+        guild: discord.Guild,
+        flagged_message: discord.Message,
+        target: Union[discord.Member, discord.User],
+        reason: str,
+        actor: Union[discord.Member, discord.ClientUser],
+        duration_minutes: int = 0,
+        delete_message: bool = False,
+    ) -> tuple[str, bool]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def smartmod_unban(self, guild_id: int, user_id: int, reason: str) -> None:
+        raise NotImplementedError
+
+    # -------------------------------------------------------
+    # -------------------------------------------------------
+    # -------------------- 3rd Party ------------------------
     # -------------------------------------------------------
     # -------------------------------------------------------
 
@@ -113,7 +298,6 @@ class MixinMeta(metaclass=ABCMeta):
         name: str,
         text: str,
         overwrite: bool = False,
-        ai_created: bool = False,
     ) -> Optional[List[float]]:
         raise NotImplementedError
 
@@ -132,6 +316,22 @@ class MixinMeta(metaclass=ABCMeta):
     ) -> str:
         raise NotImplementedError
 
+    @abstractmethod
+    def bake_skill(
+        self,
+        conf: GuildSettings,
+        name: str,
+        description: str,
+        body: str,
+        permission_level: str = "user",
+        replaces: str = "",
+    ) -> Skill:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def build_skill_index_for_member(self, conf: GuildSettings, member: Optional[discord.Member]) -> str:
+        raise NotImplementedError
+
     # -------------------------------------------------------
     # -------------------------------------------------------
     # ----------------------- MAIN --------------------------
@@ -143,7 +343,57 @@ class MixinMeta(metaclass=ABCMeta):
         raise NotImplementedError
 
     @abstractmethod
+    async def save_conversation(self, key: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_message_queue_key(
+        self,
+        author_id: int,
+        channel_id: int,
+        guild_id: int,
+        collaborative: bool,
+    ) -> tuple[int, int, int]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def enqueue_message_request(self, handle_message_kwargs: Dict[str, Any]) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def clear_message_queue(
+        self,
+        author_id: int,
+        channel_id: int,
+        guild_id: int,
+        collaborative: bool,
+    ) -> int:
+        raise NotImplementedError
+
+    @abstractmethod
+    def cancel_message_queue(
+        self,
+        author_id: int,
+        channel_id: int,
+        guild_id: int,
+        collaborative: bool,
+    ) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def cancel_all_message_queues(self) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
     async def handle_message(
-        self, message: discord.Message, question: str, conf: GuildSettings, listener: bool = False
+        self,
+        message: discord.Message,
+        question: str,
+        conf: GuildSettings,
+        listener: bool = False,
+        model_override: Optional[str] = None,
+        auto_answer: Optional[bool] = False,
+        trigger_prompt: Optional[str] = None,
+        **kwargs,
     ) -> str:
         raise NotImplementedError

@@ -1,29 +1,57 @@
 import asyncio
+import json
 import logging
-from multiprocessing.pool import Pool
+import multiprocessing as mp
+from datetime import datetime, timezone
 from time import perf_counter
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Literal, Optional, Union
 
 import discord
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from discord.ext import tasks
 from pydantic import ValidationError
 from redbot.core import Config, commands
 from redbot.core.bot import Red
+from redbot.core.data_manager import cog_data_path
+from redbot.core.utils.chat_formatting import pagify
 
 from .abc import CompositeMetaClass
 from .commands import AssistantCommands
 from .common.api import API
+from .common.calls import close_clients
 from .common.chat import ChatHandler
+from .common.command_index import CommandIndexStore
 from .common.constants import (
-    CREATE_MEMORY,
-    EDIT_MEMORY,
-    LIST_MEMORIES,
-    REQUEST_TRAINING,
-    SEARCH_MEMORIES,
+    CANCEL_REMINDER,
+    CANCEL_SCHEDULED_TASK,
+    CREATE_REMINDER,
+    DO_NOT_RESPOND_SCHEMA,
+    EDIT_IMAGE,
+    GENERATE_IMAGE,
+    GET_COMMAND_SOURCE,
+    LIST_REMINDERS,
+    LIST_SCHEDULED_TASKS,
+    LOAD_SKILL,
+    MAX_SKILL_BODY,
+    RESPOND_AND_CONTINUE,
+    SCHEDULE_TASK,
+    SEARCH_COMMANDS,
+    SEARCH_INTERNET,
+    THINK_AND_PLAN,
 )
+from .common.conversation_store import ConversationStore
+from .common.embedding_store import EmbeddingStore
 from .common.functions import AssistantFunctions
-from .common.models import DB, Embedding, EmbeddingEntryExists, NoAPIKey
-from .common.utils import json_schema_invalid
+from .common.models import (
+    DB,
+    Conversation,
+    EmbeddingEntryExists,
+    NoAPIKey,
+    RolePrompt,
+    normalize_tool_category,
+)
+from .common.smartmod import SmartMod
+from .common.utils import clean_name, json_schema_invalid, normalize_skill_name
 from .listener import AssistantListener
 
 log = logging.getLogger("red.vrt.assistant")
@@ -37,14 +65,15 @@ class Assistant(
     AssistantCommands,
     AssistantFunctions,
     AssistantListener,
+    SmartMod,
     ChatHandler,
     commands.Cog,
     metaclass=CompositeMetaClass,
 ):
     """
-    Set up and configure an AI assistant (or chat) cog for your server with one of OpenAI's ChatGPT language models.
+    Set up and configure an AI assistant (or chat) cog for your server with OpenAI or other OpenAI-compatible language models.
 
-    Features include configurable prompt injection, dynamic embeddings, custom function calling, and more!
+    Features include configurable prompt injection, admin-curated grounded RAG embeddings, custom function calling, and more!
 
     - **[p]assistant**: base command for setting up the assistant
     - **[p]chat**: talk with the assistant
@@ -52,18 +81,18 @@ class Assistant(
     - **[p]clearconvo**: reset your conversation with the assistant in the channel
     """
 
-    __author__ = "vertyco"
-    __version__ = "6.2.5"
+    __author__ = "[vertyco](https://github.com/vertyco/vrt-cogs)"
+    __version__ = "8.20.0"
 
     def format_help_for_context(self, ctx):
         helpcmd = super().format_help_for_context(ctx)
         return f"{helpcmd}\nVersion: {self.__version__}\nAuthor: {self.__author__}"
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
-        """No data to delete"""
         for key in self.db.conversations.copy():
             if key.split("-")[0] == str(user_id):
                 del self.db.conversations[key]
+                await asyncio.to_thread(self.conversation_store.delete, key)
 
     def __init__(self, bot: Red, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -71,43 +100,152 @@ class Assistant(
         self.config = Config.get_conf(self, 117117117, force_registration=True)
         self.config.register_global(db={})
         self.db: DB = DB()
-        self.mp_pool = Pool()
+        # Regex-guard pool: short re.findall/re.sub tasks only, never CPU-bound batch work.
+        # maxtasksperchild forces worker respawn so a single large-input regex can't
+        # permanently inflate a worker's RSS (CPython doesn't return big frees to the OS).
+        self.mp_pool = mp.get_context("spawn").Pool(processes=1, maxtasksperchild=100)
+        self.embedding_store = EmbeddingStore(cog_data_path(self))
+        self.conversation_store = ConversationStore(cog_data_path(self))
+        self.command_index = CommandIndexStore(self.embedding_store)
+        self.cmdindex_task: Optional[asyncio.Task] = None
+        self.scheduler = AsyncIOScheduler()
 
-        # {cog_name: {function_name: {function_json_schema}}}
+        # {cog_name: {function_name: {"permission_level": "user", "schema": function_json_schema, "required_permissions": [], "category": "uncategorized"}}}
         self.registry: Dict[str, Dict[str, dict]] = {}
+        # {cog_name: {variable_name: {"description": str, "fetch_method": str, "permission_level": str, "required_permissions": []}}}
+        self.context_registry: Dict[str, Dict[str, dict]] = {}
 
         self.saving = False
+        self.save_pending = False
         self.first_run = True
+
+        # Most recent prompt-cache stats for `[p]cacheinfo`.
+        self.last_cache_stats: Dict[str, object] = {}
 
     async def cog_load(self) -> None:
         asyncio.create_task(self.init_cog())
 
+    @property
+    def _rpc_handlers(self) -> tuple:
+        # Single source of truth for the localhost JSON-RPC handlers so init_cog
+        # registers and cog_unload unregisters exactly the same set. Registration
+        # raises on a duplicate name, so without the matching unregister a reload
+        # (old instance never cleans up) aborts before any newly-added handler and
+        # the new verb stays "method not found" until a full process restart.
+        return (
+            self.rpc_get_system_prompt,
+            self.rpc_set_system_prompt,
+            self.rpc_list_embeddings,
+            self.rpc_upsert_embedding,
+            self.rpc_delete_embedding,
+            self.rpc_list_skills,
+            self.rpc_add_skill,
+            self.rpc_delete_skill,
+            self.rpc_set_skills_enabled,
+            self.rpc_list_role_prompts,
+            self.rpc_set_role_prompt,
+        )
+
     async def cog_unload(self):
+        for handler in self._rpc_handlers:
+            try:
+                self.bot.unregister_rpc_handler(handler)
+            except Exception:
+                pass
+        self.cancel_all_message_queues()
         self.save_loop.cancel()
-        self.mp_pool.close()
+        self.scheduler.shutdown(wait=False)
+        self.mp_pool.terminate()
+        await asyncio.to_thread(self.mp_pool.join)
+        if self.cmdindex_task and not self.cmdindex_task.done():
+            self.cmdindex_task.cancel()
         self.bot.dispatch("assistant_cog_remove")
+        asyncio.create_task(close_clients())
 
     async def init_cog(self):
         await self.bot.wait_until_red_ready()
         start = perf_counter()
         data = await self.config.db()
-        try:
-            self.db = await asyncio.to_thread(DB.model_validate, data)
-        except ValidationError:
-            # Try clearing conversations
-            if "conversations" in data:
-                del data["conversations"]
-            self.db = await asyncio.to_thread(DB.model_validate, data)
+
+        # One-time migration: conversations no longer live in the db blob. Back up any
+        # legacy in-blob conversations to disk and strip them so save_conf stays tiny.
+        # Stream the backup with json.dump (NOT json.dumps) so we never hold a second full
+        # copy of a 100MB+ conversation set in memory, free it before validating, and drop
+        # the blob even if the backup fails so an oversized store can't OOM-crash the bot
+        # in a load loop.
+        legacy = data.pop("conversations", None)
+        if legacy:
+            backup = cog_data_path(self) / f"conversations_backup_{int(datetime.now().timestamp())}.json"
+
+            def write_backup():
+                with backup.open("w", encoding="utf-8") as f:
+                    json.dump(legacy, f)
+
+            try:
+                await asyncio.to_thread(write_backup)
+                log.warning(
+                    "Backed up %s legacy in-blob conversations to %s and dropped them from the db blob",
+                    len(legacy),
+                    backup.name,
+                )
+            except Exception as e:
+                log.error("Failed to back up legacy conversations; dropping them from the blob anyway", exc_info=e)
+            del legacy
+            await self.config.db.set(data)
+
+        self.db = await asyncio.to_thread(DB.model_validate, data)
+
+        # Load per-file conversations into the in-memory cache (persistent setups only).
+        if self.db.persistent_conversations:
+            raw = await asyncio.to_thread(self.conversation_store.load_all)
+            for key, cdata in raw.items():
+                try:
+                    self.db.conversations[key] = Conversation.model_validate(cdata)
+                except ValidationError:
+                    log.error("Dropping invalid stored conversation %s", key)
+            log.info("Loaded %s conversations from disk", len(self.db.conversations))
 
         log.info(f"Config loaded in {round((perf_counter() - start) * 1000, 2)}ms")
-        await asyncio.to_thread(self._cleanup_db)
+        await self.embedding_store.initialize()
+        await self._cleanup_db()
+        await self._migrate_embeddings()
 
         # Register internal functions
-        await self.register_function(self.qualified_name, CREATE_MEMORY)
-        await self.register_function(self.qualified_name, SEARCH_MEMORIES)
-        await self.register_function(self.qualified_name, EDIT_MEMORY)
-        await self.register_function(self.qualified_name, LIST_MEMORIES)
-        await self.register_function(self.qualified_name, REQUEST_TRAINING)
+        await self.register_function(self.qualified_name, GENERATE_IMAGE, category="image")
+        await self.register_function(self.qualified_name, EDIT_IMAGE, category="image")
+        await self.register_function(self.qualified_name, SEARCH_INTERNET, category="web")
+        await self.register_function(self.qualified_name, THINK_AND_PLAN, category="planning")
+        await self.register_function(self.qualified_name, DO_NOT_RESPOND_SCHEMA, category="planning")
+        await self.register_function(self.qualified_name, RESPOND_AND_CONTINUE, category="planning")
+        await self.register_function(self.qualified_name, CREATE_REMINDER, category="reminders")
+        await self.register_function(self.qualified_name, CANCEL_REMINDER, category="reminders")
+        await self.register_function(self.qualified_name, LIST_REMINDERS, category="reminders")
+        await self.register_function(self.qualified_name, SCHEDULE_TASK, permission_level="mod", category="scheduling")
+        await self.register_function(
+            self.qualified_name,
+            CANCEL_SCHEDULED_TASK,
+            permission_level="mod",
+            category="scheduling",
+        )
+        await self.register_function(
+            self.qualified_name,
+            LIST_SCHEDULED_TASKS,
+            permission_level="mod",
+            category="scheduling",
+        )
+        await self.register_function(self.qualified_name, SEARCH_COMMANDS, category="documentation")
+        await self.register_function(
+            self.qualified_name,
+            GET_COMMAND_SOURCE,
+            permission_level="admin",
+            category="documentation",
+        )
+        await self.register_function(self.qualified_name, LOAD_SKILL, category="skills")
+
+        # Start scheduler and reschedule existing reminders/tasks
+        self.scheduler.start()
+        await self._reschedule_reminders()
+        await self._reschedule_tasks()
 
         logging.getLogger("openai").setLevel(logging.WARNING)
         logging.getLogger("aiocache").setLevel(logging.WARNING)
@@ -115,32 +253,63 @@ class Assistant(
         logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
         logging.getLogger("httpx").setLevel(logging.WARNING)
         self.bot.dispatch("assistant_cog_add", self)
+        self.schedule_command_index_sync()
+
+        # Expose shepherd handlers on Red's localhost RPC (no-op unless --rpc flag is set).
+        # Unregister first so a reload (which leaves the old instance's handlers
+        # registered) doesn't abort on a duplicate name. See _rpc_handlers.
+        for handler in self._rpc_handlers:
+            try:
+                self.bot.unregister_rpc_handler(handler)
+            except Exception:
+                pass
+            self.bot.register_rpc_handler(handler)
 
         await asyncio.sleep(30)
         self.save_loop.start()
 
     async def save_conf(self):
         if self.saving:
+            # A save is already running. Coalesce: flag a trailing save so changes
+            # made during this one get persisted, instead of silently dropping them
+            # (dropped saves would otherwise wait for the 30-min save_loop, which is
+            # cancelled entirely when conversations aren't persistent).
+            self.save_pending = True
             return
         try:
             self.saving = True
-            start = perf_counter()
-            if not self.db.persistent_conversations:
-                self.db.conversations.clear()
-            dump = await asyncio.to_thread(self.db.model_dump, mode="json")
-            await self.config.db.set(dump)
-            txt = f"Config saved in {round((perf_counter() - start) * 1000, 2)}ms"
-            if self.first_run:
-                log.info(txt)
-                self.first_run = False
+            while True:
+                self.save_pending = False
+                start = perf_counter()
+                dump = await asyncio.to_thread(self.db.model_dump, exclude={"conversations"})
+                await self.config.db.set(dump)
+                txt = f"Config saved in {round((perf_counter() - start) * 1000, 2)}ms"
+                if self.first_run:
+                    log.info(txt)
+                    self.first_run = False
+                if not self.save_pending:
+                    break
         except Exception as e:
             log.error("Failed to save config", exc_info=e)
         finally:
             self.saving = False
-        if not self.db.persistent_conversations and self.save_loop.is_running():
-            self.save_loop.cancel()
+            self.save_pending = False
+        if not self.db.persistent_conversations and self.save_loop.is_running():  # type: ignore
+            self.save_loop.cancel()  # type: ignore
 
-    def _cleanup_db(self):
+    async def save_conversation(self, key: str):
+        """Persist a single conversation to its own file. No-op when not persistent."""
+        if not self.db.persistent_conversations:
+            return
+        convo = self.db.conversations.get(key)
+        if convo is None:
+            await asyncio.to_thread(self.conversation_store.delete, key)
+            return
+        # AssistantBaseModel.model_dump already forces mode="json"; passing it again collides.
+        dump = await asyncio.to_thread(convo.model_dump)
+        await asyncio.to_thread(self.conversation_store.save, key, dump)
+
+    async def _cleanup_db(self):
         cleaned = False
         # Cleanup registry if any cogs no longer exist
         for cog_name, cog_functions in self.registry.copy().items():
@@ -150,18 +319,40 @@ class Assistant(
                 del self.registry[cog_name]
                 cleaned = True
                 continue
-            for function_name in cog_functions:
+            for function_name in list(cog_functions):
                 if not hasattr(cog, function_name):
                     log.debug(f"{cog_name} no longer has function named {function_name}, removing")
                     del self.registry[cog_name][function_name]
                     cleaned = True
 
-        # Clean up any stale channels
+        for cog_name, cog_variables in self.context_registry.copy().items():
+            cog = self.bot.get_cog(cog_name)
+            if not cog:
+                log.debug(f"{cog_name} no longer loaded. Unregistering its context variables")
+                del self.context_registry[cog_name]
+                cleaned = True
+                continue
+            for variable_name, data in list(cog_variables.items()):
+                fetch_method = data.get("fetch_method", variable_name)
+                if not hasattr(cog, fetch_method):
+                    log.debug(f"{cog_name} no longer has context variable fetcher named {fetch_method}, removing")
+                    del self.context_registry[cog_name][variable_name]
+                    cleaned = True
+
+        # Clean up any stale channels. Deleting a guild's config wipes its settings and
+        # embeddings permanently, so never do it while the gateway looks degraded: a guild
+        # that is merely unavailable (Discord outage, chunking at startup) must not be
+        # treated as "bot was removed".
+        outage_suspected = not self.bot.guilds or any(g.unavailable for g in self.bot.guilds)
         for guild_id in self.db.configs.copy().keys():
             guild = self.bot.get_guild(guild_id)
             if not guild:
+                if outage_suspected:
+                    log.warning(f"Guild {guild_id} missing but gateway looks degraded, skipping cleanup")
+                    continue
                 log.debug("Cleaning up guild")
                 del self.db.configs[guild_id]
+                await self.embedding_store.delete_all(guild_id)
                 cleaned = True
                 continue
             conf = self.db.get_conf(guild_id)
@@ -192,19 +383,184 @@ class Assistant(
                     conf.blacklist.remove(obj_id)
                     cleaned = True
 
-            # Ensure embedding entry names arent too long
-            new_embeddings = {}
-            for entry_name, embedding in conf.embeddings.items():
-                if len(entry_name) > 100:
-                    log.debug(f"Embed entry more than 100 characters, truncating: {entry_name}")
-                    cleaned = True
-                new_embeddings[entry_name[:100]] = embedding
-            conf.embeddings = new_embeddings
-
         health = "BAD (Cleaned)" if cleaned else "GOOD"
         log.info(f"Config health: {health}")
 
-    @tasks.loop(minutes=2)
+    async def _migrate_embeddings(self):
+        """One-time migration: move embeddings from Config to persistent ChromaDB."""
+        migrated_any = False
+        for guild_id, conf in self.db.configs.items():
+            if not conf.embeddings:
+                continue
+            count = await self.embedding_store.migrate_from_config(guild_id, conf.embeddings)
+            # Clear even when nothing was migrated (entries without vectors are unrecoverable),
+            # otherwise the next load re-runs the migration and drops the live collection.
+            conf.embeddings.clear()
+            migrated_any = True
+            if not count:
+                log.warning(f"No embeddings migrated for guild {guild_id}, clearing stale config entries")
+        if migrated_any:
+            log.info("Embedding migration complete. Saving config now.")
+            await self.save_conf()
+
+    async def _reschedule_reminders(self):
+        """Reschedule all pending reminders on cog load."""
+        now = datetime.now(tz=timezone.utc)
+        expired_ids = []
+
+        for reminder_id, reminder in self.db.reminders.items():
+            if reminder.remind_at <= now:
+                # Fire immediately if past due
+                expired_ids.append(reminder_id)
+            else:
+                # Schedule for the future
+                self.scheduler.add_job(
+                    self._fire_reminder,
+                    "date",
+                    run_date=reminder.remind_at,
+                    args=[reminder_id],
+                    id=f"reminder_{reminder_id}",
+                    replace_existing=True,
+                )
+
+        # Fire expired reminders
+        for reminder_id in expired_ids:
+            asyncio.create_task(self._fire_reminder(reminder_id))
+
+        if self.db.reminders:
+            log.info(f"Rescheduled {len(self.db.reminders)} reminders ({len(expired_ids)} expired)")
+
+    async def _reschedule_tasks(self):
+        """Reschedule all pending scheduled tasks on cog load."""
+        now = datetime.now(tz=timezone.utc)
+        expired_ids = []
+
+        for task_id, task in self.db.scheduled_tasks.items():
+            if task.execute_at <= now:
+                expired_ids.append(task_id)
+            else:
+                self.scheduler.add_job(
+                    self._fire_scheduled_task,
+                    "date",
+                    run_date=task.execute_at,
+                    args=[task_id],
+                    id=f"task_{task_id}",
+                    replace_existing=True,
+                )
+
+        for task_id in expired_ids:
+            asyncio.create_task(self._fire_scheduled_task(task_id))
+
+        if self.db.scheduled_tasks:
+            log.info(f"Rescheduled {len(self.db.scheduled_tasks)} tasks ({len(expired_ids)} expired)")
+
+    async def _fire_scheduled_task(self, task_id: str):
+        """Execute a scheduled task by sending the instruction as a chat message."""
+        task = self.db.scheduled_tasks.get(task_id)
+        if not task:
+            return
+
+        guild = self.bot.get_guild(task.guild_id)
+        if not guild:
+            del self.db.scheduled_tasks[task_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        channel = guild.get_channel(task.channel_id)
+        if not channel or not hasattr(channel, "send"):
+            del self.db.scheduled_tasks[task_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        member = guild.get_member(task.user_id)
+        if not member:
+            del self.db.scheduled_tasks[task_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        conf = self.db.get_conf(guild)
+        if not await self.can_call_llm(conf):
+            log.warning(f"Cannot fire scheduled task {task_id}: no API key configured")
+            del self.db.scheduled_tasks[task_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        # Clean up the task before execution
+        del self.db.scheduled_tasks[task_id]
+        asyncio.create_task(self.save_conf())
+
+        # Build the prompt with context
+        prompt = f"[SCHEDULED TASK] This is an autonomous task you previously scheduled (ID: {task_id}).\n"
+        if task.context:
+            prompt += f"Context: {task.context}\n"
+        prompt += f"Original requester: {member.display_name} ({member.id})\n"
+        prompt += f"Instruction: {task.instruction}"
+
+        try:
+            deferred_files = []
+            reply = await self.get_chat_response(
+                message=prompt,
+                author=member,
+                guild=guild,
+                channel=channel,
+                conf=conf,
+                deferred_files=deferred_files,
+            )
+            if reply:
+                allowed_mentions = await self.get_mention_permissions(member)
+                pages = list(pagify(reply, delims=["\n", " "], page_length=2000))
+                for i, page in enumerate(pages):
+                    kwargs = {"allowed_mentions": allowed_mentions}
+                    if i == 0 and deferred_files:
+                        kwargs["files"] = deferred_files
+                    await channel.send(page, **kwargs)
+            elif deferred_files:
+                await channel.send(files=deferred_files)
+        except Exception as e:
+            log.error(f"Error executing scheduled task {task_id}", exc_info=e)
+            try:
+                await channel.send(f"⚠️ {member.mention} A scheduled task failed to execute: {task.instruction[:100]}")
+            except discord.HTTPException:
+                pass
+
+    async def _fire_reminder(self, reminder_id: str):
+        """Fire a reminder and clean it up."""
+        reminder = self.db.reminders.get(reminder_id)
+        if not reminder:
+            return
+
+        guild = self.bot.get_guild(reminder.guild_id)
+        if not guild:
+            del self.db.reminders[reminder_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        user = guild.get_member(reminder.user_id)
+        if not user:
+            del self.db.reminders[reminder_id]
+            asyncio.create_task(self.save_conf())
+            return
+
+        try:
+            if reminder.dm:
+                await user.send(f"⏰ **Reminder:** {reminder.message}")
+            else:
+                channel = guild.get_channel(reminder.channel_id)
+                if channel and hasattr(channel, "send"):
+                    await channel.send(f"⏰ {user.mention} **Reminder:** {reminder.message}")
+                else:
+                    # Fall back to DM if channel no longer exists or is not messageable
+                    await user.send(f"⏰ **Reminder:** {reminder.message}")
+        except discord.Forbidden:
+            log.warning(f"Could not send reminder {reminder_id} to user {user.id}")
+        except Exception as e:
+            log.error(f"Error firing reminder {reminder_id}", exc_info=e)
+
+        # Clean up
+        del self.db.reminders[reminder_id]
+        asyncio.create_task(self.save_conf())
+
+    @tasks.loop(minutes=30)
     async def save_loop(self):
         if not self.db.persistent_conversations:
             return
@@ -238,15 +594,228 @@ class Assistant(
 
         conf = self.db.get_conf(guild)
 
-        if name in conf.embeddings and not overwrite:
+        if await self.embedding_store.exists(guild.id, name) and not overwrite:
             raise EmbeddingEntryExists(f"The entry name '{name}' already exists!")
 
-        embedding = await self.request_embedding(text, conf)
+        embedding, observed_model = await self.request_embedding_with_info(text, conf)
         if not embedding:
             return None
-        conf.embeddings[name] = Embedding(text=text, embedding=embedding, ai_created=ai_created, model=conf.embed_model)
+        await self.embedding_store.add(
+            guild.id,
+            name,
+            text,
+            embedding,
+            observed_model,
+        )
         asyncio.create_task(self.save_conf())
         return embedding
+
+    # ------------------ RPC HANDLERS ------------------
+    # Exposed on Red's localhost JSON-RPC server (requires the --rpc launch flag).
+    # Method names over the wire: ASSISTANT__RPC_<NAME> (e.g. ASSISTANT__RPC_GET_SYSTEM_PROMPT).
+    # Localhost binding is the access control; all args/returns are JSON serializable.
+
+    def rpc_guild(self, guild_id: int) -> Optional[discord.Guild]:
+        return self.bot.get_guild(int(guild_id))
+
+    async def rpc_get_system_prompt(self, guild_id: int) -> dict:
+        """Return the guild's current system prompt."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        return {"ok": True, "prompt": conf.system_prompt or ""}
+
+    async def rpc_set_system_prompt(self, guild_id: int, prompt: str) -> dict:
+        """Set the guild's system prompt."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        if not isinstance(prompt, str) or not prompt.strip():
+            return {"ok": False, "error": "prompt must be a non-empty string"}
+        conf = self.db.get_conf(guild)
+        conf.system_prompt = prompt
+        await self.save_conf()
+        return {"ok": True, "length": len(prompt)}
+
+    async def rpc_list_embeddings(self, guild_id: int) -> dict:
+        """List all embedding entries: {name: {text, created, modified, model, dimensions}}."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        meta = await self.embedding_store.get_all_metadata(guild.id)
+        return {"ok": True, "embeddings": meta}
+
+    async def rpc_upsert_embedding(self, guild_id: int, name: str, text: str) -> dict:
+        """Create or overwrite an embedding entry (re-embeds via the configured API)."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        if not str(name).strip() or not str(text).strip():
+            return {"ok": False, "error": "name and text must be non-empty strings"}
+        try:
+            embedding = await self.add_embedding(guild, str(name), str(text), overwrite=True)
+        except NoAPIKey:
+            return {"ok": False, "error": "no API key configured for this guild"}
+        if embedding is None:
+            return {"ok": False, "error": "embedding request returned nothing"}
+        return {"ok": True, "name": str(name), "dimensions": len(embedding)}
+
+    async def rpc_delete_embedding(self, guild_id: int, name: str) -> dict:
+        """Delete an embedding entry by name."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        if not await self.embedding_store.exists(guild.id, str(name)):
+            return {"ok": False, "error": f"no embedding named '{name}'"}
+        await self.embedding_store.delete(guild.id, str(name))
+        return {"ok": True, "deleted": str(name)}
+
+    async def rpc_list_skills(self, guild_id: int) -> dict:
+        """List a guild's skills: {name: {description, permission_level, enabled, use_count}}."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        skills = {
+            name: {
+                "description": skill.description,
+                "permission_level": skill.permission_level,
+                "enabled": skill.enabled,
+                "use_count": skill.use_count,
+            }
+            for name, skill in conf.skills.items()
+        }
+        return {"ok": True, "skills": skills, "count": len(skills), "max": conf.max_skills}
+
+    async def rpc_get_skill(self, guild_id: int, name: str) -> dict:
+        """Fetch one skill in full, including its body (rpc_list_skills omits body)."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        key = normalize_skill_name(name)
+        skill = conf.skills.get(key)
+        if not skill:
+            return {"ok": False, "error": f"no skill named '{key}'"}
+        return {
+            "ok": True,
+            "name": key,
+            "description": skill.description,
+            "body": skill.body,
+            "permission_level": skill.permission_level,
+            "enabled": skill.enabled,
+            "use_count": skill.use_count,
+        }
+
+    async def rpc_add_skill(
+        self,
+        guild_id: int,
+        name: str,
+        description: str,
+        body: str,
+        permission_level: str = "user",
+        replaces: str = "",
+    ) -> dict:
+        """Create or overwrite an active skill (same path as the skills add command)."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        if not all(isinstance(value, str) and value.strip() for value in (name, description, body)):
+            return {"ok": False, "error": "name, description and body must be non-empty strings"}
+        if permission_level not in ("user", "mod", "admin", "owner"):
+            return {"ok": False, "error": "permission_level must be user, mod, admin or owner"}
+        if len(body) > MAX_SKILL_BODY:
+            return {"ok": False, "error": f"body too long ({len(body)} chars, max {MAX_SKILL_BODY})"}
+        conf = self.db.get_conf(guild)
+        name = normalize_skill_name(name)
+        replaces = normalize_skill_name(replaces) if replaces else ""
+        if replaces and replaces not in conf.skills:
+            return {"ok": False, "error": f"no skill named '{replaces}' to replace"}
+        # An existing same-name skill is an in-place update, not a limit hit.
+        if not replaces and name in conf.skills:
+            replaces = name
+        if not replaces and len(conf.skills) >= conf.max_skills:
+            return {"ok": False, "error": f"skill limit reached ({conf.max_skills})"}
+        self.bake_skill(
+            conf=conf,
+            name=name,
+            description=description,
+            body=body,
+            permission_level=permission_level,
+            replaces=replaces,
+        )
+        await self.save_conf()
+        return {"ok": True, "name": name, "count": len(conf.skills)}
+
+    async def rpc_delete_skill(self, guild_id: int, name: str) -> dict:
+        """Delete a skill by name."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        name = normalize_skill_name(name)
+        if name not in conf.skills:
+            return {"ok": False, "error": f"no skill named '{name}'"}
+        del conf.skills[name]
+        await self.save_conf()
+        return {"ok": True, "deleted": name}
+
+    async def rpc_set_skills_enabled(self, guild_id: int, enabled: bool) -> dict:
+        """Enable or disable the skills system for a guild (also flips the skill tools)."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        conf.skills_enabled = bool(enabled)
+        conf.function_statuses["load_skill"] = conf.skills_enabled
+        await self.save_conf()
+        return {"ok": True, "skills_enabled": conf.skills_enabled}
+
+    async def rpc_list_role_prompts(self, guild_id: int) -> dict:
+        """List per-role system prompt layers: {role_id: {text, replace}} + the stack flag."""
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        conf = self.db.get_conf(guild)
+        prompts = {str(role_id): {"text": rp.text, "replace": rp.replace} for role_id, rp in conf.role_prompts.items()}
+        return {"ok": True, "role_prompts": prompts, "stack": conf.role_prompts_stack}
+
+    async def rpc_set_role_prompt(
+        self,
+        guild_id: int,
+        role_id: int,
+        text: str = "",
+        replace: bool = False,
+    ) -> dict:
+        """Set, overwrite, or remove a role's system prompt layer.
+
+        Empty/whitespace text removes the role's prompt (mirrors the
+        `[p]assistant override roleprompt` command run with no text).
+        replace=True swaps the resolved base prompt instead of appending.
+        """
+        guild = self.rpc_guild(guild_id)
+        if not guild:
+            return {"ok": False, "error": f"guild {guild_id} not found"}
+        try:
+            role_id = int(role_id)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "role_id must be an integer"}
+        if guild.get_role(role_id) is None:
+            return {"ok": False, "error": f"role {role_id} not found in guild"}
+        conf = self.db.get_conf(guild)
+        if not isinstance(text, str) or not text.strip():
+            existed = conf.role_prompts.pop(role_id, None)
+            await self.save_conf()
+            return {"ok": True, "removed": existed is not None, "role_id": str(role_id)}
+        conf.role_prompts[role_id] = RolePrompt(text=text, replace=bool(replace))
+        await self.save_conf()
+        return {
+            "ok": True,
+            "role_id": str(role_id),
+            "length": len(text),
+            "replace": bool(replace),
+        }
 
     async def get_chat(
         self,
@@ -278,11 +847,11 @@ class Assistant(
             NoAPIKey: If the specified guild has no api key associated with it
 
         Returns:
-            str: the reply from ChatGPT (may need to be pagified)
+            str: the reply from the configured model (may need to be pagified)
         """
         conf = self.db.get_conf(guild)
         if not await self.can_call_llm(conf):
-            raise NoAPIKey("OpenAI key has not been set for this server!")
+            raise NoAPIKey("No API key or endpoint override has been set for this server!")
         return await self.get_chat_response(
             message,
             author,
@@ -302,27 +871,68 @@ class Assistant(
         funcs = [func for event_name, func in cog.get_listeners() if event_name == event]
         for func in funcs:
             self.bot._schedule_event(func, event, self)
+        if cog.qualified_name != self.qualified_name:
+            self.schedule_command_index_sync()
 
     @commands.Cog.listener()
     async def on_cog_remove(self, cog: commands.Cog):
         await self.unregister_cog(cog.qualified_name)
+        self.schedule_command_index_sync()
 
-    async def register_functions(self, cog_name: str, schemas: List[dict]) -> None:
+    async def register_functions(
+        self,
+        cog_name: str,
+        schemas: List[dict],
+        category: Optional[str] = None,
+        requires_user_approval: bool = False,
+    ) -> None:
         """Quick way to register multiple functions for a cog
 
         Args:
             cog_name (str): the name of the cog registering the functions
             schemas (List[dict]): List of dicts representing the json schemas of the functions
+            category (Optional[str]): Category applied to all registered functions unless they are registered individually
+            requires_user_approval (bool): Whether these functions require interactive approval before execution
         """
         for schema in schemas:
-            await self.register_function(cog_name, schema)
+            await self.register_function(
+                cog_name,
+                schema,
+                category=category,
+                requires_user_approval=requires_user_approval,
+            )
 
-    async def register_function(self, cog_name: str, schema: dict) -> bool:
+    async def register_context_variables(self, cog_name: str, variables: List[dict]) -> None:
+        """Quick way to register multiple context variables for a cog."""
+        for variable in variables:
+            await self.register_context_variable(
+                cog_name=cog_name,
+                variable_name=variable["name"],
+                description=variable["description"],
+                permission_level=variable.get("permission_level", "user"),
+                required_permissions=variable.get("required_permissions"),
+                fetch_method=variable.get("fetch_method"),
+                cache_safe=variable.get("cache_safe", True),
+            )
+
+    async def register_function(
+        self,
+        cog_name: str,
+        schema: dict,
+        permission_level: Literal["user", "mod", "admin", "owner"] = "user",
+        required_permissions: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        requires_user_approval: bool = False,
+    ) -> bool:
         """Allow 3rd party cogs to register their functions for the model to use
 
         Args:
             cog_name (str): the name of the cog registering the function
             schema (dict): JSON schema representation of the command (see https://json-schema.org/understanding-json-schema/)
+            permission_level (str): the permission level required to call the function (user, mod, admin, owner)
+            required_permissions (list[str]): Discord permission names required (e.g. ["manage_messages", "kick_members"])
+            category (Optional[str]): Category used to group related tools in commands and UI
+            requires_user_approval (bool): Whether the user must interactively approve the tool before execution
 
         Returns:
             bool: True if function was successfully registered
@@ -358,11 +968,98 @@ class Assistant(
             log.info(fail(f"Cog does not have a function called {function_name}"))
             return False
 
+        if required_permissions:
+            valid_flags = set(discord.Permissions.VALID_FLAGS)
+            invalid = [p for p in required_permissions if p not in valid_flags]
+            if invalid:
+                log.info(fail(f"Invalid permission names: {', '.join(invalid)}"))
+                return False
+
         if cog_name not in self.registry:
             self.registry[cog_name] = {}
 
-        log.info(f"The {cog_name} cog registered a function object: {function_name}")
-        self.registry[cog_name][function_name] = schema
+        normalized_category = normalize_tool_category(category)
+        log.info(f"The {cog_name} cog registered a function object: {function_name} [{normalized_category}]")
+        self.registry[cog_name][function_name] = {
+            "permission_level": permission_level,
+            "schema": schema,
+            "required_permissions": required_permissions or [],
+            "category": normalized_category,
+            "requires_user_approval": requires_user_approval,
+        }
+        return True
+
+    async def register_context_variable(
+        self,
+        cog_name: str,
+        variable_name: str,
+        description: str,
+        permission_level: Literal["user", "mod", "admin", "owner"] = "user",
+        required_permissions: Optional[List[str]] = None,
+        fetch_method: Optional[str] = None,
+        cache_safe: bool = True,
+    ) -> bool:
+        """Allow 3rd party cogs to register prompt context variables resolved at prompt-build time.
+
+        Args:
+            cache_safe (bool): If True (default), this variable is treated as dynamic /
+                per-request. Admins can opt to surface it in the floating
+                ``[Current Context]`` block via ``[p]floatingcontext``, which keeps the
+                cached prompt prefix stable. If False, the variable is treated as stable
+                (admins may still opt to additionally include it in the floating block).
+        """
+
+        def fail(reason: str):
+            return f"Context variable registry failed for {cog_name}: {reason}"
+
+        cog = self.bot.get_cog(cog_name)
+        if not cog:
+            log.info(fail("Cog is not loaded or does not exist"))
+            return False
+
+        variable_name = str(variable_name).strip()
+        if not variable_name:
+            log.info(fail("Empty variable name provided"))
+            return False
+        if clean_name(variable_name) != variable_name:
+            log.info(fail("Variable names must be alphanumeric and may include underscores or dashes only"))
+            return False
+
+        description = str(description).strip()
+        if not description:
+            log.info(fail("Context variables require a non-empty description"))
+            return False
+
+        fetch_method = str(fetch_method or variable_name).strip()
+        if not hasattr(cog, fetch_method):
+            log.info(fail(f"Cog does not have a fetch method called {fetch_method}"))
+            return False
+
+        for registered_cog_name, registered_variables in self.context_registry.items():
+            if registered_cog_name == cog_name:
+                continue
+            if variable_name in registered_variables:
+                log.info(fail(f"{registered_cog_name} already registered the context variable {variable_name}"))
+                return False
+
+        if required_permissions:
+            valid_flags = set(discord.Permissions.VALID_FLAGS)
+            invalid = [p for p in required_permissions if p not in valid_flags]
+            if invalid:
+                log.info(fail(f"Invalid permission names: {', '.join(invalid)}"))
+                return False
+
+        if cog_name not in self.context_registry:
+            self.context_registry[cog_name] = {}
+
+        self.context_registry[cog_name][variable_name] = {
+            "description": description,
+            "fetch_method": fetch_method,
+            "permission_level": permission_level,
+            "required_permissions": required_permissions or [],
+            "cache_safe": bool(cache_safe),
+        }
+        log.info(f"The {cog_name} cog registered a context variable: {variable_name} (cache_safe={cache_safe})")
         return True
 
     async def unregister_function(self, cog_name: str, function_name: str) -> None:
@@ -381,14 +1078,31 @@ class Assistant(
         del self.registry[cog_name][function_name]
         log.info(f"{cog_name} cog removed the function {function_name} from the registry")
 
+    async def unregister_context_variable(self, cog_name: str, variable_name: str) -> None:
+        """Remove a specific cog's context variable from the registry."""
+        if cog_name not in self.context_registry:
+            log.debug(f"{cog_name} not in context registry")
+            return
+        if variable_name not in self.context_registry[cog_name]:
+            log.debug(f"{variable_name} not in {cog_name}'s context registry")
+            return
+        del self.context_registry[cog_name][variable_name]
+        log.info(f"{cog_name} cog removed the context variable {variable_name} from the registry")
+
     async def unregister_cog(self, cog_name: str) -> None:
         """Remove a cog from the registry
 
         Args:
             cog_name (str): name of the cog
         """
-        if cog_name not in self.registry:
-            log.debug(f"{cog_name} not in registry")
-            return
-        del self.registry[cog_name]
-        log.info(f"{cog_name} cog removed from registry")
+        removed = False
+        if cog_name in self.registry:
+            del self.registry[cog_name]
+            removed = True
+        if cog_name in self.context_registry:
+            del self.context_registry[cog_name]
+            removed = True
+        if removed:
+            log.info(f"{cog_name} cog removed from assistant registries")
+        else:
+            log.debug(f"{cog_name} not in assistant registries")

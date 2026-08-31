@@ -2,20 +2,20 @@ msgid ""
 msgstr ""
 "Project-Id-Version: vrt-cogs\n"
 "POT-Creation-Date: 2026-05-06 22:10-0400\n"
-"PO-Revision-Date: 2026-05-07 02:48\n"
+"PO-Revision-Date: 2026-05-07 03:00\n"
 "Last-Translator: \n"
-"Language-Team: French\n"
+"Language-Team: Russian\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: redgettext 3.4.2\n"
-"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+"Plural-Forms: nplurals=4; plural=((n%10==1 && n%100!=11) ? 0 : ((n%10 >= 2 && n%10 <=4 && (n%100 < 12 || n%100 > 14)) ? 1 : ((n%10 == 0 || (n%10 >= 5 && n%10 <=9)) || (n%100 >= 11 && n%100 <= 14)) ? 2 : 3));\n"
 "X-Crowdin-Project: vrt-cogs\n"
 "X-Crowdin-Project-ID: 550681\n"
-"X-Crowdin-Language: fr\n"
+"X-Crowdin-Language: ru\n"
 "X-Crowdin-File: /[vertyco.vrt-cogs] main/assistant/common/locales/messages.pot\n"
 "X-Crowdin-File-ID: 55\n"
-"Language: fr_FR\n"
+"Language: ru_RU\n"
 
 #: assistant\common\api.py:110 assistant\common\api.py:111
 #: assistant\common\api.py:120 assistant\common\api.py:121
@@ -63,7 +63,7 @@ msgstr ""
 #: assistant\common\api.py:659
 #, docstring
 msgid "Get token list from text"
-msgstr "Obtenir une liste de jetons à partir d'un texte"
+msgstr ""
 
 #: assistant\common\api.py:691
 msgid "No model API key or endpoint override is configured!\n"
@@ -83,7 +83,7 @@ msgstr ""
 #: assistant\common\api.py:801
 #, docstring
 msgid "Get text from token list"
-msgstr "Obtenir le texte de la liste des jetons"
+msgstr ""
 
 #: assistant\common\api.py:828
 #, docstring
@@ -113,15 +113,15 @@ msgstr ""
 #: assistant\common\api.py:1098
 #, docstring
 msgid "Pagify a long string by tokens rather than characters"
-msgstr "Paginatez une longue chaîne de caractères par jetons plutôt que par caractères"
+msgstr ""
 
 #: assistant\common\api.py:1169
 msgid "Custom Functions"
-msgstr "Fonctions personnalisées"
+msgstr ""
 
 #: assistant\common\api.py:1179
 msgid "Internal Function"
-msgstr "Fonction interne"
+msgstr ""
 
 #: assistant\common\api.py:1180
 msgid "This is a built-in function managed by the Assistant cog"
@@ -129,11 +129,11 @@ msgstr ""
 
 #: assistant\common\api.py:1185
 msgid "3rd Party"
-msgstr "troisième partie"
+msgstr ""
 
 #: assistant\common\api.py:1186
 msgid "This function is managed by the `{}` cog"
-msgstr "Cette fonction est gérée par le `{}` cog"
+msgstr ""
 
 #: assistant\common\api.py:1189
 msgid "Category"
@@ -157,11 +157,11 @@ msgstr ""
 
 #: assistant\common\api.py:1198
 msgid "This function consumes `{}` input tokens each call\n"
-msgstr "Cette fonction consomme des jetons d'entrée `{}` à chaque appel.\n"
+msgstr ""
 
 #: assistant\common\api.py:1213
 msgid "Hidden..."
-msgstr "Caché..."
+msgstr ""
 
 #: assistant\common\api.py:1217
 msgid "\n"
@@ -174,19 +174,19 @@ msgstr ""
 
 #: assistant\common\api.py:1219
 msgid "Schema"
-msgstr "Schéma"
+msgstr ""
 
 #: assistant\common\api.py:1220
 msgid "Code"
-msgstr "Code"
+msgstr ""
 
 #: assistant\common\api.py:1222 assistant\common\api.py:1253
 msgid "Page {}/{}"
-msgstr "Page {}/{}"
+msgstr ""
 
 #: assistant\common\api.py:1229
 msgid "No custom code has been added yet!"
-msgstr "Aucun code personnalisé n'a encore été ajouté !"
+msgstr ""
 
 #: assistant\common\api.py:1241
 msgid "No embeddings have been created yet!"
@@ -194,11 +194,11 @@ msgstr ""
 
 #: assistant\common\api.py:1252
 msgid "Embeddings"
-msgstr "Emboîtements"
+msgstr ""
 
 #: assistant\common\api.py:1293
 msgid "No embeddings have been added!"
-msgstr "Aucun encastrement n'a été ajouté !"
+msgstr ""
 
 #: assistant\common\chat.py:138
 #, docstring
@@ -280,7 +280,7 @@ msgstr ""
 
 #: assistant\common\chat.py:560
 msgid "No message history!"
-msgstr "Pas d'historique des messages !"
+msgstr ""
 
 #: assistant\common\chat.py:582 assistant\common\chat.py:585
 #: assistant\common\chat.py:587
@@ -293,11 +293,11 @@ msgstr ""
 
 #: assistant\common\chat.py:593
 msgid "Invalid API key, please set a new valid key!"
-msgstr "Clé API invalide, veuillez définir une nouvelle clé valide !"
+msgstr ""
 
 #: assistant\common\chat.py:595
 msgid "Uh oh, looks like my API key is invalid!"
-msgstr "On dirait que ma clé API n'est pas valide !"
+msgstr ""
 
 #: assistant\common\chat.py:597
 msgid "Rate limit error: {}"
@@ -309,7 +309,7 @@ msgstr ""
 
 #: assistant\common\chat.py:605
 msgid "Uh oh, something went wrong! Bot owner can use `{}` to view the error."
-msgstr "Uh oh, quelque chose s'est mal passé ! Le propriétaire du bot peut utiliser `{}` pour voir l'erreur."
+msgstr ""
 
 #: assistant\common\chat.py:608
 msgid "API Status: {}"
@@ -317,12 +317,12 @@ msgstr ""
 
 #: assistant\common\chat.py:643
 msgid "No results found"
-msgstr "Aucun résultat trouvé"
+msgstr ""
 
 #: assistant\common\chat.py:685
 #, docstring
 msgid "Call the API asynchronously"
-msgstr "Appeler l'API de manière asynchrone"
+msgstr ""
 
 #: assistant\common\chat.py:803
 msgid "None"
@@ -347,7 +347,7 @@ msgstr ""
 
 #: assistant\common\chat.py:1235
 msgid "Response failed due to invalid regex, check logs for more info."
-msgstr "Traduisez le texte suivant en français."
+msgstr ""
 
 #: assistant\common\chat.py:1278
 #, docstring
@@ -373,7 +373,7 @@ msgstr ""
 #: assistant\common\chat.py:1386
 #, docstring
 msgid "Instead of format(**params) possibly giving a KeyError if prompt has code in it"
-msgstr "Au lieu de format(**params) qui peut donner une KeyError si l'invite contient du code"
+msgstr ""
 
 #: assistant\common\utils.py:28 assistant\common\utils.py:82
 msgid "Playing"
@@ -463,31 +463,31 @@ msgstr ""
 #: assistant\common\utils.py:201
 #, docstring
 msgid "Get all attachments from context"
-msgstr "Obtenir toutes les pièces jointes du contexte"
+msgstr ""
 
 #: assistant\common\utils.py:222
 msgid "Canceled"
-msgstr "Annulé"
+msgstr ""
 
 #: assistant\common\utils.py:235
 msgid "You have been blacklisted from using this command!"
-msgstr "Vous avez été mis sur liste noire pour l'utilisation de cette commande !"
+msgstr ""
 
 #: assistant\common\utils.py:239
 msgid "You have a blacklisted role and cannot use this command!"
-msgstr "Vous avez un rôle sur liste noire et ne pouvez pas utiliser cette commande !"
+msgstr ""
 
 #: assistant\common\utils.py:243
 msgid "You cannot use that command in this channel!"
-msgstr "Vous ne pouvez pas utiliser cette commande dans ce canal !"
+msgstr ""
 
 #: assistant\common\utils.py:247
 msgid "You cannot use that command in any channels under this category"
-msgstr "Vous ne pouvez pas utiliser cette commande dans les canaux de cette catégorie"
+msgstr ""
 
 #: assistant\common\utils.py:282 assistant\common\utils.py:283
 msgid "[Code Removed]"
-msgstr "[Code supprimé]"
+msgstr ""
 
 #: assistant\common\utils.py:409
 #, docstring

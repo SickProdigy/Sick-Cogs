@@ -1,22 +1,36 @@
-import asyncio
 import json
 import logging
 import traceback
-from io import StringIO
+import typing as t
+from base64 import b64decode
+from contextlib import suppress
+from datetime import datetime, timedelta
+from io import BytesIO, StringIO
 
 import discord
-from redbot.core import commands
+import httpx
+import openai
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
+from redbot.core import app_commands, commands
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import (
     box,
     escape,
     humanize_list,
+    humanize_number,
+    humanize_timedelta,
     pagify,
     text_to_file,
 )
 
 from ..abc import MixinMeta
-from ..common.constants import READ_EXTENSIONS
+from ..common.calls import get_custom_endpoint_image_error, request_image_raw
+from ..common.constants import (
+    COMPACTION_KEEP_RECENT,
+    LOADING,
+    READ_EXTENSIONS,
+    TLDR_PROMPT,
+)
 from ..common.models import Conversation
 from ..common.utils import can_use, get_attachments
 
@@ -35,8 +49,10 @@ class Base(MixinMeta):
 # How to Use
 
 ### Commands
-`[p]convostats` - view your conversation message count/token usage for that convo.
+`[p]convostats` - message/token usage + a context-window map for that convo (`full` or `[p]convocontext` for the detailed breakdown).
+`[p]convocompact` - intelligently summarize older messages to free up context space.
 `[p]clearconvo` - reset your conversation for the current channel/thread/forum.
+`[p]unchat` - cancel the active assistant response for the current channel/thread/forum.
 `[p]showconvo` - get a json dump of your current conversation (this is mostly for debugging)
 `[p]chat` or `[p]ask` - command prefix for chatting with the bot outside of the live chat, or just @ it.
 
@@ -71,6 +87,77 @@ If a file has no extension it will still try to read it only if it can be decode
         embed = discord.Embed(description=txt.strip(), color=ctx.me.color)
         await ctx.send(embed=embed)
 
+    @app_commands.command(name="draw", description=_("Generate an image with AI"))
+    @app_commands.describe(prompt=_("What would you like to draw?"))
+    @app_commands.describe(size=_("The size of the image to generate"))
+    @app_commands.describe(quality=_("The quality of the image to generate"))
+    @app_commands.describe(style=_("The style of the image to generate"))
+    @app_commands.describe(model=_("The model to use for image generation"))
+    @commands.guild_only()
+    async def draw(
+        self,
+        interaction: discord.Interaction,
+        prompt: str,
+        size: t.Literal["1024x1024", "1792x1024", "1024x1792", "1024x1536", "1536x1024"] = "1024x1024",
+        quality: t.Literal["low", "medium", "high", "standard", "hd"] = "medium",
+        style: t.Literal["natural", "vivid"] = "vivid",
+        model: t.Literal["dall-e-3", "gpt-image-1.5"] = "dall-e-3",
+    ):
+        conf = self.db.get_conf(interaction.guild)
+        has_endpoint = bool(conf.endpoint_override or self.db.endpoint_override)
+        if not conf.api_key and not has_endpoint:
+            return await interaction.response.send_message(_("The API key is not set up!"), ephemeral=True)
+        if not conf.image_command:
+            return await interaction.response.send_message(_("Image generation is disabled!"), ephemeral=True)
+
+        # Model-specific parameter validation
+        if model == "gpt-image-1.5" and quality in ["standard", "hd"]:
+            quality = "medium"  # Default for gpt-image-1.5 if dall-e-3 quality is provided
+        if model == "dall-e-3" and quality in ["low", "medium", "high"]:
+            quality = "standard"  # Default for dall-e-3 if gpt-image-1.5 quality is provided
+
+        color = await self.bot.get_embed_color(interaction.channel)
+        embed = discord.Embed(description=_("Generating image..."), color=color)
+        embed.set_thumbnail(url=LOADING)
+        await interaction.response.send_message(embed=embed)
+
+        desc = _("-# Size: {}\n-# Quality: {}\n-# Model: {}").format(size, quality, model)
+        if model == "dall-e-3":
+            desc += _("\n-# Style: {}").format(style)
+
+        base_url = conf.endpoint_override or self.db.endpoint_override
+        try:
+            image = await request_image_raw(
+                prompt,
+                self.get_api_key(conf),
+                size,
+                quality,
+                style,
+                model,
+                base_url=base_url,
+            )
+        except (openai.NotFoundError, openai.BadRequestError):
+            if has_endpoint:
+                embed = discord.Embed(description=get_custom_endpoint_image_error(), color=color)
+                return await interaction.edit_original_response(embed=embed)
+            raise
+
+        image_bytes = b64decode(image.b64_json)
+        file = discord.File(BytesIO(image_bytes), filename="image.png")
+        embed = discord.Embed(description=desc, color=color)
+        embed.set_image(url="attachment://image.png")
+
+        if hasattr(image, "revised_prompt") and image.revised_prompt:
+            chunks = [p for p in pagify(image.revised_prompt, page_length=1000)]
+            for idx, chunk in enumerate(chunks):
+                embed.add_field(
+                    name=_("Revised Prompt") if idx == 0 else _("Continued"),
+                    value=chunk,
+                    inline=False,
+                )
+
+        await interaction.edit_original_response(embed=embed, attachments=[file])
+
     @commands.command(
         name="chat",
         aliases=[
@@ -86,7 +173,6 @@ If a file has no extension it will still try to read it only if it can be decode
         ],
     )
     @commands.guild_only()
-    @commands.cooldown(1, 6, commands.BucketType.user)
     async def ask_question(self, ctx: commands.Context, *, question: str):
         """
         Chat with [botname]!
@@ -109,81 +195,263 @@ If a file has no extension it will still try to read it only if it can be decode
             return
         if not await can_use(ctx.message, conf.blacklist):
             return
-        async with ctx.typing():
-            await self.handle_message(ctx.message, question, conf)
+        queued = await self.enqueue_message_request(
+            {
+                "message": ctx.message,
+                "question": question,
+                "conf": conf,
+            }
+        )
+        if not queued:
+            await ctx.send(
+                _("There are too many pending messages for this conversation. Please wait for the current reply.")
+            )
 
-    @commands.command(name="convostats")
+    @staticmethod
+    def render_context_bar(segments: t.List[tuple], max_tokens: int, cells: int = 20) -> str:
+        """Render a colored-square bar of the context window (like a /context map).
+
+        ``segments`` is an ordered list of (tokens, emoji) for the used
+        categories; the remainder fills with the free square. Any nonzero
+        category gets at least one cell so it stays visible.
+        """
+        if max_tokens <= 0:
+            return "\N{BLACK LARGE SQUARE}" * cells
+        bar = ""
+        allocated = 0
+        for tok, emoji in segments:
+            if allocated >= cells:
+                break
+            n = round(tok / max_tokens * cells)
+            if tok > 0 and n == 0:
+                n = 1
+            n = min(n, cells - allocated)
+            bar += emoji * n
+            allocated += n
+        bar += "\N{BLACK LARGE SQUARE}" * max(cells - allocated, 0)
+        return bar
+
+    @commands.command(name="convostats", aliases=["convocontext", "contextinfo"])
     @commands.guild_only()
-    async def show_convo_stats(self, ctx: commands.Context, *, user: discord.Member = None):
+    @commands.bot_has_permissions(embed_links=True)
+    async def show_convo_stats(self, ctx: commands.Context, *, args: str = ""):
         """
-        Check the token and message count of yourself or another user's conversation for this channel
+        Token + message stats for your (or another user's) conversation in this channel, with a context-window map.
 
-        Conversations are *Per* user *Per* channel, meaning a conversation you have in one channel will be kept in memory separately from another conversation in a separate channel
+        Conversations are *Per* user *Per* channel and only kept in memory until the bot restarts or the cog reloads.
 
-        Conversations are only stored in memory until the bot restarts or the cog reloads
+        - `[p]convostats` - compact stats + context bar
+        - `[p]convostats full` - also show the detailed token/message breakdown
+        - `[p]convocontext` - alias that opens the detailed view
+        - append a member to view theirs, e.g. `[p]convostats full @user`
         """
+        detailed = ctx.invoked_with in ("convocontext", "contextinfo")
+        parts = args.split()
+        if parts and parts[0].lower() in ("full", "detailed", "-d"):
+            detailed = True
+            parts = parts[1:]
+        user = None
+        if parts:
+            try:
+                user = await commands.MemberConverter().convert(ctx, " ".join(parts))
+            except commands.BadArgument:
+                return await ctx.send(_("Could not find a member matching `{}`.").format(" ".join(parts)))
         if not user:
             user = ctx.author
+
         conf = self.db.get_conf(ctx.guild)
         mem_id = ctx.channel.id if conf.collab_convos else user.id
         conversation = self.db.get_conversation(mem_id, ctx.channel.id, ctx.guild.id)
         messages = len(conversation.messages)
-
         max_tokens = self.get_max_tokens(conf, ctx.author)
+        model = conf.get_user_model(user)
 
-        def generate_color(index: int, limit: int):
-            if not limit:
-                return (0, 0)
-            if index > limit:
-                return (0, 0)
+        convo_tokens = await self.count_payload_tokens(conversation.messages)
+        effective_system_prompt = self.db.get_effective_system_prompt(conf)
+        system_tokens = await self.count_tokens(effective_system_prompt) if effective_system_prompt else 0
+        prompt_tokens = await self.count_tokens(conf.prompt) if conf.prompt else 0
+        channel_prompt = conf.channel_prompts.get(ctx.channel.id, "")
+        channel_tokens = await self.count_tokens(channel_prompt) if channel_prompt else 0
+        func_list, function_map = await self.db.prep_functions(self.bot, conf, self.registry, showall=True)
+        func_tokens = await self.count_function_tokens(func_list)
+        skill_index = await self.build_skill_index_for_member(conf, user)
+        skill_tokens = await self.count_tokens(skill_index) if skill_index else 0
+        skill_count = sum(1 for line in skill_index.splitlines() if line.startswith("- ")) if skill_index else 0
 
-            # RGB for white is (255, 255, 255) and for red is (255, 0, 0)
-            # As we progress from white to red, we need to decrease the values of green and blue from 255 to 0
+        prompt_overhead = system_tokens + prompt_tokens + channel_tokens
+        overhead = prompt_overhead + func_tokens + skill_tokens
+        total_tokens = overhead + convo_tokens
+        fill_pct = (total_tokens / max_tokens * 100) if max_tokens else 0
+        free_tokens = max(max_tokens - total_tokens, 0)
 
-            # Calculate the decrement in green and blue values
-            decrement = int((255 / limit) * index)
+        # Context-window map: 🟩 prompts, 🟦 functions, 🟨 skills, 🟥 conversation, ⬛ free
+        segments = [
+            (prompt_overhead, "\N{LARGE GREEN SQUARE}"),
+            (func_tokens, "\N{LARGE BLUE SQUARE}"),
+            (skill_tokens, "\N{LARGE YELLOW SQUARE}"),
+            (convo_tokens, "\N{LARGE RED SQUARE}"),
+        ]
+        bar = self.render_context_bar(segments, max_tokens)
+        legend = _(
+            "\N{LARGE GREEN SQUARE} prompt {}  \N{LARGE BLUE SQUARE} func {}  \N{LARGE YELLOW SQUARE} skills {}\n"
+            "\N{LARGE RED SQUARE} convo {}  \N{BLACK LARGE SQUARE} free {}"
+        ).format(
+            humanize_number(prompt_overhead),
+            humanize_number(func_tokens),
+            humanize_number(skill_tokens),
+            humanize_number(convo_tokens),
+            humanize_number(free_tokens),
+        )
 
-            # Calculate the new green and blue values
-            green = blue = 255 - decrement
-
-            # Return the new RGB color
-            return (green, blue)
-
-        convo_tokens = await self.count_payload_tokens(conversation.messages, conf.get_user_model(user))
-        g, b = generate_color(messages, conf.get_user_max_retention(ctx.author))
-        gg, bb = generate_color(convo_tokens, max_tokens)
-        # Whatever limit is more severe get that color
-        color = discord.Color.from_rgb(255, min(g, gg), min(b, bb))
-        model = conf.get_user_model(ctx.author)
-
+        max_retention = conf.get_user_max_retention(ctx.author)
+        retention_display = "\N{INFINITY}" if max_retention == 0 else max_retention
         desc = (
             ctx.channel.mention
             + "\n"
-            + _("`Messages:   `{}/{}\n" "`Tokens:     `{}/{}\n" "`Expired:    `{}\n" "`Model:      `{}").format(
+            + _(
+                "`Messages:    `{}/{}\n"
+                "`Expired:     `{}\n"
+                "`Model:       `{}\n"
+                "`Context:     `{}/{} ({:.1f}%)\n"
+                "`Conversation:`{}\n"
+                "`Overhead:    `{}\n"
+            ).format(
                 messages,
-                conf.get_user_max_retention(ctx.author),
-                convo_tokens,
-                max_tokens,
+                retention_display,
                 conversation.is_expired(conf, ctx.author),
                 model,
+                humanize_number(total_tokens),
+                humanize_number(max_tokens),
+                fill_pct,
+                humanize_number(convo_tokens),
+                humanize_number(overhead),
             )
         )
-        desc += _("\n`Tool Calls: `{}").format(conversation.function_count())
+        if skill_count:
+            desc += _("\n`Skills:      `{} ({})").format(humanize_number(skill_tokens), skill_count)
+        desc += _("\n`Tool Calls:  `{}").format(conversation.function_count())
+        if conversation.compaction_count:
+            desc += _("\n`Compacted:   `{} time(s)").format(conversation.compaction_count)
         if conf.collab_convos:
-            desc += "\n" + _("*Collabroative conversations are enabled*")
-        embed = discord.Embed(
-            description=desc,
-            color=color,
-        )
+            desc += "\n" + _("*Collaborative conversations are enabled*")
+        desc += f"\n\n{bar}\n{legend}"
+
+        if detailed:
+            system_msgs = sum(1 for m in conversation.messages if m.get("role") in ("system", "developer"))
+            user_msgs = sum(1 for m in conversation.messages if m.get("role") == "user")
+            assistant_msgs = sum(1 for m in conversation.messages if m.get("role") == "assistant")
+            tool_msgs = sum(1 for m in conversation.messages if m.get("role") in ("tool", "function"))
+            image_count = len(conversation.get_images())
+            summary_msgs = sum(
+                1
+                for m in conversation.messages
+                if m.get("content") and isinstance(m.get("content"), str) and "[Conversation Summary" in m["content"]
+            )
+            desc += (
+                "\n\n"
+                + _("**Token Breakdown**\n")
+                + _("`System Prompt:      `{}\n").format(humanize_number(system_tokens))
+                + _("`Initial Prompt:     `{}\n").format(humanize_number(prompt_tokens))
+                + _("`Channel Prompt:     `{}\n").format(humanize_number(channel_tokens))
+                + _("`Function Schemas:   `{} ({} functions)\n").format(
+                    humanize_number(func_tokens), humanize_number(len(func_list))
+                )
+                + _("`Skills Index:       `{} ({} skills)\n").format(humanize_number(skill_tokens), skill_count)
+                + _("`Conversation:       `{}\n").format(humanize_number(convo_tokens))
+                + "\n"
+                + _("**Message Breakdown**\n")
+                + _("`User Messages:      `{}\n").format(user_msgs)
+                + _("`Assistant Messages: `{}\n").format(assistant_msgs)
+                + _("`Tool Results:       `{}\n").format(tool_msgs)
+                + _("`System/Developer:   `{}\n").format(system_msgs)
+                + _("`Images:             `{}\n").format(image_count)
+                + _("`Compaction Summaries:`{}").format(summary_msgs)
+            )
+
+        if fill_pct < 70:
+            color = discord.Color.green()
+        elif fill_pct < 90:
+            color = discord.Color.orange()
+        else:
+            color = discord.Color.red()
+        embed = discord.Embed(description=desc, color=color)
         embed.set_author(
             name=_("Conversation stats for {}").format(ctx.channel.name if conf.collab_convos else user.display_name),
             icon_url=ctx.guild.icon if conf.collab_convos else user.display_avatar,
         )
-        embed.set_footer(text=_("Token limit is a soft cap and excess is trimmed before sending to the api"))
+        embed.set_footer(text=_("Context = conversation + overhead (prompt + functions + skills)"))
         await ctx.send(embed=embed)
-        if conversation.system_prompt_override:
-            file = text_to_file(conversation.system_prompt_override)
-            await ctx.send(_("System prompt override for this conversation"), file=file)
+        if await self.bot.is_mod(ctx.author) or ctx.author.id in self.bot.owner_ids or not conf.collab_convos:
+            if conversation.system_prompt_override:
+                file = text_to_file(conversation.system_prompt_override)
+                await ctx.send(_("System prompt override for this conversation"), file=file)
+            elif ctx.channel.id in conf.channel_prompts:
+                file = text_to_file(conf.channel_prompts[ctx.channel.id])
+                await ctx.send(_("System prompt override for this channel"), file=file)
+
+    @commands.command(name="convocompact", aliases=["compact"])
+    @commands.guild_only()
+    async def compact_convo(self, ctx: commands.Context, *, focus: str = ""):
+        """Compact your conversation using LLM summarization
+
+        This summarizes older messages instead of deleting them, preserving
+        context while freeing up token space. Optionally provide a focus phrase.
+
+        **Examples**
+        - `[p]compact` - compact with default summarization
+        - `[p]compact coding decisions` - focus on coding decisions
+        """
+        conf = self.db.get_conf(ctx.guild)
+        has_endpoint = bool(conf.endpoint_override or self.db.endpoint_override)
+        if not conf.api_key and not has_endpoint:
+            return await ctx.send(_("No API key has been set!"))
+        if not conf.compaction_enabled:
+            return await ctx.send(_("Conversation compaction is disabled in this server."))
+
+        mem_id = ctx.channel.id if conf.collab_convos else ctx.author.id
+        if conf.collab_convos:
+            perms = [
+                await self.bot.is_mod(ctx.author),
+                ctx.channel.permissions_for(ctx.author).manage_messages,
+                ctx.author.id in self.bot.owner_ids,
+            ]
+            if not any(perms):
+                return await ctx.send(
+                    _("Only moderators can compact channel conversations when collaborative conversations are enabled!")
+                )
+
+        conversation = self.db.get_conversation(mem_id, ctx.channel.id, ctx.guild.id)
+        if not conversation.messages:
+            return await ctx.send(_("You have no conversation history in this channel."))
+
+        convo_msgs = [m for m in conversation.messages if m.get("role") not in ("system", "developer")]
+        if len(convo_msgs) <= COMPACTION_KEEP_RECENT:
+            return await ctx.send(
+                _("Not enough messages to compact (need more than {}).").format(COMPACTION_KEEP_RECENT)
+            )
+
+        async with ctx.typing():
+            function_calls, function_map = await self.db.prep_functions(self.bot, conf, self.registry)
+
+            compacted = await self.compact_conversation(
+                conversation.messages,
+                function_calls,
+                conf,
+                ctx.author,
+                conversation=conversation,
+                focus=focus,
+                force=True,
+            )
+
+        if compacted:
+            await self.save_conversation(f"{mem_id}-{ctx.channel.id}-{ctx.guild.id}")
+            await ctx.send(
+                _("Conversation compacted! ({} compactions total for this conversation)").format(
+                    conversation.compaction_count
+                )
+            )
+        else:
+            await ctx.send(_("Compaction was not needed or failed."))
 
     @commands.command(name="convoclear", aliases=["clearconvo"])
     @commands.guild_only()
@@ -204,8 +472,29 @@ If a file has no extension it will still try to read it only if it can be decode
             txt = _("Only moderators can clear channel conversations when collaborative conversations are enabled!")
             return await ctx.send(txt)
         conversation = self.db.get_conversation(mem_id, ctx.channel.id, ctx.guild.id)
+        self.clear_message_queue(ctx.author.id, ctx.channel.id, ctx.guild.id, conf.collab_convos)
         conversation.reset()
+        await self.save_conversation(f"{mem_id}-{ctx.channel.id}-{ctx.guild.id}")
         await ctx.send(_("Your conversation in this channel has been reset!"))
+
+    @commands.command(name="unchat")
+    @commands.guild_only()
+    async def cancel_active_chat(self, ctx: commands.Context):
+        """Cancel the active assistant response for this channel"""
+        conf = self.db.get_conf(ctx.guild)
+        perms = [
+            await self.bot.is_mod(ctx.author),
+            ctx.channel.permissions_for(ctx.author).manage_messages,
+            ctx.author.id in self.bot.owner_ids,
+        ]
+        if conf.collab_convos and not any(perms):
+            txt = _("Only moderators can cancel channel conversations when collaborative conversations are enabled!")
+            return await ctx.send(txt)
+
+        cancelled = self.cancel_message_queue(ctx.author.id, ctx.channel.id, ctx.guild.id, conf.collab_convos)
+        if not cancelled:
+            return await ctx.send(_("There is no active assistant response to cancel in this channel."))
+        await ctx.send(_("The active assistant response for this channel has been cancelled."))
 
     @commands.command(name="convopop")
     @commands.guild_only()
@@ -229,15 +518,251 @@ If a file has no extension it will still try to read it only if it can be decode
             txt = _("There are no messages in this conversation yet!")
             return await ctx.send(txt)
         last = conversation.messages.pop()
+        await self.save_conversation(f"{mem_id}-{ctx.channel.id}-{ctx.guild.id}")
         dump = json.dumps(last, indent=2)
         file = text_to_file(dump, "popped.json")
         await ctx.send(_("Removed the last message from this conversation"), file=file)
+
+    @app_commands.command(name="tldr", description=_("Summarize whats been happening in a channel"))
+    @app_commands.guild_only()
+    @app_commands.describe(
+        timeframe=_("The number of messages to scan"),
+        question=_("Ask for specific info about the conversation"),
+        channel=_("The channel to summarize messages from"),
+        member=_("Target a specific member"),
+        private=_("Only you can see the response"),
+    )
+    async def summarize_convo(
+        self,
+        interaction: discord.Interaction,
+        timeframe: t.Optional[str] = "1h",
+        question: t.Optional[str] = None,
+        channel: t.Optional[discord.TextChannel] = None,
+        member: t.Optional[discord.Member] = None,
+        private: t.Optional[bool] = True,
+    ):
+        """
+        Get a summary of whats going on in a channel
+        """
+        delta = commands.parse_timedelta(timeframe)
+        channel = channel or interaction.channel
+        if not delta:
+            txt = _("Invalid timeframe! Please use a valid time format like `1h` for an hour")
+            return await interaction.response.send_message(txt, ephemeral=True)
+        if delta > timedelta(hours=48):
+            txt = _("The maximum timeframe is 48 hours!")
+            return await interaction.response.send_message(txt, ephemeral=True)
+        perms = [
+            await self.bot.is_mod(interaction.user),
+            interaction.channel.permissions_for(interaction.user).manage_messages,
+            interaction.user.id in self.bot.owner_ids,
+        ]
+        if not any(perms):
+            txt = _("Only moderators can summarize conversations!")
+            return await interaction.response.send_message(txt, ephemeral=True)
+        user_allowed = [
+            channel.permissions_for(interaction.user).view_channel,
+            channel.permissions_for(interaction.user).read_message_history,
+        ]
+        if not all(user_allowed):
+            txt = _("You don't have permission to view the channel!")
+            return await interaction.response.send_message(txt, ephemeral=True)
+        bot_allowed = [
+            channel.permissions_for(interaction.guild.me).view_channel,
+            channel.permissions_for(interaction.guild.me).read_message_history,
+        ]
+        if not all(bot_allowed):
+            txt = _("I don't have permission to view the channel!")
+            return await interaction.response.send_message(txt, ephemeral=True)
+
+        with suppress(discord.NotFound):
+            if private:
+                await interaction.response.defer(ephemeral=True, thinking=True)
+            else:
+                await interaction.response.defer(ephemeral=False, thinking=True)
+
+        messages: t.List[discord.Message] = []
+        async for message in channel.history(oldest_first=False):
+            if member and message.author.id != member.id:
+                continue
+            if not message.content and not message.attachments:
+                continue
+            if not message.content and not any(a.content_type.startswith("image") for a in message.attachments):
+                continue
+            messages.append(message)
+            now = datetime.now().astimezone()
+            if now - message.created_at > delta:
+                break
+
+        if not messages:
+            return await interaction.followup.send(_("No messages found to summarize within that timeframe!"))
+        if len(messages) < 5:
+            return await interaction.followup.send(_("Not enough messages found to summarize within that timeframe!"))
+
+        conf = self.db.get_conf(interaction.guild)
+
+        humanized_delta = humanize_timedelta(timedelta=delta)
+
+        primer = (
+            f"Your name is '{self.bot.user.name}' and you are a discord bot. Refer to yourself as 'I' or 'me' in your responses.\n"
+            f"{TLDR_PROMPT}"
+            f"Dont include the following info in the summary:\n"
+            f"- guild_id: {interaction.guild.id}\n"
+            f"- channel_id: {channel.id}\n"
+            f"- Channel Name: {channel.name}\n"
+            f"- Timeframe: {humanized_delta}\n"
+        )
+        if question:
+            primer += f"- User prompt: {question}\n"
+
+        payload = [{"role": "developer", "content": primer}]
+
+        for message in reversed(messages):
+            # Cleanup the message content
+            if message.content:
+                for mention in message.mentions:
+                    message.content = message.content.replace(f"<@{mention.id}>", f"{mention.name} (<@{mention.id}>)")
+                for mention in message.channel_mentions:
+                    message.content = message.content.replace(f"<#{mention.id}>", f"{mention.name} (<@{mention.id}>)")
+                for mention in message.role_mentions:
+                    message.content = message.content.replace(f"<@&{mention.id}>", f"{mention.name} (<@{mention.id}>)")
+
+            # created = message.created_at.strftime("%m-%d-%Y %I:%M %p")
+            created_ts = f"<t:{int(message.created_at.timestamp())}:t>"
+
+            detail = f"[{created_ts}]({message.id}) {message.author.name}"
+
+            ref: t.Optional[discord.Message] = None
+            if hasattr(message, "reference") and message.reference:
+                ref = message.reference.resolved
+
+            if ref:
+                detail += f" (replying to {ref.author.name} at {ref.id})"
+
+            if message.content:
+                detail += f": {message.content}"
+            elif message.embeds:
+                detail += "\n# EMBED\n"
+                embed = message.embeds[0]
+                if embed.title:
+                    detail += f"Title: {embed.title}\n"
+                if embed.description:
+                    detail += f"Description: {embed.description}\n"
+                for field in embed.fields:
+                    detail += f"{field.name}: {field.value}\n"
+                if embed.footer:
+                    detail += f"Footer: {embed.footer.text}\n"
+
+            if not message.attachments:
+                payload.append({"role": "user", "content": detail, "name": str(message.author.id)})
+            else:
+                message_obj = {
+                    "role": "user",
+                    "name": str(message.author.id),
+                    "content": [{"type": "text", "text": detail}],
+                }
+                for attachment in message.attachments:
+                    # Make sure the attachment is an image
+                    if attachment.content_type.startswith("image"):
+                        message_obj["content"].append(
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": attachment.url,
+                                    "detail": conf.vision_detail,
+                                },
+                            }
+                        )
+                    elif attachment.content_type.startswith("text") and attachment.filename.endswith(
+                        tuple(READ_EXTENSIONS)
+                    ):
+                        try:
+                            content = await attachment.read()
+                            content = content.decode()
+                            message_obj["content"].append(
+                                {
+                                    "type": "text",
+                                    "text": f"```{attachment.filename.split('.')[-1]}\n{content}```",
+                                }
+                            )
+                        except UnicodeDecodeError:
+                            pass
+                        except Exception as e:
+                            log.error("Failed to read attachment for TLDR", exc_info=e)
+
+                if message_obj["content"]:
+                    payload.append(message_obj)
+
+        try:
+            response: ChatCompletionMessage = await self.request_response(
+                messages=payload,
+                conf=conf,
+                model_override="gpt-5.1",
+                temperature_override=0.0,
+            )
+        except httpx.ReadTimeout:
+            return await interaction.followup.send(_("The request timed out!"))
+        except openai.BadRequestError as e:
+            error = e.body.get("message", "Unknown Error")
+            kwargs = {}
+            if interaction.user.id in self.bot.owner_ids:
+                dump = json.dumps(payload, indent=2)
+                file = text_to_file(dump, "payload.json")
+                kwargs["file"] = file
+            return await interaction.followup.send(f"BadRequest({e.status_code}): {error}", **kwargs)
+        except Exception as e:
+            log.error("Failed to get TLDR response", exc_info=e)
+            return await interaction.followup.send(_("Failed to get response"))
+
+        if not response.content:
+            return await interaction.followup.send(_("No response was generated!"))
+
+        split = [i.strip() for i in response.content.split("\n") if i.strip()]
+        # We want to compress the spaced out bullet points while keeping the tldr header with two new lines
+        description = split[0] + "\n\n" + "\n".join(split[1:])
+
+        color = await self.bot.get_embed_color(interaction.channel)
+        footer_text = _("Timeframe: {}").format(humanized_delta)
+
+        # Split into multiple embeds if description exceeds Discord's 4096 char limit
+        if len(description) <= 4096:
+            embed = discord.Embed(color=color, description=description)
+            embed.set_footer(text=footer_text)
+            if channel.id != interaction.channel.id:
+                embed.add_field(name=_("Channel"), value=channel.mention)
+            await interaction.followup.send(embed=embed)
+        else:
+            embeds = []
+            chunks = [description[i : i + 4096] for i in range(0, len(description), 4096)]
+            for i, chunk in enumerate(chunks):
+                embed = discord.Embed(color=color, description=chunk)
+                if i == len(chunks) - 1:
+                    embed.set_footer(text=footer_text)
+                    if channel.id != interaction.channel.id:
+                        embed.add_field(name=_("Channel"), value=channel.mention)
+                embeds.append(embed)
+            await interaction.followup.send(embeds=embeds[:10])
+
+        # if private:
+        #     try:
+        #         channel = await modlog.get_modlog_channel(interaction.guild)
+        #         embed.title = _("TLDR Summary")
+        #         embed.add_field(name=_("Channel"), value=interaction.channel.mention)
+        #         embed.add_field(name=_("Messages"), value=len(messages))
+        #         embed.add_field(name=_("Timeframe"), value=humanized_delta)
+        #         embed.add_field(name=_("Moderator"), value=interaction.user.mention)
+        #         await channel.send(embed=embed)
+        #     except RuntimeError:
+        #         pass
 
     @commands.command(name="convocopy")
     @commands.guild_only()
     @commands.bot_has_guild_permissions(attach_files=True)
     async def copy_conversation(
-        self, ctx: commands.Context, *, channel: discord.TextChannel | discord.Thread | discord.ForumChannel
+        self,
+        ctx: commands.Context,
+        *,
+        channel: discord.TextChannel | discord.Thread | discord.ForumChannel,
     ):
         """
         Copy the conversation to another channel, thread, or forum
@@ -274,7 +799,7 @@ If a file has no extension it will still try to read it only if it can be decode
 
         self.db.conversations[key] = Conversation.model_validate(conversation.model_dump())
 
-        await self.save_conf()
+        await self.save_conversation(key)
 
     @commands.command(name="convoprompt")
     @commands.guild_only()
@@ -311,11 +836,10 @@ If a file has no extension it will still try to read it only if it can be decode
                 )
                 await ctx.send(txt)
                 log.error("Failed to parse conversation prompt", exc_info=e)
-                self.bot._last_exception = traceback.format_exc()
+                self.bot._last_exception = traceback.format_exc()  # type: ignore
                 return
 
-        model = conf.get_user_model(ctx.author)
-        ptokens = await self.count_tokens(conf.prompt, model) if conf.prompt else 0
+        ptokens = await self.count_tokens(conf.prompt) if conf.prompt else 0
         max_tokens = conf.get_user_max_tokens(ctx.author)
         if ptokens > (max_tokens * 0.9):
             txt = _(
@@ -326,6 +850,7 @@ If a file has no extension it will still try to read it only if it can be decode
 
         conversation = self.db.get_conversation(mem_id, ctx.channel.id, ctx.guild.id)
         conversation.system_prompt_override = prompt
+        await self.save_conversation(f"{mem_id}-{ctx.channel.id}-{ctx.guild.id}")
         if prompt:
             txt = _("System prompt has been set for this conversation!")
         else:
@@ -335,7 +860,12 @@ If a file has no extension it will still try to read it only if it can be decode
     @commands.command(name="convoshow", aliases=["showconvo"])
     @commands.guild_only()
     @commands.guildowner()
-    async def show_convo(self, ctx: commands.Context, user: discord.Member = None, channel: discord.TextChannel = None):
+    async def show_convo(
+        self,
+        ctx: commands.Context,
+        user: t.Optional[discord.Member] = None,
+        channel: discord.TextChannel = commands.CurrentChannel,
+    ):
         """
         View the current transcript of a conversation
 
@@ -343,8 +873,6 @@ If a file has no extension it will still try to read it only if it can be decode
         """
         if not user:
             user = ctx.author
-        if not channel:
-            channel = ctx.channel
 
         conf = self.db.get_conf(ctx.guild)
         mem_id = ctx.channel.id if conf.collab_convos else user.id
@@ -365,6 +893,49 @@ If a file has no extension it will still try to read it only if it can be decode
 
         await ctx.send(_("Here is your conversation transcript!"), file=file)
 
+    @commands.command(name="importconvo")
+    @commands.guild_only()
+    @commands.guildowner()
+    async def import_conversation(self, ctx: commands.Context):
+        """
+        Import a conversation from a file
+        """
+        attachments = get_attachments(ctx.message)
+        if not attachments:
+            return await ctx.send(_("Please attach a file to import the conversation from!"))
+        if len(attachments) > 1:
+            return await ctx.send(_("Please only attach one file to import the conversation from!"))
+        attachment = attachments[0]
+        if not attachment.filename.endswith(".json"):
+            return await ctx.send(_("Please upload a valid JSON file."))
+        try:
+            data = await attachment.read()
+            messages = json.loads(data)
+        except Exception as e:
+            await ctx.send(_("Failed to parse conversation file."))
+            log.error("Failed to parse conversation file", exc_info=e)
+            return
+        # Verify that it is a list of messages (dicts)
+        if not isinstance(messages, list) or not all(isinstance(msg, dict) for msg in messages):
+            return await ctx.send(
+                _("The conversation file is not in the correct format. It should be a list of messages.")
+            )
+        conf = self.db.get_conf(ctx.guild)
+        mem_id = ctx.channel.id if conf.collab_convos else ctx.author.id
+        perms = [
+            await self.bot.is_mod(ctx.author),
+            ctx.channel.permissions_for(ctx.author).manage_messages,
+            ctx.author.id in self.bot.owner_ids,
+        ]
+        if not any(perms) and conf.collab_convos:
+            return await ctx.send(_("You do not have permission to import conversations."))
+
+        conversation = self.db.get_conversation(mem_id, ctx.channel.id, ctx.guild.id)
+        conversation.messages = messages
+
+        await ctx.send(_("Conversation has been imported successfully!"))
+        await self.save_conversation(f"{mem_id}-{ctx.channel.id}-{ctx.guild.id}")
+
     @commands.command(name="query")
     @commands.bot_has_permissions(embed_links=True)
     async def test_embedding_response(self, ctx: commands.Context, *, query: str):
@@ -374,7 +945,7 @@ If a file has no extension it will still try to read it only if it can be decode
         You can use this to fine-tune the minimum relatedness for your assistant
         """
         conf = self.db.get_conf(ctx.guild)
-        if not conf.embeddings:
+        if not await self.embedding_store.has_embeddings(ctx.guild.id):
             return await ctx.send(_("You do not have any embeddings configured!"))
         if not conf.top_n:
             return await ctx.send(_("Top N is set to 0 so no embeddings will be returned"))
@@ -385,7 +956,12 @@ If a file has no extension it will still try to read it only if it can be decode
             if not query_embedding:
                 return await ctx.send(_("Failed to get embedding for your query"))
 
-            embeddings = await asyncio.to_thread(conf.get_related_embeddings, query_embedding, relatedness_override=0.1)
+            embeddings = await self.embedding_store.get_related(
+                guild_id=ctx.guild.id,
+                query_embedding=query_embedding,
+                top_n=conf.top_n,
+                min_relatedness=0.1,
+            )
             if not embeddings:
                 return await ctx.send(_("No embeddings could be related to this query with the current settings"))
             for name, em, score, dimension in embeddings:
