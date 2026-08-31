@@ -1,0 +1,51 @@
+[
+  {
+    "name": "assistant",
+    "repo": "https://github.com/vertyco/vrt-cogs.git",
+    "branch": "main",
+    "source_path": "assistant",
+    "target_path": "assistant"
+  },
+  {
+    "name": "dadjokes",
+    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
+    "branch": "v3",
+    "source_path": "dadjokes",
+    "target_path": "dadjokes"
+  },
+  {
+    "name": "dictionary",
+    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
+    "branch": "v3",
+    "source_path": "dictionary",
+    "target_path": "dictionary"
+  },
+  {
+    "name": "reminder",
+    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
+    "branch": "v3",
+    "source_path": "reminder",
+    "target_path": "reminder"
+  },
+  {
+    "name": "rss",
+    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
+    "branch": "v3",
+    "source_path": "rss",
+    "target_path": "rss"
+  },
+  {
+    "name": "welcome",
+    "repo": "https://github.com/TrustyJAID/Trusty-cogs.git",
+    "branch": "master",
+    "source_path": "welcome",
+    "target_path": "welcome"
+  },
+  {
+    "name": "wolfram",
+    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
+    "branch": "v3",
+    "source_path": "wolfram",
+    "target_path": "wolfram"
+  }
+]
