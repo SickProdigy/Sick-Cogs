@@ -29,3 +29,6 @@ venv/
 env/
 redenv/
 .red-runtime/
+
+# External cog sync cache
+/.external-cogs-cache/
