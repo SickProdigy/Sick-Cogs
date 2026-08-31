@@ -1,16 +1,18 @@
 # Sick-Cogs
 
-A Red-DiscordBot cog repository for custom Discord bot features and related tooling.
+Sick-Cogs is a Red-DiscordBot cog repository maintained for SickProdigy's Discord projects.
 
-This repository is intentionally kept as a lightweight baseline for development work. The live bot runtime and config live outside the repo path.
+This branch is the stable release branch. Active development, experiments, and unreleased cogs live on `develop`.
 
-## Notes
+## Available Cogs
 
-- Keep the bot install in a dedicated Python virtual environment.
-- Keep bot config and runtime data in a separate config/data directory.
-- Use the repo as source code for cogs and utilities, not as the bot runtime root.
+- `coc` - Clash of Clans clan and war status utilities.
 
-## Branch strategy
+## Branches
 
-- `main`: minimal baseline branch
-- `develop`: active working branch for ongoing development
+- `main` - stable release branch.
+- `develop` - active working branch for ongoing development.
+
+## License
+
+Sick-Cogs original code is licensed under the MIT License. Third-party code keeps any license terms that apply to its original source.
