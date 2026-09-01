@@ -466,6 +466,15 @@ class Coc(commands.Cog):
             return "Defeat by destruction"
         return "Tie"
 
+    @staticmethod
+    def _max_war_stars(war_data: dict) -> int | str:
+        team_size = war_data.get("teamSize")
+        return team_size * 3 if isinstance(team_size, int) else "?"
+
+    @classmethod
+    def _format_war_stars(cls, stars, war_data: dict) -> str:
+        return f"{int(stars or 0)}/{cls._max_war_stars(war_data)}"
+
     @classmethod
     def _war_member_attack_stats(cls, war_data: dict, clan_tag: str) -> list[dict]:
         clan, _ = cls._configured_war_sides(war_data, clan_tag)
@@ -556,7 +565,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=clan_name,
             value=(
-                f"Stars: **{clan.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(clan.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{clan_attacks}/{attack_total}**"
             ),
@@ -565,7 +574,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=opponent_name,
             value=(
-                f"Stars: **{opponent.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(opponent.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{opponent_attacks}/{attack_total}**"
             ),
@@ -636,7 +645,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=clan.get("name", "Your Clan"),
             value=(
-                f"Stars: **{clan.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(clan.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{clan.get('attacks', 0)}/{attack_total}**"
             ),
@@ -645,7 +654,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=opponent.get("name", "Opponent"),
             value=(
-                f"Stars: **{opponent.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(opponent.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{opponent.get('attacks', 0)}/{attack_total}**"
             ),
@@ -696,7 +705,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=clan_name,
             value=(
-                f"Stars: **{clan.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(clan.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{clan.get('attacks', 0)}/{attack_total}**"
             ),
@@ -705,7 +714,7 @@ class Coc(commands.Cog):
         embed.add_field(
             name=opponent_name,
             value=(
-                f"Stars: **{opponent.get('stars', 0)}**\n"
+                f"Stars: **{self._format_war_stars(opponent.get('stars', 0), war_data)}**\n"
                 f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
                 f"Attacks: **{opponent.get('attacks', 0)}/{attack_total}**"
             ),
@@ -759,6 +768,68 @@ class Coc(commands.Cog):
         if war_data.get("endTime"):
             embed.add_field(
                 name="War Ended",
+                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                inline=False,
+            )
+
+        embed.set_footer(text="Brought to you by SickGaming.net")
+        return embed
+
+    def _build_war_attacks_embed(self, war_data: dict, clan_tag: str) -> discord.Embed:
+        clan, opponent = self._configured_war_sides(war_data, clan_tag)
+        clan_name = clan.get("name", "Your Clan")
+        opponent_name = opponent.get("name", "Opponent")
+        state = war_data.get("state", "unknown")
+        attacks_per_member = self._positive_int(war_data.get("attacksPerMember"), 2)
+        member_stats = self._war_member_attack_stats(war_data, clan_tag)
+        total_attacks = len(member_stats) * attacks_per_member
+        used_attacks = sum(member["used"] for member in member_stats)
+        unused_attacks = sum(member["remaining"] for member in member_stats)
+
+        state_notes = {
+            "preparation": "Battle day has not started yet.",
+            "inWar": "Battle day is active.",
+            "warEnded": "War has ended.",
+        }
+        embed = discord.Embed(
+            title="War Attack Status",
+            description=(
+                f"{clan_name} vs {opponent_name}\n"
+                f"Status: **{self._war_state_label(state)}**\n"
+                f"{state_notes.get(state, 'Current war status is available.')}"
+            ),
+            color=0x2ECC71 if state == "preparation" else 0x992D22,
+            timestamp=None,
+        )
+
+        badge_url = clan.get("badgeUrls", {}).get("large")
+        if badge_url:
+            embed.set_thumbnail(url=badge_url)
+
+        embed.add_field(
+            name="Attack Summary",
+            value=(
+                f"Used: **{used_attacks}/{total_attacks}**\n"
+                f"Remaining: **{unused_attacks}**\n"
+                f"Stars: **{self._format_war_stars(clan.get('stars', 0), war_data)}**"
+            ),
+            inline=False,
+        )
+
+        member_lines = []
+        for member in sorted(member_stats, key=lambda item: (item["map_position"], item["name"].lower())):
+            status = ":green_square:" if member["remaining"] == 0 else ":red_square:"
+            remaining = f", {member['remaining']} left" if member["remaining"] else ""
+            member_lines.append(
+                f"{status} **{member['name']}** - {member['used']}/{attacks_per_member} used"
+                f"{remaining}, {member['stars']} stars"
+            )
+        embed.add_field(name="Member Results", value=self._trim_embed_lines(member_lines), inline=False)
+
+        if war_data.get("endTime") and state in {"inWar", "warEnded"}:
+            label = "War Ended" if state == "warEnded" else "War Ends"
+            embed.add_field(
+                name=label,
                 value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
                 inline=False,
             )
@@ -1093,6 +1164,36 @@ class Coc(commands.Cog):
         await guild_config.LAST_API_PULL.set((datetime.now() - timedelta(hours=5)).isoformat())
         await guild_config.LAST_WAR_ID.set(self._war_id(user_json))
         await guild_config.LAST_WAR_ATTACKS.set(self._current_attack_keys(user_json, clan_key))
+        await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
+
+    @command_coc.command(name="attacks", aliases=["attack", "attackstatus", "hits"])
+    async def command_coc_attacks(self, ctx):
+        """Show who has and has not attacked in the current war."""
+
+        api_key = await self.config.COC_API_KEY()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+
+        clan_key = await self._get_clan_tag(ctx)
+        if not clan_key:
+            return await ctx.send(self._missing_clan_key_message(ctx))
+
+        headers = self._api_headers(api_key)
+        try:
+            war_data, notice = await self._fetch_current_war(clan_key, headers)
+        except aiohttp.ClientConnectionError as e:
+            await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
+            return
+        except Exception as e:
+            await ctx.send(f"An unexpected error occurred: {e}")
+            return
+
+        if not war_data:
+            return await ctx.send(notice)
+        if notice:
+            await ctx.send(notice)
+
+        embed = self._build_war_attacks_embed(war_data, clan_key)
         await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
         
     @staticmethod
