@@ -324,6 +324,15 @@ class Coc(commands.Cog):
         except (TypeError, ValueError):
             return default
 
+    @classmethod
+    def _configured_war_sides(cls, war_data: dict, clan_tag: str) -> tuple[dict, dict]:
+        configured_tag = cls._normalize_tag(clan_tag)
+        clan = war_data.get("clan", {})
+        opponent = war_data.get("opponent", {})
+        if opponent.get("tag") == configured_tag:
+            clan, opponent = opponent, clan
+        return clan, opponent
+
     @staticmethod
     def _attack_key(war_data: dict, attacker_tag: str, attack: dict) -> str:
         return "|".join(
@@ -343,19 +352,16 @@ class Coc(commands.Cog):
 
     @classmethod
     def _iter_war_attacks(cls, war_data: dict, clan_tag: str):
-        configured_tag = cls._normalize_tag(clan_tag)
-        clan = war_data.get("clan", {})
-        opponent = war_data.get("opponent", {})
-        if opponent.get("tag") == configured_tag:
-            clan, opponent = opponent, clan
+        clan, opponent = cls._configured_war_sides(war_data, clan_tag)
 
-        sides = ((clan, opponent), (opponent, clan))
-        for attacking_side, defending_side in sides:
+        sides = ((clan, opponent, True), (opponent, clan, False))
+        for attacking_side, defending_side, is_friendly in sides:
             defending_members = {
                 member.get("tag"): member.get("name", "Unknown")
                 for member in defending_side.get("members", [])
             }
             side_name = attacking_side.get("name", "Unknown Clan")
+            defending_side_name = defending_side.get("name", "Unknown Clan")
             for member in attacking_side.get("members", []):
                 attacker_tag = member.get("tag")
                 attacker_name = member.get("name", "Unknown")
@@ -364,6 +370,8 @@ class Coc(commands.Cog):
                     yield {
                         "key": cls._attack_key(war_data, attacker_tag, attack),
                         "side_name": side_name,
+                        "defending_side_name": defending_side_name,
+                        "is_friendly": is_friendly,
                         "attacker_name": attacker_name,
                         "defender_name": defending_members.get(defender_tag, defender_tag or "Unknown"),
                         "stars": attack.get("stars", 0),
@@ -376,9 +384,7 @@ class Coc(commands.Cog):
         return [attack["key"] for attack in cls._iter_war_attacks(war_data, clan_tag)]
 
     @classmethod
-    def _new_attack_summaries(
-        cls, war_data: dict, clan_tag: str, previous_attack_keys: list[str]
-    ) -> list[str]:
+    def _new_war_attacks(cls, war_data: dict, clan_tag: str, previous_attack_keys: list[str]) -> list[dict]:
         previous = set(previous_attack_keys or [])
         if not previous:
             return []
@@ -389,15 +395,23 @@ class Coc(commands.Cog):
             if attack["key"] not in previous
         ]
         new_attacks.sort(key=lambda attack: attack["order"])
+        return new_attacks
 
+    @classmethod
+    def _new_attack_summaries(
+        cls, war_data: dict, clan_tag: str, previous_attack_keys: list[str]
+    ) -> list[str]:
+        new_attacks = cls._new_war_attacks(war_data, clan_tag, previous_attack_keys)
         lines = []
         for attack in new_attacks[:6]:
             stars = attack["stars"]
             star_word = "star" if stars == 1 else "stars"
+            attack_type = "Friendly" if attack["is_friendly"] else "Enemy"
             lines.append(
+                f"**{attack_type}: {attack['side_name']}**\n"
                 f"**{attack['attacker_name']}** attacked **{attack['defender_name']}**\n"
                 f"Result: **{stars} {star_word}**, **{cls._format_percent(attack['destruction'])}** "
-                f"destruction for **{attack['side_name']}**."
+                "destruction."
             )
 
         remaining = len(new_attacks) - len(lines)
@@ -410,6 +424,72 @@ class Coc(commands.Cog):
             lines.append(f"...and {hidden_count} more new attack{'s' if hidden_count != 1 else ''}.")
 
         return lines
+
+    @staticmethod
+    def _trim_embed_lines(lines: list[str], max_chars: int = 1024) -> str:
+        if not lines:
+            return "None."
+
+        visible = []
+        for line in lines:
+            candidate = "\n".join(visible + [line])
+            if len(candidate) <= max_chars:
+                visible.append(line)
+                continue
+            break
+
+        hidden_count = len(lines) - len(visible)
+        if hidden_count > 0:
+            suffix = f"...and {hidden_count} more."
+            while visible and len("\n".join(visible + [suffix])) > max_chars:
+                visible.pop()
+                hidden_count = len(lines) - len(visible)
+                suffix = f"...and {hidden_count} more."
+            visible.append(suffix)
+
+        return "\n".join(visible) if visible else "Too many entries to show."
+
+    @staticmethod
+    def _war_result_label(clan: dict, opponent: dict) -> str:
+        clan_stars = int(clan.get("stars", 0) or 0)
+        opponent_stars = int(opponent.get("stars", 0) or 0)
+        clan_destruction = float(clan.get("destructionPercentage", 0) or 0)
+        opponent_destruction = float(opponent.get("destructionPercentage", 0) or 0)
+
+        if clan_stars > opponent_stars:
+            return "Victory"
+        if clan_stars < opponent_stars:
+            return "Defeat"
+        if clan_destruction > opponent_destruction:
+            return "Victory by destruction"
+        if clan_destruction < opponent_destruction:
+            return "Defeat by destruction"
+        return "Tie"
+
+    @classmethod
+    def _war_member_attack_stats(cls, war_data: dict, clan_tag: str) -> list[dict]:
+        clan, _ = cls._configured_war_sides(war_data, clan_tag)
+        attacks_per_member = cls._positive_int(war_data.get("attacksPerMember"), 2)
+        stats = []
+
+        for member in clan.get("members", []):
+            attacks = member.get("attacks", [])
+            used = len(attacks)
+            stars = sum(int(attack.get("stars", 0) or 0) for attack in attacks)
+            destruction = sum(float(attack.get("destructionPercentage", 0) or 0) for attack in attacks)
+            stats.append(
+                {
+                    "name": member.get("name", "Unknown"),
+                    "map_position": member.get("mapPosition", 0),
+                    "used": used,
+                    "remaining": max(0, attacks_per_member - used),
+                    "stars": stars,
+                    "destruction": destruction,
+                    "zero_star_attacks": sum(1 for attack in attacks if int(attack.get("stars", 0) or 0) == 0),
+                }
+            )
+
+        return stats
 
     @staticmethod
     def _format_coc_time(raw_time: str) -> str:
@@ -440,11 +520,7 @@ class Coc(commands.Cog):
         intro: str | None = None,
         schedule_keys: tuple[tuple[str, str], ...] | None = None,
     ) -> discord.Embed:
-        configured_tag = self._normalize_tag(clan_tag)
-        clan = war_data.get("clan", {})
-        opponent = war_data.get("opponent", {})
-        if opponent.get("tag") == configured_tag:
-            clan, opponent = opponent, clan
+        clan, opponent = self._configured_war_sides(war_data, clan_tag)
 
         state = war_data.get("state", "unknown")
         team_size = war_data.get("teamSize", "Unknown")
@@ -515,7 +591,185 @@ class Coc(commands.Cog):
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
 
+    def _build_war_attack_update_embed(
+        self, war_data: dict, clan_tag: str, new_attacks: list[dict]
+    ) -> discord.Embed:
+        clan, opponent = self._configured_war_sides(war_data, clan_tag)
+        enemy_attack = any(not attack["is_friendly"] for attack in new_attacks)
+        embed = discord.Embed(
+            title="War Log Update",
+            description=f"{clan.get('name', 'Your Clan')} vs {opponent.get('name', 'Opponent')}",
+            color=0x992D22 if enemy_attack else 0x2ECC71,
+            timestamp=None,
+        )
+
+        badge_url = opponent.get("badgeUrls", {}).get("large") if enemy_attack else clan.get("badgeUrls", {}).get("large")
+        if badge_url:
+            embed.set_thumbnail(url=badge_url)
+
+        for attack in new_attacks[:6]:
+            stars = attack["stars"]
+            star_word = "star" if stars == 1 else "stars"
+            attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
+            field_name = f"{attack_type} - {attack['side_name']}"
+            embed.add_field(
+                name=field_name,
+                value=(
+                    f"**{attack['attacker_name']}** attacked **{attack['defender_name']}**\n"
+                    f"Result: **{stars} {star_word}**, "
+                    f"**{self._format_percent(attack['destruction'])}** destruction"
+                ),
+                inline=False,
+            )
+
+        remaining = len(new_attacks) - 6
+        if remaining > 0:
+            embed.add_field(name="More Attacks", value=f"...and {remaining} more.", inline=False)
+
+        attack_total = war_data.get("teamSize", "Unknown")
+        attacks_per_member = self._positive_int(war_data.get("attacksPerMember"), 2)
+        if isinstance(attack_total, int):
+            attack_total *= attacks_per_member
+        else:
+            attack_total = "?"
+
+        embed.add_field(
+            name=clan.get("name", "Your Clan"),
+            value=(
+                f"Stars: **{clan.get('stars', 0)}**\n"
+                f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
+                f"Attacks: **{clan.get('attacks', 0)}/{attack_total}**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name=opponent.get("name", "Opponent"),
+            value=(
+                f"Stars: **{opponent.get('stars', 0)}**\n"
+                f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
+                f"Attacks: **{opponent.get('attacks', 0)}/{attack_total}**"
+            ),
+            inline=True,
+        )
+
+        if war_data.get("endTime"):
+            embed.add_field(
+                name="War Ends",
+                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                inline=False,
+            )
+
+        embed.set_footer(text="Brought to you by SickGaming.net")
+        return embed
+
+    def _build_war_roundup_embed(self, war_data: dict, clan_tag: str) -> discord.Embed:
+        clan, opponent = self._configured_war_sides(war_data, clan_tag)
+        clan_name = clan.get("name", "Your Clan")
+        opponent_name = opponent.get("name", "Opponent")
+        attack_total = war_data.get("teamSize", len(clan.get("members", [])))
+        attacks_per_member = self._positive_int(war_data.get("attacksPerMember"), 2)
+        if isinstance(attack_total, int):
+            attack_total *= attacks_per_member
+        else:
+            attack_total = len(clan.get("members", [])) * attacks_per_member
+
+        member_stats = self._war_member_attack_stats(war_data, clan_tag)
+        used_attacks = sum(member["used"] for member in member_stats)
+        unused_attacks = sum(member["remaining"] for member in member_stats)
+        result = self._war_result_label(clan, opponent)
+
+        embed = discord.Embed(
+            title="War Roundup",
+            description=(
+                f"{clan_name} vs {opponent_name}\n"
+                f"Result: **{result}**\n"
+                f"Attacks used: **{used_attacks}/{attack_total}**"
+            ),
+            color=0x2ecc71 if result.startswith("Victory") else 0x992d22,
+            timestamp=None,
+        )
+
+        badge_url = clan.get("badgeUrls", {}).get("large")
+        if badge_url:
+            embed.set_thumbnail(url=badge_url)
+
+        embed.add_field(
+            name=clan_name,
+            value=(
+                f"Stars: **{clan.get('stars', 0)}**\n"
+                f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
+                f"Attacks: **{clan.get('attacks', 0)}/{attack_total}**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name=opponent_name,
+            value=(
+                f"Stars: **{opponent.get('stars', 0)}**\n"
+                f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
+                f"Attacks: **{opponent.get('attacks', 0)}/{attack_total}**"
+            ),
+            inline=True,
+        )
+
+        member_lines = [
+            (
+                f"**{member['name']}** - {member['stars']} stars, "
+                f"{member['used']}/{attacks_per_member} attacks"
+            )
+            for member in sorted(member_stats, key=lambda member: (member["map_position"], member["name"].lower()))
+        ]
+        embed.add_field(name="Member Results", value=self._trim_embed_lines(member_lines), inline=False)
+
+        top_attackers = sorted(
+            [member for member in member_stats if member["used"] > 0],
+            key=lambda member: (-member["stars"], -member["destruction"], member["name"].lower()),
+        )
+        top_lines = [
+            (
+                f"**{member['name']}** - {member['stars']} stars in {member['used']} "
+                f"attack{'s' if member['used'] != 1 else ''}"
+            )
+            for member in top_attackers[:8]
+        ]
+        embed.add_field(name="Top Attackers", value=self._trim_embed_lines(top_lines), inline=False)
+
+        unused_members = sorted(
+            [member for member in member_stats if member["remaining"] > 0],
+            key=lambda member: (-member["remaining"], member["map_position"], member["name"].lower()),
+        )
+        unused_lines = [
+            f"**{member['name']}** - {member['remaining']} attack{'s' if member['remaining'] != 1 else ''} unused"
+            for member in unused_members
+        ]
+        embed.add_field(
+            name=f"Unused Attacks ({unused_attacks})",
+            value=self._trim_embed_lines(unused_lines),
+            inline=False,
+        )
+
+        zero_star_lines = [
+            f"**{member['name']}** - {member['zero_star_attacks']} zero-star attack{'s' if member['zero_star_attacks'] != 1 else ''}"
+            for member in member_stats
+            if member["zero_star_attacks"] > 0
+        ]
+        if zero_star_lines:
+            embed.add_field(name="Zero-Star Attacks", value=self._trim_embed_lines(zero_star_lines), inline=False)
+
+        if war_data.get("endTime"):
+            embed.add_field(
+                name="War Ended",
+                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                inline=False,
+            )
+
+        embed.set_footer(text="Brought to you by SickGaming.net")
+        return embed
+
     def _build_war_event_embed(self, war_data: dict, clan_tag: str, event: str) -> discord.Embed:
+        if event == "ended":
+            return self._build_war_roundup_embed(war_data, clan_tag)
+
         titles = {
             "prep": "War Preparation Started",
             "prepsoon": "War Starting Soon",
@@ -704,9 +958,9 @@ class Coc(commands.Cog):
                 sent_events[event] = (datetime.now() - timedelta(hours=5)).isoformat()
                 sent_any_notification = True
 
-            battle_log = self._new_attack_summaries(war_data, clan_tag, previous_attack_keys)
+            new_attacks = self._new_war_attacks(war_data, clan_tag, previous_attack_keys)
             if (
-                battle_log
+                new_attacks
                 and self._event_enabled(settings, "attacklog")
                 and fingerprint != settings.get("LAST_NOTIFICATION_STATE")
             ):
@@ -715,13 +969,7 @@ class Coc(commands.Cog):
                         await channel.send(notice)
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, "attacklog")
-                    embed = self._build_war_embed(
-                        war_data,
-                        clan_tag,
-                        battle_log,
-                        title="War Attack Update",
-                        schedule_keys=(("War Ends", "endTime"),),
-                    )
+                    embed = self._build_war_attack_update_embed(war_data, clan_tag, new_attacks)
                     await self._send_embed_with_optional_image(
                         channel,
                         embed,

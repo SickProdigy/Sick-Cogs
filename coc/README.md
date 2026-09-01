@@ -77,7 +77,7 @@ Default behavior:
 - `battle`: on, sends when battle day starts.
 - `attacklog`: on, sends new individual attack updates during war.
 - `endsoon`: on, sends before the war ends. Default is 60 minutes before end.
-- `ended`: on, sends when the war ends.
+- `ended`: on, sends a roundup when the war ends.
 
 Toggle one event:
 
@@ -118,13 +118,27 @@ Toggle mentions for one event:
 
 ## Attack Log Updates
 
-When `attacklog` is enabled, war notifications include a focused attack update for new attacks. The update leads with the player who attacked, the target, stars, destruction percentage, and the current score summary.
+When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. Each attack is labeled as a friendly or enemy attack, then leads with the player who attacked, the target, stars, destruction percentage, and the current score summary.
 
-Attack-log notification embeds only show the war end time once battle day is active, instead of repeating preparation and start times.
+Attack-log notification embeds do not show the generic status or team size text. Once battle day is active, they only show the war end time instead of repeating preparation and start times.
+
+## War Roundup
+
+When `ended` is enabled, the war-ended notification sends a roundup embed instead of the normal war status embed.
+
+The roundup includes:
+
+- Final result.
+- Final stars, destruction, and attack totals for both clans.
+- Member-by-member stars and attacks used for the configured clan.
+- Top attackers from the configured clan.
+- Unused attacks from the configured clan.
+- Zero-star attack counts when any happened.
+- War ended time.
 
 ## Notes
 
 - Notification setup commands are limited to moderators or users with `Manage Channels`.
 - `setapi` is bot-owner only because the API key is shared globally.
 - Current war lookup supports regular wars and attempts a CWL fallback when regular war data is blocked or unavailable.
-- Planned follow-up work is tracked for a war-ended roundup notification and a manual current-war attack status command.
+- Planned follow-up work is tracked for a manual current-war attack status command.
