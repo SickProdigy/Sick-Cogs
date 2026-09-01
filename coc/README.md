@@ -43,6 +43,13 @@ Show current war details:
 [p]coc war
 ```
 
+Show who has and has not attacked in the current war:
+
+```text
+[p]coc attacks
+[p]coc attack
+```
+
 Toggle all war notifications for the server:
 
 ```text
@@ -122,6 +129,20 @@ When `attacklog` is enabled, war notifications send a focused `War Log Update` f
 
 Attack-log notification embeds do not show the generic status or team size text. Once battle day is active, they only show the war end time instead of repeating preparation and start times.
 
+## Attack Status
+
+Use `[p]coc attacks` or `[p]coc attack` to check the current war attack status for the configured clan.
+
+The command shows:
+
+- Current war state.
+- Total attacks used and remaining.
+- Stars as current/max possible.
+- Member-by-member attacks used and stars.
+- Red markers for members who still have attacks.
+- Green markers for members who have used all attacks.
+- War end time during battle day and after the war ends.
+
 ## War Roundup
 
 When `ended` is enabled, the war-ended notification sends a roundup embed instead of the normal war status embed.
@@ -129,7 +150,7 @@ When `ended` is enabled, the war-ended notification sends a roundup embed instea
 The roundup includes:
 
 - Final result.
-- Final stars, destruction, and attack totals for both clans.
+- Final stars as current/max possible, destruction, and attack totals for both clans.
 - Member-by-member stars and attacks used for the configured clan.
 - Top attackers from the configured clan.
 - Unused attacks from the configured clan.
@@ -141,4 +162,3 @@ The roundup includes:
 - Notification setup commands are limited to moderators or users with `Manage Channels`.
 - `setapi` is bot-owner only because the API key is shared globally.
 - Current war lookup supports regular wars and attempts a CWL fallback when regular war data is blocked or unavailable.
-- Planned follow-up work is tracked for a manual current-war attack status command.
