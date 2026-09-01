@@ -1,0 +1,130 @@
+# Clash of Clans Cog
+
+The `coc` cog provides Clash of Clans clan lookup, current war status, and configurable war notifications for Red-DiscordBot.
+
+## Requirements
+
+- Red-DiscordBot `3.5.0` or newer.
+- A Clash of Clans API key from https://developer.clashofclans.com/.
+- The configured clan's war log must be public for current war data. Clan War League data is used as a fallback when available.
+
+## Setup
+
+Bot owners set the shared Clash of Clans API key:
+
+```text
+[p]coc setapi <api_key>
+```
+
+Server moderators or users with `Manage Channels` set the clan tag:
+
+```text
+[p]coc setclan <clan_tag>
+```
+
+Set the war update channel. If no channel is passed, the current channel is used. This also turns war notifications on:
+
+```text
+[p]coc setwarchannel
+[p]coc setwarchannel #war-updates
+```
+
+## Commands
+
+Show configured clan information:
+
+```text
+[p]coc
+```
+
+Show current war details:
+
+```text
+[p]coc war
+```
+
+Toggle all war notifications for the server:
+
+```text
+[p]coc notifications
+```
+
+Show the current notification setup:
+
+```text
+[p]coc notifications status
+```
+
+## War Notifications
+
+War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
+
+Available event names:
+
+```text
+prep
+prepsoon
+battle
+attacklog
+endsoon
+ended
+```
+
+Default behavior:
+
+- `prep`: on, sends when preparation day starts.
+- `prepsoon`: on, sends before battle day starts. Default is 5 minutes before start.
+- `battle`: on, sends when battle day starts.
+- `attacklog`: on, sends new individual attack updates during war.
+- `endsoon`: on, sends before the war ends. Default is 60 minutes before end.
+- `ended`: on, sends when the war ends.
+
+Toggle one event:
+
+```text
+[p]coc notifications event prep on
+[p]coc notifications event attacklog off
+```
+
+Change warning times:
+
+```text
+[p]coc notifications prepsoonminutes 5
+[p]coc notifications endsoonminutes 60
+```
+
+## Role Mentions
+
+Set one role for war notification mentions:
+
+```text
+[p]coc notifications role @War
+```
+
+Clear the mention role:
+
+```text
+[p]coc notifications clearrole
+```
+
+Mention toggles are on by default for every event, but no ping is sent unless a mention role is configured.
+
+Toggle mentions for one event:
+
+```text
+[p]coc notifications mention prepsoon on
+[p]coc notifications mention attacklog off
+```
+
+## Attack Log Updates
+
+When `attacklog` is enabled, war notifications include a focused attack update for new attacks. The update leads with the player who attacked, the target, stars, destruction percentage, and the current score summary.
+
+Attack-log notification embeds only show the war end time once battle day is active, instead of repeating preparation and start times.
+
+## Notes
+
+- Notification setup commands are limited to moderators or users with `Manage Channels`.
+- `setapi` is bot-owner only because the API key is shared globally.
+- Current war lookup supports regular wars and attempts a CWL fallback when regular war data is blocked or unavailable.
+- Planned follow-up work is tracked for a war-ended roundup notification and a manual current-war attack status command.
