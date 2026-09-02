@@ -8,6 +8,7 @@ This branch is the stable release branch. Active development, experiments, and u
 
 - `coc` - Clash of Clans clan and war status utilities.
 - `donate` - Configurable donation information command.
+- `rss` - Configurable RSS and Atom feed notifications.
 
 ## Branches
 
