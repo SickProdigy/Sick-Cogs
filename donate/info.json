@@ -1,0 +1,16 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Configurable donation information command for Discord servers.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild donation display settings such as payment method labels, links, addresses, and public notes. It does not store donor records or payment history.",
+  "hidden": false,
+  "install_msg": "Use `[p]donate` to show the default SickGaming donation card, or `[p]donate set` to customize methods. This cog only displays donation information; verified donor roles or account upgrades should be handled by a separate integration.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "name": "Donate",
+  "requirements": [],
+  "short": "Show configured donation options",
+  "tags": ["donate", "donation", "donations", "support", "paypal", "cashapp", "venmo", "crypto"],
+  "type": "COG",
+  "version": "1.0.0"
+}
