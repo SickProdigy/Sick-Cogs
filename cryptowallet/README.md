@@ -108,12 +108,15 @@ GET /cryptowallet/session/<one-time-token>
 → one-time token is consumed
 → short-lived HttpOnly browser cookie is issued
 → redirect to /cryptowallet/session
-→ GET /cryptowallet/api/v1/session
+→ browser calls /cryptowallet/api/session.php
+→ PHP signs GET /api/v1/session to the cog backend and forwards the browser cookie
 ```
 
-`GET /api/v1/session` returns a stable JSON envelope containing only server-authoritative public
-session data. Transaction fields are loaded from the stored intent; the endpoint does not accept
-addresses, amounts, wallet identifiers, or authorization decisions from browser input.
+Cog endpoint `GET /api/v1/session` requires both a valid paired-server signature and the user's
+browser cookie. The public PHP proxy returns its stable JSON envelope containing only
+server-authoritative session data. Transaction fields are loaded from the stored intent; the
+endpoint does not accept addresses, amounts, wallet identifiers, or authorization decisions from
+browser input.
 
 Success envelope:
 
@@ -205,6 +208,7 @@ Completed:
 11. Atomic, single-use website-server pairing with revocable credentials in Red shared API tokens.
 12. HMAC-authenticated website-server requests with timestamp and nonce replay protection.
 13. PHP CLI pairing and status tools with server-only, atomic credential storage.
+14. Signed PHP session proxy requiring paired-server authentication plus the user browser session.
 
 Not implemented:
 
@@ -244,6 +248,7 @@ cryptowallet/
 │   ├── session.html
 │   ├── app.js
 │   ├── styles.css
+│   ├── api/              # Public PHP endpoints; never contains installation credentials
 │   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
 └── info.json
 ```
@@ -252,9 +257,9 @@ cryptowallet/
 
 1. Adapt the companion contract for the SickGaming two-server deployment.
 2. Authenticate website-server-to-cog requests over a private/restricted connection.
-3. Route protected website operations through authenticated server-side requests.
+3. Add signed proxies for each future recovery, security, and approval operation.
 4. Integrate private setup/status controls with MyBB administration if desired.
-5. Test pairing, signatures, replay rejection, rotation, and unpairing end to end.
+5. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing end to end.
 6. Implement secure CDP configuration and the provider adapter.
 7. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
 8. Display the address and balance through Discord.

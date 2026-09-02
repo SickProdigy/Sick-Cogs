@@ -159,6 +159,9 @@ class CompanionServer:
 
     async def api_session(self, request: web.Request) -> web.Response:
         """Return public, server-authoritative details for a verified browser session."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
         browser_token = request.cookies.get(BROWSER_COOKIE, "")
         session = await self.cog.resolve_browser_session(browser_token)
         if session is None:
