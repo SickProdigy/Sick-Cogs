@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from redbot.core import commands
 
 from .networks import BASE_SEPOLIA, NETWORKS
+from .relay import PAIRING_INPUT_NAMESPACE, RelayError
 
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -43,6 +44,7 @@ class WalletAdminCommands:
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"
             f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"Website relay: `{'connected' if self.relay.connected.is_set() else 'disconnected'}`\n"
             f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
             f"Custom authentication: `{'configured' if jwt_auth['configured'] else 'not configured'}`\n"
             "Mainnet: `disabled`"
@@ -80,6 +82,42 @@ class WalletAdminCommands:
             f"JWKS URL: `{status['jwks_url']}`\n"
             f"Key ID: `{status['kid']}`\n"
             "Algorithm: `ES256`"
+        )
+
+    @walletset.command(name="relaypair")
+    @commands.is_owner()
+    async def walletset_relay_pair(self, ctx: commands.Context):
+        """Pair outbound to the PHP/MySQL relay using a one-time secret-store code."""
+        tokens = await self.bot.get_shared_api_tokens(PAIRING_INPUT_NAMESPACE)
+        code = str(tokens.get("code") or "").strip()
+        if not code:
+            await ctx.send(
+                "Generate a one-time code on the website server, then use `[p]set api` with "
+                "service `cryptowallet_relay_pairing` and `code YOUR_CODE` before retrying."
+            )
+            return
+        try:
+            result = await self.relay.pair(code)
+        except RelayError as exc:
+            log.warning("CryptoWallet website relay pairing failed: %s", exc)
+            await ctx.send(str(exc))
+            return
+        finally:
+            await self.bot.set_shared_api_tokens(PAIRING_INPUT_NAMESPACE, code="")
+        await ctx.send(
+            "Website relay paired. Outbound polling is starting for installation "
+            f"`{result['installation_id']}`."
+        )
+
+    @walletset.command(name="relaystatus")
+    @commands.is_owner()
+    async def walletset_relay_status(self, ctx: commands.Context):
+        """Show non-secret outbound website relay status."""
+        pairing = await self.companion_pairing_status()
+        await ctx.send(
+            f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"Outbound relay: `{'connected' if self.relay.connected.is_set() else 'disconnected'}`\n"
+            f"Last relay error: `{self.relay.last_error or 'none'}`"
         )
 
     @walletset.command(name="pair")
@@ -121,6 +159,7 @@ class WalletAdminCommands:
     @commands.is_owner()
     async def walletset_unpair(self, ctx: commands.Context):
         """Revoke the companion website installation credential."""
+        await self.relay.stop()
         await self.unpair_companion()
         await ctx.send("Companion website unpaired; its previous credential is revoked.")
 
