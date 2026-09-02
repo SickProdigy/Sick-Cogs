@@ -1,5 +1,11 @@
+import datetime
+import logging
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Sequence
+from types import MappingProxyType
+from typing import Any, Mapping, Optional, Sequence, Union
+
+import discord
+import feedparser
 
 from .models import FeedMode, entry_identity, normalize_mode
 
