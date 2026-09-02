@@ -1,11 +1,16 @@
 {
-    "author": ["aikaterna"],
-    "description": "Read RSS feeds.",
-    "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
-    "install_msg": "Thanks for installing.",
+    "author": ["SickProdigy"],
+    "description": "Configure and automatically post RSS and Atom feeds to Discord channels.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores server RSS feed URLs, channel destinations, templates, and delivery settings. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Use `[p]rss add <name> <channel> <url>` to add a feed, then `[p]help RSS` to view configuration and template commands.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links"],
-    "requirements": ["bs4", "feedparser>=6.0.0", "webcolors==1.3", "filetype"],
-    "short": "Read RSS feeds.",
-    "tags": ["rss"]
+    "name": "RSS",
+    "requirements": ["beautifulsoup4", "feedparser>=6.0.0", "webcolors==1.3", "filetype"],
+    "short": "Post RSS and Atom feed updates",
+    "tags": ["rss", "atom", "feeds", "news", "notifications"],
+    "type": "COG",
+    "version": "2.2.0"
 }

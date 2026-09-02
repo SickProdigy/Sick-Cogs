@@ -25,7 +25,8 @@ from .quiet_template import QuietTemplate
 from .rss_feed import RssFeed
 from .tag_type import INTERNAL_TAGS, VALID_IMAGES, TagType
 
-log = logging.getLogger("red.aikaterna.rss")
+# Originally based on aikaterna-cogs RSS; maintained here by SickProdigy.
+log = logging.getLogger("red.Sick-Cogs.RSS")
 
 
 IPV4_RE = re.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}")
@@ -33,7 +34,11 @@ IPV6_RE = re.compile("([a-f0-9:]+:+)+[a-f0-9]+")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
-__version__ = "2.1.8"
+__version__ = "2.2.0"
+RSS_USER_AGENT = (
+    f"Sick-Cogs-RSS/{__version__} "
+    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/rss)"
+)
 
 warnings.filterwarnings(
     "ignore",
@@ -64,7 +69,7 @@ class RSS(commands.Cog):
 
         self._read_feeds_loop = None
 
-        self._headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"}
+        self._headers = {"User-Agent": RSS_USER_AGENT}
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete"""

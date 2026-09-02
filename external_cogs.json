@@ -28,13 +28,6 @@
     "target_path": "reminder"
   },
   {
-    "name": "rss",
-    "repo": "https://github.com/aikaterna/aikaterna-cogs.git",
-    "branch": "v3",
-    "source_path": "rss",
-    "target_path": "rss"
-  },
-  {
     "name": "welcome",
     "repo": "https://github.com/TrustyJAID/Trusty-cogs.git",
     "branch": "master",
