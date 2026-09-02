@@ -31,6 +31,7 @@ class WalletAdminCommands:
         deployment_id = await self.config.deployment_id()
         application_id = self.discord_application_id()
         pairing = await self.companion_pairing_status()
+        cdp = await self.wallet_provider.readiness()
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
@@ -41,8 +42,23 @@ class WalletAdminCommands:
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"
             f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
             "Mainnet: `disabled`"
         )
+
+    @walletset.command(name="cdpstatus")
+    @commands.is_owner()
+    async def walletset_cdp_status(self, ctx: commands.Context):
+        """Show CDP readiness without displaying credential values."""
+        readiness = await self.wallet_provider.readiness()
+        if readiness["configured"]:
+            await ctx.send(
+                "CDP credentials are configured in server-side shared API tokens. "
+                "Network calls remain disabled until the provider integration is implemented."
+            )
+            return
+        missing = ", ".join(readiness["missing"])
+        await ctx.send(f"CDP is not configured. Missing secret-store fields: `{missing}`.")
 
     @walletset.command(name="pair")
     @commands.is_owner()

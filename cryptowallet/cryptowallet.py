@@ -9,6 +9,7 @@ from .commands import WalletCommands
 from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
 from .pairing import CompanionPairingMixin
+from .providers import CdpWalletProvider
 from .sessions import ApprovalSessionMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -28,6 +29,7 @@ class CryptoWallet(
         self.bot = bot
         self.config = create_config(self)
         self.pairing_lock = asyncio.Lock()
+        self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)
 
     async def initialize(self):
