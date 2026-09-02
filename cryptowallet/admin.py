@@ -32,6 +32,7 @@ class WalletAdminCommands:
         application_id = self.discord_application_id()
         pairing = await self.companion_pairing_status()
         cdp = await self.wallet_provider.readiness()
+        jwt_auth = await self.jwt_public_status()
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
@@ -43,6 +44,7 @@ class WalletAdminCommands:
             f"Discord application: `{application_id or 'unavailable'}`\n"
             f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
             f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
+            f"Custom authentication: `{'configured' if jwt_auth['configured'] else 'not configured'}`\n"
             "Mainnet: `disabled`"
         )
 
@@ -54,11 +56,31 @@ class WalletAdminCommands:
         if readiness["configured"]:
             await ctx.send(
                 "CDP credentials are configured in server-side shared API tokens. "
-                "Network calls remain disabled until the provider integration is implemented."
+                "Automatic Base Sepolia provisioning and balance lookup are enabled."
             )
             return
         missing = ", ".join(readiness["missing"])
         await ctx.send(f"CDP is not configured. Missing secret-store fields: `{missing}`.")
+
+    @walletset.command(name="jwtstatus")
+    @commands.is_owner()
+    async def walletset_jwt_status(self, ctx: commands.Context):
+        """Show the public CDP custom-auth configuration."""
+        status = await self.jwt_public_status()
+        if not status["configured"]:
+            await ctx.send(
+                "Custom authentication is incomplete. Configure the companion URL and CDP "
+                "project ID, then reload the cog to initialize its signing key."
+            )
+            return
+        await ctx.send(
+            "**CDP custom authentication**\n"
+            f"Issuer: `{status['issuer']}`\n"
+            f"Audience: `{status['audience']}`\n"
+            f"JWKS URL: `{status['jwks_url']}`\n"
+            f"Key ID: `{status['kid']}`\n"
+            "Algorithm: `ES256`"
+        )
 
     @walletset.command(name="pair")
     @commands.is_owner()

@@ -1,6 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
+from ..jwt_auth import JWT_TOKEN_NAMESPACE
 from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfile
 from ..networks import BASE_SEPOLIA
 from ..validation import normalize_evm_address
@@ -49,18 +50,20 @@ class CdpWalletProvider(WalletProvider):
 
     async def credentials(self) -> CdpCredentials | None:
         tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
-        return CdpCredentials.from_tokens(tokens)
+        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
+        combined = dict(tokens)
+        combined["jwt_kid"] = jwt_tokens.get("kid")
+        return CdpCredentials.from_tokens(combined)
 
     async def readiness(self) -> dict:
         tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
-        required = (
-            "project_id",
-            "api_key_id",
-            "api_key_secret",
-            "wallet_secret",
-            "jwt_kid",
-        )
+        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
+        tokens = dict(tokens)
+        tokens["jwt_kid"] = jwt_tokens.get("kid")
+        required = ("project_id", "api_key_id", "api_key_secret", "wallet_secret")
         missing = [key for key in required if not str(tokens.get(key) or "").strip()]
+        if not str(tokens.get("jwt_kid") or "").strip():
+            missing.append("generated_jwt_key")
         return {"configured": not missing, "missing": missing}
 
     @staticmethod
