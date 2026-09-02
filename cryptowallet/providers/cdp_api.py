@@ -74,10 +74,10 @@ def _api_jwt(credentials: CdpApiCredentials, method: str, path: str) -> str:
     claims = {
         "sub": credentials.api_key_id,
         "iss": "cdp",
-        "aud": None,
+        "aud": ["cdp_service"],
         "nbf": now,
         "exp": now + 120,
-        "uris": [f"{method} {CDP_API_HOST}{full_path}"],
+        "uri": f"{method} {CDP_API_HOST}{full_path}",
     }
     headers = {
         "alg": algorithm,
@@ -176,7 +176,17 @@ class CdpApiClient:
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                     raise CdpApiError("CDP returned an invalid JSON response.") from exc
                 if response.status < 200 or response.status >= 300:
-                    raise CdpApiError(f"CDP returned HTTP {response.status}.")
+                    error_type = ""
+                    correlation_id = ""
+                    if isinstance(payload, dict):
+                        error_type = str(payload.get("errorType") or "").strip()
+                        correlation_id = str(payload.get("correlationId") or "").strip()
+                    details = [f"HTTP {response.status}"]
+                    if error_type:
+                        details.append(error_type)
+                    if correlation_id:
+                        details.append(f"correlation {correlation_id}")
+                    raise CdpApiError(f"CDP returned {'; '.join(details)}.")
                 if not isinstance(payload, dict):
                     raise CdpApiError("CDP returned an unexpected response shape.")
                 return payload

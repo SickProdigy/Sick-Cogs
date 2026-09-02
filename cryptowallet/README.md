@@ -256,12 +256,7 @@ companion pairing credential for any field above.
 1. Create or select the CDP project and record its project ID.
 2. Create a **Secret API Key** for that project and save its ID and secret.
 3. Generate the project's **Wallet Secret** and save it separately.
-4. Configure the companion HTTPS URL and reload the cog. CryptoWallet generates its signing key.
-5. Deploy `web/api/jwks.php`, then run `[p]walletset jwtstatus` to obtain the HTTPS JWKS URL,
-   expected issuer, audience, and generated key ID.
-6. Configure that JWKS URL, issuer, audience, and default
-   `sub` user identifier under the project's CDP custom-auth settings.
-7. As the Red bot owner, run `[p]set api`, set the service to `cryptowallet_cdp`, and enter:
+4. As the Red bot owner, run `[p]set api`, set the service to `cryptowallet_cdp`, and enter:
 
    ```text
    project_id YOUR_PROJECT_ID
@@ -270,7 +265,12 @@ companion pairing credential for any field above.
    wallet_secret YOUR_WALLET_SECRET
    ```
 
-8. Run `[p]walletset cdpstatus`, then test `[p]wallet` using Base Sepolia only.
+5. Reload the cog so CryptoWallet initializes its server-only JWT identity key.
+6. Run `[p]walletset cdpstatus`, then test `[p]wallet` using Base Sepolia only.
+
+The companion website and CDP custom-auth/JWKS configuration are not required to provision and
+display a wallet address. Configure those later when implementing protected claim, recovery,
+export, or transaction-approval flows.
 
 `[p]walletset jwtstatus` displays only public configuration. It never displays the JWT private
 key. The issuer is the configured companion URL, the audience is the CDP project ID, and tokens
