@@ -1,0 +1,227 @@
+import base64
+import hashlib
+import json
+import secrets
+import time
+import uuid
+from dataclasses import dataclass
+from urllib.parse import quote, urlencode
+
+import aiohttp
+import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+
+
+CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform"
+CDP_API_HOST = "api.cdp.coinbase.com"
+REQUEST_TIMEOUT_SECONDS = 15
+MAX_RESPONSE_BYTES = 1024 * 1024
+
+
+class CdpApiError(RuntimeError):
+    """Raised when the direct CDP API client cannot complete a request."""
+
+
+@dataclass(frozen=True, slots=True)
+class CdpApiCredentials:
+    api_key_id: str
+    api_key_secret: str
+    wallet_secret: str
+
+
+def _load_api_private_key(secret: str):
+    normalized = secret.replace("\\n", "\n")
+    try:
+        key = serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            return key, "ES256"
+    except (TypeError, ValueError):
+        pass
+    try:
+        decoded = base64.b64decode(normalized, validate=True)
+        if len(decoded) == 64:
+            return ed25519.Ed25519PrivateKey.from_private_bytes(decoded[:32]), "EdDSA"
+    except (TypeError, ValueError):
+        pass
+    raise CdpApiError("The CDP API key secret is not a supported EC or Ed25519 key.")
+
+
+def _load_wallet_private_key(secret: str):
+    try:
+        key = serialization.load_der_private_key(
+            base64.b64decode(secret, validate=True), password=None
+        )
+    except (TypeError, ValueError) as exc:
+        raise CdpApiError("The CDP wallet secret is not a valid DER private key.") from exc
+    if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
+        key.curve, ec.SECP256R1
+    ):
+        raise CdpApiError("The CDP wallet secret must contain a P-256 EC private key.")
+    return key
+
+
+def _request_path(path: str) -> str:
+    if not path.startswith("/") or "?" in path:
+        raise CdpApiError("CDP request paths must be absolute and omit query strings.")
+    return f"/platform{path}"
+
+
+def _api_jwt(credentials: CdpApiCredentials, method: str, path: str) -> str:
+    private_key, algorithm = _load_api_private_key(credentials.api_key_secret)
+    now = int(time.time())
+    full_path = _request_path(path)
+    claims = {
+        "sub": credentials.api_key_id,
+        "iss": "cdp",
+        "aud": None,
+        "nbf": now,
+        "exp": now + 120,
+        "uris": [f"{method} {CDP_API_HOST}{full_path}"],
+    }
+    headers = {
+        "alg": algorithm,
+        "kid": credentials.api_key_id,
+        "typ": "JWT",
+        "nonce": "".join(str(secrets.randbelow(10)) for _ in range(16)),
+    }
+    try:
+        return jwt.encode(claims, private_key, algorithm=algorithm, headers=headers)
+    except Exception as exc:
+        raise CdpApiError("The CDP API authentication token could not be signed.") from exc
+
+
+def _wallet_jwt(credentials: CdpApiCredentials, method: str, path: str, body: dict) -> str:
+    now = int(time.time())
+    claims = {
+        "uris": [f"{method} {CDP_API_HOST}{_request_path(path)}"],
+        "iat": now,
+        "nbf": now,
+        "jti": str(uuid.uuid4()),
+    }
+    if body:
+        encoded = json.dumps(body, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        claims["reqHash"] = hashlib.sha256(encoded).hexdigest()
+    try:
+        return jwt.encode(
+            claims,
+            _load_wallet_private_key(credentials.wallet_secret),
+            algorithm="ES256",
+            headers={"typ": "JWT"},
+        )
+    except CdpApiError:
+        raise
+    except Exception as exc:
+        raise CdpApiError("The CDP wallet authentication token could not be signed.") from exc
+
+
+class CdpApiClient:
+    """Minimal CDP v2 client compatible with Red's existing aiohttp version."""
+
+    def __init__(
+        self,
+        credentials: CdpApiCredentials,
+        *,
+        base_url: str = CDP_API_BASE_URL,
+        session: aiohttp.ClientSession | None = None,
+    ):
+        self.credentials = credentials
+        self.base_url = base_url.rstrip("/")
+        self.session = session
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict | None = None,
+        query: dict[str, str | int] | None = None,
+        wallet_auth: bool = False,
+        idempotency_key: str | None = None,
+    ) -> dict:
+        method = method.upper()
+        request_body = body or {}
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {_api_jwt(self.credentials, method, path)}",
+            "User-Agent": "Sick-Cogs-CryptoWallet/0.14",
+        }
+        if wallet_auth:
+            headers["X-Wallet-Auth"] = _wallet_jwt(
+                self.credentials, method, path, request_body
+            )
+        if idempotency_key:
+            headers["X-Idempotency-Key"] = idempotency_key
+        url = f"{self.base_url}{path}"
+        if query:
+            url = f"{url}?{urlencode(query)}"
+        timeout = aiohttp.ClientTimeout(total=REQUEST_TIMEOUT_SECONDS)
+        owned_session = self.session is None
+        session = self.session or aiohttp.ClientSession(timeout=timeout)
+        try:
+            async with session.request(
+                method,
+                url,
+                headers=headers,
+                json=request_body if body is not None else None,
+            ) as response:
+                raw = bytearray()
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    raw.extend(chunk)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise CdpApiError("CDP returned an oversized response.")
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise CdpApiError("CDP returned an invalid JSON response.") from exc
+                if response.status < 200 or response.status >= 300:
+                    raise CdpApiError(f"CDP returned HTTP {response.status}.")
+                if not isinstance(payload, dict):
+                    raise CdpApiError("CDP returned an unexpected response shape.")
+                return payload
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise CdpApiError("CDP could not be reached.") from exc
+        finally:
+            if owned_session:
+                await session.close()
+
+    async def create_end_user(
+        self, profile_id: str, jwt_kid: str, idempotency_key: str
+    ) -> dict:
+        body = {
+            "userId": profile_id,
+            "authenticationMethods": [{"type": "jwt", "kid": jwt_kid, "sub": profile_id}],
+            "evmAccount": {
+                "createSmartAccount": True,
+                "enableSpendPermissions": False,
+            },
+        }
+        return await self._request(
+            "POST",
+            "/v2/end-users",
+            body=body,
+            wallet_auth=True,
+            idempotency_key=idempotency_key,
+        )
+
+    async def validate_access_token(self, access_token: str) -> dict:
+        return await self._request(
+            "POST",
+            "/v2/end-users/auth/validate-token",
+            body={"accessToken": access_token},
+        )
+
+    async def list_token_balances(
+        self,
+        address: str,
+        network: str,
+        *,
+        page_size: int,
+        page_token: str | None = None,
+    ) -> dict:
+        path = f"/v2/evm/token-balances/{quote(network, safe='')}/{quote(address, safe='')}"
+        query: dict[str, str | int] = {"pageSize": page_size}
+        if page_token:
+            query["pageToken"] = page_token
+        return await self._request("GET", path, query=query)
