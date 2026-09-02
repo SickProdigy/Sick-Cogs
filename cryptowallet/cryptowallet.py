@@ -8,6 +8,7 @@ from .admin import WalletAdminCommands
 from .commands import WalletCommands
 from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
+from .jwt_auth import JwtAuthMixin
 from .pairing import CompanionPairingMixin
 from .providers import CdpWalletProvider
 from .provisioning import WalletProvisioningMixin
@@ -23,6 +24,7 @@ class CryptoWallet(
     ApprovalSessionMixin,
     CompanionPairingMixin,
     WalletProvisioningMixin,
+    JwtAuthMixin,
     commands.Cog,
 ):
     """Manage public smart-wallet information through a secure companion service."""
@@ -39,6 +41,10 @@ class CryptoWallet(
         """Restore the loopback companion only when explicitly enabled."""
         if not await self.config.deployment_id():
             await self.config.deployment_id.set(secrets.token_urlsafe(24))
+        try:
+            await self.initialize_jwt_auth()
+        except Exception:
+            log.exception("The CryptoWallet custom-auth signing key could not be initialized")
         if await self.config.companion_enabled():
             try:
                 await self.companion.start(

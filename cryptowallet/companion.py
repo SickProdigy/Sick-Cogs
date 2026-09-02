@@ -76,6 +76,8 @@ class CompanionServer:
         app.router.add_get("/session/{token}", self.begin_session)
         app.router.add_get("/oauth/callback", self.oauth_callback)
         app.router.add_get("/api/v1/session", self.api_session)
+        app.router.add_post("/api/v1/auth/token", self.api_auth_token)
+        app.router.add_get("/api/v1/jwks", self.api_jwks)
         app.router.add_post("/api/v1/pair", self.api_pair)
         app.router.add_get("/api/v1/server/status", self.api_server_status)
         self.runner = web.AppRunner(app, access_log=None)
@@ -172,6 +174,48 @@ class CompanionServer:
             )
         payload = await self.cog.companion_session_payload(session)
         return web.json_response({"data": payload}, headers=SECURITY_HEADERS)
+
+    async def api_auth_token(self, request: web.Request) -> web.Response:
+        """Issue a short-lived CDP custom-auth token to a verified browser session."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
+        browser_token = request.cookies.get(BROWSER_COOKIE, "")
+        session = await self.cog.resolve_browser_session(browser_token)
+        if session is None:
+            return api_error(
+                "session_unavailable",
+                "The wallet session is missing, invalid, or expired.",
+                status=401,
+            )
+        profile = await self.cog.config.user_from_id(session.discord_user_id).profile()
+        if profile is None:
+            return api_error("profile_unavailable", "The wallet profile is unavailable.", status=409)
+        try:
+            token, expires_at = await self.cog.create_cdp_auth_token(session, profile)
+        except RuntimeError:
+            return api_error(
+                "authentication_unavailable",
+                "Wallet authentication is not configured or the session is invalid.",
+                status=503,
+            )
+        return web.json_response(
+            {"data": {"token": token, "expires_at": expires_at}}, headers=SECURITY_HEADERS
+        )
+
+    async def api_jwks(self, request: web.Request) -> web.Response:
+        """Return the public custom-auth key through an authenticated website proxy."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
+        jwks = await self.cog.jwt_jwks()
+        if jwks is None:
+            return api_error(
+                "authentication_unavailable",
+                "Wallet authentication is not configured.",
+                status=503,
+            )
+        return web.json_response(jwks, headers=SECURITY_HEADERS)
 
     async def api_pair(self, request: web.Request) -> web.Response:
         """Exchange a short-lived owner code for website-server credentials once."""
