@@ -74,16 +74,15 @@ The packaged browser assets live in [`web/`](web/) and are intended to be publis
 https://sickgaming.net/cryptowallet
 ```
 
-The cog remains the authoritative backend. The separately hosted companion website uses the assets
-under `web/` and is the only public listener. The cog opens an authenticated outbound WebSocket to
-the website-side broker, so the bot host does not need an inbound port. The website and cog remain
-two components; the broker is part of the website deployment, not a third companion service.
+The cog provides the authoritative backend through its `aiohttp` listener in `companion.py`. The
+separately hosted companion website uses the assets under `web/` and communicates with that cog
+backend. The website and cog are two components; there is no separate companion service.
 
-The earlier loopback `aiohttp` listener remains temporarily while browser routes are migrated. Do
-not expose it publicly or build new deployment assumptions around it. New deployments use the
-standalone broker under `web/broker/`, one-time website-generated pairing, durable credentials,
-reconnection with backoff, heartbeats, replay protection, and one active cog connection per
-installation.
+The listener currently defaults to loopback, which only works when the reverse proxy and bot share
+a host. SickGaming runs its website and bot on different servers, so the listener must not be made
+public merely to connect them. The next milestone is an authenticated private/restricted
+website-server-to-cog connection with one-time pairing, durable credential rotation, and
+revocation.
 
 Static files can be served by the companion, the SickGaming web server, or a future MyBB plugin. Static files cannot safely contain or replace server-side functionality for:
 
@@ -189,8 +188,6 @@ Owner commands:
 [p]walletset paircancel
 [p]walletset pairstatus
 [p]walletset unpair
-[p]walletset brokerpair
-[p]walletset brokerstatus
 [p]walletset companion start [port]
 [p]walletset companion stop
 ```
@@ -232,9 +229,6 @@ Completed:
     and provisioned address all agree.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
-28. Standalone website WebSocket broker with website-generated one-time pairing, durable
-    installation credentials, replay-safe authentication, bounded messages, heartbeats, and
-    single-connection enforcement.
 
 ### CDP and custom-auth configuration
 
@@ -315,9 +309,8 @@ cryptowallet/
 ├── provisioning.py       # Idempotent automatic wallet provisioning
 ├── jwt_auth.py           # ES256 key lifecycle, JWKS, and custom-auth JWTs
 ├── sessions.py           # One-time state and replay prevention
-├── pairing.py            # Installation credentials and request authentication
-├── transport.py          # Authenticated outbound website WebSocket client
-├── companion.py          # Legacy HTTP routes during broker migration
+├── pairing.py            # Website-server pairing and credential lifecycle
+├── companion.py          # HTTP routes, OAuth, and listener lifecycle
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface
@@ -335,8 +328,7 @@ cryptowallet/
 │   ├── package-lock.json
 │   ├── src/              # Auditable browser SDK integration source
 │   ├── api/              # Signed session/JWT/claim proxies and public JWKS endpoint
-│   ├── server/           # Legacy PHP bridge during broker migration
-│   └── broker/           # Website WebSocket broker and deployment instructions
+│   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
 └── info.json
 ```
 
@@ -346,20 +338,17 @@ Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci && npm run buil
 `cryptowallet/web/` whenever the pinned frontend dependencies or `src/cdp-wallet.js` change.
 Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy `node_modules/`.
 
-1. Deploy the website broker and proxy its loopback HTTP/WebSocket routes through HTTPS.
-2. Pair the cog outbound and migrate OAuth, session, JWKS, token, and claim operations to the
-   broker protocol.
-3. Add exact-origin enforcement, payload encryption, request correlation, acknowledgement,
-   expiry, and bounded durable routing queues.
-4. Test reconnection, replay rejection, rotation, unpairing, and the complete Base Sepolia claim.
-5. Add the exact website origin to CDP's allowlist and configure custom authentication.
-6. Convert verified identity into recovery and account-security operations.
-7. Connect unsigned intents to explicit browser signing.
-8. Add optional, policy-limited bot delegation and independent revocation.
-9. Verify key export, signer replacement, recovery, and migration away from CDP.
-10. Test expired/replayed links, wrong-user OAuth, compromised Discord, provider outages, lost
+1. Deploy the claim assets and add the exact website origin to CDP's domain allowlist.
+2. Test custom-auth configuration and the complete Base Sepolia claim path end to end.
+3. Adapt the backend connection for the SickGaming private/restricted two-server deployment.
+4. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing.
+5. Convert verified identity into recovery and account-security operations.
+6. Connect unsigned intents to explicit browser signing.
+7. Add optional, policy-limited bot delegation and independent revocation.
+8. Verify key export, signer replacement, recovery, and migration away from CDP.
+9. Test expired/replayed links, wrong-user OAuth, compromised Discord, provider outages, lost
    factors, linked identities, signing-key failure, and mismatched CDP users/addresses.
-11. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
+10. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
 
 ## Security boundary
 
