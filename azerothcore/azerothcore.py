@@ -1,6 +1,7 @@
 import asyncio
 import errno
 import html
+import re
 import secrets
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -39,6 +40,12 @@ DEFAULT_SOAP_ENVELOPE_TEMPLATE = (
 )
 DEFAULT_INFO_COMMAND = "server info"
 DEFAULT_ONLINE_COMMAND = "account onlinelist"
+DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES = ["RNDBOT"]
+ONLINE_PROBE_COMMANDS = (
+    DEFAULT_ONLINE_COMMAND,
+    f".{DEFAULT_ONLINE_COMMAND}",
+    DEFAULT_INFO_COMMAND,
+)
 DEFAULT_BANNER_FILENAME = "wow-status-banner.png"
 DEFAULT_BANNER_PATH = Path(__file__).parent / "assets" / DEFAULT_BANNER_FILENAME
 
@@ -62,6 +69,7 @@ class AzerothCore(commands.Cog):
             soap_create_command_template="account create {username} {password}",
             soap_info_command_template=DEFAULT_INFO_COMMAND,
             soap_online_command_template=DEFAULT_ONLINE_COMMAND,
+            playerbot_account_prefixes=DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES,
             request_timeout=20,
         )
         self.config.register_guild(allowed_roles=[])
@@ -163,7 +171,7 @@ class AzerothCore(commands.Cog):
     def _missing_soap_url_message(ctx: commands.Context) -> str:
         return (
             "SOAP URL has not been configured yet. Set it with "
-            f"`{ctx.clean_prefix}ac set soap_url <ip:port>`."
+            f"`{ctx.clean_prefix}azerothcore set soap_url <ip:port>`."
         )
 
     @staticmethod
@@ -249,7 +257,7 @@ class AzerothCore(commands.Cog):
 
         soap_url = await self._configured_soap_url()
         if not soap_url:
-            return None, "SOAP URL has not been configured. Use `ac set soap_url` to set it."
+            return None, "SOAP URL has not been configured. Use `azerothcore set soap_url` to set it."
 
         envelope_template = await self._configured_envelope_template()
         body = envelope_template.format(command=html.escape(command, quote=True))
@@ -413,6 +421,27 @@ class AzerothCore(commands.Cog):
             if not ln:
                 continue
 
+            bracket_cells = re.findall(r"\[([^\]]+)\]", ln)
+            if bracket_cells:
+                cells = [cell.strip() for cell in bracket_cells]
+                lowered_cells = [cell.lower().strip(":") for cell in cells]
+                if any(cell in {"account", "character", "ip", "map", "zone", "exp", "gmlev"} for cell in lowered_cells):
+                    continue
+                if len(cells) >= 7:
+                    players.append(
+                        {
+                            "raw": ln,
+                            "account": cells[0],
+                            "name": cells[1],
+                            "ip": cells[2],
+                            "map": cells[3],
+                            "zone": cells[4],
+                            "expansion": cells[5],
+                            "gm_level": cells[6],
+                        }
+                    )
+                    continue
+
             player: Dict[str, Any] = {"raw": ln}
 
             # Pattern: Name: Alice  Level: 60  Class: Mage  Zone: Stormwind
@@ -499,6 +528,25 @@ class AzerothCore(commands.Cog):
             if not ln:
                 continue
 
+            bracket_cells = re.findall(r"\[([^\]]+)\]", ln)
+            if bracket_cells:
+                cells = [cell.strip() for cell in bracket_cells]
+                lowered_cells = [cell.lower().strip(":") for cell in cells]
+                if any(cell in ignored_cells for cell in lowered_cells):
+                    for index, cell in enumerate(lowered_cells):
+                        if cell in {"username", "user", "name", "account"}:
+                            table_name_index = index
+                            break
+                    continue
+
+                if table_name_index is not None and table_name_index < len(cells):
+                    add_account(cells[table_name_index])
+                    continue
+
+                if cells:
+                    add_account(cells[0])
+                    continue
+
             lowered = ln.lower()
             if lowered.startswith("azerothcore"):
                 continue
@@ -558,6 +606,55 @@ class AzerothCore(commands.Cog):
 
         return accounts
 
+    @classmethod
+    def _online_response_hint(cls, text: Optional[str]) -> Optional[str]:
+        lowered = (text or "").lower()
+        if "low security" in lowered or "not have permission" in lowered:
+            return (
+                f"`{DEFAULT_ONLINE_COMMAND}` is responding, but the SOAP account does not have enough "
+                "AzerothCore command security/RBAC permission to run it."
+            )
+        if "command" in lowered and ("not exist" in lowered or "unknown" in lowered):
+            return "The configured online command was not recognized by AzerothCore."
+        return None
+
+    @staticmethod
+    def _is_empty_online_response(text: Optional[str]) -> bool:
+        lowered = (text or "").strip().lower()
+        return bool(re.search(r"\bno\b.*\bonline\b.*\b(players?|accounts?|characters?)\b", lowered))
+
+    def _summarize_online_probe_result(
+        self, command: str, output: Optional[str], error: Optional[str]
+    ) -> str:
+        text = (output or "").strip()
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+
+        if error:
+            status = f"SOAP error: {error}"
+        else:
+            accounts = [] if self._is_default_online_summary_command(command) else self._parse_online_accounts(text)
+            players = self._parse_players(text)
+            summary = self._format_online_from_server_info(text)
+            hint = self._online_response_hint(text)
+
+            if accounts:
+                status = f"Parsed {len(accounts)} account name{'s' if len(accounts) != 1 else ''}."
+            elif players:
+                status = f"Parsed {len(players)} player row{'s' if len(players) != 1 else ''}."
+            elif self._is_empty_online_response(text):
+                status = "Command worked and reported no online players."
+            elif summary:
+                status = "Returned server counts, but no account or character names."
+            elif hint:
+                status = hint
+            else:
+                status = "No account names, player rows, or server counts were recognized."
+
+        snippet = "\n".join(lines[:8]) if lines else "No output."
+        if len(snippet) > 900:
+            snippet = f"{snippet[:897]}..."
+        return f"`{command}`\n{status}\n{box(snippet, lang='text')}"
+
     @staticmethod
     def _is_default_online_summary_command(command: str) -> bool:
         return command.strip().lower().lstrip(".") == DEFAULT_INFO_COMMAND
@@ -599,6 +696,58 @@ class AzerothCore(commands.Cog):
         member_roles = {role.id for role in ctx.author.roles}
         return any(role_id in member_roles for role_id in allowed_role_ids)
 
+    @staticmethod
+    def _clean_role_input(role_input: str) -> str:
+        return role_input.strip().strip("*`_~ ,")
+
+    @staticmethod
+    def _inline_role_input(role_input: str) -> str:
+        return f"`{role_input.replace('`', '').strip()}`"
+
+    def _resolve_role_input(self, ctx: commands.Context, role_input: str) -> Optional[discord.Role]:
+        if ctx.guild is None:
+            return None
+
+        cleaned = self._clean_role_input(role_input)
+        if not cleaned:
+            return None
+
+        role_id: Optional[int] = None
+        mention_match = re.fullmatch(r"<@&(\d+)>", cleaned)
+        if mention_match:
+            role_id = int(mention_match.group(1))
+        elif cleaned.isdigit():
+            role_id = int(cleaned)
+
+        if role_id is not None:
+            return ctx.guild.get_role(role_id)
+
+        role_name = cleaned.lstrip("@").casefold()
+        for role in ctx.guild.roles:
+            if role.name.casefold() == role_name:
+                return role
+
+        return None
+
+    def _resolve_role_inputs(
+        self, ctx: commands.Context, role_inputs: Tuple[str, ...]
+    ) -> Tuple[List[discord.Role], List[str]]:
+        roles: List[discord.Role] = []
+        missing: List[str] = []
+        seen = set()
+
+        for role_input in role_inputs:
+            role = self._resolve_role_input(ctx, role_input)
+            if role is None:
+                missing.append(role_input)
+                continue
+            if role.id in seen:
+                continue
+            seen.add(role.id)
+            roles.append(role)
+
+        return roles, missing
+
     def _can_embed(self, ctx: commands.Context) -> bool:
         channel = ctx.channel
         if hasattr(channel, "permissions_for") and ctx.me is not None:
@@ -633,17 +782,181 @@ class AzerothCore(commands.Cog):
     async def _server_display_name(self) -> str:
         return await self.config.server_name() or "World of Warcraft"
 
+    async def _configured_playerbot_prefixes(self) -> List[str]:
+        prefixes = await self.config.playerbot_account_prefixes()
+        if not isinstance(prefixes, list):
+            await self.config.playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
+            return list(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
+
+        cleaned = []
+        for prefix in prefixes:
+            if not isinstance(prefix, str):
+                continue
+            prefix = prefix.strip()
+            if prefix and prefix.casefold() not in {item.casefold() for item in cleaned}:
+                cleaned.append(prefix)
+        return cleaned
+
+    @staticmethod
+    def _is_playerbot_account(account: Optional[str], prefixes: List[str]) -> bool:
+        if not account:
+            return False
+        account_name = account.casefold()
+        return any(account_name.startswith(prefix.casefold()) for prefix in prefixes if prefix)
+
+    def _is_playerbot_record(self, record: Dict[str, Any], prefixes: List[str]) -> bool:
+        account = record.get("account") or record.get("name")
+        return self._is_playerbot_account(str(account), prefixes)
+
+    @staticmethod
+    def _format_online_record(record: Dict[str, Any]) -> str:
+        name = str(record.get("name") or record.get("account") or record.get("raw") or "").strip()
+        account = str(record.get("account") or "").strip()
+        if account and name and account.casefold() != name.casefold():
+            return f"{name} ({account})"
+        return name or account or str(record.get("raw") or "").strip()
+
+    @staticmethod
+    def _format_character_name(record: Dict[str, Any]) -> str:
+        return str(record.get("name") or record.get("account") or record.get("raw") or "").strip()
+
+    async def _send_online_entries(
+        self,
+        ctx: commands.Context,
+        *,
+        server_name: str,
+        field_name: str,
+        header: str,
+        entries: List[str],
+        footer: Optional[str] = None,
+        title_name: Optional[str] = None,
+    ) -> None:
+        embed_title = title_name or field_name
+        embed = discord.Embed(title=f"{server_name} {embed_title}", color=await ctx.embed_color())
+        await self._decorate_server_embed(embed, with_banner=True)
+
+        if self._can_embed(ctx):
+            pages = list(pagify("\n".join(entries), delims=["\n"], page_length=900))
+            if len(pages) == 1:
+                value = f"{header}\n{pages[0]}" if header else pages[0]
+                if footer:
+                    value = f"{value}\n\n{footer}"
+                embed.add_field(name=field_name, value=value, inline=False)
+                await self._send_embed(ctx, embed, with_banner=True)
+                return
+
+            field_header = header or "See below."
+            if footer:
+                field_header = f"{field_header}\n\n{footer}"
+            embed.add_field(name=field_name, value=field_header, inline=False)
+            await self._send_embed(ctx, embed, with_banner=True)
+            for page in pages:
+                await ctx.send(page)
+            return
+
+        lines = [server_name, field_name]
+        if header:
+            lines.append(header)
+        lines.extend(entries)
+        if footer:
+            lines.extend(["", footer])
+        await ctx.send("\n".join(lines))
+
+    async def _fetch_online_output(self) -> Tuple[str, Optional[str], str, Optional[str]]:
+        cmd_template = await self._configured_online_command_template()
+        cmd = self._render_template(cmd_template)
+        fallback_notice = None
+
+        if self._is_default_online_summary_command(cmd):
+            out, error = await self._soap_execute(DEFAULT_ONLINE_COMMAND)
+            used_command = DEFAULT_ONLINE_COMMAND
+            if error:
+                fallback_notice = (
+                    "Could not get the online account list, so showing server counts instead.\n"
+                    f"{error}"
+                )
+                out, error = await self._soap_execute(cmd)
+                used_command = cmd
+        else:
+            out, error = await self._soap_execute(cmd)
+            used_command = cmd
+
+        return out or "", error, used_command, fallback_notice
+
+    async def _resolve_member_input(
+        self, ctx: commands.Context, member_input: str
+    ) -> Optional[discord.Member]:
+        try:
+            return await commands.MemberConverter().convert(ctx, member_input)
+        except commands.BadArgument:
+            return None
+
+    async def _parse_account_create_details(
+        self, ctx: commands.Context, details: Tuple[str, ...]
+    ) -> Tuple[Optional[str], Optional[discord.Member], Optional[str]]:
+        if not details:
+            return None, ctx.author, None
+
+        remaining = list(details)
+        target = await self._resolve_member_input(ctx, remaining[-1])
+        if target is not None:
+            remaining.pop()
+        else:
+            target = ctx.author
+
+        if len(remaining) > 1:
+            return (
+                None,
+                None,
+                "Usage: `azerothcore createuser <username> [email] [@member]` or `azerothcore accountcreate <username> [email] [@member]`.",
+            )
+
+        email = remaining[0] if remaining else None
+        return email, target, None
+
+    async def _send_account_welcome_dm(
+        self,
+        recipient: discord.Member,
+        *,
+        username: str,
+        password: str,
+        email: Optional[str],
+    ) -> None:
+        server_name = await self._server_display_name()
+        realmlist = await self.config.realmlist()
+
+        embed = discord.Embed(
+            title=f"Welcome to {server_name}",
+            description="Your game account is ready. Keep these login details private.",
+            color=discord.Color.gold(),
+        )
+        embed.add_field(name="Username", value=f"`{username}`", inline=True)
+        embed.add_field(name="Password", value=f"`{password}`", inline=True)
+        if email:
+            embed.add_field(name="Email", value=f"`{email}`", inline=False)
+        if realmlist:
+            embed.add_field(name="Realmlist", value=f"`{realmlist}`", inline=False)
+        embed.add_field(
+            name="Next Steps",
+            value="Log in with the username and password above, then change your password if the server supports it.",
+            inline=False,
+        )
+
+        file = self._server_banner_file()
+        if file:
+            embed.set_image(url=f"attachment://{DEFAULT_BANNER_FILENAME}")
+            await recipient.send(embed=embed, file=file)
+        else:
+            await recipient.send(embed=embed)
+
     async def _decorate_server_embed(self, embed: discord.Embed, *, with_banner: bool = False) -> None:
-        configured_description = await self.config.info_description()
         configured_realmlist = await self.config.realmlist()
-        if configured_description:
-            embed.description = str(configured_description)[:1900]
         if configured_realmlist:
-            embed.add_field(name="Realmlist", value=str(configured_realmlist), inline=False)
+            embed.set_footer(text=f"Realmlist: {configured_realmlist}")
         if with_banner and DEFAULT_BANNER_PATH.exists():
             embed.set_image(url=f"attachment://{DEFAULT_BANNER_FILENAME}")
 
-    @commands.group(name="ac", aliases=("azerothcore",), invoke_without_command=True)
+    @commands.group(name="azerothcore", aliases=("ac", "wow"), invoke_without_command=True)
     async def ac(self, ctx: commands.Context):
         """AzerothCore server commands."""
 
@@ -717,124 +1030,200 @@ class AzerothCore(commands.Cog):
 
     @ac.command(name="online")
     async def ac_online(self, ctx: commands.Context):
-        """Show the characters currently online."""
+        """Show the non-playerbot characters currently online."""
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
             return await ctx.send(self._missing_soap_url_message(ctx))
 
-        cmd_template = await self._configured_online_command_template()
-        cmd = self._render_template(cmd_template)
-        fallback_notice = None
-
-        if self._is_default_online_summary_command(cmd):
-            out, error = await self._soap_execute(DEFAULT_ONLINE_COMMAND)
-            used_command = DEFAULT_ONLINE_COMMAND
-            if error:
-                fallback_notice = (
-                    "Could not get the online account list, so showing server counts instead.\n"
-                    f"{error}"
-                )
-                out, error = await self._soap_execute(cmd)
-                used_command = cmd
-        else:
-            out, error = await self._soap_execute(cmd)
-            used_command = cmd
-
+        out, error, used_command, fallback_notice = await self._fetch_online_output()
         if error:
             return await ctx.send(error)
 
+        prefixes = await self._configured_playerbot_prefixes()
+        players = self._parse_players(out)
+        if players:
+            visible_players = [player for player in players if not self._is_playerbot_record(player, prefixes)]
+            playerbot_count = len(players) - len(visible_players)
+            bot_footer = f"Playerbots Online: {playerbot_count}" if playerbot_count else None
+            if visible_players:
+                entries = [self._format_character_name(player) for player in visible_players]
+                return await self._send_online_entries(
+                    ctx,
+                    server_name=server_name,
+                    field_name=f"Online Players: {len(entries)}",
+                    header="",
+                    entries=entries,
+                    footer=bot_footer,
+                    title_name="Online List",
+                )
+
+            message = "No real players are online."
+            if playerbot_count:
+                message += f"\n\nPlayerbots Online: {playerbot_count}"
+            return await self._send_embed_or_text(
+                ctx,
+                discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color()).add_field(
+                    name="Online Players: 0",
+                    value=message,
+                    inline=False,
+                ),
+                f"{server_name}\nOnline Players\n{message}",
+                with_banner=True,
+            )
+
         accounts = [] if self._is_default_online_summary_command(used_command) else self._parse_online_accounts(out)
         if accounts:
-            header = f"Currently online: {len(accounts)} account{'s' if len(accounts) != 1 else ''}"
-            if fallback_notice:
-                header = f"{header}\n\n{fallback_notice}"
-            embed = discord.Embed(title=server_name, color=await ctx.embed_color())
-            await self._decorate_server_embed(embed, with_banner=True)
+            visible_accounts = [account for account in accounts if not self._is_playerbot_account(account, prefixes)]
+            playerbot_count = len(accounts) - len(visible_accounts)
+            bot_footer = f"Playerbots Online: {playerbot_count}" if playerbot_count else None
+            if visible_accounts:
+                header = ""
+                if fallback_notice:
+                    header = fallback_notice
+                return await self._send_online_entries(
+                    ctx,
+                    server_name=server_name,
+                    field_name=f"Online Players: {len(visible_accounts)}",
+                    header=header,
+                    entries=visible_accounts,
+                    footer=bot_footer,
+                    title_name="Online List",
+                )
 
-            if self._can_embed(ctx):
-                pages = list(pagify("\n".join(accounts), delims=["\n"], page_length=900))
-                if len(pages) == 1:
-                    embed.add_field(name="Online Players", value=f"{header}\n{pages[0]}", inline=False)
-                    await self._send_embed(ctx, embed, with_banner=True)
-                    return
-
-                embed.add_field(name="Online Players", value=header, inline=False)
-                await self._send_embed(ctx, embed, with_banner=True)
-                for page in pages:
-                    await ctx.send(page)
-                return
-
-            await ctx.send(f"{server_name}\nOnline Players\n{header}\n" + "\n".join(accounts))
-            return
+            message = "No real player accounts are online."
+            if playerbot_count:
+                message += f"\n\nPlayerbots Online: {playerbot_count}"
+            return await self._send_embed_or_text(
+                ctx,
+                discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color()).add_field(
+                    name="Online Players: 0",
+                    value=message,
+                    inline=False,
+                ),
+                f"{server_name}\nOnline Players\n{message}",
+                with_banner=True,
+            )
 
         summary = self._format_online_from_server_info(out)
         if summary:
             if fallback_notice:
                 summary = f"{summary}\n\n{fallback_notice}"
-            embed = discord.Embed(title=server_name, color=await ctx.embed_color())
+            embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
             await self._decorate_server_embed(embed, with_banner=True)
             embed.add_field(name="Online Players", value=summary, inline=False)
             await self._send_embed_or_text(ctx, embed, f"{server_name}\nOnline Players\n{summary}", with_banner=True)
             return
 
-        players = self._parse_players(out)
-        if not players:
-            if self._is_default_online_list_command(cmd):
-                summary_out, summary_error = await self._soap_execute(DEFAULT_INFO_COMMAND)
-                summary = self._format_online_from_server_info(summary_out)
-                if summary and not summary_error:
-                    message = "No account names were returned, so showing server counts instead.\n\n" f"{summary}"
-                    embed = discord.Embed(title=server_name, color=await ctx.embed_color())
-                    await self._decorate_server_embed(embed, with_banner=True)
-                    embed.add_field(name="Online Players", value=message, inline=False)
-                    await self._send_embed_or_text(
-                        ctx,
-                        embed,
-                        f"{server_name}\nOnline Players\n{message}",
-                        with_banner=True,
-                    )
-                    return
-            return await ctx.send("No online player information returned.")
-
-        formatted = []
-        for p in players:
-            if "name" in p:
-                details: List[str] = []
-                if p.get("level") is not None:
-                    details.append(f"lvl {p['level']}")
-                if p.get("class"):
-                    details.append(str(p.get("class")))
-                if p.get("zone"):
-                    details.append(str(p.get("zone")))
-                if details:
-                    formatted.append(f"{p['name']} ({', '.join(details)})")
-                else:
-                    formatted.append(p["name"])
-            else:
-                formatted.append(p.get("raw", ""))
-
-        header = f"Currently online: {len(formatted)} player{'s' if len(formatted) != 1 else ''}"
-        embed = discord.Embed(title=server_name, color=await ctx.embed_color())
-        await self._decorate_server_embed(embed, with_banner=True)
-
-        if self._can_embed(ctx):
-            pages = list(pagify("\n".join(formatted), delims=["\n"], page_length=900))
-            if len(pages) == 1:
-                embed.add_field(name="Online Players", value=f"{header}\n{pages[0]}", inline=False)
-                await self._send_embed(ctx, embed, with_banner=True)
-                return
-
-            embed.add_field(name="Online Players", value=header, inline=False)
-            await self._send_embed(ctx, embed, with_banner=True)
-            for page in pages:
-                await ctx.send(page)
+        if self._is_empty_online_response(out):
+            embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
+            await self._decorate_server_embed(embed, with_banner=True)
+            embed.add_field(name="Online Players: 0", value="No online players.", inline=False)
+            await self._send_embed_or_text(
+                ctx,
+                embed,
+                f"{server_name}\nOnline Players\nNo online players.",
+                with_banner=True,
+            )
             return
 
-        await ctx.send(f"{server_name}\nOnline Players\n{header}\n" + "\n".join(formatted))
+        if self._is_default_online_list_command(used_command):
+            summary_out, summary_error = await self._soap_execute(DEFAULT_INFO_COMMAND)
+            summary = self._format_online_from_server_info(summary_out)
+            if summary and not summary_error:
+                hint = self._online_response_hint(out)
+                message = "No account names were returned, so showing server counts instead."
+                if hint:
+                    message += f"\n\n{hint}"
+                message += f"\n\n{summary}"
+                embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
+                await self._decorate_server_embed(embed, with_banner=True)
+                embed.add_field(name="Online Players", value=message, inline=False)
+                await self._send_embed_or_text(
+                    ctx,
+                    embed,
+                    f"{server_name}\nOnline Players\n{message}",
+                    with_banner=True,
+                )
+                return
 
-    @ac.command(name="check")
+        await ctx.send("No online player information returned.")
+
+    @ac.command(name="playerbots")
+    async def ac_playerbots(self, ctx: commands.Context):
+        """Show online playerbot characters filtered by configured account prefixes."""
+        server_name = await self._server_display_name()
+        if not await self.config.use_soap():
+            return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
+
+        out, error, used_command, fallback_notice = await self._fetch_online_output()
+        if error:
+            return await ctx.send(error)
+
+        prefixes = await self._configured_playerbot_prefixes()
+        if not prefixes:
+            return await ctx.send("Playerbot account prefixes are disabled. Configure them with `azerothcore set playerbotprefix <prefix...>`.")
+
+        players = self._parse_players(out)
+        if players:
+            playerbots = [player for player in players if self._is_playerbot_record(player, prefixes)]
+            if playerbots:
+                entries = [self._format_online_record(player) for player in playerbots]
+                header = f"Currently online: {len(entries)} playerbot{'s' if len(entries) != 1 else ''}"
+                return await self._send_online_entries(
+                    ctx,
+                    server_name=server_name,
+                    field_name="Online Playerbots",
+                    header=header,
+                    entries=entries,
+                )
+
+            return await ctx.send("No configured playerbot accounts are online.")
+
+        accounts = [] if self._is_default_online_summary_command(used_command) else self._parse_online_accounts(out)
+        playerbot_accounts = [account for account in accounts if self._is_playerbot_account(account, prefixes)]
+        if playerbot_accounts:
+            header = f"Currently online: {len(playerbot_accounts)} playerbot account{'s' if len(playerbot_accounts) != 1 else ''}"
+            if fallback_notice:
+                header = f"{header}\n\n{fallback_notice}"
+            return await self._send_online_entries(
+                ctx,
+                server_name=server_name,
+                field_name="Online Playerbots",
+                header=header,
+                entries=playerbot_accounts,
+            )
+
+        if self._is_empty_online_response(out):
+            return await ctx.send("No online playerbots.")
+
+        await ctx.send("No configured playerbot accounts were found in the online output.")
+
+    @ac.command(name="onlineprobe")
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def ac_onlineprobe(self, ctx: commands.Context, *, command: Optional[str] = None):
+        """Probe SOAP online-list commands and show parse/security results."""
+
+        if not await self.config.use_soap():
+            return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
+        if not await self._configured_soap_url():
+            return await ctx.send(self._missing_soap_url_message(ctx))
+
+        commands_to_probe = (command.strip(),) if command and command.strip() else ONLINE_PROBE_COMMANDS
+        results = []
+        async with ctx.typing():
+            for probe_command in commands_to_probe:
+                out, error = await self._soap_execute(probe_command)
+                results.append(self._summarize_online_probe_result(probe_command, out, error))
+
+        for page in pagify("\n\n".join(results), delims=["\n\n"], page_length=1800):
+            await ctx.send(page)
+
+    @ac.command(name="soapcheck", aliases=("check",))
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def ac_check(self, ctx: commands.Context):
@@ -880,15 +1269,20 @@ class AzerothCore(commands.Cog):
 
         await ctx.send(
             f"TCP check passed for {self._redact_url(soap_url)}. "
-            "This only confirms the port is open; `ac info` or `ac online` still verifies the SOAP request."
+            "This only confirms the port is open; `azerothcore info` or `azerothcore online` still verifies the SOAP request."
         )
 
     @ac.command(name="raw")
     @commands.guild_only()
-    @commands.admin_or_permissions(manage_guild=True)
     async def ac_raw(self, ctx: commands.Context, *, command: str):
-        """Run a raw SOAP console command and show the response."""
+        """Run a raw SOAP console command and show the response.
 
+        Restricted to server owners, server admins/managers, and roles
+        configured with `azerothcore set accountcreationrole`.
+        """
+
+        if not await self._can_create_accounts(ctx):
+            return await ctx.send("You do not have permission to run raw AzerothCore commands.")
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
         if not await self._configured_soap_url():
@@ -902,13 +1296,27 @@ class AzerothCore(commands.Cog):
         for page in pagify(response, delims=["\n"], page_length=1800):
             await ctx.send(box(page, lang="text"))
 
-    @ac.command(name="createuser", aliases=("createaccount",))
+    @ac.command(name="createuser", aliases=("createaccount", "accountcreate"))
     @commands.guild_only()
-    async def ac_createuser(self, ctx: commands.Context, username: str, email: Optional[str] = None):
-        """Create a new game account through the configured API bridge."""
+    async def ac_createuser(self, ctx: commands.Context, username: str, *details: str):
+        """Create a game account through SOAP and DM the credentials.
+
+        Restricted to server owners, server admins/managers, and roles
+        configured with `azerothcore set accountcreationrole`.
+
+        If a Discord member is provided as the final argument, the bot DMs
+        that member. Otherwise, it DMs the command author.
+        """
 
         if not await self._can_create_accounts(ctx):
             return await ctx.send("You do not have permission to create accounts.")
+
+        email, target, parse_error = await self._parse_account_create_details(ctx, details)
+        if parse_error:
+            return await ctx.send(parse_error)
+        if target is None:
+            return await ctx.send("I could not find that Discord member.")
+
         # Use SOAP to create account
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
@@ -923,18 +1331,24 @@ class AzerothCore(commands.Cog):
             return await ctx.send(error)
 
         lower_out = (out or "").lower()
-        if "created" in lower_out or "success" in lower_out or "account" in (out or ""):
+        if ("created" in lower_out or "success" in lower_out) and "already" not in lower_out:
             try:
-                await ctx.author.send(
-                    "Your AzerothCore account was created.\n"
-                    f"Username: {username}\n"
-                    f"Password: {password}\n"
-                )
-                await ctx.send("Account created. I sent the login details to you in DMs.")
-            except discord.Forbidden:
-                await ctx.send(
-                    "Account created, but I could not DM you the password. Please enable DMs and try again if needed."
-                )
+                await self._send_account_welcome_dm(target, username=username, password=password, email=email)
+            except (discord.Forbidden, discord.HTTPException):
+                if target.id == ctx.author.id:
+                    await ctx.send(
+                        "Account created, but I could not DM you the password. Please enable DMs and try again if needed."
+                    )
+                else:
+                    await ctx.send(
+                        f"Account created for {target.mention}, but I could not DM them the login details. "
+                        "Ask them to enable DMs, then create a new password if needed."
+                    )
+            else:
+                if target.id == ctx.author.id:
+                    await ctx.send("Account created. I sent the login details to you in DMs.")
+                else:
+                    await ctx.send(f"Account created for {target.mention}. I sent the login details to them in DMs.")
             return
 
         # Helpful hints
@@ -960,25 +1374,28 @@ class AzerothCore(commands.Cog):
         message = (
             "**AzerothCore Module Settings (SOAP-only)**\n\n"
             "**Basics**\n"
-            "- `ac set soap_url <ip:port>`\n"
-            "- `ac set soap_auth <user> <pass>`\n"
-            "- `ac set view`\n"
-            "- `ac check`\n\n"
+            "- `azerothcore set soap_url <ip:port>`\n"
+            "- `azerothcore set soap_auth <user> <pass>`\n"
+            "- `azerothcore set view`\n"
+            "- `azerothcore soapcheck`\n\n"
             "**Display**\n"
-            "- `ac set servername <name>`\n"
-            "- `ac set realmlist <text>`\n"
-            "- `ac set infodescription <text>`\n\n"
+            "- `azerothcore set servername <name>`\n"
+            "- `azerothcore set realmlist <text>`\n"
+            "- `azerothcore set infodescription <text>`\n\n"
             "**Account Creation Roles**\n"
-            "- `ac set accountcreationrole <role...>`\n"
-            "- `ac set roleremove <role...>`\n"
-            "- `ac set rolelist`\n\n"
+            "- `azerothcore set accountcreationrole <role...>`\n"
+            "- `azerothcore set roleremove <role...>`\n"
+            "- `azerothcore set rolelist`\n\n"
             "**Advanced**\n"
-            "- `ac set timeout <seconds>`\n"
-            "- `ac set onlinecommand <command>`\n"
-            "- `ac set infocommand <command>`\n"
-            "- `ac set createcommand <command>`\n"
-            "- `ac raw <command>`\n\n"
-            "Example: `ac set soap_url 192.168.1.1:7878`"
+            "- `azerothcore set timeout <seconds>`\n"
+            "- `azerothcore set onlinecommand <command>`\n"
+            "- `azerothcore set playerbotprefix <prefix...>`\n"
+            "- `azerothcore set infocommand <command>`\n"
+            "- `azerothcore set createcommand <command>`\n"
+            "- `azerothcore raw <command>`\n"
+            "- `azerothcore playerbots`\n"
+            "- `azerothcore onlineprobe [command]`\n\n"
+            "Example: `azerothcore set soap_url 192.168.1.1:7878`"
         )
         await ctx.send(message)
 
@@ -988,7 +1405,7 @@ class AzerothCore(commands.Cog):
     async def acset_baseurl(self, ctx: commands.Context, base_url: str):
         """Legacy bridge setting. Use soap_url instead."""
 
-        await ctx.send("Base URL is managed by SOAP-only configuration. Use `ac set soap_url`.")
+        await ctx.send("Base URL is managed by SOAP-only configuration. Use `azerothcore set soap_url`.")
 
     @acset.command(name="servername")
     @commands.guild_only()
@@ -1038,7 +1455,7 @@ class AzerothCore(commands.Cog):
     async def acset_token(self, ctx: commands.Context, token: Optional[str] = None):
         """Legacy bridge setting. Use soap_auth instead."""
 
-        await ctx.send("Token is not used in SOAP-only mode. Use `ac set soap_auth` to configure SOAP credentials.")
+        await ctx.send("Token is not used in SOAP-only mode. Use `azerothcore set soap_auth` to configure SOAP credentials.")
 
     @acset.command(name="statuspath", hidden=True)
     @commands.guild_only()
@@ -1083,27 +1500,50 @@ class AzerothCore(commands.Cog):
     @acset.command(name="accountcreationrole", aliases=("roleadd",))
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
-    async def acset_accountcreationrole(self, ctx: commands.Context, *roles: discord.Role):
-        """Allow the provided roles to create accounts."""
+    async def acset_accountcreationrole(self, ctx: commands.Context, *role_inputs: str):
+        """Allow roles to create accounts and run restricted account tools.
+
+        Roles can be provided as mentions, IDs, or exact names.
+        """
+
+        if not role_inputs:
+            return await ctx.send("You need to provide at least one role.")
+
+        roles, missing = self._resolve_role_inputs(ctx, role_inputs)
+        if missing:
+            missing_roles = humanize_list([self._inline_role_input(role_input) for role_input in missing])
+            return await ctx.send(
+                f"I could not find {missing_roles}. Use a role mention, role ID, or exact role name."
+            )
 
         if not roles:
-            return await ctx.send("You need to provide at least one role.")
+            return await ctx.send("I could not find any matching roles.")
 
         async with self.config.guild(ctx.guild).allowed_roles() as allowed_roles:
             for role in roles:
                 if role.id not in allowed_roles:
                     allowed_roles.append(role.id)
 
-        await ctx.send(f"Allowed roles updated: {humanize_list(role.mention for role in roles)}")
+        await ctx.send(f"Allowed roles updated: {humanize_list([role.mention for role in roles])}")
 
     @acset.command(name="roleremove")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
-    async def acset_roleremove(self, ctx: commands.Context, *roles: discord.Role):
+    async def acset_roleremove(self, ctx: commands.Context, *role_inputs: str):
         """Remove roles from the account-creation allowlist."""
 
-        if not roles:
+        if not role_inputs:
             return await ctx.send("You need to provide at least one role.")
+
+        roles, missing = self._resolve_role_inputs(ctx, role_inputs)
+        if missing:
+            missing_roles = humanize_list([self._inline_role_input(role_input) for role_input in missing])
+            return await ctx.send(
+                f"I could not find {missing_roles}. Use a role mention, role ID, or exact role name."
+            )
+
+        if not roles:
+            return await ctx.send("I could not find any matching roles.")
 
         removed: List[discord.Role] = []
         async with self.config.guild(ctx.guild).allowed_roles() as allowed_roles:
@@ -1113,7 +1553,7 @@ class AzerothCore(commands.Cog):
                     removed.append(role)
 
         if removed:
-            await ctx.send(f"Removed: {humanize_list(role.mention for role in removed)}")
+            await ctx.send(f"Removed: {humanize_list([role.mention for role in removed])}")
         else:
             await ctx.send("None of the provided roles were on the allowlist.")
 
@@ -1129,6 +1569,8 @@ class AzerothCore(commands.Cog):
 
         role_mentions = []
         for role_id in allowed_roles:
+            if not isinstance(role_id, int):
+                continue
             role = ctx.guild.get_role(role_id)
             if role is not None:
                 role_mentions.append(role.mention)
@@ -1194,7 +1636,7 @@ class AzerothCore(commands.Cog):
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_onlinecommand(self, ctx: commands.Context, *, command: Optional[str] = None):
-        """Set, show, or reset the SOAP command used by ac online."""
+        """Set, show, or reset the SOAP command used by azerothcore online."""
 
         if command is None:
             current = await self.config.soap_online_command_template()
@@ -1206,11 +1648,45 @@ class AzerothCore(commands.Cog):
         await self.config.soap_online_command_template.set(command)
         await ctx.send(f"SOAP online command set to `{command}`.")
 
+    @acset.command(name="playerbotprefix", aliases=("playerbotprefixes",))
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def acset_playerbotprefix(self, ctx: commands.Context, *prefixes: str):
+        """Set account prefixes used to identify playerbots in online output."""
+
+        if not prefixes:
+            current = await self._configured_playerbot_prefixes()
+            value = humanize_list([f"`{prefix}`" for prefix in current]) if current else "disabled"
+            return await ctx.send(f"Playerbot account prefixes are currently {value}.")
+
+        action = prefixes[0].casefold()
+        if len(prefixes) == 1 and action == "reset":
+            await self.config.playerbot_account_prefixes.set(DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES)
+            return await ctx.send(
+                "Playerbot account prefixes reset to "
+                f"{humanize_list([f'`{prefix}`' for prefix in DEFAULT_PLAYERBOT_ACCOUNT_PREFIXES])}."
+            )
+        if len(prefixes) == 1 and action in {"clear", "disable", "off", "none"}:
+            await self.config.playerbot_account_prefixes.set([])
+            return await ctx.send("Playerbot account prefix filtering disabled.")
+
+        cleaned = []
+        for prefix in prefixes:
+            prefix = prefix.strip()
+            if prefix and prefix.casefold() not in {item.casefold() for item in cleaned}:
+                cleaned.append(prefix)
+
+        if not cleaned:
+            return await ctx.send("You need to provide at least one non-empty prefix.")
+
+        await self.config.playerbot_account_prefixes.set(cleaned)
+        await ctx.send(f"Playerbot account prefixes set to {humanize_list([f'`{prefix}`' for prefix in cleaned])}.")
+
     @acset.command(name="infocommand")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_infocommand(self, ctx: commands.Context, *, command: Optional[str] = None):
-        """Set, show, or reset the SOAP command used by ac info."""
+        """Set, show, or reset the SOAP command used by azerothcore info."""
 
         if command is None:
             current = await self.config.soap_info_command_template()
@@ -1226,7 +1702,7 @@ class AzerothCore(commands.Cog):
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_createcommand(self, ctx: commands.Context, *, command: Optional[str] = None):
-        """Set, show, or reset the SOAP command template used by ac createuser."""
+        """Set, show, or reset the SOAP command template used by azerothcore createuser."""
 
         if command is None:
             current = await self.config.soap_create_command_template()
@@ -1253,6 +1729,7 @@ class AzerothCore(commands.Cog):
         soap_envelope = await self._configured_envelope_template()
         soap_create = await self.config.soap_create_command_template()
         soap_online = await self.config.soap_online_command_template()
+        playerbot_prefixes = await self._configured_playerbot_prefixes()
         request_timeout = await self.config.request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
 
@@ -1265,9 +1742,16 @@ class AzerothCore(commands.Cog):
         embed.add_field(name="Info Description", value=info_description or "Not set", inline=False)
         embed.add_field(name="SOAP Create Cmd", value=box(soap_create, lang=""), inline=False)
         embed.add_field(name="SOAP Online Cmd", value=box(soap_online, lang=""), inline=False)
+        embed.add_field(
+            name="Playerbot Prefixes",
+            value=humanize_list([f"`{prefix}`" for prefix in playerbot_prefixes]) if playerbot_prefixes else "Disabled",
+            inline=False,
+        )
 
         role_mentions = []
         for role_id in allowed_roles:
+            if not isinstance(role_id, int):
+                continue
             role = ctx.guild.get_role(role_id)
             if role is not None:
                 role_mentions.append(role.mention)
