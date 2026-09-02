@@ -1,0 +1,168 @@
+import secrets
+import time
+
+import discord
+from redbot.core import commands
+
+from .models import ApprovalPurpose, TransactionIntent
+from .networks import BASE_SEPOLIA, NETWORKS
+from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
+
+INTENT_LIFETIME_SECONDS = 15 * 60
+
+
+class WalletCommands:
+    """User-facing wallet commands."""
+
+    @commands.group(name="wallet", aliases=("cryptowallet",), invoke_without_command=True)
+    async def wallet(self, ctx: commands.Context):
+        """Show your wallet profile and prototype status."""
+        profile = await self.config.user(ctx.author).profile()
+        embed = discord.Embed(title="Crypto Wallet", color=await ctx.embed_color())
+        embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
+        if profile is None:
+            embed.description = (
+                "No wallet has been provisioned yet. Automatic CDP provisioning is the "
+                "next implementation milestone."
+            )
+        else:
+            embed.description = "Your public wallet profile is linked."
+            for account in (profile.get("accounts") or [])[:5]:
+                address = str(account.get("address") or "Unavailable")
+                account_type = str(account.get("account_type") or "unknown")
+                embed.add_field(
+                    name=account_type.replace("_", " ").title(),
+                    value=f"`{address}`",
+                    inline=False,
+                )
+        embed.set_footer(text="Prototype only — do not use with real funds")
+        await ctx.send(embed=embed)
+
+    @wallet.command(name="networks")
+    async def wallet_networks(self, ctx: commands.Context):
+        """List networks enabled for this prototype."""
+        lines = [
+            f"- **{network.name}** — chain ID `{network.chain_id}` "
+            f"({network.native_symbol}, testnet)"
+            for network in NETWORKS.values()
+        ]
+        await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
+
+    @wallet.command(name="claim")
+    async def wallet_claim(self, ctx: commands.Context):
+        """Claim and configure control of an automatically provisioned wallet."""
+        profile = await self.config.user(ctx.author).profile()
+        if profile is None:
+            await ctx.send(
+                "No wallet has been provisioned yet. Automatic CDP provisioning is the "
+                "next implementation milestone."
+            )
+            return
+        approval_base_url = await self.config.approval_base_url()
+        if not approval_base_url or not self.companion.running:
+            await ctx.send(
+                "Wallet claiming is unavailable until the account-control companion is running."
+            )
+            return
+        if await self.discord_oauth_config() is None:
+            await ctx.send("Discord OAuth credentials are not configured for the companion.")
+            return
+        token = await self.create_approval_session(ctx.author.id, ApprovalPurpose.CLAIM)
+        await ctx.send(
+            f"Open this single-use wallet claim link within 10 minutes:\n"
+            f"<{approval_base_url}/session/{token}>\n"
+            "It currently verifies Discord ownership only; it does not expose or export keys."
+        )
+
+    @staticmethod
+    def _account_for_network(profile: dict, network_key: str) -> dict | None:
+        for account in profile.get("accounts") or []:
+            if account.get("network") == network_key:
+                return account
+        return None
+
+    @staticmethod
+    def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
+        embed = discord.Embed(title="Wallet transaction intent", color=color)
+        embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
+        embed.add_field(name="Network", value=f"{network.name} (`{network.chain_id}`)", inline=True)
+        embed.add_field(
+            name="Amount",
+            value=f"{format_wei_as_eth(intent.value_wei)} {network.native_symbol}",
+            inline=True,
+        )
+        embed.add_field(name="From", value=f"`{intent.from_address}`", inline=False)
+        embed.add_field(name="To", value=f"`{intent.to_address}`", inline=False)
+        embed.add_field(name="Intent ID", value=f"`{intent.intent_id}`", inline=False)
+        embed.add_field(name="Expires", value=f"<t:{intent.expires_at}:R>", inline=True)
+        if intent.transaction_hash:
+            embed.add_field(
+                name="Transaction",
+                value=(
+                    f"[{intent.transaction_hash}]"
+                    f"({network.explorer_url}/tx/{intent.transaction_hash})"
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="Unsigned testnet intent — no transaction has been sent")
+        return embed
+
+    @wallet.command(name="send")
+    async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
+        """Prepare an unsigned Base Sepolia ETH transfer intent."""
+        profile = await self.config.user(ctx.author).profile()
+        if profile is None:
+            await ctx.send("Link or enroll a wallet before creating a transaction intent.")
+            return
+        network = NETWORKS.get(await self.config.default_network())
+        if network is None or not network.testnet:
+            await ctx.send("Transaction intents are restricted to an enabled test network.")
+            return
+        account = self._account_for_network(profile, network.key)
+        if account is None:
+            await ctx.send(f"Your wallet profile has no account for {network.name}.")
+            return
+        try:
+            from_address = normalize_evm_address(str(account.get("address") or ""))
+            recipient = normalize_evm_address(to_address)
+            value_wei = parse_eth_to_wei(amount)
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
+        now = int(time.time())
+        intent = TransactionIntent(
+            intent_id=secrets.token_urlsafe(12),
+            profile_id=str(profile.get("profile_id") or ""),
+            network=network.key,
+            from_address=from_address,
+            to_address=recipient,
+            value_wei=value_wei,
+            created_at=now,
+            expires_at=now + INTENT_LIFETIME_SECONDS,
+        )
+        if not intent.profile_id:
+            await ctx.send("Your wallet profile is incomplete and must be linked again.")
+            return
+        async with self.config.user(ctx.author).intents() as intents:
+            intents[intent.intent_id] = intent.to_dict()
+        await self.expire_and_trim_intents(ctx.author)
+        await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()))
+
+    @wallet.command(name="transaction", aliases=("intent", "tx"))
+    async def wallet_transaction(self, ctx: commands.Context, intent_id: str):
+        """Show one of your transaction intents by ID."""
+        intents = await self.expire_and_trim_intents(ctx.author)
+        data = intents.get(intent_id.strip())
+        if data is None:
+            await ctx.send("No transaction intent with that ID belongs to your wallet profile.")
+            return
+        try:
+            intent = TransactionIntent.from_dict(data)
+        except (KeyError, TypeError, ValueError):
+            await ctx.send("That stored transaction intent is invalid and cannot be displayed.")
+            return
+        network = NETWORKS.get(intent.network)
+        if network is None:
+            await ctx.send("That transaction intent references an unsupported network.")
+            return
+        await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()))
