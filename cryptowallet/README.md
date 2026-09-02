@@ -190,7 +190,9 @@ Owner commands:
 [p]walletset companion stop
 ```
 
-`wallet claim` currently verifies Discord identity but does not yet claim, export, or provision a CDP wallet.
+The first `wallet`, `wallet claim`, or `wallet send` command provisions the user's CDP end
+user and Base Sepolia smart account if no stored profile exists. `wallet claim` currently verifies
+Discord identity but does not yet grant account control, recovery, or export access.
 
 ## Current implementation status
 
@@ -211,24 +213,27 @@ Completed:
 13. PHP CLI pairing and status tools with server-only, atomic credential storage.
 14. Signed PHP session proxy requiring paired-server authentication plus the user browser session.
 15. Server-only CDP credential loading and readiness reporting without exposing secret values.
+16. Idempotent, deployment-scoped CDP end-user and Base Sepolia smart-account provisioning.
+17. Per-user concurrency control and public profile persistence after successful provisioning.
 
 ### CDP configuration boundary
 
 The provider reads its credentials from Red's shared API-token namespace
-`cryptowallet_cdp`. The required fields are `project_id`, `api_key_id`, `api_key_secret`, and
-`wallet_secret`. Provision them only through Red's approved hidden/server-side secret mechanism;
-there is intentionally no Discord command that accepts or displays these values.
+`cryptowallet_cdp`. The required fields are `project_id`, `api_key_id`, `api_key_secret`,
+`wallet_secret`, and `jwt_kid`. The key ID identifies the developer-JWT key configured for
+CDP custom authentication; the private JWT signing key is a separate future configuration and is
+not part of this checkpoint. Provision all secrets only through Red's approved
+hidden/server-side secret mechanism; there is intentionally no Discord command that accepts or
+displays these values.
 
 `[p]walletset cdpstatus` reports only whether configuration is complete and the names of any
-missing fields. It does not test Coinbase connectivity yet. Provider network operations remain
-disabled until the authenticated CDP client and Base Sepolia provisioning flow are implemented.
+missing fields. Provisioning uses Coinbase's official Python SDK, deterministic idempotency keys,
+and spend permissions disabled. It stores only the resulting CDP user ID and public smart-account
+address.
 
 Not implemented:
 
-- CDP provider calls
-- automatic wallet provisioning
 - custom-auth JWT and JWKS support
-- smart-account creation
 - balance lookup
 - wallet claiming, recovery, or export
 - blockchain signing or broadcasting
@@ -247,6 +252,7 @@ cryptowallet/
 ├── models.py             # Profiles, accounts, intents, and approval sessions
 ├── networks.py           # Supported chain metadata
 ├── validation.py         # Address and amount validation
+├── provisioning.py       # Idempotent automatic wallet provisioning
 ├── sessions.py           # One-time state and replay prevention
 ├── pairing.py            # Website-server pairing and credential lifecycle
 ├── companion.py          # HTTP routes, OAuth, and listener lifecycle
@@ -273,15 +279,14 @@ cryptowallet/
 3. Add signed proxies for each future recovery, security, and approval operation.
 4. Integrate private setup/status controls with MyBB administration if desired.
 5. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing end to end.
-6. Implement authenticated CDP client calls and automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
-7. Display the address and balance through Discord.
-8. Convert identity verification into wallet claiming, recovery, and account security.
-9. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
-10. Connect unsigned intents to explicit browser signing.
-11. Add optional, policy-limited bot delegation and independent revocation.
-12. Verify key export, signer replacement, recovery, and migration away from CDP.
-13. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
-14. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+6. Display the address and Base Sepolia balance through Discord.
+7. Convert identity verification into wallet claiming, recovery, and account security.
+8. Add custom-auth JWT signing and JWKS publication using stable wallet-profile subjects.
+9. Connect unsigned intents to explicit browser signing.
+10. Add optional, policy-limited bot delegation and independent revocation.
+11. Verify key export, signer replacement, recovery, and migration away from CDP.
+12. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
+13. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
 
 ## Security boundary
 

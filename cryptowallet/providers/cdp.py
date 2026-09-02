@@ -1,6 +1,9 @@
+import uuid
 from dataclasses import dataclass
 
-from ..models import TransactionIntent, WalletProfile
+from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfile
+from ..networks import BASE_SEPOLIA
+from ..validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
 
 
@@ -15,12 +18,19 @@ class CdpCredentials:
     api_key_id: str
     api_key_secret: str
     wallet_secret: str
+    jwt_kid: str
 
     @classmethod
     def from_tokens(cls, tokens: dict[str, str]) -> "CdpCredentials | None":
         values = {
             key: str(tokens.get(key) or "").strip()
-            for key in ("project_id", "api_key_id", "api_key_secret", "wallet_secret")
+            for key in (
+                "project_id",
+                "api_key_id",
+                "api_key_secret",
+                "wallet_secret",
+                "jwt_kid",
+            )
         }
         if not all(values.values()):
             return None
@@ -28,7 +38,7 @@ class CdpCredentials:
 
 
 class CdpWalletProvider(WalletProvider):
-    """CDP provider boundary; network operations are added only after credential testing."""
+    """CDP provider boundary for end-user smart wallets."""
 
     name = "cdp"
 
@@ -41,18 +51,103 @@ class CdpWalletProvider(WalletProvider):
 
     async def readiness(self) -> dict:
         tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
-        required = ("project_id", "api_key_id", "api_key_secret", "wallet_secret")
+        required = (
+            "project_id",
+            "api_key_id",
+            "api_key_secret",
+            "wallet_secret",
+            "jwt_kid",
+        )
         missing = [key for key in required if not str(tokens.get(key) or "").strip()]
         return {"configured": not missing, "missing": missing}
 
     @staticmethod
-    def _not_connected() -> WalletProviderError:
-        return WalletProviderError(
-            "CDP network operations are not connected yet; Base Sepolia only remains enforced."
+    def _idempotency_key(profile_id: str) -> str:
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:{profile_id}"))
+
+    @staticmethod
+    def _profile_from_end_user(
+        end_user, profile_id: str, discord_user_id: int
+    ) -> WalletProfile:
+        smart_accounts = list(getattr(end_user, "evm_smart_account_objects", None) or [])
+        if not smart_accounts:
+            raise WalletProviderError("CDP did not return the requested EVM smart account.")
+        address = normalize_evm_address(str(smart_accounts[0].address))
+        provider_user_id = str(getattr(end_user, "user_id", "") or "")
+        if not provider_user_id:
+            raise WalletProviderError("CDP did not return an end-user identifier.")
+        return WalletProfile(
+            profile_id=profile_id,
+            discord_user_id=discord_user_id,
+            provider="cdp",
+            provider_user_id=provider_user_id,
+            accounts=[
+                PublicAccount(
+                    address=address,
+                    network=BASE_SEPOLIA.key,
+                    account_type=AccountType.SMART_ACCOUNT,
+                    provider_account_id=address,
+                )
+            ],
         )
 
-    async def create_wallet(self, discord_user_id: int) -> WalletProfile:
-        raise self._not_connected()
+    async def _create_end_user(self, credentials: CdpCredentials, profile_id: str):
+        try:
+            from cdp import CdpClient
+            from cdp.openapi_client.models.authentication_method import AuthenticationMethod
+            from cdp.openapi_client.models.create_end_user_request_evm_account import (
+                CreateEndUserRequestEvmAccount,
+            )
+            from cdp.openapi_client.models.developer_jwt_authentication import (
+                DeveloperJWTAuthentication,
+            )
+        except ImportError as exc:
+            raise WalletProviderError(
+                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
+            ) from exc
+
+        client = CdpClient(
+            api_key_id=credentials.api_key_id,
+            api_key_secret=credentials.api_key_secret,
+            wallet_secret=credentials.wallet_secret,
+        )
+        try:
+            return await client.end_user.create_end_user(
+                authentication_methods=[
+                    AuthenticationMethod(
+                        DeveloperJWTAuthentication(
+                            type="jwt",
+                            kid=credentials.jwt_kid,
+                            sub=profile_id,
+                        )
+                    )
+                ],
+                user_id=profile_id,
+                evm_account=CreateEndUserRequestEvmAccount(create_smart_account=True),
+                idempotency_key=self._idempotency_key(profile_id),
+            )
+        finally:
+            await client.close()
+
+    @staticmethod
+    def _not_connected() -> WalletProviderError:
+        return WalletProviderError(
+            "This CDP operation is not implemented yet; Base Sepolia only remains enforced."
+        )
+
+    async def create_wallet(self, profile_id: str, discord_user_id: int) -> WalletProfile:
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            end_user = await self._create_end_user(credentials, profile_id)
+            return self._profile_from_end_user(end_user, profile_id, discord_user_id)
+        except WalletProviderError:
+            raise
+        except Exception as exc:
+            raise WalletProviderError(
+                "CDP could not provision the Base Sepolia wallet. Try again later."
+            ) from exc
 
     async def get_profile(self, profile_id: str) -> WalletProfile:
         raise self._not_connected()

@@ -7,9 +7,9 @@
   "install_msg": "This cog is an early Base Sepolia prototype. The companion site is for wallet claiming, recovery, security, and exceptional approvals; ordinary wallet provisioning will happen through bot commands. Do not use it with real funds.",
   "min_bot_version": "3.5.0",
   "permissions": ["embed_links"],
-  "requirements": [],
+  "requirements": ["cdp-sdk>=1.48.1,<2.0.0"],
   "short": "Base-first self-custodial smart wallet integration",
   "tags": ["wallet", "crypto", "base", "ethereum", "smart-wallet", "testnet"],
   "type": "COG",
-  "version": "0.9.0"
+  "version": "0.10.0"
 }
