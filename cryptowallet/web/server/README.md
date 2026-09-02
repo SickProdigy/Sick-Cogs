@@ -1,5 +1,50 @@
 # Companion Website Server Setup
 
+## Outbound PHP/MySQL relay (current direction)
+
+The website is the only public listener. The cog polls ordinary PHP endpoints over outbound HTTPS;
+no bot port, tunnel, WebSocket process, or private route is required.
+
+Requirements: PHP 8.1+, PDO MySQL, HTTPS, and a dedicated MySQL database/user. Confirm the target
+web PHP runtime—not only CLI—has `pdo_mysql` enabled.
+
+1. Import `relay-schema.sql` into the dedicated database.
+2. Copy `relay-config.example.php` outside the public document root, rename it, insert the
+   database credentials, and restrict it to the website account.
+3. Copy `relay.php`, `relay-pair-code.php`, `relay-probe.php`, and `relay-cleanup.php`
+   outside the public document root.
+4. Set the PHP environment variables:
+
+   ```text
+   SICKWALLET_RELAY_CONFIG=/absolute/private/path/relay-config.php
+   SICKWALLET_RELAY_LIBRARY=/absolute/private/path/relay.php
+   ```
+
+5. Upload the public files under `web/relay/` to
+   `https://sickgaming.net/cryptowallet/relay/`.
+6. Schedule `php relay-cleanup.php` every five minutes.
+
+Generate a ten-minute pairing code on the website server with:
+
+```bash
+php relay-pair-code.php
+```
+
+Enter it through Red's owner-only `[p]set api` modal using service
+`cryptowallet_relay_pairing` and the line `code YOUR_CODE`, then run
+`[p]walletset relaypair`. Check `[p]walletset relaystatus`.
+
+After pairing, verify the empty transport with:
+
+```bash
+php relay-probe.php INSTALLATION_ID
+```
+
+The database credential and relay library never enter the public document root. The installation
+credential is returned once to the cog over HTTPS and is stored in Red shared API tokens.
+
+## Legacy direct bridge (temporary during route migration)
+
 Deploy this directory outside the public document root. It contains server-only pairing credentials
 and request-signing code; only the static files in the parent `web/` directory are public assets.
 
