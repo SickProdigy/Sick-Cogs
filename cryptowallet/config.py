@@ -25,7 +25,7 @@ def create_config(cog) -> Config:
         paired_at=0,
         companion_nonces={},
     )
-    config.register_user(profile=None, intents={}, approval_sessions={})
+    config.register_user(profile=None, claimed_at=0, intents={}, approval_sessions={})
     return config
 
 

@@ -184,6 +184,54 @@ class CdpWalletProvider(WalletProvider):
         finally:
             await client.close()
 
+    async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:
+        """Validate a browser CDP session against the provisioned profile and account."""
+        if not access_token or len(access_token) > 16_384:
+            raise WalletProviderError("The CDP access token is missing or invalid.")
+        profile_id = str(profile.get("profile_id") or "")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        expected_addresses = {
+            normalize_evm_address(str(account.get("address") or ""))
+            for account in profile.get("accounts") or []
+            if account.get("network") == BASE_SEPOLIA.key
+        }
+        if not profile_id or not provider_user_id or not expected_addresses:
+            raise WalletProviderError("The stored wallet profile is incomplete.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            from cdp import CdpClient
+        except ImportError as exc:
+            raise WalletProviderError(
+                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
+            ) from exc
+
+        client = CdpClient(
+            api_key_id=credentials.api_key_id,
+            api_key_secret=credentials.api_key_secret,
+            wallet_secret=credentials.wallet_secret,
+        )
+        try:
+            end_user = await client.end_user.validate_access_token(access_token=access_token)
+            returned_user_id = str(getattr(end_user, "user_id", "") or "")
+            returned_addresses = {
+                normalize_evm_address(str(account.address))
+                for account in getattr(end_user, "evm_smart_account_objects", None) or []
+            }
+        except Exception as exc:
+            raise WalletProviderError(
+                "CDP rejected the wallet authentication or returned invalid account data."
+            ) from exc
+        finally:
+            await client.close()
+        if returned_user_id != provider_user_id or provider_user_id != profile_id:
+            raise WalletProviderError("The authenticated CDP user does not match this wallet.")
+        matched = expected_addresses.intersection(returned_addresses)
+        if not matched:
+            raise WalletProviderError("The authenticated CDP account does not match this wallet.")
+        return {"provider_user_id": returned_user_id, "address": sorted(matched)[0]}
+
     @staticmethod
     def _not_connected() -> WalletProviderError:
         return WalletProviderError(

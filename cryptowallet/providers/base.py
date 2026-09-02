@@ -25,6 +25,10 @@ class WalletProvider(ABC):
         """Return the native network balance in its smallest unit."""
 
     @abstractmethod
+    async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:
+        """Validate browser control and return matched public provider identity."""
+
+    @abstractmethod
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Validate and prepare an unsigned transaction intent."""
 

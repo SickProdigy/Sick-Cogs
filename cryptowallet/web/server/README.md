@@ -29,12 +29,17 @@ The public `web/api/session.php` endpoint requires `SICKWALLET_SERVER_LIBRARY` t
 directory's `companion.php`. It validates the browser-session cookie and forwards it through a
 freshly signed server-to-cog request. The installation credential never enters the browser.
 
-Custom authentication adds two public website endpoints:
+Custom authentication and claiming add three public website endpoints:
 
 - `web/api/jwks.php` publishes only the ES256 public key after retrieving it through a signed
   server-to-cog request. Configure its public HTTPS URL in CDP.
 - `web/api/auth-token.php` accepts POST only, requires the verified HttpOnly browser-session
   cookie, and returns a short-lived user-bound CDP JWT. It never receives the signing key.
+- `web/api/claim.php` forwards the short-lived CDP access token through a signed request. The
+  cog validates that token with CDP and records a claim only when the CDP user and smart-account
+  address exactly match the provisioned profile.
+
+Add the website's exact HTTPS origin to the CDP project's domain allowlist before testing.
 
 The private JWT signing key remains in the bot's Red shared API-token store. Do not copy it into
 this website directory or its environment.

@@ -57,6 +57,27 @@ a {
   color: #8ab4ff;
 }
 
+button {
+  margin-top: 1rem;
+  padding: .75rem 1rem;
+  border: 0;
+  border-radius: .5rem;
+  background: #2563eb;
+  color: white;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+#claim-status {
+  overflow-wrap: anywhere;
+}
+
 .notice {
   padding: .75rem;
   border-left: .25rem solid #f59e0b;

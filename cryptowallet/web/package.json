@@ -1,0 +1,15 @@
+{
+  "name": "sick-cogs-cryptowallet-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/cdp-wallet.js --bundle --format=esm --minify --outfile=cdp-wallet.js"
+  },
+  "dependencies": {
+    "@coinbase/cdp-core": "0.0.123",
+    "react": "19.2.8"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

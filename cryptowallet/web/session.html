@@ -12,8 +12,12 @@
     <h1>Protected wallet session</h1>
     <p id="session-status">Loading verified session details…</p>
     <dl id="session-details" hidden></dl>
+    <div id="claim-controls" hidden>
+      <button id="claim-wallet" type="button">Claim this wallet</button>
+      <p id="claim-status" role="status"></p>
+    </div>
     <p class="notice">Identity verification does not sign or broadcast a transaction.</p>
   </main>
-  <script src="assets/app.js" defer></script>
+  <script src="assets/app.js" type="module"></script>
 </body>
 </html>

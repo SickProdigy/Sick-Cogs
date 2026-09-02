@@ -121,7 +121,7 @@ browser input.
 Success envelope:
 
 ```json
-{"data": {"version": 1, "purpose": "claim", "expires_at": 0, "identity_verified": true, "transaction": null}}
+{"data": {"version": 1, "purpose": "claim", "expires_at": 0, "identity_verified": true, "wallet": {"address": "0x...", "claimed": false}, "cdp": {"project_id": "..."}, "transaction": null}}
 ```
 
 Error envelope:
@@ -193,8 +193,8 @@ Owner commands:
 ```
 
 The first `wallet`, `wallet claim`, or `wallet send` command provisions the user's CDP end
-user and Base Sepolia smart account if no stored profile exists. `wallet claim` currently verifies
-Discord identity but does not yet grant account control, recovery, or export access.
+user and Base Sepolia smart account if no stored profile exists. `wallet claim` verifies the same
+Discord identity and records a claim only after CDP independently validates browser wallet control.
 
 ## Current implementation status
 
@@ -223,6 +223,10 @@ Completed:
 21. Public JWKS publication through the authenticated website-server bridge.
 22. Five-minute, issuer-, audience-, deployment-, application-, purpose-, and user-bound JWTs.
 23. Browser-session-protected PHP token proxy and owner-visible public JWT configuration.
+24. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
+25. CDP access-token validation in the cog with exact provider-user and smart-account matching.
+26. Persisted claim completion only after Discord, website installation, browser session, CDP user,
+    and provisioned address all agree.
 
 ### CDP and custom-auth configuration
 
@@ -282,8 +286,7 @@ address.
 
 Not implemented:
 
-- CDP browser SDK authentication using the issued JWT
-- wallet claiming, recovery, or export
+- wallet recovery or export
 - blockchain signing or broadcasting
 - application delegation or policy enforcement
 - mainnet support
@@ -315,26 +318,33 @@ cryptowallet/
 │   ├── security.html
 │   ├── session.html
 │   ├── app.js
+│   ├── cdp-wallet.js     # Generated, self-hosted Coinbase SDK bundle
 │   ├── styles.css
-│   ├── api/              # Signed session/JWT proxies and public JWKS endpoint
+│   ├── package.json      # Pinned frontend dependencies and bundle command
+│   ├── package-lock.json
+│   ├── src/              # Auditable browser SDK integration source
+│   ├── api/              # Signed session/JWT/claim proxies and public JWKS endpoint
 │   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
 └── info.json
 ```
 
 ## Remaining work
 
-1. Adapt the companion contract for the SickGaming two-server deployment.
-2. Authenticate website-server-to-cog requests over a private/restricted connection.
-3. Add signed proxies for each future recovery, security, and approval operation.
-4. Integrate private setup/status controls with MyBB administration if desired.
-5. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing end to end.
-6. Integrate the CDP browser SDK with the protected JWT endpoint and complete wallet claiming.
-7. Convert identity verification into recovery and account-security operations.
-8. Connect unsigned intents to explicit browser signing.
-9. Add optional, policy-limited bot delegation and independent revocation.
-10. Verify key export, signer replacement, recovery, and migration away from CDP.
-11. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost factors, linked identities, and signing-key failure.
-12. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci && npm run build` in
+`cryptowallet/web/` whenever the pinned frontend dependencies or `src/cdp-wallet.js` change.
+Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy `node_modules/`.
+
+1. Deploy the claim assets and add the exact website origin to CDP's domain allowlist.
+2. Test custom-auth configuration and the complete Base Sepolia claim path end to end.
+3. Adapt the backend connection for the SickGaming private/restricted two-server deployment.
+4. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing.
+5. Convert verified identity into recovery and account-security operations.
+6. Connect unsigned intents to explicit browser signing.
+7. Add optional, policy-limited bot delegation and independent revocation.
+8. Verify key export, signer replacement, recovery, and migration away from CDP.
+9. Test expired/replayed links, wrong-user OAuth, compromised Discord, provider outages, lost
+   factors, linked identities, signing-key failure, and mismatched CDP users/addresses.
+10. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
 
 ## Security boundary
 
