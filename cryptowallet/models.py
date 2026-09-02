@@ -63,8 +63,11 @@ class TransactionIntent:
     intent_id: str
     profile_id: str
     network: str
+    from_address: str
     to_address: str
     value_wei: int
+    created_at: int
+    expires_at: int
     status: IntentStatus = IntentStatus.PENDING
     transaction_hash: str | None = None
 
@@ -73,8 +76,26 @@ class TransactionIntent:
             "intent_id": self.intent_id,
             "profile_id": self.profile_id,
             "network": self.network,
+            "from_address": self.from_address,
             "to_address": self.to_address,
             "value_wei": self.value_wei,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
             "status": self.status.value,
             "transaction_hash": self.transaction_hash,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TransactionIntent":
+        return cls(
+            intent_id=str(data["intent_id"]),
+            profile_id=str(data["profile_id"]),
+            network=str(data["network"]),
+            from_address=str(data["from_address"]),
+            to_address=str(data["to_address"]),
+            value_wei=int(data["value_wei"]),
+            created_at=int(data["created_at"]),
+            expires_at=int(data["expires_at"]),
+            status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
+            transaction_hash=data.get("transaction_hash"),
+        )
