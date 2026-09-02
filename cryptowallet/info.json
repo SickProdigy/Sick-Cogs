@@ -11,5 +11,5 @@
   "short": "Base-first self-custodial smart wallet integration",
   "tags": ["wallet", "crypto", "base", "ethereum", "smart-wallet", "testnet"],
   "type": "COG",
-  "version": "0.3.0"
+  "version": "0.4.0"
 }

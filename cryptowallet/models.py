@@ -128,6 +128,7 @@ class ApprovalSession:
     status: ApprovalStatus = ApprovalStatus.PENDING
     intent_id: str | None = None
     consumed_at: int | None = None
+    browser_token_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,6 +142,7 @@ class ApprovalSession:
             "status": self.status.value,
             "intent_id": self.intent_id,
             "consumed_at": self.consumed_at,
+            "browser_token_digest": self.browser_token_digest,
         }
 
     @classmethod
@@ -159,4 +161,5 @@ class ApprovalSession:
             status=ApprovalStatus(data.get("status", ApprovalStatus.PENDING.value)),
             intent_id=data.get("intent_id"),
             consumed_at=data.get("consumed_at"),
+            browser_token_digest=data.get("browser_token_digest"),
         )

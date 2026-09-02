@@ -74,7 +74,15 @@ The packaged browser assets live in [`web/`](web/) and are intended to be publis
 https://sickgaming.net/cryptowallet
 ```
 
-The cog provides a loopback-only `aiohttp` companion listener. A production web server must terminate HTTPS and reverse proxy the `/cryptowallet` routes to that listener. The listener must not be exposed directly to the internet.
+The cog provides the authoritative backend through its `aiohttp` listener in `companion.py`. The
+separately hosted companion website uses the assets under `web/` and communicates with that cog
+backend. The website and cog are two components; there is no separate companion service.
+
+The listener currently defaults to loopback, which only works when the reverse proxy and bot share
+a host. SickGaming runs its website and bot on different servers, so the listener must not be made
+public merely to connect them. The next milestone is an authenticated private/restricted
+website-server-to-cog connection with one-time pairing, durable credential rotation, and
+revocation.
 
 Static files can be served by the companion, the SickGaming web server, or a future MyBB plugin. Static files cannot safely contain or replace server-side functionality for:
 
@@ -86,6 +94,46 @@ Static files can be served by the companion, the SickGaming web server, or a fut
 - delegated-authority changes
 
 No API key, OAuth client secret, wallet secret, signing key, or private user material may be embedded in `web/`.
+
+### Initial companion API v1
+
+The current implementation establishes the browser-session and response contract. When a reverse
+proxy can securely reach the cog, it preserves the public `/cryptowallet` prefix while forwarding
+it to the listener with that prefix removed. The protected flow is:
+
+```text
+GET /cryptowallet/session/<one-time-token>
+→ Discord OAuth
+→ GET /cryptowallet/oauth/callback
+→ one-time token is consumed
+→ short-lived HttpOnly browser cookie is issued
+→ redirect to /cryptowallet/session
+→ GET /cryptowallet/api/v1/session
+```
+
+`GET /api/v1/session` returns a stable JSON envelope containing only server-authoritative public
+session data. Transaction fields are loaded from the stored intent; the endpoint does not accept
+addresses, amounts, wallet identifiers, or authorization decisions from browser input.
+
+Success envelope:
+
+```json
+{"data": {"version": 1, "purpose": "claim", "expires_at": 0, "identity_verified": true, "transaction": null}}
+```
+
+Error envelope:
+
+```json
+{"error": {"code": "session_unavailable", "message": "The wallet session is missing, invalid, or expired."}}
+```
+
+The browser cookie is distinct from the OAuth state token, marked `Secure`, `HttpOnly`, and
+`SameSite=Strict`, scoped to the configured companion path, and expires with the approval session.
+
+This is not yet the finished SickGaming two-server contract. Before the web server can call these
+routes, it must pair with the cog and authenticate server-to-server requests. Until that exists,
+keep the listener on loopback or an explicitly restricted private test network; do not expose it
+to the public internet.
 
 ## Current commands
 
@@ -124,6 +172,7 @@ Completed:
 7. One-time state digests, expiration, replay prevention, and Discord OAuth identity matching.
 8. Packaged wallet home, recovery, and security pages.
 9. Deployment- and Discord-application-bound browser sessions.
+10. Initial versioned, read-only companion session API with a separate HttpOnly browser token.
 
 Not implemented:
 
@@ -166,17 +215,20 @@ cryptowallet/
 
 ## Remaining work
 
-1. Define and stabilize the companion API and reverse-proxy contract.
-2. Implement secure CDP configuration and the provider adapter.
-3. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
-4. Display the address and balance through Discord.
-5. Convert the current identity-verification flow into wallet claiming and account security.
-6. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
-7. Connect unsigned intents to explicit browser signing.
-8. Add optional, policy-limited bot delegation and independent revocation.
-9. Verify key export, signer replacement, recovery, and migration away from CDP.
-10. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
-11. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+1. Adapt the companion contract for the SickGaming two-server deployment.
+2. Authenticate website-server-to-cog requests over a private/restricted connection.
+3. Add owner setup, one-time pairing, pairing status, credential rotation, and unpairing.
+4. Test the paired website and cog API end to end.
+5. Implement secure CDP configuration and the provider adapter.
+6. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
+7. Display the address and balance through Discord.
+8. Convert identity verification into wallet claiming, recovery, and account security.
+9. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
+10. Connect unsigned intents to explicit browser signing.
+11. Add optional, policy-limited bot delegation and independent revocation.
+12. Verify key export, signer replacement, recovery, and migration away from CDP.
+13. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
+14. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
 
 ## Security boundary
 

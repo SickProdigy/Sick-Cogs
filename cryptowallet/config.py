@@ -3,7 +3,7 @@ import time
 from redbot.core import Config
 
 from .models import IntentStatus
-from .networks import DEFAULT_NETWORK
+from .networks import DEFAULT_NETWORK, NETWORKS
 
 CONFIG_IDENTIFIER = 9365048217
 MAX_STORED_INTENTS = 25
@@ -45,3 +45,36 @@ class WalletConfigMixin:
             intents.clear()
             intents.update(ordered[:MAX_STORED_INTENTS])
             return dict(intents)
+
+    async def companion_session_payload(self, session) -> dict:
+        """Build the public API representation from authoritative stored state."""
+        payload = {
+            "version": 1,
+            "purpose": session.purpose.value,
+            "expires_at": session.expires_at,
+            "identity_verified": True,
+            "transaction": None,
+        }
+        if not session.intent_id:
+            return payload
+        data = await self.config.user_from_id(session.discord_user_id).intents.get_raw(
+            session.intent_id, default=None
+        )
+        if data is None:
+            return payload
+        network = NETWORKS.get(str(data.get("network") or ""))
+        if network is None:
+            return payload
+        payload["transaction"] = {
+            "intent_id": str(data.get("intent_id") or ""),
+            "network": network.key,
+            "network_name": network.name,
+            "chain_id": network.chain_id,
+            "native_symbol": network.native_symbol,
+            "from_address": str(data.get("from_address") or ""),
+            "to_address": str(data.get("to_address") or ""),
+            "value_wei": str(data.get("value_wei") or "0"),
+            "status": str(data.get("status") or "unknown"),
+            "expires_at": int(data.get("expires_at", 0) or 0),
+        }
+        return payload
