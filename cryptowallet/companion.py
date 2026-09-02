@@ -76,6 +76,7 @@ class CompanionServer:
         app.router.add_get("/session/{token}", self.begin_session)
         app.router.add_get("/oauth/callback", self.oauth_callback)
         app.router.add_get("/api/v1/session", self.api_session)
+        app.router.add_post("/api/v1/pair", self.api_pair)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         try:
@@ -167,6 +168,20 @@ class CompanionServer:
             )
         payload = await self.cog.companion_session_payload(session)
         return web.json_response({"data": payload}, headers=SECURITY_HEADERS)
+
+    async def api_pair(self, request: web.Request) -> web.Response:
+        """Exchange a short-lived owner code for website-server credentials once."""
+        if request.content_type != "application/json":
+            return api_error("invalid_request", "A JSON request is required.", status=415)
+        try:
+            body = await request.json()
+            code = str(body["code"])
+        except (KeyError, TypeError, ValueError):
+            return api_error("invalid_request", "A pairing code is required.", status=400)
+        credentials = await self.cog.complete_companion_pairing(code)
+        if credentials is None:
+            return api_error("pairing_rejected", "The pairing code is invalid or expired.", status=403)
+        return web.json_response({"data": credentials}, status=201, headers=SECURITY_HEADERS)
 
     async def oauth_callback(self, request: web.Request) -> web.Response:
         code = request.query.get("code")

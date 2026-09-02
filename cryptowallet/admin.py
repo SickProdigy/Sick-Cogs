@@ -30,6 +30,7 @@ class WalletAdminCommands:
         oauth_ready = await self.discord_oauth_config() is not None
         deployment_id = await self.config.deployment_id()
         application_id = self.discord_application_id()
+        pairing = await self.companion_pairing_status()
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
@@ -39,8 +40,51 @@ class WalletAdminCommands:
             f"Discord OAuth: `{'configured' if oauth_ready else 'not configured'}`\n"
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"
+            f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
             "Mainnet: `disabled`"
         )
+
+    @walletset.command(name="pair")
+    @commands.is_owner()
+    async def walletset_pair(self, ctx: commands.Context):
+        """Create a one-time code for pairing the companion website server."""
+        code, expires_at = await self.begin_companion_pairing()
+        message = (
+            "Companion website pairing code (single use):\n"
+            f"`{code}`\nExpires <t:{expires_at}:R>. Enter it only in the private website setup."
+        )
+        try:
+            await ctx.author.send(message)
+        except Exception:
+            await self.cancel_companion_pairing()
+            await ctx.send("I could not DM you, so no pairing code was left active.")
+            return
+        await ctx.send("I sent the one-time companion pairing code to your DMs.")
+
+    @walletset.command(name="paircancel")
+    @commands.is_owner()
+    async def walletset_pair_cancel(self, ctx: commands.Context):
+        """Cancel an outstanding website pairing code."""
+        await self.cancel_companion_pairing()
+        await ctx.send("Outstanding companion pairing code cancelled.")
+
+    @walletset.command(name="pairstatus")
+    @commands.is_owner()
+    async def walletset_pair_status(self, ctx: commands.Context):
+        """Show non-secret companion website pairing status."""
+        status = await self.companion_pairing_status()
+        await ctx.send(
+            f"Website pairing: `{'paired' if status['paired'] else 'not paired'}`\n"
+            f"Installation: `{status['installation_id'] or 'none'}`\n"
+            f"Paired at: `{status['paired_at'] or 'never'}`"
+        )
+
+    @walletset.command(name="unpair")
+    @commands.is_owner()
+    async def walletset_unpair(self, ctx: commands.Context):
+        """Revoke the companion website installation credential."""
+        await self.unpair_companion()
+        await ctx.send("Companion website unpaired; its previous credential is revoked.")
 
     @walletset.group(name="companion", invoke_without_command=True)
     @commands.is_owner()

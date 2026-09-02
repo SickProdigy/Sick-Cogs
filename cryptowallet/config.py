@@ -20,6 +20,9 @@ def create_config(cog) -> Config:
         companion_enabled=False,
         companion_host="127.0.0.1",
         companion_port=8787,
+        pairing_code_digest=None,
+        pairing_expires_at=0,
+        paired_at=0,
     )
     config.register_user(profile=None, intents={}, approval_sessions={})
     return config
