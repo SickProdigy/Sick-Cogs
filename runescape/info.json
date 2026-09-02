@@ -1,0 +1,13 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Look up RuneScape and Old School RuneScape players, quests, items, and wiki articles.",
+  "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
+  "install_msg": "Use `[p]rs user <username>` for OSRS stats or `[p]rs wiki <query>` to search the Old School RuneScape Wiki.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "RuneScape player and wiki lookups",
+  "tags": ["runescape", "osrs", "wiki", "hiscores"],
+  "type": "COG",
+  "version": "1.0.0"
+}
