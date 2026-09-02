@@ -14,7 +14,7 @@ function addDetail(label, value) {
 }
 
 if (statusElement && detailsElement) {
-  fetch("api/v1/session", { credentials: "same-origin", headers: { Accept: "application/json" } })
+  fetch("api/session.php", { credentials: "same-origin", headers: { Accept: "application/json" } })
     .then(async (response) => {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message || "Wallet session unavailable.");

@@ -70,7 +70,13 @@ function sickwallet_load_credentials(): array
     return json_decode((string) file_get_contents($path), true, 16, JSON_THROW_ON_ERROR);
 }
 
-function sickwallet_request(string $method, string $path, ?array $json = null, bool $signed = true): array
+function sickwallet_request(
+    string $method,
+    string $path,
+    ?array $json = null,
+    bool $signed = true,
+    array $additionalHeaders = []
+): array
 {
     if (!str_starts_with($path, '/') || str_contains($path, '?')) {
         throw new RuntimeException('Backend path must be absolute and cannot contain a query string.');
@@ -79,6 +85,12 @@ function sickwallet_request(string $method, string $path, ?array $json = null, b
     $headers = ['Accept: application/json'];
     if ($json !== null) {
         $headers[] = 'Content-Type: application/json';
+    }
+    foreach ($additionalHeaders as $header) {
+        if (!is_string($header) || str_contains($header, "\r") || str_contains($header, "\n")) {
+            throw new RuntimeException('Invalid additional request header.');
+        }
+        $headers[] = $header;
     }
     if ($signed) {
         $credentials = sickwallet_load_credentials();
