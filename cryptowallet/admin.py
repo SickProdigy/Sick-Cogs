@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 from redbot.core import commands
 
 from .networks import BASE_SEPOLIA, NETWORKS
+from .transport import BrokerTransportError, PAIRING_INPUT_NAMESPACE
 
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -43,6 +44,7 @@ class WalletAdminCommands:
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"
             f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"Website socket: `{'connected' if self.broker_transport.connected.is_set() else 'disconnected'}`\n"
             f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
             f"Custom authentication: `{'configured' if jwt_auth['configured'] else 'not configured'}`\n"
             "Mainnet: `disabled`"
@@ -80,6 +82,42 @@ class WalletAdminCommands:
             f"JWKS URL: `{status['jwks_url']}`\n"
             f"Key ID: `{status['kid']}`\n"
             "Algorithm: `ES256`"
+        )
+
+    @walletset.command(name="brokerpair")
+    @commands.is_owner()
+    async def walletset_broker_pair(self, ctx: commands.Context):
+        """Pair outbound to the website broker using a one-time secret-store code."""
+        tokens = await self.bot.get_shared_api_tokens(PAIRING_INPUT_NAMESPACE)
+        code = str(tokens.get("code") or "").strip()
+        if not code:
+            await ctx.send(
+                "Generate a one-time code on the website server, then use `[p]set api` with "
+                "service `cryptowallet_broker_pairing` and `code YOUR_CODE` before retrying."
+            )
+            return
+        try:
+            result = await self.broker_transport.pair(code)
+        except BrokerTransportError as exc:
+            log.warning("CryptoWallet website broker pairing failed: %s", exc)
+            await ctx.send(str(exc))
+            return
+        finally:
+            await self.bot.set_shared_api_tokens(PAIRING_INPUT_NAMESPACE, code="")
+        await ctx.send(
+            "Website broker paired. The cog is opening its authenticated outbound "
+            f"WebSocket connection for installation `{result['installation_id']}`."
+        )
+
+    @walletset.command(name="brokerstatus")
+    @commands.is_owner()
+    async def walletset_broker_status(self, ctx: commands.Context):
+        """Show the non-secret outbound website broker status."""
+        pairing = await self.companion_pairing_status()
+        await ctx.send(
+            f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"Outbound socket: `{'connected' if self.broker_transport.connected.is_set() else 'disconnected'}`\n"
+            f"Last connection error: `{self.broker_transport.last_error or 'none'}`"
         )
 
     @walletset.command(name="pair")
@@ -121,6 +159,7 @@ class WalletAdminCommands:
     @commands.is_owner()
     async def walletset_unpair(self, ctx: commands.Context):
         """Revoke the companion website installation credential."""
+        await self.broker_transport.stop()
         await self.unpair_companion()
         await ctx.send("Companion website unpaired; its previous credential is revoked.")
 

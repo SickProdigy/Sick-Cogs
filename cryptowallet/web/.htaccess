@@ -1,0 +1,11 @@
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # The cog and static navigation use stable extensionless public routes.
+  RewriteRule ^recovery/?$ recovery.html [L]
+  RewriteRule ^security/?$ security.html [L]
+  RewriteRule ^session/?$ session.html [L]
+</IfModule>
+

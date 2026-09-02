@@ -13,6 +13,7 @@ from .pairing import CompanionPairingMixin
 from .providers import CdpWalletProvider
 from .provisioning import WalletProvisioningMixin
 from .sessions import ApprovalSessionMixin
+from .transport import BrokerTransport
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
@@ -36,6 +37,7 @@ class CryptoWallet(
         self.initialize_provisioning()
         self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)
+        self.broker_transport = BrokerTransport(self)
 
     async def initialize(self):
         """Restore the loopback companion only when explicitly enabled."""
@@ -53,9 +55,14 @@ class CryptoWallet(
                 )
             except Exception:
                 log.exception("The configured wallet companion listener could not start")
+        await self.broker_transport.start()
 
     def cog_unload(self):
-        self.bot.loop.create_task(self.companion.stop())
+        self.bot.loop.create_task(self._shutdown())
+
+    async def _shutdown(self):
+        await self.broker_transport.stop()
+        await self.companion.stop()
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Delete the Discord-side wallet profile metadata for a user."""
