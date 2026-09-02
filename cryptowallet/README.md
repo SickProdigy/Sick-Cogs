@@ -179,6 +179,7 @@ Owner commands:
 
 ```text
 [p]walletset view
+[p]walletset cdpstatus
 [p]walletset approvalurl https://sickgaming.net/cryptowallet
 [p]walletset clearapprovalurl
 [p]walletset pair
@@ -209,6 +210,18 @@ Completed:
 12. HMAC-authenticated website-server requests with timestamp and nonce replay protection.
 13. PHP CLI pairing and status tools with server-only, atomic credential storage.
 14. Signed PHP session proxy requiring paired-server authentication plus the user browser session.
+15. Server-only CDP credential loading and readiness reporting without exposing secret values.
+
+### CDP configuration boundary
+
+The provider reads its credentials from Red's shared API-token namespace
+`cryptowallet_cdp`. The required fields are `project_id`, `api_key_id`, `api_key_secret`, and
+`wallet_secret`. Provision them only through Red's approved hidden/server-side secret mechanism;
+there is intentionally no Discord command that accepts or displays these values.
+
+`[p]walletset cdpstatus` reports only whether configuration is complete and the names of any
+missing fields. It does not test Coinbase connectivity yet. Provider network operations remain
+disabled until the authenticated CDP client and Base Sepolia provisioning flow are implemented.
 
 Not implemented:
 
@@ -240,7 +253,7 @@ cryptowallet/
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface
-│   └── cdp.py            # Planned Coinbase CDP implementation
+│   └── cdp.py            # Server-only CDP configuration and provider boundary
 ├── web/
 │   ├── index.html
 │   ├── recovery.html
@@ -260,16 +273,15 @@ cryptowallet/
 3. Add signed proxies for each future recovery, security, and approval operation.
 4. Integrate private setup/status controls with MyBB administration if desired.
 5. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing end to end.
-6. Implement secure CDP configuration and the provider adapter.
-7. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
-8. Display the address and balance through Discord.
-9. Convert identity verification into wallet claiming, recovery, and account security.
-10. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
-11. Connect unsigned intents to explicit browser signing.
-12. Add optional, policy-limited bot delegation and independent revocation.
-13. Verify key export, signer replacement, recovery, and migration away from CDP.
-14. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
-15. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+6. Implement authenticated CDP client calls and automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
+7. Display the address and balance through Discord.
+8. Convert identity verification into wallet claiming, recovery, and account security.
+9. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
+10. Connect unsigned intents to explicit browser signing.
+11. Add optional, policy-limited bot delegation and independent revocation.
+12. Verify key export, signer replacement, recovery, and migration away from CDP.
+13. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
+14. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
 
 ## Security boundary
 
