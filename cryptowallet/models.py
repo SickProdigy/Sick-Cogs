@@ -18,6 +18,19 @@ class IntentStatus(str, Enum):
     FAILED = "failed"
 
 
+class ApprovalPurpose(str, Enum):
+    CLAIM = "claim"
+    RECOVERY = "recovery"
+    SECURITY = "security"
+    TRANSACTION = "transaction"
+
+
+class ApprovalStatus(str, Enum):
+    PENDING = "pending"
+    IDENTITY_VERIFIED = "identity_verified"
+    EXPIRED = "expired"
+
+
 @dataclass(slots=True)
 class PublicAccount:
     """Non-secret account metadata safe for persistent cog storage."""
@@ -98,4 +111,46 @@ class TransactionIntent:
             expires_at=int(data["expires_at"]),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
             transaction_hash=data.get("transaction_hash"),
+        )
+
+
+@dataclass(slots=True)
+class ApprovalSession:
+    """One-time browser handoff state stored without its bearer token."""
+
+    token_digest: str
+    discord_user_id: int
+    purpose: ApprovalPurpose
+    created_at: int
+    expires_at: int
+    status: ApprovalStatus = ApprovalStatus.PENDING
+    intent_id: str | None = None
+    consumed_at: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "token_digest": self.token_digest,
+            "discord_user_id": self.discord_user_id,
+            "purpose": self.purpose.value,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+            "status": self.status.value,
+            "intent_id": self.intent_id,
+            "consumed_at": self.consumed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ApprovalSession":
+        purpose = data["purpose"]
+        if purpose == "enrollment":
+            purpose = ApprovalPurpose.CLAIM.value
+        return cls(
+            token_digest=str(data["token_digest"]),
+            discord_user_id=int(data["discord_user_id"]),
+            purpose=ApprovalPurpose(purpose),
+            created_at=int(data["created_at"]),
+            expires_at=int(data["expires_at"]),
+            status=ApprovalStatus(data.get("status", ApprovalStatus.PENDING.value)),
+            intent_id=data.get("intent_id"),
+            consumed_at=data.get("consumed_at"),
         )

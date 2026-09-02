@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import secrets
 import time
 from urllib.parse import urlparse
@@ -5,7 +7,14 @@ from urllib.parse import urlparse
 import discord
 from redbot.core import Config, commands
 
-from .models import IntentStatus, TransactionIntent
+from .companion import CompanionServer
+from .models import (
+    ApprovalPurpose,
+    ApprovalSession,
+    ApprovalStatus,
+    IntentStatus,
+    TransactionIntent,
+)
 from .networks import BASE_SEPOLIA, DEFAULT_NETWORK, NETWORKS
 from .validation import (
     format_wei_as_eth,
@@ -15,7 +24,11 @@ from .validation import (
 
 
 INTENT_LIFETIME_SECONDS = 15 * 60
+APPROVAL_LIFETIME_SECONDS = 10 * 60
 MAX_STORED_INTENTS = 25
+MAX_STORED_APPROVALS = 10
+
+log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
 class CryptoWallet(commands.Cog):
@@ -28,8 +41,27 @@ class CryptoWallet(commands.Cog):
             approval_base_url=None,
             provider="unconfigured",
             default_network=DEFAULT_NETWORK,
+            companion_enabled=False,
+            companion_host="127.0.0.1",
+            companion_port=8787,
         )
-        self.config.register_user(profile=None, intents={})
+        self.config.register_user(profile=None, intents={}, approval_sessions={})
+        self.companion = CompanionServer(self)
+
+    async def initialize(self):
+        """Restore the loopback companion only when explicitly enabled."""
+
+        if await self.config.companion_enabled():
+            try:
+                await self.companion.start(
+                    await self.config.companion_host(),
+                    await self.config.companion_port(),
+                )
+            except Exception:
+                log.exception("The configured wallet companion listener could not start")
+
+    def cog_unload(self):
+        self.bot.loop.create_task(self.companion.stop())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Delete the Discord-side wallet profile metadata for a user."""
@@ -76,23 +108,122 @@ class CryptoWallet(commands.Cog):
         ]
         await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
 
-    @wallet.command(name="enroll", aliases=("create",))
-    async def wallet_enroll(self, ctx: commands.Context):
-        """Begin secure wallet enrollment when the companion service is available."""
+    @wallet.command(name="claim")
+    async def wallet_claim(self, ctx: commands.Context):
+        """Claim and configure control of an automatically provisioned wallet."""
 
-        approval_base_url = await self.config.approval_base_url()
-        provider = await self.config.provider()
-        if not approval_base_url or provider == "unconfigured":
+        profile = await self.config.user(ctx.author).profile()
+        if profile is None:
             await ctx.send(
-                "Wallet enrollment is not enabled yet. The Base Sepolia companion service "
-                "and user-owned wallet provider must be configured first."
+                "No wallet has been provisioned yet. Automatic CDP provisioning is the "
+                "next implementation milestone."
             )
             return
+        approval_base_url = await self.config.approval_base_url()
+        if not approval_base_url or not self.companion.running:
+            await ctx.send(
+                "Wallet claiming is unavailable until the account-control companion is running."
+            )
+            return
+        if await self.discord_oauth_config() is None:
+            await ctx.send("Discord OAuth credentials are not configured for the companion.")
+            return
 
+        token = await self.create_approval_session(ctx.author.id, ApprovalPurpose.CLAIM)
         await ctx.send(
-            "Enrollment configuration exists, but issuing one-time authorization links is "
-            "not implemented in this foundation milestone."
+            f"Open this single-use wallet claim link within 10 minutes:\n"
+            f"<{approval_base_url}/session/{token}>\n"
+            "It currently verifies Discord ownership only; it does not expose or export keys."
         )
+
+    @staticmethod
+    def _token_digest(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    async def create_approval_session(
+        self, discord_user_id: int, purpose: ApprovalPurpose, intent_id: str | None = None
+    ) -> str:
+        """Persist the digest of a new one-time state token and return the token once."""
+
+        token = secrets.token_urlsafe(32)
+        now = int(time.time())
+        session = ApprovalSession(
+            token_digest=self._token_digest(token),
+            discord_user_id=discord_user_id,
+            purpose=purpose,
+            created_at=now,
+            expires_at=now + APPROVAL_LIFETIME_SECONDS,
+            intent_id=intent_id,
+        )
+        async with self.config.user_from_id(discord_user_id).approval_sessions() as sessions:
+            sessions[session.token_digest] = session.to_dict()
+            ordered = sorted(
+                sessions.items(),
+                key=lambda item: int(item[1].get("created_at", 0) or 0),
+                reverse=True,
+            )
+            sessions.clear()
+            sessions.update(ordered[:MAX_STORED_APPROVALS])
+        return token
+
+    async def resolve_approval_session(self, token: str) -> ApprovalSession | None:
+        """Resolve valid one-time state without storing or logging its bearer value."""
+
+        if len(token) < 32 or len(token) > 128:
+            return None
+        digest = self._token_digest(token)
+        all_users = await self.config.all_users()
+        for user_id, user_data in all_users.items():
+            data = (user_data.get("approval_sessions") or {}).get(digest)
+            if data is None:
+                continue
+            try:
+                session = ApprovalSession.from_dict(data)
+            except (KeyError, TypeError, ValueError):
+                return None
+            if (
+                session.discord_user_id != int(user_id)
+                or session.status is not ApprovalStatus.PENDING
+                or session.expires_at <= int(time.time())
+            ):
+                return None
+            return session
+        return None
+
+    async def consume_approval_session(self, token: str, discord_user_id: int) -> bool:
+        """Atomically consume state after the matching Discord OAuth identity returns."""
+
+        digest = self._token_digest(token)
+        now = int(time.time())
+        async with self.config.user_from_id(discord_user_id).approval_sessions() as sessions:
+            data = sessions.get(digest)
+            if data is None:
+                return False
+            try:
+                session = ApprovalSession.from_dict(data)
+            except (KeyError, TypeError, ValueError):
+                return False
+            if session.status is not ApprovalStatus.PENDING or session.expires_at <= now:
+                return False
+            session.status = ApprovalStatus.IDENTITY_VERIFIED
+            session.consumed_at = now
+            sessions[digest] = session.to_dict()
+            return True
+
+    async def discord_oauth_config(self) -> dict | None:
+        """Return complete OAuth configuration without persisting its secret in cog config."""
+
+        tokens = await self.bot.get_shared_api_tokens("cryptowallet")
+        client_id = tokens.get("client_id")
+        client_secret = tokens.get("client_secret")
+        approval_base_url = await self.config.approval_base_url()
+        if not client_id or not client_secret or not approval_base_url:
+            return None
+        return {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": f"{approval_base_url}/oauth/callback",
+        }
 
     async def _expire_and_trim_intents(self, user) -> dict:
         """Expire pending intents and retain only the newest bounded history."""
@@ -239,13 +370,59 @@ class CryptoWallet(commands.Cog):
         provider = await self.config.provider()
         network_key = await self.config.default_network()
         network = NETWORKS.get(network_key, BASE_SEPOLIA)
+        oauth_ready = await self.discord_oauth_config() is not None
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
             f"Network: `{network.name}` (`{network.chain_id}`)\n"
             f"Companion URL: `{approval_base_url or 'not configured'}`\n"
+            f"Companion listener: `{'running' if self.companion.running else 'stopped'}`\n"
+            f"Discord OAuth: `{'configured' if oauth_ready else 'not configured'}`\n"
             "Mainnet: `disabled`"
         )
+
+    @walletset.group(name="companion", invoke_without_command=True)
+    @commands.is_owner()
+    async def walletset_companion(self, ctx: commands.Context):
+        """Start or stop the loopback companion listener."""
+
+        await ctx.send_help()
+
+    @walletset_companion.command(name="start")
+    @commands.is_owner()
+    async def walletset_companion_start(self, ctx: commands.Context, port: int = 8787):
+        """Start the loopback listener behind your HTTPS reverse proxy."""
+
+        if self.companion.running:
+            await ctx.send(
+                "The wallet companion is already running; stop it before changing ports."
+            )
+            return
+        if not 1024 <= port <= 65535:
+            await ctx.send("Choose an unprivileged TCP port from 1024 through 65535.")
+            return
+        if not await self.config.approval_base_url():
+            await ctx.send("Configure the public HTTPS approval URL first.")
+            return
+        try:
+            await self.companion.start("127.0.0.1", port)
+        except Exception:
+            log.exception("The wallet companion could not be started by command")
+            await ctx.send("The loopback companion could not start; check the Red logs.")
+            return
+        await self.config.companion_host.set("127.0.0.1")
+        await self.config.companion_port.set(port)
+        await self.config.companion_enabled.set(True)
+        await ctx.send(f"Companion listening on `127.0.0.1:{port}` for the HTTPS proxy.")
+
+    @walletset_companion.command(name="stop")
+    @commands.is_owner()
+    async def walletset_companion_stop(self, ctx: commands.Context):
+        """Stop and disable the companion listener."""
+
+        await self.companion.stop()
+        await self.config.companion_enabled.set(False)
+        await ctx.send("Wallet companion stopped and disabled.")
 
     @walletset.command(name="approvalurl")
     @commands.is_owner()
@@ -254,10 +431,21 @@ class CryptoWallet(commands.Cog):
 
         normalized = url.strip().rstrip("/")
         parsed = urlparse(normalized)
-        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.params
+            or parsed.query
+            or parsed.fragment
+            or "//" in parsed.path
+            or "%2e" in parsed.path.casefold()
+            or any(part in {".", ".."} for part in parsed.path.split("/"))
+        ):
             await ctx.send(
-                "Provide an HTTPS origin without embedded credentials, for example "
-                "`https://wallet.example.com`."
+                "Provide an HTTPS URL without a query, fragment, credentials, or unsafe path, "
+                "for example `https://sickgaming.net/cryptowallet`."
             )
             return
         await self.config.approval_base_url.set(normalized)
