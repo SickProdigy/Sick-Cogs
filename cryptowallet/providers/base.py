@@ -21,6 +21,10 @@ class WalletProvider(ABC):
         """Return public wallet profile information."""
 
     @abstractmethod
+    async def get_native_balance(self, address: str, network: str) -> int:
+        """Return the native network balance in its smallest unit."""
+
+    @abstractmethod
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Validate and prepare an unsigned transaction intent."""
 

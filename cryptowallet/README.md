@@ -169,6 +169,7 @@ User commands:
 
 ```text
 [p]wallet
+[p]wallet balance
 [p]wallet networks
 [p]wallet send <address> <amount>
 [p]wallet transaction <intent-id>
@@ -215,6 +216,8 @@ Completed:
 15. Server-only CDP credential loading and readiness reporting without exposing secret values.
 16. Idempotent, deployment-scoped CDP end-user and Base Sepolia smart-account provisioning.
 17. Per-user concurrency control and public profile persistence after successful provisioning.
+18. Read-only Base Sepolia native ETH balance lookup with bounded pagination.
+19. Explorer-linked address and balance display in `wallet` and `wallet balance`.
 
 ### CDP configuration boundary
 
@@ -234,7 +237,6 @@ address.
 Not implemented:
 
 - custom-auth JWT and JWKS support
-- balance lookup
 - wallet claiming, recovery, or export
 - blockchain signing or broadcasting
 - application delegation or policy enforcement
@@ -279,14 +281,13 @@ cryptowallet/
 3. Add signed proxies for each future recovery, security, and approval operation.
 4. Integrate private setup/status controls with MyBB administration if desired.
 5. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing end to end.
-6. Display the address and Base Sepolia balance through Discord.
-7. Convert identity verification into wallet claiming, recovery, and account security.
-8. Add custom-auth JWT signing and JWKS publication using stable wallet-profile subjects.
-9. Connect unsigned intents to explicit browser signing.
-10. Add optional, policy-limited bot delegation and independent revocation.
-11. Verify key export, signer replacement, recovery, and migration away from CDP.
-12. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
-13. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+6. Convert identity verification into wallet claiming, recovery, and account security.
+7. Add custom-auth JWT signing and JWKS publication using stable wallet-profile subjects.
+8. Connect unsigned intents to explicit browser signing.
+9. Add optional, policy-limited bot delegation and independent revocation.
+10. Verify key export, signer replacement, recovery, and migration away from CDP.
+11. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
+12. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
 
 ## Security boundary
 
