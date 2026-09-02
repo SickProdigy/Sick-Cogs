@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 
@@ -7,6 +8,7 @@ from .admin import WalletAdminCommands
 from .commands import WalletCommands
 from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
+from .pairing import CompanionPairingMixin
 from .sessions import ApprovalSessionMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -17,6 +19,7 @@ class CryptoWallet(
     WalletAdminCommands,
     WalletConfigMixin,
     ApprovalSessionMixin,
+    CompanionPairingMixin,
     commands.Cog,
 ):
     """Manage public smart-wallet information through a secure companion service."""
@@ -24,6 +27,7 @@ class CryptoWallet(
     def __init__(self, bot):
         self.bot = bot
         self.config = create_config(self)
+        self.pairing_lock = asyncio.Lock()
         self.companion = CompanionServer(self)
 
     async def initialize(self):
