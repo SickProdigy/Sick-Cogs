@@ -119,6 +119,8 @@ class ApprovalSession:
     """One-time browser handoff state stored without its bearer token."""
 
     token_digest: str
+    deployment_id: str
+    discord_application_id: int
     discord_user_id: int
     purpose: ApprovalPurpose
     created_at: int
@@ -130,6 +132,8 @@ class ApprovalSession:
     def to_dict(self) -> dict[str, Any]:
         return {
             "token_digest": self.token_digest,
+            "deployment_id": self.deployment_id,
+            "discord_application_id": self.discord_application_id,
             "discord_user_id": self.discord_user_id,
             "purpose": self.purpose.value,
             "created_at": self.created_at,
@@ -146,6 +150,8 @@ class ApprovalSession:
             purpose = ApprovalPurpose.CLAIM.value
         return cls(
             token_digest=str(data["token_digest"]),
+            deployment_id=str(data["deployment_id"]),
+            discord_application_id=int(data["discord_application_id"]),
             discord_user_id=int(data["discord_user_id"]),
             purpose=ApprovalPurpose(purpose),
             created_at=int(data["created_at"]),

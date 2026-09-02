@@ -123,6 +123,7 @@ Completed:
 6. Loopback companion listener and HTTPS public-URL configuration.
 7. One-time state digests, expiration, replay prevention, and Discord OAuth identity matching.
 8. Packaged wallet home, recovery, and security pages.
+9. Deployment- and Discord-application-bound browser sessions.
 
 Not implemented:
 
@@ -136,7 +137,7 @@ Not implemented:
 - application delegation or policy enforcement
 - mainnet support
 
-## Planned module layout
+## Module layout
 
 ```text
 cryptowallet/
@@ -153,7 +154,7 @@ cryptowallet/
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface
-│   └── cdp.py            # Coinbase CDP implementation
+│   └── cdp.py            # Planned Coinbase CDP implementation
 ├── web/
 │   ├── index.html
 │   ├── recovery.html
@@ -165,18 +166,17 @@ cryptowallet/
 
 ## Remaining work
 
-1. Split the growing cog into the planned modules.
-2. Define the companion API and reverse-proxy contract.
-3. Implement secure CDP configuration and the provider adapter.
-4. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
-5. Display the address and balance through Discord.
-6. Convert the current identity-verification flow into wallet claiming and account security.
-7. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
-8. Connect unsigned intents to explicit browser signing.
-9. Add optional, policy-limited bot delegation and independent revocation.
-10. Verify key export, signer replacement, recovery, and migration away from CDP.
-11. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
-12. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
+1. Define and stabilize the companion API and reverse-proxy contract.
+2. Implement secure CDP configuration and the provider adapter.
+3. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
+4. Display the address and balance through Discord.
+5. Convert the current identity-verification flow into wallet claiming and account security.
+6. Add custom-auth JWT and JWKS integration using stable wallet-profile subjects.
+7. Connect unsigned intents to explicit browser signing.
+8. Add optional, policy-limited bot delegation and independent revocation.
+9. Verify key export, signer replacement, recovery, and migration away from CDP.
+10. Test expired and replayed links, wrong-user OAuth, compromised Discord, provider outages, lost authentication factors, and linked identities.
+11. Complete security, threat-model, and jurisdiction-specific legal review before considering mainnet.
 
 ## Security boundary
 
