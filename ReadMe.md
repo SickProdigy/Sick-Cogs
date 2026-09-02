@@ -13,6 +13,7 @@ Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `coc` - Clash of Clans clan and war status utilities.
+- `donate` - Configurable donation information command.
 
 ## Experimental or Learning Cogs
 
