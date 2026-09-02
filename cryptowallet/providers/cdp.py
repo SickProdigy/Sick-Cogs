@@ -6,6 +6,7 @@ from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfil
 from ..networks import BASE_SEPOLIA
 from ..validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
+from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
@@ -74,11 +75,11 @@ class CdpWalletProvider(WalletProvider):
     def _profile_from_end_user(
         end_user, profile_id: str, discord_user_id: int
     ) -> WalletProfile:
-        smart_accounts = list(getattr(end_user, "evm_smart_account_objects", None) or [])
-        if not smart_accounts:
+        smart_accounts = end_user.get("evmSmartAccountObjects") or []
+        if not isinstance(smart_accounts, list) or not smart_accounts:
             raise WalletProviderError("CDP did not return the requested EVM smart account.")
-        address = normalize_evm_address(str(smart_accounts[0].address))
-        provider_user_id = str(getattr(end_user, "user_id", "") or "")
+        address = normalize_evm_address(str(smart_accounts[0].get("address") or ""))
+        provider_user_id = str(end_user.get("userId") or "")
         if not provider_user_id:
             raise WalletProviderError("CDP did not return an end-user identifier.")
         return WalletProfile(
@@ -96,43 +97,22 @@ class CdpWalletProvider(WalletProvider):
             ],
         )
 
-    async def _create_end_user(self, credentials: CdpCredentials, profile_id: str):
-        try:
-            from cdp import CdpClient
-            from cdp.openapi_client.models.authentication_method import AuthenticationMethod
-            from cdp.openapi_client.models.create_end_user_request_evm_account import (
-                CreateEndUserRequestEvmAccount,
+    @staticmethod
+    def _api_client(credentials: CdpCredentials) -> CdpApiClient:
+        return CdpApiClient(
+            CdpApiCredentials(
+                api_key_id=credentials.api_key_id,
+                api_key_secret=credentials.api_key_secret,
+                wallet_secret=credentials.wallet_secret,
             )
-            from cdp.openapi_client.models.developer_jwt_authentication import (
-                DeveloperJWTAuthentication,
-            )
-        except ImportError as exc:
-            raise WalletProviderError(
-                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
-            ) from exc
-
-        client = CdpClient(
-            api_key_id=credentials.api_key_id,
-            api_key_secret=credentials.api_key_secret,
-            wallet_secret=credentials.wallet_secret,
         )
-        try:
-            return await client.end_user.create_end_user(
-                authentication_methods=[
-                    AuthenticationMethod(
-                        DeveloperJWTAuthentication(
-                            type="jwt",
-                            kid=credentials.jwt_kid,
-                            sub=profile_id,
-                        )
-                    )
-                ],
-                user_id=profile_id,
-                evm_account=CreateEndUserRequestEvmAccount(create_smart_account=True),
-                idempotency_key=self._idempotency_key(profile_id),
-            )
-        finally:
-            await client.close()
+
+    async def _create_end_user(self, credentials: CdpCredentials, profile_id: str) -> dict:
+        return await self._api_client(credentials).create_end_user(
+            profile_id,
+            credentials.jwt_kid,
+            self._idempotency_key(profile_id),
+        )
 
     async def get_native_balance(self, address: str, network: str) -> int:
         if network != BASE_SEPOLIA.key:
@@ -141,48 +121,40 @@ class CdpWalletProvider(WalletProvider):
         credentials = await self.credentials()
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
-        try:
-            from cdp import CdpClient
-        except ImportError as exc:
-            raise WalletProviderError(
-                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
-            ) from exc
-
-        client = CdpClient(
-            api_key_id=credentials.api_key_id,
-            api_key_secret=credentials.api_key_secret,
-            wallet_secret=credentials.wallet_secret,
-        )
+        client = self._api_client(credentials)
         page_token = None
         try:
             for _ in range(MAX_BALANCE_PAGES):
-                result = await client.evm.list_token_balances(
-                    address=normalized_address,
-                    network=BASE_SEPOLIA.key,
+                result = await client.list_token_balances(
+                    normalized_address,
+                    BASE_SEPOLIA.key,
                     page_size=100,
                     page_token=page_token,
                 )
-                for balance in result.balances:
-                    contract = str(balance.token.contract_address).lower()
+                balances = result.get("balances") or []
+                if not isinstance(balances, list):
+                    raise WalletProviderError("CDP returned invalid balance data.")
+                for balance in balances:
+                    token = balance.get("token") or {}
+                    amount = balance.get("amount") or {}
+                    contract = str(token.get("contractAddress") or "").lower()
                     if contract != NATIVE_ETH_CONTRACT:
                         continue
-                    if int(balance.amount.decimals) != 18:
+                    if int(amount.get("decimals", -1)) != 18:
                         raise WalletProviderError(
                             "CDP returned an unexpected decimal count for native ETH."
                         )
-                    return int(balance.amount.amount)
-                page_token = result.next_page_token
+                    return int(amount.get("amount", 0))
+                page_token = str(result.get("nextPageToken") or "")
                 if not page_token:
                     return 0
             raise WalletProviderError("CDP returned too many balance pages to inspect safely.")
         except WalletProviderError:
             raise
-        except Exception as exc:
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve the Base Sepolia balance. Try again later."
             ) from exc
-        finally:
-            await client.close()
 
     async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:
         """Validate a browser CDP session against the provisioned profile and account."""
@@ -201,30 +173,19 @@ class CdpWalletProvider(WalletProvider):
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
-            from cdp import CdpClient
-        except ImportError as exc:
-            raise WalletProviderError(
-                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
-            ) from exc
-
-        client = CdpClient(
-            api_key_id=credentials.api_key_id,
-            api_key_secret=credentials.api_key_secret,
-            wallet_secret=credentials.wallet_secret,
-        )
-        try:
-            end_user = await client.end_user.validate_access_token(access_token=access_token)
-            returned_user_id = str(getattr(end_user, "user_id", "") or "")
+            end_user = await self._api_client(credentials).validate_access_token(access_token)
+            returned_user_id = str(end_user.get("userId") or "")
+            smart_accounts = end_user.get("evmSmartAccountObjects") or []
+            if not isinstance(smart_accounts, list):
+                raise ValueError("Invalid smart account list")
             returned_addresses = {
-                normalize_evm_address(str(account.address))
-                for account in getattr(end_user, "evm_smart_account_objects", None) or []
+                normalize_evm_address(str(account.get("address") or ""))
+                for account in smart_accounts
             }
-        except Exception as exc:
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP rejected the wallet authentication or returned invalid account data."
             ) from exc
-        finally:
-            await client.close()
         if returned_user_id != provider_user_id or provider_user_id != profile_id:
             raise WalletProviderError("The authenticated CDP user does not match this wallet.")
         matched = expected_addresses.intersection(returned_addresses)

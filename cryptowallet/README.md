@@ -227,6 +227,8 @@ Completed:
 25. CDP access-token validation in the cog with exact provider-user and smart-account matching.
 26. Persisted claim completion only after Discord, website installation, browser session, CDP user,
     and provisioned address all agree.
+27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
+    the official Python SDK's incompatible networking dependency upgrades.
 
 ### CDP and custom-auth configuration
 
@@ -280,9 +282,10 @@ Provision them only through Red's bot-owner API-token modal or another approved 
 secret mechanism; there is intentionally no CryptoWallet command that accepts or displays them.
 
 `[p]walletset cdpstatus` reports only whether configuration is complete and the names of any
-missing fields. Provisioning uses Coinbase's official Python SDK, deterministic idempotency keys,
-and spend permissions disabled. It stores only the resulting CDP user ID and public smart-account
-address.
+missing fields. Provisioning uses a small authenticated CDP v2 HTTP client, deterministic
+idempotency keys, and spend permissions disabled. The client uses Red's compatible `aiohttp`
+version instead of installing Coinbase's Python SDK, whose dependency requirements conflict with
+Red-DiscordBot 3.5. It stores only the resulting CDP user ID and public smart-account address.
 
 Not implemented:
 
@@ -311,7 +314,8 @@ cryptowallet/
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface
-│   └── cdp.py            # Server-only CDP configuration and provider boundary
+│   ├── cdp.py            # Server-only CDP configuration and provider boundary
+│   └── cdp_api.py        # Minimal authenticated CDP v2 HTTP client
 ├── web/
 │   ├── index.html
 │   ├── recovery.html
