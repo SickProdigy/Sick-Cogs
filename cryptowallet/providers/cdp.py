@@ -8,6 +8,8 @@ from .base import WalletProvider, WalletProviderError
 
 
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
+NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+MAX_BALANCE_PAGES = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +128,56 @@ class CdpWalletProvider(WalletProvider):
                 evm_account=CreateEndUserRequestEvmAccount(create_smart_account=True),
                 idempotency_key=self._idempotency_key(profile_id),
             )
+        finally:
+            await client.close()
+
+    async def get_native_balance(self, address: str, network: str) -> int:
+        if network != BASE_SEPOLIA.key:
+            raise WalletProviderError("CDP balance lookup is restricted to Base Sepolia.")
+        normalized_address = normalize_evm_address(address)
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            from cdp import CdpClient
+        except ImportError as exc:
+            raise WalletProviderError(
+                "The Coinbase CDP SDK is unavailable; reinstall the cog dependencies."
+            ) from exc
+
+        client = CdpClient(
+            api_key_id=credentials.api_key_id,
+            api_key_secret=credentials.api_key_secret,
+            wallet_secret=credentials.wallet_secret,
+        )
+        page_token = None
+        try:
+            for _ in range(MAX_BALANCE_PAGES):
+                result = await client.evm.list_token_balances(
+                    address=normalized_address,
+                    network=BASE_SEPOLIA.key,
+                    page_size=100,
+                    page_token=page_token,
+                )
+                for balance in result.balances:
+                    contract = str(balance.token.contract_address).lower()
+                    if contract != NATIVE_ETH_CONTRACT:
+                        continue
+                    if int(balance.amount.decimals) != 18:
+                        raise WalletProviderError(
+                            "CDP returned an unexpected decimal count for native ETH."
+                        )
+                    return int(balance.amount.amount)
+                page_token = result.next_page_token
+                if not page_token:
+                    return 0
+            raise WalletProviderError("CDP returned too many balance pages to inspect safely.")
+        except WalletProviderError:
+            raise
+        except Exception as exc:
+            raise WalletProviderError(
+                "CDP could not retrieve the Base Sepolia balance. Try again later."
+            ) from exc
         finally:
             await client.close()
 

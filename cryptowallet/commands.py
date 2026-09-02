@@ -24,25 +24,47 @@ class WalletCommands:
             await ctx.send(str(exc))
         return None
 
+    async def _wallet_embed(self, ctx: commands.Context, profile: dict) -> discord.Embed:
+        embed = discord.Embed(title="Crypto Wallet", color=await ctx.embed_color())
+        embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
+        embed.description = "Your public wallet profile is linked."
+        accounts = profile.get("accounts") or []
+        for account in accounts[:5]:
+            address = str(account.get("address") or "Unavailable")
+            account_type = str(account.get("account_type") or "unknown")
+            embed.add_field(
+                name=account_type.replace("_", " ").title(),
+                value=f"[{address}]({BASE_SEPOLIA.explorer_url}/address/{address})",
+                inline=False,
+            )
+        account = self._account_for_network(profile, BASE_SEPOLIA.key)
+        if account is not None:
+            try:
+                balance_wei = await self.wallet_provider.get_native_balance(
+                    str(account.get("address") or ""), BASE_SEPOLIA.key
+                )
+                balance = f"{format_wei_as_eth(balance_wei)} {BASE_SEPOLIA.native_symbol}"
+            except (ValueError, WalletProviderError):
+                balance = "Temporarily unavailable"
+            embed.add_field(name="Balance", value=balance, inline=False)
+        embed.set_footer(text="Prototype only — do not use with real funds")
+        return embed
+
     @commands.group(name="wallet", aliases=("cryptowallet",), invoke_without_command=True)
     async def wallet(self, ctx: commands.Context):
         """Show your wallet profile and prototype status."""
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        embed = discord.Embed(title="Crypto Wallet", color=await ctx.embed_color())
-        embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
-        embed.description = "Your public wallet profile is linked."
-        for account in (profile.get("accounts") or [])[:5]:
-            address = str(account.get("address") or "Unavailable")
-            account_type = str(account.get("account_type") or "unknown")
-            embed.add_field(
-                name=account_type.replace("_", " ").title(),
-                value=f"`{address}`",
-                inline=False,
-            )
-        embed.set_footer(text="Prototype only — do not use with real funds")
-        await ctx.send(embed=embed)
+        await ctx.send(embed=await self._wallet_embed(ctx, profile))
+
+    @wallet.command(name="balance", aliases=("funds",))
+    async def wallet_balance(self, ctx: commands.Context):
+        """Show your Base Sepolia address and native ETH balance."""
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        await ctx.send(embed=await self._wallet_embed(ctx, profile))
 
     @wallet.command(name="networks")
     async def wallet_networks(self, ctx: commands.Context):
