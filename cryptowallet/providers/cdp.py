@@ -206,6 +206,10 @@ class CdpWalletProvider(WalletProvider):
         try:
             end_user = await self._create_end_user(credentials, profile_id)
             return self._profile_from_end_user(end_user, profile_id, discord_user_id)
+        except CdpApiError as exc:
+            raise WalletProviderError(
+                f"CDP could not provision the Base Sepolia wallet: {exc}"
+            ) from exc
         except WalletProviderError:
             raise
         except Exception as exc:
