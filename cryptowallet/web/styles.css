@@ -40,6 +40,19 @@ nav {
   margin: 1.5rem 0;
 }
 
+dt {
+  margin-top: 1rem;
+  color: #8fa5c6;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+dd {
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
 a {
   color: #8ab4ff;
 }

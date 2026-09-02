@@ -1,6 +1,7 @@
 import html
+import time
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import aiohttp
 from aiohttp import web
@@ -12,11 +13,21 @@ SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'; frame-ancestors 'none'"
+        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
     ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
 }
+BROWSER_COOKIE = "__Secure-sickwallet-session"
+
+
+def api_error(code: str, message: str, *, status: int) -> web.Response:
+    """Return the stable v1 companion error envelope."""
+    return web.json_response(
+        {"error": {"code": code, "message": message}},
+        status=status,
+        headers=SECURITY_HEADERS,
+    )
 
 
 def page(title: str, message: str, *, status: int = 200) -> web.Response:
@@ -58,11 +69,13 @@ class CompanionServer:
         app.router.add_get("/", self.home)
         app.router.add_get("/recovery", self.recovery)
         app.router.add_get("/security", self.security)
+        app.router.add_get("/session", self.session_page)
         app.router.add_get("/assets/app.js", self.app_script)
         app.router.add_get("/assets/styles.css", self.styles)
         app.router.add_get("/health", self.health)
         app.router.add_get("/session/{token}", self.begin_session)
         app.router.add_get("/oauth/callback", self.oauth_callback)
+        app.router.add_get("/api/v1/session", self.api_session)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         try:
@@ -107,6 +120,9 @@ class CompanionServer:
     async def security(self, request: web.Request) -> web.Response:
         return self._static_response("security.html", "text/html")
 
+    async def session_page(self, request: web.Request) -> web.Response:
+        return self._static_response("session.html", "text/html")
+
     async def app_script(self, request: web.Request) -> web.Response:
         return self._static_response("app.js", "application/javascript")
 
@@ -138,6 +154,19 @@ class CompanionServer:
         raise web.HTTPFound(
             f"https://discord.com/oauth2/authorize?{params}", headers=SECURITY_HEADERS
         )
+
+    async def api_session(self, request: web.Request) -> web.Response:
+        """Return public, server-authoritative details for a verified browser session."""
+        browser_token = request.cookies.get(BROWSER_COOKIE, "")
+        session = await self.cog.resolve_browser_session(browser_token)
+        if session is None:
+            return api_error(
+                "session_unavailable",
+                "The wallet session is missing, invalid, or expired.",
+                status=401,
+            )
+        payload = await self.cog.companion_session_payload(session)
+        return web.json_response({"data": payload}, headers=SECURITY_HEADERS)
 
     async def oauth_callback(self, request: web.Request) -> web.Response:
         code = request.query.get("code")
@@ -198,17 +227,22 @@ class CompanionServer:
                 "Sign in with the same Discord account that requested this link.",
                 status=403,
             )
-        if not await self.cog.consume_approval_session(token, discord_user_id):
+        browser_token = await self.cog.establish_browser_session(token, discord_user_id)
+        if browser_token is None:
             return page("Link unavailable", "This link was already used or expired.", status=409)
-        messages = {
-            "claim": "Discord ownership is verified. CDP wallet claiming will be connected next.",
-            "recovery": "Discord ownership is verified. Recovery controls are not connected yet.",
-            "security": "Discord ownership is verified. Security controls are not connected yet.",
-            "transaction": (
-                "Discord ownership is verified. No blockchain transaction was authorized."
-            ),
-        }
-        return page(
-            "Identity verified",
-            messages.get(session.purpose.value, "Discord ownership is verified."),
+        approval_base_url = await self.cog.config.approval_base_url()
+        cookie_path = urlparse(approval_base_url).path or "/"
+        response = web.HTTPFound(
+            f"{approval_base_url}/session",
+            headers=SECURITY_HEADERS,
         )
+        response.set_cookie(
+            BROWSER_COOKIE,
+            browser_token,
+            max_age=max(0, session.expires_at - int(time.time())),
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            path=cookie_path,
+        )
+        raise response

@@ -73,21 +73,22 @@ class ApprovalSessionMixin:
             return session
         return None
 
-    async def consume_approval_session(self, token: str, discord_user_id: int) -> bool:
+    async def establish_browser_session(self, token: str, discord_user_id: int) -> str | None:
+        """Consume the OAuth state and return a distinct short-lived browser token."""
         digest = self._token_digest(token)
         now = int(time.time())
         deployment_id = await self.config.deployment_id()
         application_id = self.discord_application_id()
         if not deployment_id or application_id is None:
-            return False
+            return None
         async with self.config.user_from_id(discord_user_id).approval_sessions() as sessions:
             data = sessions.get(digest)
             if data is None:
-                return False
+                return None
             try:
                 session = ApprovalSession.from_dict(data)
             except (KeyError, TypeError, ValueError):
-                return False
+                return None
             if (
                 session.deployment_id != deployment_id
                 or session.discord_application_id != application_id
@@ -95,8 +96,39 @@ class ApprovalSessionMixin:
                 or session.status is not ApprovalStatus.PENDING
                 or session.expires_at <= now
             ):
-                return False
+                return None
+            browser_token = secrets.token_urlsafe(32)
             session.status = ApprovalStatus.IDENTITY_VERIFIED
             session.consumed_at = now
+            session.browser_token_digest = self._token_digest(browser_token)
             sessions[digest] = session.to_dict()
-            return True
+            return browser_token
+
+    async def resolve_browser_session(self, browser_token: str) -> ApprovalSession | None:
+        """Resolve a verified browser token without accepting the original OAuth state."""
+        if len(browser_token) < 32 or len(browser_token) > 128:
+            return None
+        browser_digest = self._token_digest(browser_token)
+        deployment_id = await self.config.deployment_id()
+        application_id = self.discord_application_id()
+        if not deployment_id or application_id is None:
+            return None
+        all_users = await self.config.all_users()
+        for user_id, user_data in all_users.items():
+            for data in (user_data.get("approval_sessions") or {}).values():
+                if data.get("browser_token_digest") != browser_digest:
+                    continue
+                try:
+                    session = ApprovalSession.from_dict(data)
+                except (KeyError, TypeError, ValueError):
+                    return None
+                if (
+                    session.deployment_id != deployment_id
+                    or session.discord_application_id != application_id
+                    or session.discord_user_id != int(user_id)
+                    or session.status is not ApprovalStatus.IDENTITY_VERIFIED
+                    or session.expires_at <= int(time.time())
+                ):
+                    return None
+                return session
+        return None
