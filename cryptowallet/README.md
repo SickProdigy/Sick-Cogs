@@ -232,7 +232,14 @@ Completed:
 
 ### CDP and custom-auth configuration
 
-Create or select a project in the [Coinbase Developer Platform portal](https://portal.cdp.coinbase.com/).
+Sign in or create an account at the
+[Coinbase Developer Platform Portal](https://portal.cdp.coinbase.com/), then create or select a
+project. Under **API Keys → Secret API Keys**, create a Secret API Key; choose **Ed25519** when
+Coinbase offers an algorithm choice. Copy its key ID and private secret when they are displayed.
+Under the selected project's **Non-custodial Wallet → Security** area, generate the separate
+Wallet Secret. Coinbase may display private values only once, so save them directly in an
+appropriate server-side secret store and never post them in Discord messages, logs, or Git.
+
 The four `cryptowallet_cdp` fields do not all come from the same screen:
 
 | Red field | Meaning | Where it comes from | Secret? |
@@ -240,7 +247,7 @@ The four `cryptowallet_cdp` fields do not all come from the same screen:
 | `project_id` | Public identifier for the selected CDP project. The browser SDK will use it to select the same project as the cog. | The selected project's settings or Embedded Wallet configuration in the CDP Portal. | No |
 | `api_key_id` | Identifier for a CDP Secret API Key used by the cog for authenticated server requests. | CDP Portal → API Keys → Secret API Keys → Create API key. Copy the displayed API key ID. | Treat as sensitive metadata |
 | `api_key_secret` | Private half of that Secret API Key. It signs short-lived CDP API authentication tokens. | Shown once with the newly created Secret API Key. Save it when Coinbase displays it. | Yes |
-| `wallet_secret` | Separate wallet-authentication secret used for sensitive wallet creation and signing operations. It is not the API key secret. | Generate it from the selected project's Server Wallet/Wallet Secret page. Save it when Coinbase displays it. | Yes |
+| `wallet_secret` | Separate wallet-authentication secret used for sensitive wallet creation and signing operations. It is not the API key secret. | Generate it from the selected project's Non-custodial Wallet → Security page. Save it when Coinbase displays it. | Yes |
 
 CryptoWallet separately generates a P-256 signing key during cog initialization and stores it in
 Red's `cryptowallet_jwt` shared-token namespace. Its RFC 7638 thumbprint becomes `jwt_kid`; owners
