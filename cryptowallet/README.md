@@ -204,6 +204,7 @@ Completed:
 10. Initial versioned, read-only companion session API with a separate HttpOnly browser token.
 11. Atomic, single-use website-server pairing with revocable credentials in Red shared API tokens.
 12. HMAC-authenticated website-server requests with timestamp and nonce replay protection.
+13. PHP CLI pairing and status tools with server-only, atomic credential storage.
 
 Not implemented:
 
@@ -242,7 +243,8 @@ cryptowallet/
 │   ├── security.html
 │   ├── session.html
 │   ├── app.js
-│   └── styles.css
+│   ├── styles.css
+│   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
 └── info.json
 ```
 
@@ -250,8 +252,8 @@ cryptowallet/
 
 1. Adapt the companion contract for the SickGaming two-server deployment.
 2. Authenticate website-server-to-cog requests over a private/restricted connection.
-3. Add a website-side private setup handler that stores the returned credential server-side.
-4. Route protected website operations through authenticated server-side requests.
+3. Route protected website operations through authenticated server-side requests.
+4. Integrate private setup/status controls with MyBB administration if desired.
 5. Test pairing, signatures, replay rejection, rotation, and unpairing end to end.
 6. Implement secure CDP configuration and the provider adapter.
 7. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
