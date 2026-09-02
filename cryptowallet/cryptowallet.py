@@ -10,6 +10,7 @@ from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
 from .pairing import CompanionPairingMixin
 from .providers import CdpWalletProvider
+from .provisioning import WalletProvisioningMixin
 from .sessions import ApprovalSessionMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -21,6 +22,7 @@ class CryptoWallet(
     WalletConfigMixin,
     ApprovalSessionMixin,
     CompanionPairingMixin,
+    WalletProvisioningMixin,
     commands.Cog,
 ):
     """Manage public smart-wallet information through a secure companion service."""
@@ -29,6 +31,7 @@ class CryptoWallet(
         self.bot = bot
         self.config = create_config(self)
         self.pairing_lock = asyncio.Lock()
+        self.initialize_provisioning()
         self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)
 

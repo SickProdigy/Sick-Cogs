@@ -6,6 +6,7 @@ from redbot.core import commands
 
 from .models import ApprovalPurpose, TransactionIntent
 from .networks import BASE_SEPOLIA, NETWORKS
+from .providers import WalletProviderError
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
@@ -14,27 +15,32 @@ INTENT_LIFETIME_SECONDS = 15 * 60
 class WalletCommands:
     """User-facing wallet commands."""
 
+    async def _wallet_profile_or_error(self, ctx: commands.Context) -> dict | None:
+        try:
+            return await self.get_or_create_wallet_profile(ctx.author)
+        except WalletProviderError as exc:
+            await ctx.send(f"Wallet provisioning is unavailable: {exc}")
+        except RuntimeError as exc:
+            await ctx.send(str(exc))
+        return None
+
     @commands.group(name="wallet", aliases=("cryptowallet",), invoke_without_command=True)
     async def wallet(self, ctx: commands.Context):
         """Show your wallet profile and prototype status."""
-        profile = await self.config.user(ctx.author).profile()
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
         embed = discord.Embed(title="Crypto Wallet", color=await ctx.embed_color())
         embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
-        if profile is None:
-            embed.description = (
-                "No wallet has been provisioned yet. Automatic CDP provisioning is the "
-                "next implementation milestone."
+        embed.description = "Your public wallet profile is linked."
+        for account in (profile.get("accounts") or [])[:5]:
+            address = str(account.get("address") or "Unavailable")
+            account_type = str(account.get("account_type") or "unknown")
+            embed.add_field(
+                name=account_type.replace("_", " ").title(),
+                value=f"`{address}`",
+                inline=False,
             )
-        else:
-            embed.description = "Your public wallet profile is linked."
-            for account in (profile.get("accounts") or [])[:5]:
-                address = str(account.get("address") or "Unavailable")
-                account_type = str(account.get("account_type") or "unknown")
-                embed.add_field(
-                    name=account_type.replace("_", " ").title(),
-                    value=f"`{address}`",
-                    inline=False,
-                )
         embed.set_footer(text="Prototype only — do not use with real funds")
         await ctx.send(embed=embed)
 
@@ -51,12 +57,8 @@ class WalletCommands:
     @wallet.command(name="claim")
     async def wallet_claim(self, ctx: commands.Context):
         """Claim and configure control of an automatically provisioned wallet."""
-        profile = await self.config.user(ctx.author).profile()
+        profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
-            await ctx.send(
-                "No wallet has been provisioned yet. Automatic CDP provisioning is the "
-                "next implementation milestone."
-            )
             return
         approval_base_url = await self.config.approval_base_url()
         if not approval_base_url or not self.companion.running:
@@ -110,9 +112,8 @@ class WalletCommands:
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
         """Prepare an unsigned Base Sepolia ETH transfer intent."""
-        profile = await self.config.user(ctx.author).profile()
+        profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
-            await ctx.send("Link or enroll a wallet before creating a transaction intent.")
             return
         network = NETWORKS.get(await self.config.default_network())
         if network is None or not network.testnet:

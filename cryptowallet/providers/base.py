@@ -13,7 +13,7 @@ class WalletProvider(ABC):
     name: str
 
     @abstractmethod
-    async def create_wallet(self, discord_user_id: int) -> WalletProfile:
+    async def create_wallet(self, profile_id: str, discord_user_id: int) -> WalletProfile:
         """Create a user-owned wallet profile without exposing secret key material."""
 
     @abstractmethod
