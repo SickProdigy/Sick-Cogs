@@ -77,6 +77,7 @@ class CompanionServer:
         app.router.add_get("/oauth/callback", self.oauth_callback)
         app.router.add_get("/api/v1/session", self.api_session)
         app.router.add_post("/api/v1/pair", self.api_pair)
+        app.router.add_get("/api/v1/server/status", self.api_server_status)
         self.runner = web.AppRunner(app, access_log=None)
         await self.runner.setup()
         try:
@@ -182,6 +183,23 @@ class CompanionServer:
         if credentials is None:
             return api_error("pairing_rejected", "The pairing code is invalid or expired.", status=403)
         return web.json_response({"data": credentials}, status=201, headers=SECURITY_HEADERS)
+
+    async def api_server_status(self, request: web.Request) -> web.Response:
+        """Confirm that the paired website server can authenticate to this cog."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
+        return web.json_response(
+            {
+                "data": {
+                    "version": 1,
+                    "status": "paired",
+                    "deployment_id": await self.cog.config.deployment_id(),
+                    "discord_application_id": self.cog.discord_application_id(),
+                }
+            },
+            headers=SECURITY_HEADERS,
+        )
 
     async def oauth_callback(self, request: web.Request) -> web.Response:
         code = request.query.get("code")

@@ -23,6 +23,7 @@ def create_config(cog) -> Config:
         pairing_code_digest=None,
         pairing_expires_at=0,
         paired_at=0,
+        companion_nonces={},
     )
     config.register_user(profile=None, intents={}, approval_sessions={})
     return config

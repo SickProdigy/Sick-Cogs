@@ -135,6 +135,31 @@ routes, it must pair with the cog and authenticate server-to-server requests. Un
 keep the listener on loopback or an explicitly restricted private test network; do not expose it
 to the public internet.
 
+### Website-server authentication v1
+
+After pairing, the website server signs protected requests with the returned credential. It sends:
+
+```text
+X-SickWallet-Installation: <installation-id>
+X-SickWallet-Timestamp: <unix-seconds>
+X-SickWallet-Nonce: <unique-random-value>
+X-SickWallet-Signature: <lowercase-hex-hmac-sha256>
+```
+
+The signature key is the durable credential. Its canonical UTF-8 input is:
+
+```text
+v1\n<timestamp>\n<nonce>\n<METHOD>\n<backend-path>\n<sha256-body-hex>
+```
+
+The backend rejects unknown installations, invalid signatures, query strings, timestamps outside
+the five-minute window, and reused nonces. It retains at most 500 recent nonces and clears them
+when the website is unpaired. `GET /api/v1/server/status` is the first protected endpoint and can
+be used by the website backend to confirm its stored credential.
+
+This credential belongs only in the website server's secret storage. Frontend JavaScript must
+never construct these headers or receive the credential.
+
 ## Current commands
 
 User commands:
@@ -178,6 +203,7 @@ Completed:
 9. Deployment- and Discord-application-bound browser sessions.
 10. Initial versioned, read-only companion session API with a separate HttpOnly browser token.
 11. Atomic, single-use website-server pairing with revocable credentials in Red shared API tokens.
+12. HMAC-authenticated website-server requests with timestamp and nonce replay protection.
 
 Not implemented:
 
@@ -224,9 +250,9 @@ cryptowallet/
 
 1. Adapt the companion contract for the SickGaming two-server deployment.
 2. Authenticate website-server-to-cog requests over a private/restricted connection.
-3. Authenticate operational website-server requests with the paired credential, timestamps, and replay protection.
-4. Add a website-side private setup handler that stores the returned credential server-side.
-5. Test pairing, rotation, unpairing, and authenticated requests end to end.
+3. Add a website-side private setup handler that stores the returned credential server-side.
+4. Route protected website operations through authenticated server-side requests.
+5. Test pairing, signatures, replay rejection, rotation, and unpairing end to end.
 6. Implement secure CDP configuration and the provider adapter.
 7. Automatically provision a CDP end user, owner signer, and Base Sepolia smart account on first wallet interaction.
 8. Display the address and balance through Discord.
