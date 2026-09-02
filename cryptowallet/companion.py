@@ -1,4 +1,5 @@
 import html
+import json
 import time
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
@@ -6,6 +7,7 @@ from urllib.parse import urlencode, urlparse
 import aiohttp
 from aiohttp import web
 
+from .providers import WalletProviderError
 
 DISCORD_API = "https://discord.com/api/v10"
 WEB_ROOT = Path(__file__).with_name("web")
@@ -13,7 +15,8 @@ SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self' 'unsafe-inline'; "
-        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+        "script-src 'self'; connect-src 'self' https://api.cdp.coinbase.com; "
+        "frame-ancestors 'none'"
     ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
@@ -71,12 +74,14 @@ class CompanionServer:
         app.router.add_get("/security", self.security)
         app.router.add_get("/session", self.session_page)
         app.router.add_get("/assets/app.js", self.app_script)
+        app.router.add_get("/assets/cdp-wallet.js", self.cdp_wallet_script)
         app.router.add_get("/assets/styles.css", self.styles)
         app.router.add_get("/health", self.health)
         app.router.add_get("/session/{token}", self.begin_session)
         app.router.add_get("/oauth/callback", self.oauth_callback)
         app.router.add_get("/api/v1/session", self.api_session)
         app.router.add_post("/api/v1/auth/token", self.api_auth_token)
+        app.router.add_post("/api/v1/claim", self.api_claim)
         app.router.add_get("/api/v1/jwks", self.api_jwks)
         app.router.add_post("/api/v1/pair", self.api_pair)
         app.router.add_get("/api/v1/server/status", self.api_server_status)
@@ -130,6 +135,9 @@ class CompanionServer:
     async def app_script(self, request: web.Request) -> web.Response:
         return self._static_response("app.js", "application/javascript")
 
+    async def cdp_wallet_script(self, request: web.Request) -> web.Response:
+        return self._static_response("cdp-wallet.js", "application/javascript")
+
     async def styles(self, request: web.Request) -> web.Response:
         return self._static_response("styles.css", "text/css")
 
@@ -173,6 +181,21 @@ class CompanionServer:
                 status=401,
             )
         payload = await self.cog.companion_session_payload(session)
+        profile_config = self.cog.config.user_from_id(session.discord_user_id)
+        profile = await profile_config.profile()
+        cdp_tokens = await self.cog.bot.get_shared_api_tokens("cryptowallet_cdp")
+        account = self.cog._account_for_network(profile or {}, "base-sepolia")
+        payload["wallet"] = (
+            {
+                "address": str(account.get("address") or ""),
+                "claimed": bool(await profile_config.claimed_at()),
+            }
+            if account is not None
+            else None
+        )
+        payload["cdp"] = {
+            "project_id": str(cdp_tokens.get("project_id") or ""),
+        }
         return web.json_response({"data": payload}, headers=SECURITY_HEADERS)
 
     async def api_auth_token(self, request: web.Request) -> web.Response:
@@ -201,6 +224,42 @@ class CompanionServer:
             )
         return web.json_response(
             {"data": {"token": token, "expires_at": expires_at}}, headers=SECURITY_HEADERS
+        )
+
+    async def api_claim(self, request: web.Request) -> web.Response:
+        """Validate CDP browser control before recording this profile as claimed."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
+        browser_token = request.cookies.get(BROWSER_COOKIE, "")
+        session = await self.cog.resolve_browser_session(browser_token)
+        if session is None or session.purpose.value != "claim":
+            return api_error(
+                "claim_unavailable", "A valid wallet claim session is required.", status=401
+            )
+        if request.content_type != "application/json":
+            return api_error("invalid_request", "A JSON request is required.", status=415)
+        try:
+            body = json.loads((await request.read()).decode("utf-8"))
+            access_token = str(body["access_token"])
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return api_error("invalid_request", "A CDP access token is required.", status=400)
+        profile_config = self.cog.config.user_from_id(session.discord_user_id)
+        profile = await profile_config.profile()
+        if profile is None:
+            return api_error("profile_unavailable", "The wallet profile is unavailable.", status=409)
+        try:
+            result = await self.cog.wallet_provider.validate_wallet_claim(access_token, profile)
+        except WalletProviderError:
+            return api_error(
+                "claim_rejected",
+                "Coinbase could not verify control of the provisioned wallet.",
+                status=403,
+            )
+        claimed_at = int(time.time())
+        await profile_config.claimed_at.set(claimed_at)
+        return web.json_response(
+            {"data": {**result, "claimed_at": claimed_at}}, headers=SECURITY_HEADERS
         )
 
     async def api_jwks(self, request: web.Request) -> web.Response:

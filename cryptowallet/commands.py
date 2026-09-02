@@ -95,7 +95,7 @@ class WalletCommands:
         await ctx.send(
             f"Open this single-use wallet claim link within 10 minutes:\n"
             f"<{approval_base_url}/session/{token}>\n"
-            "It currently verifies Discord ownership only; it does not expose or export keys."
+            "Verify Discord ownership there, then authenticate the provisioned wallet with CDP."
         )
 
     @staticmethod
