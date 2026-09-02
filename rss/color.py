@@ -31,7 +31,22 @@ _DISCORD_COLOURS = {
     discord.Color.dark_theme().to_rgb(): 'discord_dark_theme'
 }
 
-_RGB_NAME_MAP = {webcolors.hex_to_rgb(hexcode): name for hexcode, name in webcolors.css3_hex_to_names.items()}
+def _css3_rgb_name_map():
+    """Build the CSS3 color map across old and current webcolors releases."""
+    try:
+        names = webcolors.names(spec="css3")
+        return {
+            webcolors.hex_to_rgb(webcolors.name_to_hex(name, spec="css3")): name
+            for name in names
+        }
+    except AttributeError:
+        return {
+            webcolors.hex_to_rgb(hexcode): name
+            for hexcode, name in webcolors.css3_hex_to_names.items()
+        }
+
+
+_RGB_NAME_MAP = _css3_rgb_name_map()
 _RGB_NAME_MAP.update(_DISCORD_COLOURS)
 
 
