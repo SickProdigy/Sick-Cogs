@@ -1,0 +1,16 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Query an AzerothCore SOAP endpoint for server info, online players, and account creation.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild configuration such as API endpoint settings and allowed role IDs. It does not persist user-provided account data.",
+  "hidden": false,
+  "install_msg": "Configure the SOAP endpoint with `[p]azerothcore set soap_url <ip:port>`, then set SOAP credentials with `[p]azerothcore set soap_auth <user> <pass>` and account creation roles with `[p]azerothcore set accountcreationrole <role...>`. Roles can be mentions, IDs, or exact names. Use `[p]azerothcore set realmlist <text>` for the public WoW connection line, `[p]azerothcore set timeout <seconds>` for SOAP timeouts, and `[p]azerothcore set onlinecommand <command>` if your build uses a custom who-is-online command. Use `[p]azerothcore soapcheck` to test TCP reachability. Commands also work with `[p]wow` and `[p]ac`.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "name": "AzerothCore",
+  "requirements": ["aiohttp"],
+  "short": "Interact with an AzerothCore server through SOAP",
+  "tags": ["api", "gaming", "world-of-warcraft", "azerothcore"],
+  "type": "COG",
+  "version": "1.0.0"
+}
