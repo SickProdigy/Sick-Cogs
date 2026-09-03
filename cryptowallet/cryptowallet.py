@@ -34,6 +34,7 @@ class CryptoWallet(
         self.config = create_config(self)
         self.pairing_lock = asyncio.Lock()
         self.confirmation_tasks = set()
+        self.wallet_read_cooldowns = {}
         self.initialize_provisioning()
         self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)

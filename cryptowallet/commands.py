@@ -17,6 +17,9 @@ INTENT_LIFETIME_SECONDS = 15 * 60
 CONFIRMATION_POLL_SECONDS = 5
 CONFIRMATION_POLL_ATTEMPTS = 24
 HISTORY_PAGE_SIZE = 10
+WALLET_SUMMARY_COOLDOWN_SECONDS = 10
+WALLET_HISTORY_COOLDOWN_SECONDS = 15
+HISTORY_NEXT_COOLDOWN_SECONDS = 3
 
 
 class WalletHistoryView(discord.ui.View):
@@ -30,6 +33,14 @@ class WalletHistoryView(discord.ui.View):
         self.pages = [page]
         self.page_index = 0
         self.color = color
+        self.next_allowed_at = 0.0
+        self.add_item(
+            discord.ui.Button(
+                label="View full history",
+                style=discord.ButtonStyle.link,
+                url=f"{BASE_SEPOLIA.explorer_url}/address/{address}",
+            )
+        )
         self._sync_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -64,6 +75,15 @@ class WalletHistoryView(discord.ui.View):
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.page_index >= len(self.pages) - 1:
+            now = time.monotonic()
+            if now < self.next_allowed_at:
+                remaining = max(1, int(self.next_allowed_at - now + 0.999))
+                await interaction.response.send_message(
+                    f"Please wait {remaining} second(s) before loading another page.",
+                    ephemeral=True,
+                )
+                return
+            self.next_allowed_at = now + HISTORY_NEXT_COOLDOWN_SECONDS
             page_token = self.pages[self.page_index]["next_page"]
             try:
                 page = await self.cog.wallet_provider.get_transaction_history(
@@ -176,6 +196,28 @@ class WalletRevocationView(discord.ui.View):
 class WalletCommands:
     """User-facing wallet commands."""
 
+    async def _wallet_read_allowed(
+        self, ctx: commands.Context, key: str, cooldown_seconds: int
+    ) -> bool:
+        """Rate-limit provider reads for ordinary users while exempting administrators."""
+        if await self.bot.is_owner(ctx.author):
+            return True
+        permissions = getattr(ctx.author, "guild_permissions", None)
+        if permissions is not None and permissions.administrator:
+            return True
+
+        now = time.monotonic()
+        cooldown_key = (ctx.author.id, key)
+        allowed_at = self.wallet_read_cooldowns.get(cooldown_key, 0.0)
+        if now < allowed_at:
+            remaining = max(1, int(allowed_at - now + 0.999))
+            await ctx.send(
+                f"Please wait {remaining} second(s) before requesting that wallet data again."
+            )
+            return False
+        self.wallet_read_cooldowns[cooldown_key] = now + cooldown_seconds
+        return True
+
     async def _wallet_profile_or_error(self, ctx: commands.Context) -> dict | None:
         try:
             return await self.get_or_create_wallet_profile(ctx.author)
@@ -213,9 +255,15 @@ class WalletCommands:
         embed.set_footer(text="Prototype only — do not use with real funds")
         return embed
 
-    @commands.group(name="wallet", aliases=("cryptowallet",), invoke_without_command=True)
+    @commands.group(
+        name="wallet", aliases=("wallets", "cryptowallet"), invoke_without_command=True
+    )
     async def wallet(self, ctx: commands.Context, member: discord.Member = None):
         """Show your wallet or another member's existing public wallet profile."""
+        if not await self._wallet_read_allowed(
+            ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
+        ):
+            return
         target = member or ctx.author
         if target.id == ctx.author.id:
             profile = await self._wallet_profile_or_error(ctx)
@@ -232,6 +280,10 @@ class WalletCommands:
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context):
         """Show your Base Sepolia address and native ETH balance."""
+        if not await self._wallet_read_allowed(
+            ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
@@ -1106,6 +1158,10 @@ class WalletCommands:
     @wallet.command(name="transactions", aliases=("tx", "trans", "history"))
     async def wallet_transactions(self, ctx: commands.Context):
         """Browse your wallet's indexed incoming and outgoing blockchain activity."""
+        if not await self._wallet_read_allowed(
+            ctx, "history", WALLET_HISTORY_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
