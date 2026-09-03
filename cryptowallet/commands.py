@@ -441,13 +441,13 @@ class WalletCommands:
             from_wallet = from_address.lower() == normalized_address
             to_wallet = to_address.lower() == normalized_address
             if from_wallet and to_wallet:
-                direction = "Self transfer"
+                direction = "🔵 Self transfer"
             elif from_wallet:
-                direction = "Sent"
+                direction = "🔴 Sent"
             elif to_wallet:
-                direction = "Received"
+                direction = "🟢 Received"
             else:
-                direction = "Contract activity"
+                direction = "⚪ Contract activity"
             amount = (
                 f" · {format_wei_as_eth(value_wei)} {BASE_SEPOLIA.native_symbol}"
                 if value_wei > 0
@@ -1004,6 +1004,6 @@ class WalletCommands:
             ctx.author.id,
             address,
             page,
-            await ctx.embed_color(),
+            discord.Color.blurple(),
         )
         await ctx.send(embed=view.embed(), view=view)
