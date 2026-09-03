@@ -1,10 +1,12 @@
 import secrets
 import time
+from datetime import datetime
+from urllib.parse import quote
 
 import discord
 from redbot.core import commands
 
-from .models import ApprovalPurpose, TransactionIntent
+from .models import TransactionIntent
 from .networks import BASE_SEPOLIA, NETWORKS
 from .providers import WalletProviderError
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
@@ -76,26 +78,56 @@ class WalletCommands:
         ]
         await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
 
-    @wallet.command(name="claim")
-    async def wallet_claim(self, ctx: commands.Context):
-        """Claim and configure control of an automatically provisioned wallet."""
+    @wallet.command(name="authorize", aliases=("auth",))
+    async def wallet_authorize(self, ctx: commands.Context):
+        """Authorize limited bot actions for your provisioned wallet."""
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        approval_base_url = await self.config.approval_base_url()
-        if not approval_base_url or not self.companion.running:
+        approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
+        try:
+            token, expires_at = await self.create_authorization_handoff(ctx.author.id, profile)
+        except RuntimeError as exc:
+            await ctx.send(f"Wallet authorization is unavailable: {exc}")
+            return
+        link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
+        try:
+            await ctx.author.send(
+                "Open this protected wallet authorization link before "
+                f"<t:{expires_at}:R>:\n<{link}>\n"
+                "Confirming creates a 24-hour delegation for this Base Sepolia smart account. "
+                "Do not share this link."
+            )
+        except discord.Forbidden:
+            await ctx.send("I could not DM you. Enable direct messages and run this command again.")
+            return
+        await ctx.send("I sent your short-lived wallet authorization link by DM.")
+
+    @wallet.command(name="authorization", aliases=("authstatus",))
+    async def wallet_authorization(self, ctx: commands.Context):
+        """Show whether the bot currently has limited signing authorization."""
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        try:
+            status = await self.wallet_provider.get_delegation_status(
+                profile, BASE_SEPOLIA.key
+            )
+        except WalletProviderError as exc:
+            await ctx.send(f"Wallet authorization status is unavailable: {exc}")
+            return
+        if status["active"]:
+            expiry = datetime.fromisoformat(
+                status["expires_at"].replace("Z", "+00:00")
+            )
             await ctx.send(
-                "Wallet claiming is unavailable until the account-control companion is running."
+                "Limited signing authorization is active for your Base Sepolia wallet "
+                f"until <t:{int(expiry.timestamp())}:F>."
             )
             return
-        if await self.discord_oauth_config() is None:
-            await ctx.send("Discord OAuth credentials are not configured for the companion.")
-            return
-        token = await self.create_approval_session(ctx.author.id, ApprovalPurpose.CLAIM)
         await ctx.send(
-            f"Open this single-use wallet claim link within 10 minutes:\n"
-            f"<{approval_base_url}/session/{token}>\n"
-            "Verify Discord ownership there, then authenticate the provisioned wallet with CDP."
+            "No active signing authorization exists. You can still receive funds and view "
+            "your wallet; authorization will be requested when you first approve a send."
         )
 
     @staticmethod

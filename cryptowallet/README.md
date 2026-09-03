@@ -24,7 +24,7 @@ Routine account information remains available through Discord:
 
 The browser interface is not an enrollment requirement. It is an independent account-control surface for sensitive operations:
 
-- claiming control of an automatically provisioned wallet
+- authorizing limited bot actions for an automatically provisioned wallet
 - recovery and backup configuration
 - signer or key export where supported
 - provider migration
@@ -173,7 +173,9 @@ User commands:
 [p]wallet networks
 [p]wallet send <address> <amount>
 [p]wallet transaction <intent-id>
-[p]wallet claim
+[p]wallet authorize
+[p]wallet auth                  # Short alias
+[p]wallet authorization
 ```
 
 Owner commands:
@@ -183,6 +185,7 @@ Owner commands:
 [p]walletset cdpstatus
 [p]walletset cdpcheck
 [p]walletset jwtstatus
+[p]walletset jwksfile
 [p]walletset approvalurl https://sickgaming.net/cryptowallet
 [p]walletset clearapprovalurl
 [p]walletset pair
@@ -193,9 +196,11 @@ Owner commands:
 [p]walletset companion stop
 ```
 
-The first `wallet`, `wallet claim`, or `wallet send` command provisions the user's CDP end
-user and Base Sepolia smart account if no stored profile exists. `wallet claim` verifies the same
-Discord identity and records a claim only after CDP independently validates browser wallet control.
+The first `wallet`, `wallet authorize`, or `wallet send` command provisions the user's CDP end
+user and Base Sepolia smart account if no stored profile exists. `wallet authorize` sends a three-minute
+handoff URL by DM. The URL token stays in the fragment, is removed from browser history immediately,
+and is validated by CDP custom authentication before the browser can grant a 24-hour delegation for
+the exact provisioned Base Sepolia smart account.
 
 ## Current implementation status
 
@@ -221,13 +226,12 @@ Completed:
 18. Read-only Base Sepolia native ETH balance lookup with bounded pagination.
 19. Explorer-linked address and balance display in `wallet` and `wallet balance`.
 20. Automatically generated, server-only P-256 custom-auth signing key with stable JWK thumbprint.
-21. Public JWKS publication through the authenticated website-server bridge.
-22. Five-minute, issuer-, audience-, deployment-, application-, purpose-, and user-bound JWTs.
-23. Browser-session-protected PHP token proxy and owner-visible public JWT configuration.
-24. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
-25. CDP access-token validation in the cog with exact provider-user and smart-account matching.
-26. Persisted claim completion only after Discord, website installation, browser session, CDP user,
-    and provisioned address all agree.
+21. Owner-only public JWKS export and a static PHP JWKS endpoint with no bot connection.
+22. Three-minute, issuer-, audience-, deployment-, application-, purpose-, user-, and address-bound
+    authorization handoff JWTs delivered only by DM and carried in the URL fragment.
+23. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
+24. Exact CDP user and smart-account matching before account-scoped delegation.
+25. Explicit browser creation of a 24-hour delegation for only the provisioned account.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
 
@@ -277,13 +281,20 @@ companion pairing credential for any field above.
 6. Run `[p]walletset cdpstatus`, then test `[p]wallet` using Base Sepolia only.
 
 The companion website and CDP custom-auth/JWKS configuration are not required to provision and
-display a wallet address. Configure those later when implementing protected claim, recovery,
+display a wallet address. Configure those later when implementing authorization, recovery,
 export, or transaction-approval flows.
 
 `[p]walletset jwtstatus` displays only public configuration. It never displays the JWT private
-key. The issuer is the configured companion URL, the audience is the CDP project ID, and tokens
-use the stable wallet-profile ID as `sub`. Tokens last no more than five minutes and require a
-paired website request plus a verified, matching browser session.
+key. The issuer is the configured website URL, the audience is the CDP project ID, and tokens use
+the stable wallet-profile ID as `sub`. Run `[p]walletset jwksfile`, upload the resulting public
+`jwks.json` beside the wallet web files, and keep CDP's JWKS URL set to
+`https://your-site.example/cryptowallet/api/jwks.php`. The file contains no private key or CDP
+credential. Add the exact website origin to the CDP Client API Key domain allowlist.
+
+Authorization handoffs expire after three minutes. They are sent by DM, carried after `#handoff=` so they
+are not sent to the web server, and removed from browser history as soon as the page loads. The
+static page authenticates the handoff directly with CDP and grants an account-scoped delegation
+only after the user presses the confirmation button. No website-to-bot listener is required.
 
 The provider reads these values from Red's shared API-token namespace `cryptowallet_cdp`.
 Provision them only through Red's bot-owner API-token modal or another approved server-side
@@ -299,7 +310,8 @@ Not implemented:
 
 - wallet recovery or export
 - blockchain signing or broadcasting
-- application delegation or policy enforcement
+- bot-side delegation status, revocation, and policy enforcement
+- transaction gas estimation, approval controls, signing, and broadcast
 - mainnet support
 
 ## Module layout
@@ -346,17 +358,16 @@ Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci && npm run buil
 `cryptowallet/web/` whenever the pinned frontend dependencies or `src/cdp-wallet.js` change.
 Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy `node_modules/`.
 
-1. Deploy the claim assets and add the exact website origin to CDP's domain allowlist.
-2. Test custom-auth configuration and the complete Base Sepolia claim path end to end.
-3. Adapt the backend connection for the SickGaming private/restricted two-server deployment.
-4. Test pairing, signatures, browser sessions, replay rejection, rotation, and unpairing.
-5. Convert verified identity into recovery and account-security operations.
-6. Connect unsigned intents to explicit browser signing.
-7. Add optional, policy-limited bot delegation and independent revocation.
-8. Verify key export, signer replacement, recovery, and migration away from CDP.
-9. Test expired/replayed links, wrong-user OAuth, compromised Discord, provider outages, lost
+1. Deploy the rebuilt authorization assets and exported `jwks.json`, then test the Base Sepolia authorization path.
+2. Add bot-side authoritative delegation status and independent revocation.
+3. Add one-time handoff consumption if the static site gains trusted server-side state; until then,
+   rely on the three-minute expiry and do not describe the link as single-use.
+4. Convert verified identity into recovery and account-security operations.
+5. Connect unsigned intents to policy-limited delegated signing and explicit Discord approval.
+6. Verify key export, signer replacement, recovery, and migration away from CDP.
+7. Test expired/replayed links, compromised Discord, provider outages, lost
    factors, linked identities, signing-key failure, and mismatched CDP users/addresses.
-10. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
+8. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
 
 ## Security boundary
 

@@ -12,18 +12,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-$library = (string) getenv('SICKWALLET_SERVER_LIBRARY');
-if ($library === '' || !str_starts_with($library, '/') || !is_file($library)) {
+$jwksPath = dirname(__DIR__) . '/jwks.json';
+if (!is_file($jwksPath) || !is_readable($jwksPath)) {
     http_response_code(503);
     echo json_encode(['error' => ['code' => 'configuration_unavailable', 'message' => 'Wallet authentication is unavailable.']]);
     exit;
 }
-require $library;
-
-try {
-    $response = sickwallet_request('GET', '/api/v1/jwks');
-    echo json_encode($response, JSON_THROW_ON_ERROR);
-} catch (Throwable $error) {
+$contents = file_get_contents($jwksPath);
+$decoded = is_string($contents) ? json_decode($contents, true) : null;
+if (!is_array($decoded) || !isset($decoded['keys']) || !is_array($decoded['keys'])) {
     http_response_code(503);
     echo json_encode(['error' => ['code' => 'authentication_unavailable', 'message' => 'Wallet authentication is unavailable.']]);
+    exit;
 }
+echo json_encode($decoded, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);

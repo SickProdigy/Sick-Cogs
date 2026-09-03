@@ -1,6 +1,9 @@
+import io
+import json
 import logging
 from urllib.parse import urlparse
 
+import discord
 from redbot.core import commands
 
 from .networks import BASE_SEPOLIA, NETWORKS
@@ -115,6 +118,21 @@ class WalletAdminCommands:
             f"JWKS URL: `{status['jwks_url']}`\n"
             f"Key ID: `{status['kid']}`\n"
             "Algorithm: `ES256`"
+        )
+
+    @walletset.command(name="jwksfile")
+    @commands.is_owner()
+    async def walletset_jwks_file(self, ctx: commands.Context):
+        """Export the public JWKS file required by CDP custom authentication."""
+        jwks = await self.jwt_jwks()
+        if jwks is None:
+            await ctx.send("Custom authentication is not completely configured.")
+            return
+        payload = json.dumps(jwks, indent=2).encode("utf-8")
+        await ctx.send(
+            "Upload this public-key file as `jwks.json` beside the wallet web files. "
+            "It contains no private key or provider credential.",
+            file=discord.File(io.BytesIO(payload), filename="jwks.json"),
         )
 
     @walletset.command(name="pair")

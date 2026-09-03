@@ -4,7 +4,7 @@
   "disabled": false,
   "end_user_data_statement": "This cog stores wallet profile identifiers, linked platform identifiers, public wallet addresses, and public transaction status metadata. It never stores private keys, recovery phrases, wallet passwords, or one-time authentication codes.",
   "hidden": false,
-  "install_msg": "This cog is an early Base Sepolia prototype. The companion site is for wallet claiming, recovery, security, and exceptional approvals; ordinary wallet provisioning will happen through bot commands. Do not use it with real funds.",
+  "install_msg": "This cog is an early Base Sepolia prototype. The companion site is for wallet authorization, recovery, security, and exceptional approvals; ordinary wallet provisioning happens through bot commands. Do not use it with real funds.",
   "min_bot_version": "3.5.0",
   "permissions": ["embed_links"],
   "requirements": ["cryptography>=42.0.0,<51.0.0", "PyJWT>=2.10.1,<3.0.0"],

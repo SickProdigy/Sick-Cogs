@@ -74,7 +74,7 @@ button:disabled {
   opacity: .65;
 }
 
-#claim-status {
+#authorization-status {
   overflow-wrap: anywhere;
 }
 

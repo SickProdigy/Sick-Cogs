@@ -29,6 +29,10 @@ class WalletProvider(ABC):
         """Validate browser control and return matched public provider identity."""
 
     @abstractmethod
+    async def get_delegation_status(self, profile: dict, network: str) -> dict:
+        """Return authoritative, non-secret delegated-signing status."""
+
+    @abstractmethod
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Validate and prepare an unsigned transaction intent."""
 

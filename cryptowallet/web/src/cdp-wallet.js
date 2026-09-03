@@ -1,34 +1,18 @@
 import {
   authenticateWithJWT,
-  getAccessToken,
+  createDelegationForAccount,
   initialize,
   isSignedIn,
   signOut,
 } from "@coinbase/cdp-core";
 
-async function responseData(response, fallback) {
-  const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message || fallback);
-  return body.data;
-}
-
-async function freshJwt() {
-  const response = await fetch("api/auth-token.php", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { Accept: "application/json" },
-  });
-  const data = await responseData(response, "Wallet authentication is unavailable.");
-  return data.token;
-}
-
-export async function claimWallet(projectId, expectedAddress) {
-  if (!projectId || !expectedAddress) {
-    throw new Error("Wallet claim configuration is incomplete.");
+export async function authorizeWallet(projectId, expectedUserId, expectedAddress, handoffToken) {
+  if (!projectId || !expectedUserId || !expectedAddress || !handoffToken) {
+    throw new Error("Wallet authorization configuration is incomplete.");
   }
   await initialize({
     projectId,
-    customAuth: { getJwt: freshJwt },
+    customAuth: { getJwt: async () => handoffToken },
     ethereum: { createOnLogin: "smart" },
     disableAnalytics: true,
   });
@@ -37,20 +21,20 @@ export async function claimWallet(projectId, expectedAddress) {
   }
   try {
     const { user } = await authenticateWithJWT();
+    if (user.userId !== expectedUserId) {
+      throw new Error("Coinbase returned a different wallet user than the handoff requested.");
+    }
     const addresses = (user.evmSmartAccountObjects || []).map((account) =>
       account.address.toLowerCase()
     );
     if (!addresses.includes(expectedAddress.toLowerCase())) {
       throw new Error("Coinbase returned a different wallet than the provisioned address.");
     }
-    const accessToken = await getAccessToken();
-    const response = await fetch("api/claim.php", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { Accept: "application/json", "Content-Type": "application/json" },
-      body: JSON.stringify({ access_token: accessToken }),
+    const delegation = await createDelegationForAccount({
+      address: expectedAddress,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     });
-    return await responseData(response, "Wallet control could not be verified.");
+    return { address: expectedAddress, expiresAt: delegation.expiresAt };
   } finally {
     await signOut().catch(() => undefined);
   }
