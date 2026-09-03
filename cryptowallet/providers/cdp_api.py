@@ -346,3 +346,21 @@ class CdpApiClient:
         if page_token:
             query["pageToken"] = page_token
         return await self._request("GET", path, query=query)
+
+    async def list_address_transactions(
+        self,
+        address: str,
+        network: str,
+        *,
+        limit: int,
+        page_token: str | None = None,
+    ) -> dict:
+        """Return indexed native, ERC-20, and ERC-721 address activity."""
+        path = (
+            f"/v1/networks/{quote(network, safe='')}"
+            f"/addresses/{quote(address.lower(), safe='')}/transactions"
+        )
+        query: dict[str, str | int] = {"limit": limit}
+        if page_token:
+            query["page"] = page_token
+        return await self._request("GET", path, query=query)

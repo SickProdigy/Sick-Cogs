@@ -16,21 +16,20 @@ from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_w
 INTENT_LIFETIME_SECONDS = 15 * 60
 CONFIRMATION_POLL_SECONDS = 5
 CONFIRMATION_POLL_ATTEMPTS = 24
-HISTORY_PAGE_SIZE = 5
+HISTORY_PAGE_SIZE = 10
 
 
 class WalletHistoryView(discord.ui.View):
-    """Owner-bound pagination for stored wallet transaction intents."""
+    """Owner-bound cursor pagination for public wallet activity."""
 
-    def __init__(self, user_id: int, intents: list[TransactionIntent], color):
+    def __init__(self, cog, user_id: int, address: str, page: dict, color):
         super().__init__(timeout=180)
+        self.cog = cog
         self.user_id = user_id
-        self.intents = intents
+        self.address = address
+        self.pages = [page]
+        self.page_index = 0
         self.color = color
-        self.page = 0
-        self.page_count = max(
-            1, (len(intents) + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE
-        )
         self._sync_buttons()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -42,45 +41,42 @@ class WalletHistoryView(discord.ui.View):
         return False
 
     def _sync_buttons(self) -> None:
-        self.previous.disabled = self.page == 0
-        self.next.disabled = self.page >= self.page_count - 1
+        self.previous.disabled = self.page_index == 0
+        page = self.pages[self.page_index]
+        self.next.disabled = (
+            self.page_index >= len(self.pages) - 1 and not page["has_more"]
+        )
 
     def embed(self) -> discord.Embed:
-        start = self.page * HISTORY_PAGE_SIZE
-        page_intents = self.intents[start : start + HISTORY_PAGE_SIZE]
-        embed = discord.Embed(title="Your Wallet Transactions", color=self.color)
-        for intent in page_intents:
-            network = NETWORKS.get(intent.network)
-            symbol = network.native_symbol if network else "ETH"
-            heading = (
-                f"{intent.status.value.title()} · "
-                f"{format_wei_as_eth(intent.value_wei)} {symbol}"
-            )
-            lines = [f"To: `{intent.to_address}`", f"Intent: `{intent.intent_id}`"]
-            if intent.transaction_hash and network:
-                lines.append(
-                    f"TXID: [{intent.transaction_hash}]"
-                    f"({network.explorer_url}/tx/{intent.transaction_hash})"
-                )
-            lines.append(f"Created <t:{intent.created_at}:R>")
-            embed.add_field(name=heading, value="\n".join(lines), inline=False)
-        embed.set_footer(
-            text=(
-                f"Page {self.page + 1} of {self.page_count} · "
-                f"Last {len(self.intents)} stored"
-            )
+        return self.cog._activity_embed(
+            self.address,
+            self.pages[self.page_index],
+            self.page_index,
+            self.color,
         )
-        return embed
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = max(0, self.page - 1)
+        self.page_index = max(0, self.page_index - 1)
         self._sync_buttons()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.page = min(self.page_count - 1, self.page + 1)
+        if self.page_index >= len(self.pages) - 1:
+            page_token = self.pages[self.page_index]["next_page"]
+            try:
+                page = await self.cog.wallet_provider.get_transaction_history(
+                    self.address,
+                    BASE_SEPOLIA.key,
+                    page_token=page_token,
+                    limit=HISTORY_PAGE_SIZE,
+                )
+            except WalletProviderError as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+            self.pages.append(page)
+        self.page_index += 1
         self._sync_buttons()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
@@ -387,6 +383,99 @@ class WalletCommands:
             "The next send will require authorization again.",
             ephemeral=True,
         )
+
+    @staticmethod
+    def _activity_embed(address: str, page: dict, page_index: int, color) -> discord.Embed:
+        """Render one CDP-indexed page of public address activity."""
+        embed = discord.Embed(title="Your Wallet Activity", color=color)
+        normalized_address = address.lower()
+        for item in page["transactions"][:HISTORY_PAGE_SIZE]:
+            if not isinstance(item, dict):
+                continue
+            content = item.get("content") or {}
+            tx_hash = str(item.get("transaction_hash") or content.get("hash") or "").lower()
+            if len(tx_hash) != 66 or not tx_hash.startswith("0x"):
+                continue
+            try:
+                int(tx_hash[2:], 16)
+            except ValueError:
+                continue
+
+            transfers = []
+            traces = content.get("flattened_traces") or []
+            if isinstance(traces, list):
+                for trace in traces:
+                    if not isinstance(trace, dict) or trace.get("error"):
+                        continue
+                    from_address = str(trace.get("from") or "")
+                    to_address = str(trace.get("to") or "")
+                    try:
+                        raw_value = str(trace.get("value") or "0")
+                        value_wei = int(
+                            raw_value,
+                            16 if raw_value.lower().startswith("0x") else 10,
+                        )
+                    except ValueError:
+                        continue
+                    if (
+                        value_wei > 0
+                        and (
+                            from_address.lower() == normalized_address
+                            or to_address.lower() == normalized_address
+                        )
+                    ):
+                        transfers.append((from_address, to_address, value_wei))
+
+            from_address = str(content.get("from") or item.get("from_address_id") or "")
+            to_address = str(content.get("to") or "")
+            try:
+                raw_value = str(content.get("value") or "0")
+                value_wei = int(
+                    raw_value, 16 if raw_value.lower().startswith("0x") else 10
+                )
+            except ValueError:
+                value_wei = 0
+            if transfers:
+                from_address, to_address, value_wei = transfers[0]
+
+            from_wallet = from_address.lower() == normalized_address
+            to_wallet = to_address.lower() == normalized_address
+            if from_wallet and to_wallet:
+                direction = "Self transfer"
+            elif from_wallet:
+                direction = "Sent"
+            elif to_wallet:
+                direction = "Received"
+            else:
+                direction = "Contract activity"
+            amount = (
+                f" · {format_wei_as_eth(value_wei)} {BASE_SEPOLIA.native_symbol}"
+                if value_wei > 0
+                else ""
+            )
+            details = [
+                f"From: `{from_address or 'Unavailable'}`",
+                f"To: `{to_address or 'Contract creation'}`",
+                f"TXID: [{tx_hash}]({BASE_SEPOLIA.explorer_url}/tx/{tx_hash})",
+            ]
+            timestamp = str(content.get("block_timestamp") or "")
+            try:
+                created_at = int(
+                    datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+                )
+            except (TypeError, ValueError):
+                created_at = 0
+            if created_at:
+                details.append(f"Confirmed <t:{created_at}:R>")
+            embed.add_field(
+                name=f"{direction}{amount}",
+                value="\n".join(details),
+                inline=False,
+            )
+        if not embed.fields:
+            embed.description = "No indexed Base Sepolia activity was found for this wallet."
+        embed.set_footer(text=f"Page {page_index + 1} · 10 transactions per page")
+        return embed
 
     @staticmethod
     def _account_for_network(profile: dict, network_key: str) -> dict | None:
@@ -772,8 +861,8 @@ class WalletCommands:
             return
         await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()))
 
-    @wallet.command(name="tx")
-    async def wallet_tx(self, ctx: commands.Context, txid: str):
+    @wallet.command(name="txid")
+    async def wallet_txid(self, ctx: commands.Context, txid: str):
         """Look up a public Base Sepolia transaction by transaction hash."""
         lookup = txid.strip().lower()
         if len(lookup) != 66 or not lookup.startswith("0x"):
@@ -792,6 +881,24 @@ class WalletCommands:
         if transaction is None:
             await ctx.send("No Base Sepolia transaction was found with that TXID.")
             return
+        stored_intent = None
+        for data in (await self.expire_and_trim_intents(ctx.author)).values():
+            if str(data.get("transaction_hash") or "").lower() != lookup:
+                continue
+            try:
+                stored_intent = TransactionIntent.from_dict(data)
+            except (KeyError, TypeError, ValueError):
+                pass
+            break
+        wallet_transfers = transaction["wallet_transfers"]
+        if stored_intent is not None:
+            wallet_transfers = [
+                {
+                    "from_address": stored_intent.from_address,
+                    "to_address": stored_intent.to_address,
+                    "value_wei": stored_intent.value_wei,
+                }
+            ]
         success = transaction["success"]
         status = "Pending" if success is None else "Confirmed" if success else "Failed"
         color = (
@@ -800,10 +907,13 @@ class WalletCommands:
             else discord.Color.red()
         )
         embed = discord.Embed(title=f"{status} Base Sepolia transaction", color=color)
-        if str(transaction["to_address"] or "").lower() == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":
+        if (
+            str(transaction["to_address"] or "").lower()
+            == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"
+        ):
             embed.description = (
-                "This is an account-abstraction bundle transaction. The wallet transfer below "
-                "appears under internal transactions in the explorer."
+                "This smart-account transfer appears under internal transactions "
+                "in the explorer."
             )
         embed.add_field(name="Status", value=status, inline=True)
         embed.add_field(
@@ -820,41 +930,44 @@ class WalletCommands:
             value=f"[{lookup}]({BASE_SEPOLIA.explorer_url}/tx/{lookup})",
             inline=False,
         )
-        embed.add_field(
-            name="Bundle sender",
-            value=f"`{transaction['from_address']}`",
-            inline=False,
-        )
-        embed.add_field(
-            name="Called contract",
-            value=f"`{transaction['to_address'] or 'Contract creation'}`",
-            inline=False,
-        )
-        wallet_transfers = transaction["wallet_transfers"]
         if wallet_transfers:
             for index, transfer in enumerate(wallet_transfers[:5], start=1):
-                label = (
-                    "Wallet transfer"
-                    if len(wallet_transfers) == 1
-                    else f"Wallet transfer {index}"
+                suffix = "" if len(wallet_transfers) == 1 else f" {index}"
+                embed.add_field(
+                    name=f"From{suffix}",
+                    value=f"`{transfer['from_address']}`",
+                    inline=False,
                 )
                 embed.add_field(
-                    name=label,
-                    value=(
-                        f"**{format_wei_as_eth(transfer['value_wei'])} "
-                        f"{BASE_SEPOLIA.native_symbol}**\n"
-                        f"From: `{transfer['from_address']}`\n"
-                        f"To: `{transfer['to_address']}`"
-                    ),
+                    name=f"To{suffix}",
+                    value=f"`{transfer['to_address']}`",
                     inline=False,
+                )
+                embed.add_field(
+                    name=f"Value{suffix}",
+                    value=(
+                        f"{format_wei_as_eth(transfer['value_wei'])} "
+                        f"{BASE_SEPOLIA.native_symbol}"
+                    ),
+                    inline=True,
                 )
         elif wallet_transfers is None:
             embed.add_field(
-                name="Wallet transfer",
+                name="Transfer details",
                 value="Temporarily unavailable; use the explorer link above.",
                 inline=False,
             )
         else:
+            embed.add_field(
+                name="From",
+                value=f"`{transaction['from_address']}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="To",
+                value=f"`{transaction['to_address'] or 'Contract creation'}`",
+                inline=False,
+            )
             embed.add_field(
                 name="Value",
                 value=(
@@ -866,19 +979,31 @@ class WalletCommands:
         embed.set_footer(text="Public on-chain transaction data")
         await ctx.send(embed=embed)
 
-    @wallet.command(name="transactions", aliases=("history",))
+    @wallet.command(name="transactions", aliases=("tx", "trans", "history"))
     async def wallet_transactions(self, ctx: commands.Context):
-        """Browse your private stored wallet transaction history."""
-        stored = await self.expire_and_trim_intents(ctx.author)
-        intents = []
-        for data in stored.values():
-            try:
-                intents.append(TransactionIntent.from_dict(data))
-            except (KeyError, TypeError, ValueError):
-                continue
-        intents.sort(key=lambda intent: intent.created_at, reverse=True)
-        if not intents:
-            await ctx.send("You have no stored wallet transactions yet.")
+        """Browse your wallet's indexed incoming and outgoing blockchain activity."""
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
             return
-        view = WalletHistoryView(ctx.author.id, intents, await ctx.embed_color())
+        account = self._account_for_network(profile, BASE_SEPOLIA.key)
+        if account is None:
+            await ctx.send("Your wallet profile has no Base Sepolia account.")
+            return
+        try:
+            address = normalize_evm_address(str(account.get("address") or ""))
+            page = await self.wallet_provider.get_transaction_history(
+                address,
+                BASE_SEPOLIA.key,
+                limit=HISTORY_PAGE_SIZE,
+            )
+        except (ValueError, WalletProviderError) as exc:
+            await ctx.send(f"Wallet activity is unavailable: {exc}")
+            return
+        view = WalletHistoryView(
+            self,
+            ctx.author.id,
+            address,
+            page,
+            await ctx.embed_color(),
+        )
         await ctx.send(embed=view.embed(), view=view)

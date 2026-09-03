@@ -182,6 +182,52 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not retrieve the Base Sepolia balance. Try again later."
             ) from exc
 
+    async def get_transaction_history(
+        self,
+        address: str,
+        network: str,
+        *,
+        page_token: str | None = None,
+        limit: int = 10,
+    ) -> dict:
+        """Return indexed public activity for one Base Sepolia address."""
+        if network != BASE_SEPOLIA.key:
+            raise WalletProviderError("Transaction history is restricted to Base Sepolia.")
+        if limit < 1 or limit > 100 or page_token is not None and len(page_token) > 5_000:
+            raise WalletProviderError("The transaction history request is invalid.")
+        try:
+            normalized_address = normalize_evm_address(address)
+        except ValueError as exc:
+            raise WalletProviderError("The stored wallet address is invalid.") from exc
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).list_address_transactions(
+                normalized_address,
+                network,
+                limit=limit,
+                page_token=page_token,
+            )
+            transactions = result.get("data")
+            has_more = result.get("has_more")
+            next_page = result.get("next_page")
+            if (
+                not isinstance(transactions, list)
+                or not isinstance(has_more, bool)
+                or has_more and not isinstance(next_page, str)
+            ):
+                raise ValueError("Invalid address history")
+            return {
+                "transactions": transactions,
+                "has_more": has_more,
+                "next_page": str(next_page or ""),
+            }
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not retrieve this wallet's Base Sepolia activity."
+            ) from exc
+
     async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:
         """Validate a browser CDP session against the provisioned profile and account."""
         if not access_token or len(access_token) > 16_384:
