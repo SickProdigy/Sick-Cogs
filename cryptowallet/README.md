@@ -207,7 +207,10 @@ Because CDP sponsors Base Sepolia smart-account user operations, the displayed u
 `0 ETH (sponsored by CDP)` and the estimated total equals the transfer amount. Approval checks
 CDP's authoritative account-delegation status. When authorization is absent, the bot DMs the
 short-lived authorization link and leaves the intent pending for another approval after completion.
-This checkpoint still does not sign or broadcast transactions.
+When authorization is active, approval atomically moves the intent into processing, rechecks its
+balance and immutable fields, and submits a sponsored Base Sepolia smart-account user operation
+with a stable CDP idempotency key. The bot stores the public user-operation hash, transaction hash,
+provider status, and block number when returned.
 
 ## Current implementation status
 
@@ -239,6 +242,7 @@ Completed:
 23. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
 24. Exact CDP user and smart-account matching before account-scoped delegation.
 25. Explicit browser creation of a 24-hour delegation for only the provisioned account.
+26. Atomic, idempotent Base Sepolia smart-account submission checkpoint in version `0.16.0`.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
 
@@ -318,7 +322,7 @@ Not implemented:
 - wallet recovery or export
 - blockchain signing or broadcasting
 - bot-side delegation status, revocation, and policy enforcement
-- transaction gas estimation, approval controls, signing, and broadcast
+- submitted-operation reconciliation and confirmation polling
 - mainnet support
 
 ## Module layout
