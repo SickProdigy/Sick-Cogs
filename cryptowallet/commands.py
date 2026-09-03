@@ -392,8 +392,19 @@ class WalletCommands:
             IntentStatus.CONFIRMED: "Confirmed wallet transaction",
             IntentStatus.FAILED: "Failed wallet transaction",
         }
+        colors = {
+            IntentStatus.PENDING: discord.Color.blurple(),
+            IntentStatus.PROCESSING: discord.Color.blurple(),
+            IntentStatus.APPROVED: discord.Color.blurple(),
+            IntentStatus.SUBMITTED: discord.Color.gold(),
+            IntentStatus.CONFIRMED: discord.Color.green(),
+            IntentStatus.FAILED: discord.Color.red(),
+            IntentStatus.REJECTED: discord.Color.red(),
+            IntentStatus.EXPIRED: discord.Color.dark_grey(),
+        }
         embed = discord.Embed(
-            title=titles.get(intent.status, "Wallet transaction intent"), color=color
+            title=titles.get(intent.status, "Wallet transaction intent"),
+            color=colors.get(intent.status, color),
         )
         embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
         embed.add_field(name="Network", value=f"{network.name} (`{network.chain_id}`)", inline=True)
