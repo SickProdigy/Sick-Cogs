@@ -176,6 +176,7 @@ User commands:
 [p]wallet intent <bot-reference>
 [p]wallet txid <txid>
 [p]wallet transactions           # Aliases: tx, trans, history
+[p]wallet notifications [true|false]
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
@@ -213,12 +214,15 @@ Because CDP sponsors Base Sepolia smart-account user operations, the displayed u
 `0 ETH (sponsored by CDP)` and the estimated total equals the transfer amount. Approval checks
 CDP's authoritative account-delegation status. When authorization is absent, the bot DMs the
 short-lived authorization link and leaves the intent pending for another approval after completion.
-When authorization is active, approval atomically moves the intent into processing, rechecks its
-balance and immutable fields, and submits a sponsored Base Sepolia smart-account user operation
+When authorization is active, the approval view is checked against the exact quote originally
+displayed. The provider then rebuilds the sponsored Base Sepolia quote immediately before signing;
+any material change updates the preview and requires another approval. An unchanged quote atomically moves the intent into processing, rechecks its balance and immutable
+fields, and submits a sponsored Base Sepolia smart-account user operation
 with a stable CDP idempotency key. The bot stores the public user-operation hash, transaction hash,
 provider status, and block number when returned. It then polls the same operation without
 resubmitting it and sends the owner a separate user-only confirmation containing the explorer
-link. The original approval preview remains unchanged as an audit snapshot. Submitted operations
+link. The original approval card progresses from pending to submitted, then updates with the final
+status, transaction hash, and block number when confirmation arrives. Submitted operations
 can also be refreshed on demand through `wallet intent <bot-reference>`.
 `wallet transactions` (or `wallet tx`/`wallet trans`) provides owner-bound, ten-at-a-time
 pagination over the wallet's indexed incoming and outgoing Base Sepolia activity, including
