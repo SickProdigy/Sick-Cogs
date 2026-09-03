@@ -62,6 +62,41 @@ class WalletAdminCommands:
         missing = ", ".join(readiness["missing"])
         await ctx.send(f"CDP is not configured. Missing secret-store fields: `{missing}`.")
 
+    @walletset.command(name="cdpcheck")
+    @commands.is_owner()
+    async def walletset_cdp_check(self, ctx: commands.Context):
+        """Validate CDP credentials with one read-only API request."""
+        async with ctx.typing():
+            result = await self.wallet_provider.diagnostics()
+        if result["ready"]:
+            await ctx.send(
+                "**CDP diagnostic passed**\n"
+                "Secret-store fields: `present`\n"
+                "API key material: `valid format`\n"
+                "Wallet Secret: `valid format`\n"
+                "Read-only project authentication: `successful`\n"
+                "No wallet, transaction, policy, or delegation was created."
+            )
+            return
+        if result["stage"] == "configuration":
+            missing = ", ".join(result.get("missing") or []) or "unknown"
+            await ctx.send(
+                "CDP diagnostic stopped before making a request. "
+                f"Missing secret-store fields: `{missing}`."
+            )
+            return
+        error = result.get("error") or "unknown authentication failure"
+        guidance = (
+            "Check the Secret API Key ID/secret, Wallet Secret, server clock, "
+            "public-IP allowlist, and key permissions."
+        )
+        await ctx.send(
+            "**CDP diagnostic failed safely**\n"
+            f"Result: `{error}`\n"
+            f"{guidance}\n"
+            "No secret values were displayed and no CDP state was changed."
+        )
+
     @walletset.command(name="jwtstatus")
     @commands.is_owner()
     async def walletset_jwt_status(self, ctx: commands.Context):

@@ -129,6 +129,11 @@ class CdpApiClient:
         self.base_url = base_url.rstrip("/")
         self.session = session
 
+    def validate_key_material(self) -> None:
+        """Parse both server-side signing keys without exposing their values."""
+        _load_api_private_key(self.credentials.api_key_secret)
+        _load_wallet_private_key(self.credentials.wallet_secret)
+
     async def _request(
         self,
         method: str,
@@ -195,6 +200,14 @@ class CdpApiClient:
         finally:
             if owned_session:
                 await session.close()
+
+    async def check_connection(self) -> None:
+        """Validate local key material and perform one read-only project request."""
+        self.validate_key_material()
+        payload = await self._request("GET", "/v2/end-users", query={"pageSize": 1})
+        end_users = payload.get("endUsers")
+        if not isinstance(end_users, list):
+            raise CdpApiError("CDP returned an invalid end-user list.")
 
     async def create_end_user(
         self, profile_id: str, jwt_kid: str, idempotency_key: str

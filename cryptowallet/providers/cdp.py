@@ -67,6 +67,28 @@ class CdpWalletProvider(WalletProvider):
             missing.append("generated_jwt_key")
         return {"configured": not missing, "missing": missing}
 
+    async def diagnostics(self) -> dict:
+        """Run local credential checks and one non-mutating CDP request."""
+        readiness = await self.readiness()
+        if not readiness["configured"]:
+            return {
+                "ready": False,
+                "stage": "configuration",
+                "missing": readiness["missing"],
+            }
+        credentials = await self.credentials()
+        if credentials is None:
+            return {"ready": False, "stage": "configuration", "missing": []}
+        client = self._api_client(credentials)
+        try:
+            await client.check_connection()
+        except CdpApiError as exc:
+            return {
+                "ready": False,
+                "stage": "authentication",
+                "error": str(exc),
+            }
+        return {"ready": True, "stage": "complete"}
     @staticmethod
     def _idempotency_key(profile_id: str) -> str:
         return str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:{profile_id}"))
