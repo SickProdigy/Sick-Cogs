@@ -3,7 +3,10 @@ import json
 import aiohttp
 
 
-BASE_SEPOLIA_RPC_URL = "https://sepolia.base.org"
+BASE_SEPOLIA_RPC_URLS = (
+    "https://sepolia.base.org",
+    "https://sepolia-preconf.base.org",
+)
 ENTRY_POINT_V06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"
 USER_OPERATION_EVENT_TOPIC = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
@@ -42,7 +45,7 @@ async def get_transaction(tx_hash: str) -> dict | None:
         try:
             wallet_transfers = await _get_wallet_transfers(tx_hash, receipt)
         except BaseRpcError:
-            pass
+            wallet_transfers = None
     if returned_hash != tx_hash.lower():
         raise BaseRpcError("Base Sepolia returned a mismatched transaction.")
     return {
@@ -116,27 +119,36 @@ async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
 
 async def _rpc(method: str, params: list):
     timeout = aiohttp.ClientTimeout(total=15)
-    try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(
-                BASE_SEPOLIA_RPC_URL,
-                headers={"Content-Type": "application/json"},
-                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-            ) as response:
-                raw = await response.content.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise BaseRpcError("Base Sepolia returned an oversized response.")
-                payload = json.loads(raw.decode("utf-8"))
-                if (
-                    response.status != 200
-                    or not isinstance(payload, dict)
-                    or "error" in payload
-                    or "result" not in payload
-                ):
-                    raise BaseRpcError("Base Sepolia RPC rejected the request.")
-                return payload["result"]
-    except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise BaseRpcError("Base Sepolia RPC could not complete the request.") from exc
+    last_error = None
+    for rpc_url in BASE_SEPOLIA_RPC_URLS:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    rpc_url,
+                    headers={"Content-Type": "application/json"},
+                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
+                ) as response:
+                    raw = await response.content.read(MAX_RESPONSE_BYTES + 1)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise BaseRpcError("Base Sepolia returned an oversized response.")
+                    payload = json.loads(raw.decode("utf-8"))
+                    if (
+                        response.status != 200
+                        or not isinstance(payload, dict)
+                        or "error" in payload
+                        or "result" not in payload
+                    ):
+                        raise BaseRpcError("Base Sepolia RPC rejected the request.")
+                    return payload["result"]
+        except (
+            aiohttp.ClientError,
+            TimeoutError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            BaseRpcError,
+        ) as exc:
+            last_error = exc
+    raise BaseRpcError("Base Sepolia RPC could not complete the request.") from last_error
 
 
 async def get_user_operation_receipt(address: str, user_operation_hash: str) -> dict | None:
