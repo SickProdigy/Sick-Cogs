@@ -22,6 +22,12 @@ Routine account information remains available through Discord:
 - transaction-intent creation and status
 - public transaction hashes and confirmations
 
+Provider-backed wallet summaries are limited to one request per user every 10 seconds, and new
+transaction-history cards to one every 15 seconds. Bot owners and server administrators bypass
+these limits. History remains compact at 10 entries per page, protects new page requests from
+rapid repeat clicks, and includes a permanent BaseScan address link for complete public history.
+The plural `wallets` command is accepted as an alias for `wallet`.
+
 The browser interface is not an enrollment requirement. It is an independent account-control surface for sensitive operations:
 
 - authorizing limited bot actions for an automatically provisioned wallet
