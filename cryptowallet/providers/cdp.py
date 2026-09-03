@@ -342,6 +342,57 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not safely complete the sponsored Base Sepolia submission."
             ) from exc
 
+    async def get_transaction_status(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        """Retrieve and validate current CDP state for a submitted user operation."""
+        if intent.network != BASE_SEPOLIA.key or not intent.user_operation_hash:
+            raise WalletProviderError("Only submitted Base Sepolia operations can be refreshed.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next(
+            (item for item in profile.get("accounts") or [] if item.get("network") == BASE_SEPOLIA.key),
+            None,
+        )
+        try:
+            address = normalize_evm_address(str((account or {}).get("address") or ""))
+        except ValueError as exc:
+            raise WalletProviderError("The stored wallet address is invalid.") from exc
+        if not provider_user_id or address != normalize_evm_address(intent.from_address):
+            raise WalletProviderError("The wallet profile does not match this operation.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).get_smart_account_user_operation(
+                provider_user_id, address, intent.user_operation_hash, credentials.project_id
+            )
+            provider_status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            if (
+                provider_status not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                or user_op_hash.lower() != intent.user_operation_hash.lower()
+                or not HASH_PATTERN.fullmatch(user_op_hash)
+                or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
+            ):
+                raise ValueError("CDP returned mismatched user-operation status")
+            receipts = result.get("receipts") or []
+            block_number = None
+            if receipts:
+                if not isinstance(receipts, list) or not isinstance(receipts[0], dict):
+                    raise ValueError("CDP returned invalid receipt data")
+                raw_block_number = receipts[0].get("blockNumber")
+                if raw_block_number is not None:
+                    block_number = int(raw_block_number)
+            return {
+                "provider_status": provider_status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                "block_number": block_number,
+            }
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not retrieve the submitted operation status.") from exc
+
     @staticmethod
     def _not_connected() -> WalletProviderError:
         return WalletProviderError(
@@ -373,9 +424,6 @@ class CdpWalletProvider(WalletProvider):
         raise self._not_connected()
 
     async def request_approval(self, intent: TransactionIntent) -> str:
-        raise self._not_connected()
-
-    async def get_transaction_status(self, intent_id: str) -> TransactionIntent:
         raise self._not_connected()
 
     async def revoke_authorization(self, profile_id: str) -> None:

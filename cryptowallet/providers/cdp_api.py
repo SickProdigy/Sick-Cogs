@@ -288,6 +288,17 @@ class CdpApiClient:
             idempotency_key=idempotency_key,
         )
 
+    async def get_smart_account_user_operation(
+        self, user_id: str, address: str, user_operation_hash: str, project_id: str
+    ) -> dict:
+        """Retrieve current public state for one submitted user operation."""
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            f"/evm/smart-accounts/{quote(address, safe='')}"
+            f"/user-operations/{quote(user_operation_hash, safe='')}"
+        )
+        return await self._request("GET", path, query={"projectID": project_id})
+
     async def list_token_balances(
         self,
         address: str,
