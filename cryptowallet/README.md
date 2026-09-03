@@ -172,7 +172,9 @@ User commands:
 [p]wallet balance
 [p]wallet networks
 [p]wallet send <address> <amount>
-[p]wallet transaction <intent-id>
+[p]wallet intent <bot-reference>
+[p]wallet tx <txid>
+[p]wallet transactions
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
@@ -216,8 +218,10 @@ with a stable CDP idempotency key. The bot stores the public user-operation hash
 provider status, and block number when returned. It then polls the same operation without
 resubmitting it and sends the owner a separate user-only confirmation containing the explorer
 link. The original approval preview remains unchanged as an audit snapshot. Submitted operations
-can also be refreshed on demand through `wallet tx <bot-reference>`. Once confirmed, the same
-details can be retrieved with the actual on-chain TXID through `wallet tx <txid>`.
+can also be refreshed on demand through `wallet intent <bot-reference>`.
+`wallet transactions` provides owner-bound pagination over the 25 most recent stored intents.
+`wallet tx <txid>` independently retrieves public transaction and receipt data directly from
+Base Sepolia; it does not expose the bot's private intent metadata.
 
 ## Current implementation status
 

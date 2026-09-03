@@ -10,11 +10,79 @@ from redbot.core import commands
 from .models import IntentStatus, TransactionIntent
 from .networks import BASE_SEPOLIA, NETWORKS
 from .providers import WalletProviderError
+from .providers.base_rpc import BaseRpcError, get_transaction
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
 CONFIRMATION_POLL_SECONDS = 5
 CONFIRMATION_POLL_ATTEMPTS = 24
+HISTORY_PAGE_SIZE = 5
+
+
+class WalletHistoryView(discord.ui.View):
+    """Owner-bound pagination for stored wallet transaction intents."""
+
+    def __init__(self, user_id: int, intents: list[TransactionIntent], color):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.intents = intents
+        self.color = color
+        self.page = 0
+        self.page_count = max(
+            1, (len(intents) + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE
+        )
+        self._sync_buttons()
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can browse this transaction history.", ephemeral=True
+        )
+        return False
+
+    def _sync_buttons(self) -> None:
+        self.previous.disabled = self.page == 0
+        self.next.disabled = self.page >= self.page_count - 1
+
+    def embed(self) -> discord.Embed:
+        start = self.page * HISTORY_PAGE_SIZE
+        page_intents = self.intents[start : start + HISTORY_PAGE_SIZE]
+        embed = discord.Embed(title="Your Wallet Transactions", color=self.color)
+        for intent in page_intents:
+            network = NETWORKS.get(intent.network)
+            symbol = network.native_symbol if network else "ETH"
+            heading = (
+                f"{intent.status.value.title()} · "
+                f"{format_wei_as_eth(intent.value_wei)} {symbol}"
+            )
+            lines = [f"To: `{intent.to_address}`", f"Intent: `{intent.intent_id}`"]
+            if intent.transaction_hash and network:
+                lines.append(
+                    f"TXID: [{intent.transaction_hash}]"
+                    f"({network.explorer_url}/tx/{intent.transaction_hash})"
+                )
+            lines.append(f"Created <t:{intent.created_at}:R>")
+            embed.add_field(name=heading, value="\n".join(lines), inline=False)
+        embed.set_footer(
+            text=(
+                f"Page {self.page + 1} of {self.page_count} · "
+                f"Last {len(self.intents)} stored"
+            )
+        )
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.page_count - 1, self.page + 1)
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
 
 
 class WalletIntentView(discord.ui.View):
@@ -319,7 +387,14 @@ class WalletCommands:
 
     @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
-        embed = discord.Embed(title="Wallet transaction intent", color=color)
+        titles = {
+            IntentStatus.SUBMITTED: "Submitted wallet transaction",
+            IntentStatus.CONFIRMED: "Confirmed wallet transaction",
+            IntentStatus.FAILED: "Failed wallet transaction",
+        }
+        embed = discord.Embed(
+            title=titles.get(intent.status, "Wallet transaction intent"), color=color
+        )
         embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
         embed.add_field(name="Network", value=f"{network.name} (`{network.chain_id}`)", inline=True)
         embed.add_field(
@@ -648,26 +723,15 @@ class WalletCommands:
             view=WalletIntentView(self, ctx.author.id, intent.intent_id),
         )
 
-    @wallet.command(name="transaction", aliases=("intent", "tx"))
-    async def wallet_transaction(self, ctx: commands.Context, reference: str):
-        """Show one of your transactions by transaction hash or bot reference."""
+    @wallet.command(name="intent", aliases=("transaction",))
+    async def wallet_intent(self, ctx: commands.Context, reference: str):
+        """Show one of your private stored intents by bot reference."""
         intents = await self.expire_and_trim_intents(ctx.author)
         lookup = reference.strip()
         data = intents.get(lookup)
         if data is None:
-            normalized_lookup = lookup.lower()
-            data = next(
-                (
-                    candidate
-                    for candidate in intents.values()
-                    if str(candidate.get("transaction_hash") or "").lower()
-                    == normalized_lookup
-                ),
-                None,
-            )
-        if data is None:
             await ctx.send(
-                "No transaction with that TXID or bot reference belongs to your wallet profile."
+                "No stored intent with that bot reference belongs to your wallet profile."
             )
             return
         try:
@@ -686,3 +750,87 @@ class WalletCommands:
             await ctx.send("That transaction intent references an unsupported network.")
             return
         await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()))
+
+    @wallet.command(name="tx")
+    async def wallet_tx(self, ctx: commands.Context, txid: str):
+        """Look up a public Base Sepolia transaction by transaction hash."""
+        lookup = txid.strip().lower()
+        if len(lookup) != 66 or not lookup.startswith("0x"):
+            await ctx.send("Enter a complete transaction hash beginning with `0x`.")
+            return
+        try:
+            int(lookup[2:], 16)
+        except ValueError:
+            await ctx.send("Enter a valid hexadecimal transaction hash.")
+            return
+        try:
+            transaction = await get_transaction(lookup)
+        except BaseRpcError as exc:
+            await ctx.send(f"Base Sepolia transaction lookup is unavailable: {exc}")
+            return
+        if transaction is None:
+            await ctx.send("No Base Sepolia transaction was found with that TXID.")
+            return
+        success = transaction["success"]
+        status = "Pending" if success is None else "Confirmed" if success else "Failed"
+        color = (
+            discord.Color.gold() if success is None
+            else discord.Color.green() if success
+            else discord.Color.red()
+        )
+        embed = discord.Embed(title=f"{status} Base Sepolia transaction", color=color)
+        if str(transaction["to_address"] or "").lower() == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":
+            embed.description = (
+                "This is an account-abstraction bundle transaction. The wallet transfer "
+                "appears under internal transactions in the explorer."
+            )
+        embed.add_field(name="Status", value=status, inline=True)
+        embed.add_field(
+            name="Network",
+            value=f"{BASE_SEPOLIA.name} (`{BASE_SEPOLIA.chain_id}`)",
+            inline=True,
+        )
+        if transaction["block_number"] is not None:
+            embed.add_field(
+                name="Block", value=f"`{transaction['block_number']}`", inline=True
+            )
+        embed.add_field(
+            name="TXID",
+            value=f"[{lookup}]({BASE_SEPOLIA.explorer_url}/tx/{lookup})",
+            inline=False,
+        )
+        embed.add_field(
+            name="From", value=f"`{transaction['from_address']}`", inline=False
+        )
+        embed.add_field(
+            name="To",
+            value=f"`{transaction['to_address'] or 'Contract creation'}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Value",
+            value=(
+                f"{format_wei_as_eth(transaction['value_wei'])} "
+                f"{BASE_SEPOLIA.native_symbol}"
+            ),
+            inline=True,
+        )
+        embed.set_footer(text="Public on-chain transaction data")
+        await ctx.send(embed=embed)
+
+    @wallet.command(name="transactions", aliases=("history",))
+    async def wallet_transactions(self, ctx: commands.Context):
+        """Browse your private stored wallet transaction history."""
+        stored = await self.expire_and_trim_intents(ctx.author)
+        intents = []
+        for data in stored.values():
+            try:
+                intents.append(TransactionIntent.from_dict(data))
+            except (KeyError, TypeError, ValueError):
+                continue
+        intents.sort(key=lambda intent: intent.created_at, reverse=True)
+        if not intents:
+            await ctx.send("You have no stored wallet transactions yet.")
+            return
+        view = WalletHistoryView(ctx.author.id, intents, await ctx.embed_color())
+        await ctx.send(embed=view.embed(), view=view)
