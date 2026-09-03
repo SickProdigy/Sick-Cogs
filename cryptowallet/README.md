@@ -202,6 +202,13 @@ handoff URL by DM. The URL token stays in the fragment, is removed from browser 
 and is validated by CDP custom authentication before the browser can grant a 24-hour delegation for
 the exact provisioned Base Sepolia smart account.
 
+`wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
+Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is
+`0 ETH (sponsored by CDP)` and the estimated total equals the transfer amount. Approval checks
+CDP's authoritative account-delegation status. When authorization is absent, the bot DMs the
+short-lived authorization link and leaves the intent pending for another approval after completion.
+This checkpoint still does not sign or broadcast transactions.
+
 ## Current implementation status
 
 Completed:
