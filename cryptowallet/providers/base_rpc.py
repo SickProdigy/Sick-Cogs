@@ -16,6 +16,39 @@ class BaseRpcError(RuntimeError):
     pass
 
 
+async def get_transaction(tx_hash: str) -> dict | None:
+    """Return public Base Sepolia transaction and receipt data by hash."""
+    transaction = await _rpc("eth_getTransactionByHash", [tx_hash])
+    if transaction is None:
+        return None
+    if not isinstance(transaction, dict):
+        raise BaseRpcError("Base Sepolia returned an invalid transaction.")
+    receipt = await _rpc("eth_getTransactionReceipt", [tx_hash])
+    if receipt is not None and not isinstance(receipt, dict):
+        raise BaseRpcError("Base Sepolia returned an invalid transaction receipt.")
+    try:
+        returned_hash = str(transaction["hash"]).lower()
+        value_wei = int(str(transaction["value"]), 16)
+        from_address = str(transaction["from"])
+        to_address = transaction.get("to")
+        block_hex = transaction.get("blockNumber")
+        block_number = int(str(block_hex), 16) if block_hex is not None else None
+        receipt_status = receipt.get("status") if receipt else None
+        success = int(str(receipt_status), 16) == 1 if receipt_status is not None else None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BaseRpcError("Base Sepolia returned malformed transaction data.") from exc
+    if returned_hash != tx_hash.lower():
+        raise BaseRpcError("Base Sepolia returned a mismatched transaction.")
+    return {
+        "transaction_hash": returned_hash,
+        "from_address": from_address,
+        "to_address": str(to_address) if to_address is not None else None,
+        "value_wei": value_wei,
+        "block_number": block_number,
+        "success": success,
+    }
+
+
 async def _rpc(method: str, params: list):
     timeout = aiohttp.ClientTimeout(total=15)
     try:
