@@ -1,10 +1,16 @@
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from ..jwt_auth import JWT_TOKEN_NAMESPACE
-from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfile
+from ..models import (
+    AccountType,
+    IntentStatus,
+    PublicAccount,
+    TransactionIntent,
+    WalletProfile,
+)
 from ..networks import BASE_SEPOLIA
 from ..validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
@@ -480,7 +486,35 @@ class CdpWalletProvider(WalletProvider):
         raise self._not_connected()
 
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
-        raise self._not_connected()
+        """Rebuild the current Base Sepolia quote without signing or submitting."""
+        if (
+            intent.status is not IntentStatus.PENDING
+            or intent.network != BASE_SEPOLIA.key
+            or not intent.gas_sponsored
+            or intent.estimated_gas_fee_wei != 0
+            or intent.value_wei <= 0
+            or intent.provider_status is not None
+            or intent.user_operation_hash is not None
+            or intent.transaction_hash is not None
+            or intent.block_number is not None
+        ):
+            raise WalletProviderError(
+                "Only a clean, pending, sponsored Base Sepolia intent can be quoted."
+            )
+        try:
+            from_address = normalize_evm_address(intent.from_address)
+            to_address = normalize_evm_address(intent.to_address)
+        except ValueError as exc:
+            raise WalletProviderError(
+                "The transaction quote contains an invalid wallet address."
+            ) from exc
+        return replace(
+            intent,
+            from_address=from_address,
+            to_address=to_address,
+            estimated_gas_fee_wei=0,
+            gas_sponsored=True,
+        )
 
     async def request_approval(self, intent: TransactionIntent) -> str:
         raise self._not_connected()
