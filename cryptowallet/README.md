@@ -169,6 +169,7 @@ User commands:
 
 ```text
 [p]wallet
+[p]wallet @member
 [p]wallet balance
 [p]wallet networks
 [p]wallet send <address> <amount>
