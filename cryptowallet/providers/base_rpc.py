@@ -37,6 +37,12 @@ async def get_transaction(tx_hash: str) -> dict | None:
         success = int(str(receipt_status), 16) == 1 if receipt_status is not None else None
     except (KeyError, TypeError, ValueError) as exc:
         raise BaseRpcError("Base Sepolia returned malformed transaction data.") from exc
+    wallet_transfers = []
+    if receipt is not None and success is True and value_wei == 0:
+        try:
+            wallet_transfers = await _get_wallet_transfers(tx_hash, receipt)
+        except BaseRpcError:
+            pass
     if returned_hash != tx_hash.lower():
         raise BaseRpcError("Base Sepolia returned a mismatched transaction.")
     return {
@@ -46,7 +52,66 @@ async def get_transaction(tx_hash: str) -> dict | None:
         "value_wei": value_wei,
         "block_number": block_number,
         "success": success,
+        "wallet_transfers": wallet_transfers,
     }
+
+
+async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
+    """Find successful native transfers initiated by ERC-4337 wallet senders."""
+    senders = set()
+    logs = receipt.get("logs")
+    if not isinstance(logs, list):
+        return []
+    for log in logs:
+        if not isinstance(log, dict):
+            continue
+        topics = log.get("topics")
+        if (
+            str(log.get("address") or "").lower() == ENTRY_POINT_V06
+            and isinstance(topics, list)
+            and len(topics) >= 3
+            and str(topics[0]).lower() == USER_OPERATION_EVENT_TOPIC
+        ):
+            sender_topic = str(topics[2]).lower().removeprefix("0x")
+            if len(sender_topic) == 64:
+                senders.add("0x" + sender_topic[-40:])
+    if not senders:
+        return []
+
+    trace = await _rpc("debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}])
+    if not isinstance(trace, dict):
+        raise BaseRpcError("Base Sepolia returned an invalid transaction trace.")
+    transfers = []
+    stack = [trace]
+    visited = 0
+    while stack:
+        call = stack.pop()
+        visited += 1
+        if visited > 10_000:
+            raise BaseRpcError("Base Sepolia returned an oversized transaction trace.")
+        children = call.get("calls")
+        if isinstance(children, list):
+            stack.extend(child for child in children if isinstance(child, dict))
+        if (
+            str(call.get("type") or "").upper() != "CALL"
+            or str(call.get("from") or "").lower() not in senders
+            or call.get("error")
+        ):
+            continue
+        try:
+            value_wei = int(str(call.get("value") or "0x0"), 16)
+        except ValueError as exc:
+            raise BaseRpcError("Base Sepolia returned an invalid trace value.") from exc
+        to_address = str(call.get("to") or "")
+        if value_wei > 0 and len(to_address) == 42:
+            transfers.append(
+                {
+                    "from_address": str(call["from"]),
+                    "to_address": to_address,
+                    "value_wei": value_wei,
+                }
+            )
+    return transfers
 
 
 async def _rpc(method: str, params: list):

@@ -220,8 +220,8 @@ resubmitting it and sends the owner a separate user-only confirmation containing
 link. The original approval preview remains unchanged as an audit snapshot. Submitted operations
 can also be refreshed on demand through `wallet intent <bot-reference>`.
 `wallet transactions` provides owner-bound pagination over the 25 most recent stored intents.
-`wallet tx <txid>` independently retrieves public transaction and receipt data directly from
-Base Sepolia; it does not expose the bot's private intent metadata.
+`wallet tx <txid>` independently retrieves public transaction, receipt, and smart-account
+internal-transfer data directly from Base Sepolia; it does not expose the bot's private intent metadata.
 
 ## Current implementation status
 
