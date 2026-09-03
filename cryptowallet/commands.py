@@ -792,7 +792,7 @@ class WalletCommands:
         embed = discord.Embed(title=f"{status} Base Sepolia transaction", color=color)
         if str(transaction["to_address"] or "").lower() == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789":
             embed.description = (
-                "This is an account-abstraction bundle transaction. The wallet transfer "
+                "This is an account-abstraction bundle transaction. The wallet transfer below "
                 "appears under internal transactions in the explorer."
             )
         embed.add_field(name="Status", value=status, inline=True)
@@ -811,21 +811,42 @@ class WalletCommands:
             inline=False,
         )
         embed.add_field(
-            name="From", value=f"`{transaction['from_address']}`", inline=False
-        )
-        embed.add_field(
-            name="To",
-            value=f"`{transaction['to_address'] or 'Contract creation'}`",
+            name="Bundle sender",
+            value=f"`{transaction['from_address']}`",
             inline=False,
         )
         embed.add_field(
-            name="Value",
-            value=(
-                f"{format_wei_as_eth(transaction['value_wei'])} "
-                f"{BASE_SEPOLIA.native_symbol}"
-            ),
-            inline=True,
+            name="Called contract",
+            value=f"`{transaction['to_address'] or 'Contract creation'}`",
+            inline=False,
         )
+        wallet_transfers = transaction["wallet_transfers"]
+        if wallet_transfers:
+            for index, transfer in enumerate(wallet_transfers[:5], start=1):
+                label = (
+                    "Wallet transfer"
+                    if len(wallet_transfers) == 1
+                    else f"Wallet transfer {index}"
+                )
+                embed.add_field(
+                    name=label,
+                    value=(
+                        f"**{format_wei_as_eth(transfer['value_wei'])} "
+                        f"{BASE_SEPOLIA.native_symbol}**\n"
+                        f"From: `{transfer['from_address']}`\n"
+                        f"To: `{transfer['to_address']}`"
+                    ),
+                    inline=False,
+                )
+        else:
+            embed.add_field(
+                name="Value",
+                value=(
+                    f"{format_wei_as_eth(transaction['value_wei'])} "
+                    f"{BASE_SEPOLIA.native_symbol}"
+                ),
+                inline=True,
+            )
         embed.set_footer(text="Public on-chain transaction data")
         await ctx.send(embed=embed)
 
