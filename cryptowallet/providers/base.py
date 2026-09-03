@@ -51,5 +51,5 @@ class WalletProvider(ABC):
         """Return authoritative provider state for a submitted transaction."""
 
     @abstractmethod
-    async def revoke_authorization(self, profile_id: str) -> None:
-        """Revoke application authority without requiring the Discord bot to sign."""
+    async def revoke_authorization(self, profile: dict, network: str) -> None:
+        """Revoke account-scoped application authority without signing a transaction."""

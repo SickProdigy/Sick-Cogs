@@ -66,6 +66,48 @@ class WalletIntentView(discord.ui.View):
             self.processing = False
 
 
+class WalletRevocationView(discord.ui.View):
+    """Owner-bound confirmation for account-scoped delegation revocation."""
+
+    def __init__(self, cog, user_id: int, profile: dict):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.user_id = user_id
+        self.profile = profile
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can revoke this authorization.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="Revoke authorization", emoji="🔒", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "Authorization revocation is already being checked.", ephemeral=True
+            )
+            return
+        self.processing = True
+        try:
+            await self.cog.revoke_authorization_interaction(interaction, self)
+        finally:
+            self.processing = False
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.disable_controls()
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("Wallet authorization was not changed.", ephemeral=True)
+
+
 class WalletCommands:
     """User-facing wallet commands."""
 
@@ -198,6 +240,59 @@ class WalletCommands:
         await ctx.send(
             "No active signing authorization exists. You can still receive funds and view "
             "your wallet; authorization will be requested when you first approve a send."
+        )
+
+    @wallet.command(name="revoke", aliases=("deauthorize",))
+    async def wallet_revoke(self, ctx: commands.Context):
+        """Revoke limited signing authorization for your Base Sepolia wallet."""
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        try:
+            status = await self.wallet_provider.get_delegation_status(
+                profile, BASE_SEPOLIA.key
+            )
+        except WalletProviderError as exc:
+            await ctx.send(f"Wallet authorization status is unavailable: {exc}")
+            return
+        if not status["active"]:
+            await ctx.send("No active signing authorization exists for this wallet.")
+            return
+        expiry = datetime.fromisoformat(status["expires_at"].replace("Z", "+00:00"))
+        await ctx.send(
+            "Revoke limited signing authorization for "
+            f"{status['address']}?\n"
+            "This does not delete the wallet or move funds. Future sends will require "
+            f"authorization again. The current authorization expires <t:{int(expiry.timestamp())}:R>.",
+            view=WalletRevocationView(self, ctx.author.id, profile),
+        )
+
+    async def revoke_authorization_interaction(
+        self, interaction: discord.Interaction, view: WalletRevocationView
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self.wallet_provider.revoke_authorization(view.profile, BASE_SEPOLIA.key)
+            status = await self.wallet_provider.get_delegation_status(
+                view.profile, BASE_SEPOLIA.key
+            )
+        except WalletProviderError as exc:
+            await interaction.followup.send(
+                f"Wallet authorization could not be revoked: {exc}", ephemeral=True
+            )
+            return
+        if status["active"]:
+            await interaction.followup.send(
+                "CDP still reports this wallet authorization as active; no success was recorded.",
+                ephemeral=True,
+            )
+            return
+        view.disable_controls()
+        await interaction.message.edit(view=view)
+        await interaction.followup.send(
+            "Limited signing authorization was revoked. Your wallet and funds were not changed. "
+            "The next send will require authorization again.",
+            ephemeral=True,
         )
 
     @staticmethod
