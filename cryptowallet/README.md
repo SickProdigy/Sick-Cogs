@@ -174,8 +174,8 @@ User commands:
 [p]wallet networks
 [p]wallet send <address> <amount>
 [p]wallet intent <bot-reference>
-[p]wallet tx <txid>
-[p]wallet transactions
+[p]wallet txid <txid>
+[p]wallet transactions           # Aliases: tx, trans, history
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
@@ -220,9 +220,11 @@ provider status, and block number when returned. It then polls the same operatio
 resubmitting it and sends the owner a separate user-only confirmation containing the explorer
 link. The original approval preview remains unchanged as an audit snapshot. Submitted operations
 can also be refreshed on demand through `wallet intent <bot-reference>`.
-`wallet transactions` provides owner-bound pagination over the 25 most recent stored intents.
-`wallet tx <txid>` independently retrieves public transaction, receipt, and smart-account
-internal-transfer data directly from Base Sepolia; it does not expose the bot's private intent metadata.
+`wallet transactions` (or `wallet tx`/`wallet trans`) provides owner-bound, ten-at-a-time
+pagination over the wallet's indexed incoming and outgoing Base Sepolia activity, including
+native, ERC-20, and ERC-721 interactions. `wallet txid <txid>` independently retrieves a public
+transaction, receipt, and smart-account internal-transfer data directly from Base Sepolia; it
+does not expose the bot's private intent metadata.
 
 ## Current implementation status
 

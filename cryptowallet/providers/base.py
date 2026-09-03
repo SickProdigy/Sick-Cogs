@@ -33,6 +33,17 @@ class WalletProvider(ABC):
         """Return authoritative, non-secret delegated-signing status."""
 
     @abstractmethod
+    async def get_transaction_history(
+        self,
+        address: str,
+        network: str,
+        *,
+        page_token: str | None = None,
+        limit: int = 10,
+    ) -> dict:
+        """Return one cursor-paginated page of public address activity."""
+
+    @abstractmethod
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
         """Sign and submit an approved transaction with provider idempotency."""
 
