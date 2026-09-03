@@ -33,6 +33,10 @@ class WalletProvider(ABC):
         """Return authoritative, non-secret delegated-signing status."""
 
     @abstractmethod
+    async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
+        """Sign and submit an approved transaction with provider idempotency."""
+
+    @abstractmethod
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Validate and prepare an unsigned transaction intent."""
 

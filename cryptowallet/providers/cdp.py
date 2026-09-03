@@ -1,3 +1,4 @@
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
+HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,6 +255,91 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve delegation status. Try again later."
+            ) from exc
+
+    async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
+        """Submit one sponsored Base Sepolia transfer through delegated signing."""
+        if intent.network != BASE_SEPOLIA.key or not intent.gas_sponsored:
+            raise WalletProviderError(
+                "Transaction submission is restricted to sponsored Base Sepolia."
+            )
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        if not provider_user_id or intent.profile_id != profile_id:
+            raise WalletProviderError("The wallet profile does not match this transaction intent.")
+        account = next(
+            (
+                item for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        try:
+            account_address = normalize_evm_address(
+                str((account or {}).get("address") or "")
+            )
+            to_address = normalize_evm_address(intent.to_address)
+        except ValueError as exc:
+            raise WalletProviderError("The transaction contains an invalid wallet address.") from exc
+        if account_address != normalize_evm_address(intent.from_address):
+            raise WalletProviderError("The transaction sender no longer matches the wallet profile.")
+        if intent.value_wei <= 0:
+            raise WalletProviderError("The transaction amount must be positive.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        idempotency_key = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"sick-cogs:cdp:send:{profile_id}:{intent.intent_id}",
+            )
+        )
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                provider_user_id,
+                account_address,
+                credentials.project_id,
+                BASE_SEPOLIA.key,
+                to_address,
+                intent.value_wei,
+                idempotency_key,
+            )
+            provider_status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            returned_calls = result.get("calls") or []
+            if (
+                str(result.get("network") or "") != BASE_SEPOLIA.key
+                or provider_status
+                not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                or not HASH_PATTERN.fullmatch(user_op_hash)
+                or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
+                or not isinstance(returned_calls, list)
+                or len(returned_calls) != 1
+                or normalize_evm_address(str(returned_calls[0].get("to") or "")) != to_address
+                or int(returned_calls[0].get("value", -1)) != intent.value_wei
+                or str(returned_calls[0].get("data") or "") != "0x"
+            ):
+                raise ValueError("CDP returned mismatched user-operation data")
+            receipts = result.get("receipts") or []
+            block_number = None
+            if receipts:
+                if not isinstance(receipts, list) or not isinstance(receipts[0], dict):
+                    raise ValueError("CDP returned invalid receipt data")
+                raw_block_number = receipts[0].get("blockNumber")
+                if raw_block_number is not None:
+                    block_number = int(raw_block_number)
+            return {
+                "provider_status": provider_status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                "block_number": block_number,
+            }
+        except WalletProviderError:
+            raise
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely complete the sponsored Base Sepolia submission."
             ) from exc
 
     @staticmethod

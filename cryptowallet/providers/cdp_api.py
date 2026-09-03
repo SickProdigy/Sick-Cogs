@@ -259,6 +259,35 @@ class CdpApiClient:
                 return None
             raise
 
+    async def send_smart_account_user_operation(
+        self,
+        user_id: str,
+        address: str,
+        project_id: str,
+        network: str,
+        to_address: str,
+        value_wei: int,
+        idempotency_key: str,
+    ) -> dict:
+        """Prepare, sign, and send one sponsored smart-account user operation."""
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            f"/evm/smart-accounts/{quote(address, safe='')}/send"
+        )
+        body = {
+            "network": network,
+            "calls": [{"to": to_address, "value": str(value_wei), "data": "0x"}],
+            "useCdpPaymaster": True,
+        }
+        return await self._request(
+            "POST",
+            path,
+            body=body,
+            query={"projectID": project_id},
+            wallet_auth=True,
+            idempotency_key=idempotency_key,
+        )
+
     async def list_token_balances(
         self,
         address: str,

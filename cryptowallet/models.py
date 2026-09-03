@@ -10,6 +10,7 @@ class AccountType(str, Enum):
 
 class IntentStatus(str, Enum):
     PENDING = "pending"
+    PROCESSING = "processing"
     APPROVED = "approved"
     SUBMITTED = "submitted"
     CONFIRMED = "confirmed"
@@ -84,7 +85,10 @@ class TransactionIntent:
     estimated_gas_fee_wei: int = 0
     gas_sponsored: bool = False
     status: IntentStatus = IntentStatus.PENDING
+    provider_status: str | None = None
+    user_operation_hash: str | None = None
     transaction_hash: str | None = None
+    block_number: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,7 +103,10 @@ class TransactionIntent:
             "estimated_gas_fee_wei": self.estimated_gas_fee_wei,
             "gas_sponsored": self.gas_sponsored,
             "status": self.status.value,
+            "provider_status": self.provider_status,
+            "user_operation_hash": self.user_operation_hash,
             "transaction_hash": self.transaction_hash,
+            "block_number": self.block_number,
         }
 
     @classmethod
@@ -116,7 +123,10 @@ class TransactionIntent:
             estimated_gas_fee_wei=int(data.get("estimated_gas_fee_wei", 0)),
             gas_sponsored=bool(data.get("gas_sponsored", False)),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
+            provider_status=data.get("provider_status"),
+            user_operation_hash=data.get("user_operation_hash"),
             transaction_hash=data.get("transaction_hash"),
+            block_number=data.get("block_number"),
         )
 
 

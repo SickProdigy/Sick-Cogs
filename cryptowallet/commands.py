@@ -227,6 +227,14 @@ class WalletCommands:
                 ),
                 inline=False,
             )
+        if intent.user_operation_hash:
+            embed.add_field(
+                name="User operation",
+                value=f"`{intent.user_operation_hash}`",
+                inline=False,
+            )
+        if intent.block_number is not None:
+            embed.add_field(name="Block", value=f"`{intent.block_number}`", inline=True)
         embed.set_footer(text="Unsigned testnet intent — no transaction has been sent")
         return embed
 
@@ -303,13 +311,93 @@ class WalletCommands:
                 ephemeral=True,
             )
             return
+        try:
+            current_balance = await self.wallet_provider.get_native_balance(
+                intent.from_address, intent.network
+            )
+        except WalletProviderError as exc:
+            await interaction.followup.send(
+                f"The final balance check failed: {exc}", ephemeral=True
+            )
+            return
+        if current_balance < intent.value_wei + intent.estimated_gas_fee_wei:
+            await interaction.followup.send(
+                "The wallet balance no longer covers the displayed total. Create a new "
+                "transaction preview.",
+                ephemeral=True,
+            )
+            return
+        async with self.config.user_from_id(view.user_id).intents() as intents:
+            current_data = intents.get(intent.intent_id)
+            try:
+                current = TransactionIntent.from_dict(current_data)
+            except (KeyError, TypeError, ValueError):
+                current = None
+            if current is None or current.status is not IntentStatus.PENDING:
+                await interaction.followup.send(
+                    "This transaction is no longer pending.", ephemeral=True
+                )
+                return
+            if current.to_dict() != intent.to_dict():
+                await interaction.followup.send(
+                    "The transaction changed after it was displayed. Create a new preview.",
+                    ephemeral=True,
+                )
+                return
+            current.status = IntentStatus.PROCESSING
+            intents[intent.intent_id] = current.to_dict()
+            intent = current
         view.disable_controls()
-        await interaction.message.edit(view=view)
-        await interaction.followup.send(
-            "Authorization is active and this preview passed its approval checks. Signing and "
-            "broadcast are not enabled yet, so approval was not persisted and no funds moved.",
-            ephemeral=True,
+        network = NETWORKS[intent.network]
+        color = interaction.message.embeds[0].color if interaction.message.embeds else None
+        await interaction.message.edit(
+            embed=self._intent_embed(intent, network, color), view=view
         )
+        try:
+            result = await self.wallet_provider.submit_transaction(profile, intent)
+        except WalletProviderError as exc:
+            async with self.config.user_from_id(view.user_id).intents() as intents:
+                stored = intents.get(intent.intent_id)
+                if stored and stored.get("status") == IntentStatus.PROCESSING.value:
+                    stored["provider_status"] = "unknown"
+            await interaction.followup.send(
+                f"Submission outcome is uncertain: {exc} Do not create a replacement transfer; "
+                "check this intent before taking further action.",
+                ephemeral=True,
+            )
+            return
+        provider_status = result["provider_status"]
+        if provider_status == "complete":
+            final_status = IntentStatus.CONFIRMED
+        elif provider_status in {"dropped", "failed"}:
+            final_status = IntentStatus.FAILED
+        else:
+            final_status = IntentStatus.SUBMITTED
+        async with self.config.user_from_id(view.user_id).intents() as intents:
+            stored = intents.get(intent.intent_id)
+            if not stored or stored.get("status") != IntentStatus.PROCESSING.value:
+                await interaction.followup.send(
+                    "CDP accepted the operation, but its local intent state could not be "
+                    "reconciled automatically. Do not submit another transfer.",
+                    ephemeral=True,
+                )
+                return
+            stored["status"] = final_status.value
+            stored["provider_status"] = provider_status
+            stored["user_operation_hash"] = result["user_operation_hash"]
+            stored["transaction_hash"] = result["transaction_hash"]
+            stored["block_number"] = result["block_number"]
+            intent = TransactionIntent.from_dict(stored)
+        await interaction.message.edit(
+            embed=self._intent_embed(intent, network, color), view=view
+        )
+        if final_status is IntentStatus.CONFIRMED:
+            message = "Transaction confirmed on Base Sepolia."
+        elif final_status is IntentStatus.FAILED:
+            message = "CDP reported that the transaction failed or was dropped."
+        else:
+            message = "Transaction submitted to Base Sepolia and awaiting confirmation."
+        await interaction.followup.send(message, ephemeral=True)
 
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
