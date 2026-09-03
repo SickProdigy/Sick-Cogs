@@ -202,13 +202,28 @@ class WalletCommands:
         approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
         token, expires_at = await self.create_authorization_handoff(user.id, profile)
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
-        try:
-            await user.send(
-                "Open this protected wallet authorization link before "
-                f"<t:{expires_at}:R>:\n<{link}>\n"
-                "Confirming creates a 24-hour delegation for this Base Sepolia smart account. "
-                "Do not share this link."
+        embed = discord.Embed(
+            title="Authorize Crypto Wallet",
+            description=(
+                "Grant the bot limited signing access to this Base Sepolia test wallet."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>", inline=True)
+        embed.add_field(name="Authorization duration", value="24 hours", inline=True)
+        embed.add_field(name="Scope", value="This wallet only", inline=False)
+        embed.set_footer(text="Do not share or forward this authorization.")
+        view = discord.ui.View(timeout=3 * 60)
+        view.add_item(
+            discord.ui.Button(
+                label="Authorize wallet",
+                emoji="🔐",
+                style=discord.ButtonStyle.link,
+                url=link,
             )
+        )
+        try:
+            await user.send(embed=embed, view=view)
         except discord.Forbidden as exc:
             raise RuntimeError(
                 "I could not DM you. Enable direct messages and try again."
