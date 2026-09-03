@@ -121,15 +121,15 @@ class WalletCommands:
         return None
 
     async def _wallet_embed(self, ctx: commands.Context, profile: dict) -> discord.Embed:
-        embed = discord.Embed(title="Crypto Wallet", color=await ctx.embed_color())
+        embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
         embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
-        embed.description = "Your public wallet profile is linked."
+        display_name = discord.utils.escape_markdown(ctx.author.display_name)
+        embed.description = f"{display_name}’s public wallet and balance."
         accounts = profile.get("accounts") or []
         for account in accounts[:5]:
             address = str(account.get("address") or "Unavailable")
-            account_type = str(account.get("account_type") or "unknown")
             embed.add_field(
-                name=account_type.replace("_", " ").title(),
+                name="Wallet Address",
                 value=f"[{address}]({BASE_SEPOLIA.explorer_url}/address/{address})",
                 inline=False,
             )
