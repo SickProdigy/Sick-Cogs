@@ -439,5 +439,33 @@ class CdpWalletProvider(WalletProvider):
     async def request_approval(self, intent: TransactionIntent) -> str:
         raise self._not_connected()
 
-    async def revoke_authorization(self, profile_id: str) -> None:
-        raise self._not_connected()
+    async def revoke_authorization(self, profile: dict, network: str) -> None:
+        """Revoke only this wallet's account-scoped delegation."""
+        if network != BASE_SEPOLIA.key:
+            raise WalletProviderError("Delegation revocation is restricted to Base Sepolia.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        if not provider_user_id or account is None:
+            raise WalletProviderError("The stored wallet profile is incomplete.")
+        try:
+            address = normalize_evm_address(str(account.get("address") or ""))
+        except ValueError as exc:
+            raise WalletProviderError("The stored wallet address is invalid.") from exc
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            await self._api_client(credentials).revoke_account_delegation(
+                provider_user_id, address, credentials.project_id
+            )
+        except CdpApiError as exc:
+            raise WalletProviderError(
+                "CDP could not revoke this wallet's signing authorization."
+            ) from exc

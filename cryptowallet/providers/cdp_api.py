@@ -147,7 +147,9 @@ class CdpApiClient:
         body: dict | None = None,
         query: dict[str, str | int] | None = None,
         wallet_auth: bool = False,
+        developer_auth: bool = False,
         idempotency_key: str | None = None,
+        allow_empty_response: bool = False,
     ) -> dict:
         method = method.upper()
         request_body = body or {}
@@ -159,6 +161,10 @@ class CdpApiClient:
         }
         if wallet_auth:
             headers["X-Wallet-Auth"] = _wallet_jwt(
+                self.credentials, method, path, request_body
+            )
+        if developer_auth:
+            headers["X-Developer-Auth"] = _wallet_jwt(
                 self.credentials, method, path, request_body
             )
         if idempotency_key:
@@ -181,6 +187,12 @@ class CdpApiClient:
                     raw.extend(chunk)
                     if len(raw) > MAX_RESPONSE_BYTES:
                         raise CdpApiError("CDP returned an oversized response.")
+                if (
+                    200 <= response.status < 300
+                    and not raw
+                    and allow_empty_response
+                ):
+                    return {}
                 try:
                     payload = json.loads(raw.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -257,6 +269,28 @@ class CdpApiClient:
         except CdpApiError as exc:
             if exc.status == 404 and exc.error_type == "not_found":
                 return None
+            raise
+
+    async def revoke_account_delegation(
+        self, user_id: str, address: str, project_id: str
+    ) -> None:
+        """Revoke only the active delegation for one end-user account."""
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            f"/address/{quote(address, safe='')}/delegation"
+        )
+        try:
+            await self._request(
+                "DELETE",
+                path,
+                body={},
+                query={"projectID": project_id},
+                developer_auth=True,
+                allow_empty_response=True,
+            )
+        except CdpApiError as exc:
+            if exc.status == 404 and exc.error_type == "not_found":
+                return
             raise
 
     async def send_smart_account_user_operation(

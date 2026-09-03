@@ -176,6 +176,7 @@ User commands:
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
+[p]wallet revoke
 ```
 
 Owner commands:
@@ -200,7 +201,9 @@ The first `wallet`, `wallet authorize`, or `wallet send` command provisions the 
 user and Base Sepolia smart account if no stored profile exists. `wallet authorize` sends a three-minute
 handoff URL by DM. The URL token stays in the fragment, is removed from browser history immediately,
 and is validated by CDP custom authentication before the browser can grant a 24-hour delegation for
-the exact provisioned Base Sepolia smart account.
+the exact provisioned Base Sepolia smart account. `wallet revoke` requires an owner-bound
+Discord confirmation, revokes only that account-scoped delegation, and verifies with CDP that it
+is inactive; it does not delete the wallet or move funds.
 
 `wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
 Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is
