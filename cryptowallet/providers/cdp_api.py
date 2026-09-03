@@ -22,6 +22,11 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 class CdpApiError(RuntimeError):
     """Raised when the direct CDP API client cannot complete a request."""
 
+    def __init__(self, message: str, *, status: int | None = None, error_type: str = ""):
+        super().__init__(message)
+        self.status = status
+        self.error_type = error_type
+
 
 @dataclass(frozen=True, slots=True)
 class CdpApiCredentials:
@@ -191,7 +196,11 @@ class CdpApiClient:
                         details.append(error_type)
                     if correlation_id:
                         details.append(f"correlation {correlation_id}")
-                    raise CdpApiError(f"CDP returned {'; '.join(details)}.")
+                    raise CdpApiError(
+                        f"CDP returned {'; '.join(details)}.",
+                        status=response.status,
+                        error_type=error_type,
+                    )
                 if not isinstance(payload, dict):
                     raise CdpApiError("CDP returned an unexpected response shape.")
                 return payload
@@ -234,6 +243,21 @@ class CdpApiClient:
             "/v2/end-users/auth/validate-token",
             body={"accessToken": access_token},
         )
+
+    async def get_account_delegation(
+        self, user_id: str, address: str, project_id: str
+    ) -> dict | None:
+        """Return an active account-scoped delegation, or None when absent."""
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            f"/address/{quote(address, safe='')}/delegation"
+        )
+        try:
+            return await self._request("GET", path, query={"projectID": project_id})
+        except CdpApiError as exc:
+            if exc.status == 404 and exc.error_type == "not_found":
+                return None
+            raise
 
     async def list_token_balances(
         self,

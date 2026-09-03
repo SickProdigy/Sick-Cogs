@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from ..jwt_auth import JWT_TOKEN_NAMESPACE
 from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfile
@@ -214,6 +215,45 @@ class CdpWalletProvider(WalletProvider):
         if not matched:
             raise WalletProviderError("The authenticated CDP account does not match this wallet.")
         return {"provider_user_id": returned_user_id, "address": sorted(matched)[0]}
+
+    async def get_delegation_status(self, profile: dict, network: str) -> dict:
+        """Read authoritative account-scoped delegation status from CDP."""
+        if network != BASE_SEPOLIA.key:
+            raise WalletProviderError("Delegation lookup is restricted to Base Sepolia.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        if not provider_user_id or account is None:
+            raise WalletProviderError("The stored wallet profile is incomplete.")
+        try:
+            address = normalize_evm_address(str(account.get("address") or ""))
+        except ValueError as exc:
+            raise WalletProviderError("The stored wallet address is invalid.") from exc
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            delegation = await self._api_client(credentials).get_account_delegation(
+                provider_user_id, address, credentials.project_id
+            )
+            if delegation is None:
+                return {"active": False, "address": address, "expires_at": None}
+            expires_at = str(delegation.get("expiresAt") or "")
+            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+            if expiry.tzinfo is None:
+                raise ValueError("Delegation expiry lacks a timezone")
+            active = expiry.astimezone(timezone.utc) > datetime.now(timezone.utc)
+            return {"active": active, "address": address, "expires_at": expires_at}
+        except (CdpApiError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not retrieve delegation status. Try again later."
+            ) from exc
 
     @staticmethod
     def _not_connected() -> WalletProviderError:

@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 JWT_TOKEN_NAMESPACE = "cryptowallet_jwt"
 JWT_LIFETIME_SECONDS = 5 * 60
+CLAIM_HANDOFF_LIFETIME_SECONDS = 3 * 60
 
 
 def _base64url(value: bytes) -> str:
@@ -140,6 +141,59 @@ class JwtAuthMixin:
             "sickwallet_deployment": session.deployment_id,
             "sickwallet_application": str(session.discord_application_id),
             "sickwallet_purpose": session.purpose.value,
+        }
+        token = jwt.encode(
+            claims,
+            configuration["private_key"],
+            algorithm="ES256",
+            headers={"kid": configuration["kid"], "typ": "JWT"},
+        )
+        return token, expires_at
+
+    async def create_authorization_handoff(
+        self, discord_user_id: int, profile: dict
+    ) -> tuple[str, int]:
+        """Create a short-lived CDP custom-auth token for wallet authorization."""
+        configuration = await self.jwt_configuration()
+        if configuration is None:
+            raise RuntimeError("CryptoWallet custom authentication is not configured")
+        profile_id = str(profile.get("profile_id") or "")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        stored_discord_user_id = int(profile.get("discord_user_id", 0) or 0)
+        address = next(
+            (
+                str(account.get("address") or "")
+                for account in profile.get("accounts") or []
+                if account.get("network") == "base-sepolia"
+            ),
+            "",
+        )
+        deployment_id = str(await self.config.deployment_id() or "")
+        application_id = getattr(self.bot.user, "id", None)
+        if (
+            not profile_id
+            or provider_user_id != profile_id
+            or stored_discord_user_id != discord_user_id
+            or not address
+            or not deployment_id
+            or application_id is None
+        ):
+            raise RuntimeError("The provisioned wallet identity is incomplete or mismatched")
+        now = int(time.time())
+        expires_at = now + CLAIM_HANDOFF_LIFETIME_SECONDS
+        claims = {
+            "iss": configuration["issuer"],
+            "aud": configuration["audience"],
+            "sub": profile_id,
+            "iat": now,
+            "nbf": now,
+            "exp": expires_at,
+            "jti": secrets.token_urlsafe(18),
+            "sickwallet_deployment": deployment_id,
+            "sickwallet_application": str(application_id),
+            "sickwallet_discord_user": str(discord_user_id),
+            "sickwallet_address": address,
+            "sickwallet_purpose": "authorize",
         }
         token = jwt.encode(
             claims,

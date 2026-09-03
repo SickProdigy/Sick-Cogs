@@ -12,11 +12,11 @@
     <h1>Protected wallet session</h1>
     <p id="session-status">Loading verified session details…</p>
     <dl id="session-details" hidden></dl>
-    <div id="claim-controls" hidden>
-      <button id="claim-wallet" type="button">Claim this wallet</button>
-      <p id="claim-status" role="status"></p>
+    <div id="authorization-controls" hidden>
+      <button id="authorize-wallet" type="button">Authorize this wallet</button>
+      <p id="authorization-status" role="status"></p>
     </div>
-    <p class="notice">Identity verification does not sign or broadcast a transaction.</p>
+    <p class="notice">This grants time-limited authority for one testnet account. It does not send funds.</p>
   </main>
   <script src="app.js" type="module"></script>
 </body>
