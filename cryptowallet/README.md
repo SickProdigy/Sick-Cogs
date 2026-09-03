@@ -181,6 +181,7 @@ Owner commands:
 ```text
 [p]walletset view
 [p]walletset cdpstatus
+[p]walletset cdpcheck
 [p]walletset jwtstatus
 [p]walletset approvalurl https://sickgaming.net/cryptowallet
 [p]walletset clearapprovalurl
