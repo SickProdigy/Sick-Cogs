@@ -188,10 +188,12 @@ class WalletCommands:
             await ctx.send(str(exc))
         return None
 
-    async def _wallet_embed(self, ctx: commands.Context, profile: dict) -> discord.Embed:
+    async def _wallet_embed(
+        self, ctx: commands.Context, profile: dict, user=None
+    ) -> discord.Embed:
         embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
         embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
-        display_name = discord.utils.escape_markdown(ctx.author.display_name)
+        display_name = discord.utils.escape_markdown((user or ctx.author).display_name)
         embed.description = f"{display_name}’s public wallet and balance."
         accounts = profile.get("accounts") or []
         for account in accounts[:5]:
@@ -215,12 +217,20 @@ class WalletCommands:
         return embed
 
     @commands.group(name="wallet", aliases=("cryptowallet",), invoke_without_command=True)
-    async def wallet(self, ctx: commands.Context):
-        """Show your wallet profile and prototype status."""
-        profile = await self._wallet_profile_or_error(ctx)
-        if profile is None:
-            return
-        await ctx.send(embed=await self._wallet_embed(ctx, profile))
+    async def wallet(self, ctx: commands.Context, member: discord.Member = None):
+        """Show your wallet or another member's existing public wallet profile."""
+        target = member or ctx.author
+        if target.id == ctx.author.id:
+            profile = await self._wallet_profile_or_error(ctx)
+            if profile is None:
+                return
+        else:
+            profile = await self.config.user(target).profile()
+            if profile is None:
+                display_name = discord.utils.escape_markdown(target.display_name)
+                await ctx.send(f"{display_name} does not have a public wallet profile yet.")
+                return
+        await ctx.send(embed=await self._wallet_embed(ctx, profile, target))
 
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context):
