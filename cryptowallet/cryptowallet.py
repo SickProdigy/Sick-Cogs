@@ -33,6 +33,7 @@ class CryptoWallet(
         self.bot = bot
         self.config = create_config(self)
         self.pairing_lock = asyncio.Lock()
+        self.confirmation_tasks = set()
         self.initialize_provisioning()
         self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)
@@ -55,6 +56,8 @@ class CryptoWallet(
                 log.exception("The configured wallet companion listener could not start")
 
     def cog_unload(self):
+        for task in self.confirmation_tasks:
+            task.cancel()
         self.bot.loop.create_task(self.companion.stop())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):

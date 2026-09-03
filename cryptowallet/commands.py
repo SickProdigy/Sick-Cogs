@@ -1,3 +1,4 @@
+import asyncio
 import secrets
 import time
 from datetime import datetime
@@ -12,6 +13,8 @@ from .providers import WalletProviderError
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
+CONFIRMATION_POLL_SECONDS = 5
+CONFIRMATION_POLL_ATTEMPTS = 24
 
 
 class WalletIntentView(discord.ui.View):
@@ -134,8 +137,20 @@ class WalletCommands:
         if profile is None:
             return
         try:
+            status = await self.wallet_provider.get_delegation_status(
+                profile, BASE_SEPOLIA.key
+            )
+            if status["active"]:
+                expiry = datetime.fromisoformat(
+                    status["expires_at"].replace("Z", "+00:00")
+                )
+                await ctx.send(
+                    "Your wallet is already authorized for limited signing until "
+                    f"<t:{int(expiry.timestamp())}:F>. No new authorization was created."
+                )
+                return
             expires_at = await self.send_authorization_link(ctx.author, profile)
-        except RuntimeError as exc:
+        except (RuntimeError, WalletProviderError) as exc:
             await ctx.send(f"Wallet authorization is unavailable: {exc}")
             return
         await ctx.send(f"I sent your wallet authorization link by DM; it expires <t:{expires_at}:R>.")
@@ -235,8 +250,65 @@ class WalletCommands:
             )
         if intent.block_number is not None:
             embed.add_field(name="Block", value=f"`{intent.block_number}`", inline=True)
-        embed.set_footer(text="Unsigned testnet intent — no transaction has been sent")
+        if intent.status in {IntentStatus.PENDING, IntentStatus.PROCESSING}:
+            footer = "Unsigned testnet intent — no transaction has been sent"
+        elif intent.status is IntentStatus.CONFIRMED:
+            footer = "Confirmed Base Sepolia testnet transaction"
+        elif intent.status is IntentStatus.SUBMITTED:
+            footer = "Submitted to Base Sepolia — awaiting confirmation"
+        else:
+            footer = "Base Sepolia testnet transaction intent"
+        embed.set_footer(text=footer)
         return embed
+
+    async def _refresh_submitted_intent(self, user_id: int, intent_id: str) -> TransactionIntent:
+        intent = await self._stored_intent(user_id, intent_id)
+        if intent is None:
+            raise RuntimeError("The stored transaction intent is unavailable.")
+        if intent.status is not IntentStatus.SUBMITTED:
+            return intent
+        profile = await self.config.user_from_id(user_id).profile()
+        if profile is None or intent.profile_id != str(profile.get("profile_id") or ""):
+            raise RuntimeError("The wallet profile no longer matches this intent.")
+        result = await self.wallet_provider.get_transaction_status(profile, intent)
+        provider_status = result["provider_status"]
+        final_status = (
+            IntentStatus.CONFIRMED if provider_status == "complete"
+            else IntentStatus.FAILED if provider_status in {"dropped", "failed"}
+            else IntentStatus.SUBMITTED
+        )
+        async with self.config.user_from_id(user_id).intents() as intents:
+            stored = intents.get(intent_id)
+            if not stored or stored.get("user_operation_hash") != intent.user_operation_hash:
+                raise RuntimeError("The stored operation changed while its status was checked.")
+            stored["status"] = final_status.value
+            stored["provider_status"] = provider_status
+            stored["transaction_hash"] = result["transaction_hash"]
+            stored["block_number"] = result["block_number"]
+            return TransactionIntent.from_dict(stored)
+
+    async def _poll_submitted_intent(self, user_id: int, intent_id: str, followup) -> None:
+        try:
+            for _ in range(CONFIRMATION_POLL_ATTEMPTS):
+                await asyncio.sleep(CONFIRMATION_POLL_SECONDS)
+                intent = await self._refresh_submitted_intent(user_id, intent_id)
+                if intent.status is IntentStatus.SUBMITTED:
+                    continue
+                network = NETWORKS[intent.network]
+                if intent.status is IntentStatus.CONFIRMED and intent.transaction_hash:
+                    await followup.send(
+                        "Transaction confirmed on Base Sepolia: "
+                        f"<{network.explorer_url}/tx/{intent.transaction_hash}>",
+                        ephemeral=True,
+                    )
+                elif intent.status is IntentStatus.FAILED:
+                    await followup.send(
+                        f"Transaction `{intent.intent_id}` failed or was dropped by CDP.",
+                        ephemeral=True,
+                    )
+                return
+        except (WalletProviderError, RuntimeError, discord.HTTPException):
+            return
 
     async def _stored_intent(self, user_id: int, intent_id: str) -> TransactionIntent | None:
         data = await self.config.user_from_id(user_id).intents.get_raw(intent_id, default=None)
@@ -398,6 +470,12 @@ class WalletCommands:
         else:
             message = "Transaction submitted to Base Sepolia and awaiting confirmation."
         await interaction.followup.send(message, ephemeral=True)
+        if final_status is IntentStatus.SUBMITTED:
+            task = self.bot.loop.create_task(
+                self._poll_submitted_intent(view.user_id, intent.intent_id, interaction.followup)
+            )
+            self.confirmation_tasks.add(task)
+            task.add_done_callback(self.confirmation_tasks.discard)
 
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
@@ -458,18 +536,38 @@ class WalletCommands:
         )
 
     @wallet.command(name="transaction", aliases=("intent", "tx"))
-    async def wallet_transaction(self, ctx: commands.Context, intent_id: str):
-        """Show one of your transaction intents by ID."""
+    async def wallet_transaction(self, ctx: commands.Context, reference: str):
+        """Show one of your transactions by transaction hash or bot reference."""
         intents = await self.expire_and_trim_intents(ctx.author)
-        data = intents.get(intent_id.strip())
+        lookup = reference.strip()
+        data = intents.get(lookup)
         if data is None:
-            await ctx.send("No transaction intent with that ID belongs to your wallet profile.")
+            normalized_lookup = lookup.lower()
+            data = next(
+                (
+                    candidate
+                    for candidate in intents.values()
+                    if str(candidate.get("transaction_hash") or "").lower()
+                    == normalized_lookup
+                ),
+                None,
+            )
+        if data is None:
+            await ctx.send(
+                "No transaction with that TXID or bot reference belongs to your wallet profile."
+            )
             return
         try:
             intent = TransactionIntent.from_dict(data)
         except (KeyError, TypeError, ValueError):
             await ctx.send("That stored transaction intent is invalid and cannot be displayed.")
             return
+        if intent.status is IntentStatus.SUBMITTED:
+            try:
+                intent = await self._refresh_submitted_intent(ctx.author.id, intent.intent_id)
+            except (RuntimeError, WalletProviderError) as exc:
+                await ctx.send(f"The latest transaction status is unavailable: {exc}")
+                return
         network = NETWORKS.get(intent.network)
         if network is None:
             await ctx.send("That transaction intent references an unsupported network.")

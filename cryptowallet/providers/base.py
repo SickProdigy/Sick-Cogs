@@ -45,8 +45,10 @@ class WalletProvider(ABC):
         """Return a short-lived HTTPS URL for independent user authorization."""
 
     @abstractmethod
-    async def get_transaction_status(self, intent_id: str) -> TransactionIntent:
-        """Return the current public state of a transaction intent."""
+    async def get_transaction_status(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        """Return authoritative provider state for a submitted transaction."""
 
     @abstractmethod
     async def revoke_authorization(self, profile_id: str) -> None:

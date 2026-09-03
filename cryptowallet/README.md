@@ -210,7 +210,11 @@ short-lived authorization link and leaves the intent pending for another approva
 When authorization is active, approval atomically moves the intent into processing, rechecks its
 balance and immutable fields, and submits a sponsored Base Sepolia smart-account user operation
 with a stable CDP idempotency key. The bot stores the public user-operation hash, transaction hash,
-provider status, and block number when returned.
+provider status, and block number when returned. It then polls the same operation without
+resubmitting it and sends the owner a separate user-only confirmation containing the explorer
+link. The original approval preview remains unchanged as an audit snapshot. Submitted operations
+can also be refreshed on demand through `wallet tx <bot-reference>`. Once confirmed, the same
+details can be retrieved with the actual on-chain TXID through `wallet tx <txid>`.
 
 ## Current implementation status
 
@@ -245,6 +249,8 @@ Completed:
 26. Atomic, idempotent Base Sepolia smart-account submission checkpoint in version `0.16.0`.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
+28. Submitted-operation reconciliation with bounded automatic polling, user-only confirmation
+    notices, persistent transaction hashes, and on-demand refresh after a cog restart.
 
 ### CDP and custom-auth configuration
 
@@ -320,9 +326,8 @@ Red-DiscordBot 3.5. It stores only the resulting CDP user ID and public smart-ac
 Not implemented:
 
 - wallet recovery or export
-- blockchain signing or broadcasting
-- bot-side delegation status, revocation, and policy enforcement
-- submitted-operation reconciliation and confirmation polling
+- independent delegation revocation and broader policy enforcement
+- restart-time background resumption for submitted-operation polling (manual refresh is available)
 - mainnet support
 
 ## Module layout
