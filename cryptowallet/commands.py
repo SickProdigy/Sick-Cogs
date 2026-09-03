@@ -848,6 +848,12 @@ class WalletCommands:
                     ),
                     inline=False,
                 )
+        elif wallet_transfers is None:
+            embed.add_field(
+                name="Wallet transfer",
+                value="Temporarily unavailable; use the explorer link above.",
+                inline=False,
+            )
         else:
             embed.add_field(
                 name="Value",
