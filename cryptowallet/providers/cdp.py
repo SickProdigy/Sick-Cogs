@@ -8,6 +8,7 @@ from ..models import AccountType, PublicAccount, TransactionIntent, WalletProfil
 from ..networks import BASE_SEPOLIA
 from ..validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
+from .base_rpc import BaseRpcError, get_user_operation_receipt
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 
@@ -366,6 +367,18 @@ class CdpWalletProvider(WalletProvider):
             result = await self._api_client(credentials).get_smart_account_user_operation(
                 provider_user_id, address, intent.user_operation_hash, credentials.project_id
             )
+        except CdpApiError as cdp_exc:
+            try:
+                result = await get_user_operation_receipt(address, intent.user_operation_hash)
+            except BaseRpcError as rpc_exc:
+                raise WalletProviderError(
+                    "CDP and Base Sepolia could not retrieve the submitted operation status."
+                ) from rpc_exc
+            if result is None:
+                raise WalletProviderError(
+                    "CDP could not retrieve the operation and it is not confirmed on Base Sepolia yet."
+                ) from cdp_exc
+        try:
             provider_status = str(result.get("status") or "")
             user_op_hash = str(result.get("userOpHash") or "")
             transaction_hash = str(result.get("transactionHash") or "") or None
@@ -390,7 +403,7 @@ class CdpWalletProvider(WalletProvider):
                 "transaction_hash": transaction_hash.lower() if transaction_hash else None,
                 "block_number": block_number,
             }
-        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+        except (AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not retrieve the submitted operation status.") from exc
 
     @staticmethod
