@@ -6,12 +6,61 @@ from urllib.parse import quote
 import discord
 from redbot.core import commands
 
-from .models import TransactionIntent
+from .models import IntentStatus, TransactionIntent
 from .networks import BASE_SEPOLIA, NETWORKS
 from .providers import WalletProviderError
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
+
+
+class WalletIntentView(discord.ui.View):
+    """Owner-bound approval controls for one pending transaction intent."""
+
+    def __init__(self, cog, user_id: int, intent_id: str):
+        super().__init__(timeout=INTENT_LIFETIME_SECONDS)
+        self.cog = cog
+        self.user_id = user_id
+        self.intent_id = intent_id
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can approve or reject this transaction.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="Approve", emoji="✅", style=discord.ButtonStyle.success)
+    async def approve(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "This transaction is already being checked.", ephemeral=True
+            )
+            return
+        self.processing = True
+        try:
+            await self.cog.approve_intent_interaction(interaction, self)
+        finally:
+            self.processing = False
+
+    @discord.ui.button(label="Reject", emoji="❌", style=discord.ButtonStyle.danger)
+    async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "This transaction is already being checked.", ephemeral=True
+            )
+            return
+        self.processing = True
+        try:
+            await self.cog.reject_intent_interaction(interaction, self)
+        finally:
+            self.processing = False
 
 
 class WalletCommands:
@@ -84,24 +133,30 @@ class WalletCommands:
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
         try:
-            token, expires_at = await self.create_authorization_handoff(ctx.author.id, profile)
+            expires_at = await self.send_authorization_link(ctx.author, profile)
         except RuntimeError as exc:
             await ctx.send(f"Wallet authorization is unavailable: {exc}")
             return
+        await ctx.send(f"I sent your wallet authorization link by DM; it expires <t:{expires_at}:R>.")
+
+    async def send_authorization_link(self, user, profile: dict) -> int:
+        """DM a short-lived authorization link and return its expiry."""
+        approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
+        token, expires_at = await self.create_authorization_handoff(user.id, profile)
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
         try:
-            await ctx.author.send(
+            await user.send(
                 "Open this protected wallet authorization link before "
                 f"<t:{expires_at}:R>:\n<{link}>\n"
                 "Confirming creates a 24-hour delegation for this Base Sepolia smart account. "
                 "Do not share this link."
             )
-        except discord.Forbidden:
-            await ctx.send("I could not DM you. Enable direct messages and run this command again.")
-            return
-        await ctx.send("I sent your short-lived wallet authorization link by DM.")
+        except discord.Forbidden as exc:
+            raise RuntimeError(
+                "I could not DM you. Enable direct messages and try again."
+            ) from exc
+        return expires_at
 
     @wallet.command(name="authorization", aliases=("authstatus",))
     async def wallet_authorization(self, ctx: commands.Context):
@@ -147,6 +202,18 @@ class WalletCommands:
             value=f"{format_wei_as_eth(intent.value_wei)} {network.native_symbol}",
             inline=True,
         )
+        gas_value = f"{format_wei_as_eth(intent.estimated_gas_fee_wei)} {network.native_symbol}"
+        if intent.gas_sponsored:
+            gas_value += " (sponsored by CDP)"
+        embed.add_field(name="Estimated gas fee", value=gas_value, inline=True)
+        embed.add_field(
+            name="Estimated total",
+            value=(
+                f"{format_wei_as_eth(intent.value_wei + intent.estimated_gas_fee_wei)} "
+                f"{network.native_symbol}"
+            ),
+            inline=True,
+        )
         embed.add_field(name="From", value=f"`{intent.from_address}`", inline=False)
         embed.add_field(name="To", value=f"`{intent.to_address}`", inline=False)
         embed.add_field(name="Intent ID", value=f"`{intent.intent_id}`", inline=False)
@@ -162,6 +229,87 @@ class WalletCommands:
             )
         embed.set_footer(text="Unsigned testnet intent — no transaction has been sent")
         return embed
+
+    async def _stored_intent(self, user_id: int, intent_id: str) -> TransactionIntent | None:
+        data = await self.config.user_from_id(user_id).intents.get_raw(intent_id, default=None)
+        if data is None:
+            return None
+        try:
+            return TransactionIntent.from_dict(data)
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    async def reject_intent_interaction(
+        self, interaction: discord.Interaction, view: WalletIntentView
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        intent = await self._stored_intent(view.user_id, view.intent_id)
+        if intent is None or intent.status is not IntentStatus.PENDING:
+            await interaction.followup.send("This transaction is no longer pending.", ephemeral=True)
+            return
+        intent.status = IntentStatus.REJECTED
+        await self.config.user_from_id(view.user_id).intents.set_raw(
+            intent.intent_id, value=intent.to_dict()
+        )
+        view.disable_controls()
+        network = NETWORKS[intent.network]
+        color = interaction.message.embeds[0].color if interaction.message.embeds else None
+        await interaction.message.edit(
+            embed=self._intent_embed(intent, network, color),
+            view=view,
+        )
+        await interaction.followup.send("Transaction rejected. No funds were moved.", ephemeral=True)
+
+    async def approve_intent_interaction(
+        self, interaction: discord.Interaction, view: WalletIntentView
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        intent = await self._stored_intent(view.user_id, view.intent_id)
+        if intent is None or intent.status is not IntentStatus.PENDING:
+            await interaction.followup.send("This transaction is no longer pending.", ephemeral=True)
+            return
+        if intent.expires_at <= int(time.time()):
+            intent.status = IntentStatus.EXPIRED
+            await self.config.user_from_id(view.user_id).intents.set_raw(
+                intent.intent_id, value=intent.to_dict()
+            )
+            view.disable_controls()
+            await interaction.message.edit(view=view)
+            await interaction.followup.send("This transaction quote has expired.", ephemeral=True)
+            return
+        profile = await self.config.user_from_id(view.user_id).profile()
+        if profile is None or intent.profile_id != str(profile.get("profile_id") or ""):
+            await interaction.followup.send("The wallet profile no longer matches this intent.", ephemeral=True)
+            return
+        try:
+            authorization = await self.wallet_provider.get_delegation_status(
+                profile, intent.network
+            )
+        except WalletProviderError as exc:
+            await interaction.followup.send(
+                f"Authorization could not be checked: {exc}", ephemeral=True
+            )
+            return
+        if not authorization["active"]:
+            try:
+                expires_at = await self.send_authorization_link(interaction.user, profile)
+            except RuntimeError as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            await interaction.followup.send(
+                "I sent the required authorization link by DM. Complete it, then press "
+                f"Approve again before the transaction expires <t:{intent.expires_at}:R>. "
+                f"The authorization link expires <t:{expires_at}:R>.",
+                ephemeral=True,
+            )
+            return
+        view.disable_controls()
+        await interaction.message.edit(view=view)
+        await interaction.followup.send(
+            "Authorization is active and this preview passed its approval checks. Signing and "
+            "broadcast are not enabled yet, so approval was not persisted and no funds moved.",
+            ephemeral=True,
+        )
 
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
@@ -184,6 +332,19 @@ class WalletCommands:
         except ValueError as exc:
             await ctx.send(str(exc))
             return
+        try:
+            balance_wei = await self.wallet_provider.get_native_balance(
+                from_address, network.key
+            )
+        except WalletProviderError as exc:
+            await ctx.send(f"The transaction preview is unavailable: {exc}")
+            return
+        if value_wei > balance_wei:
+            await ctx.send(
+                "Insufficient Base Sepolia balance. Available: "
+                f"`{format_wei_as_eth(balance_wei)} {network.native_symbol}`."
+            )
+            return
         now = int(time.time())
         intent = TransactionIntent(
             intent_id=secrets.token_urlsafe(12),
@@ -194,6 +355,8 @@ class WalletCommands:
             value_wei=value_wei,
             created_at=now,
             expires_at=now + INTENT_LIFETIME_SECONDS,
+            estimated_gas_fee_wei=0,
+            gas_sponsored=True,
         )
         if not intent.profile_id:
             await ctx.send("Your wallet profile is incomplete and must be linked again.")
@@ -201,7 +364,10 @@ class WalletCommands:
         async with self.config.user(ctx.author).intents() as intents:
             intents[intent.intent_id] = intent.to_dict()
         await self.expire_and_trim_intents(ctx.author)
-        await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()))
+        await ctx.send(
+            embed=self._intent_embed(intent, network, await ctx.embed_color()),
+            view=WalletIntentView(self, ctx.author.id, intent.intent_id),
+        )
 
     @wallet.command(name="transaction", aliases=("intent", "tx"))
     async def wallet_transaction(self, ctx: commands.Context, intent_id: str):

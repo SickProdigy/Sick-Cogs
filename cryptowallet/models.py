@@ -81,6 +81,8 @@ class TransactionIntent:
     value_wei: int
     created_at: int
     expires_at: int
+    estimated_gas_fee_wei: int = 0
+    gas_sponsored: bool = False
     status: IntentStatus = IntentStatus.PENDING
     transaction_hash: str | None = None
 
@@ -94,6 +96,8 @@ class TransactionIntent:
             "value_wei": self.value_wei,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
+            "estimated_gas_fee_wei": self.estimated_gas_fee_wei,
+            "gas_sponsored": self.gas_sponsored,
             "status": self.status.value,
             "transaction_hash": self.transaction_hash,
         }
@@ -109,6 +113,8 @@ class TransactionIntent:
             value_wei=int(data["value_wei"]),
             created_at=int(data["created_at"]),
             expires_at=int(data["expires_at"]),
+            estimated_gas_fee_wei=int(data.get("estimated_gas_fee_wei", 0)),
+            gas_sponsored=bool(data.get("gas_sponsored", False)),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
             transaction_hash=data.get("transaction_hash"),
         )
