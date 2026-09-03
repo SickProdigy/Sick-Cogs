@@ -397,7 +397,7 @@ class WalletCommands:
             stored["block_number"] = result["block_number"]
             return TransactionIntent.from_dict(stored)
 
-    async def _poll_submitted_intent(self, user_id: int, intent_id: str, followup) -> None:
+    async def _poll_submitted_intent(self, user_id: int, intent_id: str, user) -> None:
         try:
             for _ in range(CONFIRMATION_POLL_ATTEMPTS):
                 await asyncio.sleep(CONFIRMATION_POLL_SECONDS)
@@ -406,15 +406,18 @@ class WalletCommands:
                     continue
                 network = NETWORKS[intent.network]
                 if intent.status is IntentStatus.CONFIRMED and intent.transaction_hash:
-                    await followup.send(
-                        "Transaction confirmed on Base Sepolia: "
-                        f"<{network.explorer_url}/tx/{intent.transaction_hash}>",
-                        ephemeral=True,
+                    explorer_url = (
+                        f"{network.explorer_url}/tx/{intent.transaction_hash}"
+                    )
+                    await user.send(
+                        "Transaction confirmed on Base Sepolia.\n"
+                        f"**TXID:** [{intent.transaction_hash}]({explorer_url})\n"
+                        "**Copy TXID:**\n"
+                        f"```text\n{intent.transaction_hash}\n```"
                     )
                 elif intent.status is IntentStatus.FAILED:
-                    await followup.send(
+                    await user.send(
                         f"Transaction `{intent.intent_id}` failed or was dropped by CDP.",
-                        ephemeral=True,
                     )
                 return
         except (WalletProviderError, RuntimeError, discord.HTTPException):
@@ -582,7 +585,7 @@ class WalletCommands:
         await interaction.followup.send(message, ephemeral=True)
         if final_status is IntentStatus.SUBMITTED:
             task = self.bot.loop.create_task(
-                self._poll_submitted_intent(view.user_id, intent.intent_id, interaction.followup)
+                self._poll_submitted_intent(view.user_id, intent.intent_id, interaction.user)
             )
             self.confirmation_tasks.add(task)
             task.add_done_callback(self.confirmation_tasks.discard)
