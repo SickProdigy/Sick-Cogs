@@ -571,6 +571,18 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(WalletActivityCommands._activity_network("sol"), SOLANA_DEVNET)
         self.assertIsNone(WalletActivityCommands._activity_network("unknown"))
 
+    def test_send_network_aliases_do_not_silently_change_chains(self):
+        self.assertIs(
+            WalletTransactionCommands._send_network("base"), BASE_SEPOLIA
+        )
+        self.assertIs(
+            WalletTransactionCommands._send_network("eth"), ETHEREUM_SEPOLIA
+        )
+        self.assertIs(
+            WalletTransactionCommands._send_network("sol"), SOLANA_DEVNET
+        )
+        self.assertIsNone(WalletTransactionCommands._send_network("unknown"))
+
     def test_additional_evm_testnets_remain_read_only(self):
         provider = CdpWalletProvider(SimpleNamespace())
         expected = {
@@ -710,6 +722,68 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quoted.to_address, recipient)
         self.assertEqual(quoted.estimated_gas_fee_wei, 5000)
         self.assertFalse(quoted.gas_sponsored)
+
+    async def test_solana_submission_binds_profile_quote_and_signature(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        recipient = "11111111111111111111111111111111"
+        signature = "1" * 64
+        profile = {
+            "profile_id": "profile-7",
+            "provider_user_id": "profile-7",
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="sol-send", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address=recipient, value_wei=1_000_000,
+            created_at=1, expires_at=9999999999,
+            estimated_gas_fee_wei=5000, gas_sponsored=False,
+        )
+        client = SimpleNamespace(
+            send_solana_transaction=AsyncMock(
+                return_value={"transactionSignature": signature}
+            )
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+        with patch(
+            "cryptowallet.providers.cdp.quote_solana_transfer",
+            AsyncMock(return_value={
+                "transaction": "unsigned", "fee_atomic": 5000,
+                "last_valid_block_height": 123,
+            }),
+        ):
+            result = await provider.submit_transaction(profile, intent)
+        self.assertEqual(result["provider_status"], "broadcast")
+        self.assertEqual(result["transaction_hash"], signature)
+        self.assertIsNone(result["user_operation_hash"])
+        client.send_solana_transaction.assert_awaited_once()
+
+    async def test_solana_confirmation_uses_public_signature_status(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        signature = "1" * 64
+        profile = {
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}]
+        }
+        intent = TransactionIntent(
+            intent_id="sol-status", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address="11111111111111111111111111111111",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.SUBMITTED, transaction_hash=signature,
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        with patch(
+            "cryptowallet.providers.cdp.get_solana_transaction",
+            AsyncMock(return_value={"success": True, "slot": 456}),
+        ):
+            result = await provider.get_transaction_status(profile, intent)
+        self.assertEqual(result["provider_status"], "complete")
+        self.assertEqual(result["transaction_hash"], signature)
+        self.assertEqual(result["block_number"], 456)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]

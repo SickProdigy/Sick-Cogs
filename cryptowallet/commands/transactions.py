@@ -23,6 +23,29 @@ class WalletTransactionCommands:
     """Transaction intent creation, approval, and status commands."""
 
     @staticmethod
+    def _send_network(value: str):
+        aliases = {
+            "base": BASE_SEPOLIA.key,
+            "base-sepolia": BASE_SEPOLIA.key,
+            "eth": "ethereum-sepolia",
+            "ethereum": "ethereum-sepolia",
+            "ethereum-sepolia": "ethereum-sepolia",
+            "arb": "arbitrum-sepolia",
+            "arbitrum": "arbitrum-sepolia",
+            "arbitrum-sepolia": "arbitrum-sepolia",
+            "pol": "polygon-amoy",
+            "polygon": "polygon-amoy",
+            "polygon-amoy": "polygon-amoy",
+            "avax": "avalanche-fuji",
+            "avalanche": "avalanche-fuji",
+            "avalanche-fuji": "avalanche-fuji",
+            "sol": SOLANA_DEVNET.key,
+            "solana": SOLANA_DEVNET.key,
+            "solana-devnet": SOLANA_DEVNET.key,
+        }
+        return NETWORKS.get(aliases.get(value.strip().lower(), ""))
+
+    @staticmethod
     def _intent_quote(intent: TransactionIntent) -> tuple:
         """Return the exact security-sensitive quote represented by an approval view."""
         return (
@@ -412,12 +435,7 @@ class WalletTransactionCommands:
             network = NETWORKS.get(await self.config.default_network())
             to_address, amount = network_or_address, address_or_amount
         else:
-            aliases = {
-                "base": BASE_SEPOLIA.key, "base-sepolia": BASE_SEPOLIA.key,
-                "sol": SOLANA_DEVNET.key, "solana": SOLANA_DEVNET.key,
-                "solana-devnet": SOLANA_DEVNET.key,
-            }
-            network = NETWORKS.get(aliases.get(network_or_address.lower(), ""))
+            network = self._send_network(network_or_address)
             to_address = address_or_amount
         if (
             network is None
@@ -425,7 +443,15 @@ class WalletTransactionCommands:
             or not network.supports(NetworkCapability.SEND)
             or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)
         ):
-            await ctx.send("Transaction intents are restricted to an enabled test network.")
+            if network is None:
+                await ctx.send(
+                    "That wallet network is unknown. Use `wallet networks` to list testnets."
+                )
+            else:
+                await ctx.send(
+                    f"Sending is not enabled for {network.name}. "
+                    "Only capability-reviewed testnet send paths are available."
+                )
             return
         account = self._account_for_network(profile, network.key)
         if account is None:
