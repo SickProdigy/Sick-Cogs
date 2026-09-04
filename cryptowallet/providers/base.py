@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from ..core.models import TransactionIntent, WalletProfile
+from ..core.networks import NetworkCapability
 
 
 class WalletProviderError(RuntimeError):
@@ -11,6 +12,12 @@ class WalletProvider(ABC):
     """Boundary between the cog and an embedded-wallet implementation."""
 
     name: str
+    supported_capabilities: dict[str, frozenset[NetworkCapability]] = {}
+
+    def supports(self, network: str, capability: NetworkCapability) -> bool:
+        """Return whether this adapter implements one reviewed network operation."""
+
+        return capability in self.supported_capabilities.get(network, frozenset())
 
     @abstractmethod
     async def create_wallet(self, profile_id: str, discord_user_id: int) -> WalletProfile:

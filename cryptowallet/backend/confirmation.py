@@ -188,7 +188,7 @@ class ConfirmationProcessorMixin:
                 if intent.status is IntentStatus.CONFIRMED and intent.transaction_hash:
                     explorer_url = f"{network.explorer_url}/tx/{intent.transaction_hash}"
                     await user.send(
-                        "Transaction confirmed on Base Sepolia.\n"
+                        f"Transaction confirmed on {network.name}.\n"
                         f"**TXID:** [{intent.transaction_hash}]({explorer_url})\n"
                         "**Copy TXID:**\n"
                         f"```text\n{intent.transaction_hash}\n```"

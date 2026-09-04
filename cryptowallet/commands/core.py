@@ -203,11 +203,16 @@ class WalletCoreCommands:
     @wallet.command(name="networks")
     async def wallet_networks(self, ctx: commands.Context):
         """List networks enabled for this prototype."""
-        lines = [
-            f"- **{network.name}** — chain ID `{network.chain_id}` "
-            f"({network.native_symbol}, testnet)"
-            for network in NETWORKS.values()
-        ]
+        lines = []
+        for network in NETWORKS.values():
+            capabilities = ", ".join(
+                capability.value for capability in network.capabilities.enabled()
+            )
+            lines.append(
+                f"- **{network.name}** — {network.reference_label} `{network.reference}` "
+                f"({network.family.value.upper()}, {network.native_symbol}, testnet)\n"
+                f"  Capabilities: {capabilities}"
+            )
         await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
 
 

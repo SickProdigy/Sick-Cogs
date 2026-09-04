@@ -177,7 +177,7 @@ class WalletAdminCommands:
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
-            f"Network: `{network.name}` (`{network.chain_id}`)\n"
+            f"Network: `{network.name}` ({network.reference_label} `{network.reference}`)\n"
             f"Approval website: `{approval_base_url or 'not configured'}`\n"
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"

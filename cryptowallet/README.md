@@ -2,7 +2,15 @@
 
 Crypto Wallet is an experimental, Base-first wallet cog for Red-DiscordBot. Its intended user experience is bot-first: a user's wallet is provisioned automatically when they first interact with the wallet commands, and the bot immediately returns a public deposit address.
 
-The project is tracked in issue #35. It is currently a Base Sepolia prototype and must not be used with real assets.
+The secure Base prototype is tracked in issue #35; multi-network expansion is tracked separately in issue #39. Base Sepolia remains the only enabled network and must not be used with real assets.
+
+## Multi-network safety boundary
+
+CryptoWallet models each blockchain with an explicit chain family, network reference, native-token precision, testnet state, and independently reviewed capabilities for balances, sends, history, transaction lookup, delegation, recovery, export, and fee sponsorship. EVM chain IDs and Solana cluster names are deliberately different fields.
+
+A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network; unsupported Solana validation fails closed instead of interpreting the address as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
+
+This architecture does not enable Ethereum Sepolia, Solana devnet, or any mainnet. Those networks require their own provider implementation, validation, transaction, history, recovery, and test milestones before being added to the enabled registry.
 
 ## Intended experience
 
@@ -272,9 +280,9 @@ does not expose the bot's private intent metadata.
 Completed:
 
 1. Provider-neutral cog foundation.
-2. Wallet profile, public account, transaction intent, and provider models.
-3. Base Sepolia-only network configuration.
-4. Exact ETH-to-wei and EVM address validation.
+2. Wallet profile, public account, transaction intent, and capability-aware provider models.
+3. Explicit EVM/Solana chain-family metadata with Base Sepolia as the only enabled network.
+4. Network-dispatched address and native atomic-unit validation with legacy Base wei compatibility.
 5. Expiring, user-scoped unsigned transaction intents.
 6. Loopback companion listener and HTTPS public-URL configuration.
 7. One-time state digests, expiration, replay prevention, and Discord OAuth identity matching.

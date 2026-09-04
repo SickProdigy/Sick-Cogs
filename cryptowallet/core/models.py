@@ -91,6 +91,16 @@ class TransactionIntent:
     transaction_hash: str | None = None
     block_number: int | None = None
 
+    @property
+    def value_atomic(self) -> int:
+        """Network-native atomic amount; value_wei remains the stored legacy key."""
+
+        return self.value_wei
+
+    @property
+    def estimated_fee_atomic(self) -> int:
+        return self.estimated_gas_fee_wei
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "intent_id": self.intent_id,
@@ -98,9 +108,11 @@ class TransactionIntent:
             "network": self.network,
             "from_address": self.from_address,
             "to_address": self.to_address,
+            "value_atomic": self.value_atomic,
             "value_wei": self.value_wei,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
+            "estimated_fee_atomic": self.estimated_fee_atomic,
             "estimated_gas_fee_wei": self.estimated_gas_fee_wei,
             "gas_sponsored": self.gas_sponsored,
             "status": self.status.value,
@@ -118,10 +130,10 @@ class TransactionIntent:
             network=str(data["network"]),
             from_address=str(data["from_address"]),
             to_address=str(data["to_address"]),
-            value_wei=int(data["value_wei"]),
+            value_wei=int(data.get("value_atomic", data.get("value_wei", 0))),
             created_at=int(data["created_at"]),
             expires_at=int(data["expires_at"]),
-            estimated_gas_fee_wei=int(data.get("estimated_gas_fee_wei", 0)),
+            estimated_gas_fee_wei=int(data.get("estimated_fee_atomic", data.get("estimated_gas_fee_wei", 0))),
             gas_sponsored=bool(data.get("gas_sponsored", False)),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
             provider_status=data.get("provider_status"),
