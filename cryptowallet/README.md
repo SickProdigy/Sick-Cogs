@@ -377,7 +377,11 @@ cryptowallet/
 ├── cryptowallet.py     # Thin Red cog composition and lifecycle
 ├── commands/
 │   ├── __init__.py
-│   ├── user.py         # User wallet command logic
+│   ├── user.py         # Small user-command composition layer
+│   ├── core.py         # Wallet summary, balance, settings, and cooldowns
+│   ├── authorization.py # Signing authorization lifecycle
+│   ├── transactions.py # Send intents, approval, and intent status
+│   ├── activity.py     # Blockchain history and public TXID lookup
 │   ├── admin.py        # Bot-owner configuration and diagnostics
 │   ├── constants.py    # Shared command limits and cooldowns
 │   └── views.py        # Owner-bound Discord buttons and pagination
