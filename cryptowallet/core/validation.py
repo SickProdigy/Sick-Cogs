@@ -60,14 +60,19 @@ def parse_native_amount(value: str, network: Network) -> int:
     return atomic_value
 
 
-def format_atomic_amount(value_atomic: int, network: Network) -> str:
-    """Format a native atomic-unit value without scientific notation."""
+def format_atomic_amount(
+    value_atomic: int, network: Network, *, decimals: int | None = None
+) -> str:
+    """Format an atomic-unit value without scientific notation."""
 
-    atomic_scale = 10 ** network.native_decimals
+    precision = network.native_decimals if decimals is None else decimals
+    if precision < 0 or precision > 255:
+        raise ValueError("Asset decimals are outside the supported range.")
+    atomic_scale = 10 ** precision
     whole, remainder = divmod(value_atomic, atomic_scale)
     if not remainder:
         return str(whole)
-    return f"{whole}.{remainder:0{network.native_decimals}d}".rstrip("0")
+    return f"{whole}.{remainder:0{precision}d}".rstrip("0")
 
 
 def parse_eth_to_wei(value: str) -> int:

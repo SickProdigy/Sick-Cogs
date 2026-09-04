@@ -9,6 +9,7 @@ import discord
 from redbot.core import commands
 
 from ..core.networks import BASE_SEPOLIA, NETWORKS
+from ..core.validation import normalize_evm_address
 from ..providers import WalletProviderError
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
@@ -95,6 +96,83 @@ class WalletAdminCommands:
         await ctx.send(
             f"{mention}’s wallet is unlocked. No signing authorization was "
             "created; their next send may require protected authorization."
+        )
+
+    @walletset.group(name="token", aliases=("tokens",), invoke_without_command=True)
+    @commands.is_owner()
+    async def walletset_token(self, ctx: commands.Context):
+        """Moderate shared wallet tokens."""
+        await ctx.invoke(self.walletset_token_list)
+
+    async def _walletset_token_status(
+        self, ctx: commands.Context, network_key: str, contract_address: str, status: str
+    ):
+        network = NETWORKS.get(network_key.strip().lower())
+        try:
+            contract = normalize_evm_address(contract_address).lower()
+        except ValueError:
+            await ctx.send("Enter a valid EVM token contract address.")
+            return
+        if network is None:
+            await ctx.send("That enabled network is unknown.")
+            return
+        async with self.config.token_registry() as registry:
+            entry = (registry.get(network.key) or {}).get(contract)
+            if entry is None:
+                await ctx.send("That token is not registered.")
+                return
+            entry["status"] = status
+            entry["moderated_at"] = int(time.time())
+            entry["moderated_by"] = ctx.author.id
+            symbol = str(entry.get("symbol") or "TOKEN")
+        await ctx.send(f"**{symbol}** on {network.name} is now **{status}**.")
+
+    @walletset_token.command(name="recognize")
+    @commands.is_owner()
+    async def walletset_token_recognize(
+        self, ctx: commands.Context, network_key: str, contract_address: str
+    ):
+        """Mark a community token as recognized by the bot owner."""
+        await self._walletset_token_status(ctx, network_key, contract_address, "recognized")
+
+    @walletset_token.command(name="hide")
+    @commands.is_owner()
+    async def walletset_token_hide(
+        self, ctx: commands.Context, network_key: str, contract_address: str
+    ):
+        """Hide a token while retaining its moderation record."""
+        await self._walletset_token_status(ctx, network_key, contract_address, "hidden")
+
+    @walletset_token.command(name="ban")
+    @commands.is_owner()
+    async def walletset_token_ban(
+        self, ctx: commands.Context, network_key: str, contract_address: str
+    ):
+        """Ban a token and prevent its resubmission."""
+        await self._walletset_token_status(ctx, network_key, contract_address, "banned")
+
+    @walletset_token.command(name="unban")
+    @commands.is_owner()
+    async def walletset_token_unban(
+        self, ctx: commands.Context, network_key: str, contract_address: str
+    ):
+        """Return a banned token to hidden state for later review."""
+        await self._walletset_token_status(ctx, network_key, contract_address, "hidden")
+
+    @walletset_token.command(name="list", aliases=("tokens",))
+    @commands.is_owner()
+    async def walletset_token_list(self, ctx: commands.Context):
+        """List visible, hidden, and banned token records."""
+        registry = await self.config.token_registry()
+        lines = [
+            f"- **{entry.get('symbol', 'TOKEN')}** · `{network_key}` · "
+            f"**{entry.get('status', 'community')}**\n  `{contract}`"
+            for network_key, entries in registry.items()
+            for contract, entry in entries.items()
+        ]
+        await ctx.send(
+            "**Token moderation registry**\n" + "\n".join(lines)
+            if lines else "The token moderation registry is empty."
         )
 
     @walletset.command(name="pause")

@@ -31,6 +31,16 @@ class WalletProvider(ABC):
     async def get_native_balance(self, address: str, network: str) -> int:
         """Return the native network balance in its smallest unit."""
 
+    async def get_registered_token_asset(
+        self, address: str, network: str, contract: str, *, include_metadata: bool = False
+    ) -> dict:
+        """Return a configured token balance and optionally authoritative metadata."""
+        raise WalletProviderError("Configured token lookup is unavailable for this provider.")
+
+    async def get_token_balances(self, address: str, network: str) -> list[dict]:
+        """Return indexed non-native token balances when discovery is available."""
+        raise WalletProviderError("Token discovery is unavailable for this provider.")
+
     @abstractmethod
     async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:
         """Validate browser control and return matched public provider identity."""

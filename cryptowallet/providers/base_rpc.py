@@ -3,10 +3,17 @@ import json
 import aiohttp
 
 
-BASE_SEPOLIA_RPC_URLS = (
-    "https://sepolia.base.org",
-    "https://sepolia-preconf.base.org",
-)
+EVM_RPC_URLS = {
+    "base-sepolia": (
+        "https://sepolia.base.org",
+        "https://sepolia-preconf.base.org",
+    ),
+    "ethereum-sepolia": (
+        "https://ethereum-sepolia-rpc.publicnode.com",
+        "https://rpc.sepolia.org",
+    ),
+}
+BASE_SEPOLIA_RPC_URLS = EVM_RPC_URLS["base-sepolia"]
 ENTRY_POINT_V06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"
 USER_OPERATION_EVENT_TOPIC = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
@@ -17,6 +24,76 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 
 class BaseRpcError(RuntimeError):
     pass
+
+
+async def get_native_balance(address: str, network: str) -> int:
+    """Return an EVM native balance through bounded public read-only RPC."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Native RPC balance lookup is unavailable for this network.")
+    result = await _rpc_with_urls(rpc_urls, "eth_getBalance", [address, "latest"], network)
+    try:
+        return int(str(result), 16)
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError("The network returned an invalid native balance.") from exc
+
+
+async def get_erc20_asset(
+    contract: str, address: str, network: str, *, include_metadata: bool = False
+) -> dict:
+    """Read ERC-20 metadata and one balance without executing a transaction."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Token lookup is unavailable for this network.")
+    code = await _rpc_with_urls(rpc_urls, "eth_getCode", [contract, "latest"], network)
+    if not isinstance(code, str) or code in {"0x", "0x0"}:
+        raise BaseRpcError("No token contract exists at that address.")
+    address_word = address.lower().removeprefix("0x").rjust(64, "0")
+    raw_balance = await _rpc_with_urls(
+        rpc_urls, "eth_call", [{"to": contract, "data": "0x70a08231" + address_word}, "latest"], network
+    )
+    try:
+        balance = int(str(raw_balance), 16)
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError("The token returned an invalid balance.") from exc
+    result = {"contract_address": contract.lower(), "amount_atomic": balance}
+    if not include_metadata:
+        return result
+    raw_decimals = await _rpc_with_urls(
+        rpc_urls, "eth_call", [{"to": contract, "data": "0x313ce567"}, "latest"], network
+    )
+    raw_symbol = await _rpc_with_urls(
+        rpc_urls, "eth_call", [{"to": contract, "data": "0x95d89b41"}, "latest"], network
+    )
+    raw_name = await _rpc_with_urls(
+        rpc_urls, "eth_call", [{"to": contract, "data": "0x06fdde03"}, "latest"], network
+    )
+    try:
+        decimals = int(str(raw_decimals), 16)
+        symbol = _decode_abi_text(str(raw_symbol))
+        name = _decode_abi_text(str(raw_name))
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError("The contract does not expose valid ERC-20 metadata.") from exc
+    if decimals < 0 or decimals > 255 or not symbol or not name:
+        raise BaseRpcError("The contract does not expose valid ERC-20 metadata.")
+    result.update({"decimals": decimals, "symbol": symbol[:16], "name": name[:64]})
+    return result
+
+
+def _decode_abi_text(value: str) -> str:
+    data = bytes.fromhex(value.removeprefix("0x"))
+    if len(data) == 32:
+        return data.rstrip(b"\x00").decode("utf-8").strip()
+    if len(data) < 96:
+        raise ValueError("Invalid ABI string")
+    offset = int.from_bytes(data[:32], "big")
+    if offset + 32 > len(data):
+        raise ValueError("Invalid ABI offset")
+    length = int.from_bytes(data[offset:offset + 32], "big")
+    text = data[offset + 32:offset + 32 + length]
+    if len(text) != length:
+        raise ValueError("Invalid ABI length")
+    return text.decode("utf-8").strip()
 
 
 async def get_transaction(tx_hash: str) -> dict | None:
@@ -118,9 +195,13 @@ async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
 
 
 async def _rpc(method: str, params: list):
+    return await _rpc_with_urls(BASE_SEPOLIA_RPC_URLS, method, params, "Base Sepolia")
+
+
+async def _rpc_with_urls(rpc_urls: tuple[str, ...], method: str, params: list, network: str):
     timeout = aiohttp.ClientTimeout(total=15)
     last_error = None
-    for rpc_url in BASE_SEPOLIA_RPC_URLS:
+    for rpc_url in rpc_urls:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(
@@ -130,7 +211,7 @@ async def _rpc(method: str, params: list):
                 ) as response:
                     raw = await response.content.read(MAX_RESPONSE_BYTES + 1)
                     if len(raw) > MAX_RESPONSE_BYTES:
-                        raise BaseRpcError("Base Sepolia returned an oversized response.")
+                        raise BaseRpcError(f"{network} returned an oversized response.")
                     payload = json.loads(raw.decode("utf-8"))
                     if (
                         response.status != 200
@@ -138,7 +219,7 @@ async def _rpc(method: str, params: list):
                         or "error" in payload
                         or "result" not in payload
                     ):
-                        raise BaseRpcError("Base Sepolia RPC rejected the request.")
+                        raise BaseRpcError(f"{network} RPC rejected the request.")
                     return payload["result"]
         except (
             aiohttp.ClientError,
@@ -148,7 +229,7 @@ async def _rpc(method: str, params: list):
             BaseRpcError,
         ) as exc:
             last_error = exc
-    raise BaseRpcError("Base Sepolia RPC could not complete the request.") from last_error
+    raise BaseRpcError(f"{network} RPC could not complete the request.") from last_error
 
 
 async def get_user_operation_receipt(address: str, user_operation_hash: str) -> dict | None:

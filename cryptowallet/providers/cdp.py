@@ -19,7 +19,12 @@ from ..core.networks import (
 )
 from ..core.validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
-from .base_rpc import BaseRpcError, get_user_operation_receipt
+from .base_rpc import (
+    BaseRpcError,
+    get_erc20_asset,
+    get_native_balance as get_rpc_native_balance,
+    get_user_operation_receipt,
+)
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 
@@ -173,42 +178,82 @@ class CdpWalletProvider(WalletProvider):
         ):
             raise WalletProviderError("Native balance lookup is unavailable for this network.")
         normalized_address = normalize_evm_address(address)
+        try:
+            return await get_rpc_native_balance(normalized_address, network)
+        except BaseRpcError as exc:
+            raise WalletProviderError(
+                f"{configured_network.name} native balance is temporarily unavailable."
+            ) from exc
+
+    async def get_registered_token_asset(
+        self, address: str, network: str, contract: str, *, include_metadata: bool = False
+    ) -> dict:
+        configured_network = KNOWN_NETWORKS.get(network)
+        if configured_network is None or not configured_network.supports(NetworkCapability.BALANCE):
+            raise WalletProviderError("Token lookup is unavailable for this network.")
+        try:
+            normalized_address = normalize_evm_address(address)
+            normalized_contract = normalize_evm_address(contract)
+            return await get_erc20_asset(
+                normalized_contract, normalized_address, network, include_metadata=include_metadata
+            )
+        except (BaseRpcError, ValueError) as exc:
+            raise WalletProviderError(str(exc)) from exc
+
+    async def get_token_balances(self, address: str, network: str) -> list[dict]:
+        """Return bounded indexed token balances; all contracts remain explicitly identifiable."""
+        configured_network = KNOWN_NETWORKS.get(network)
+        if configured_network is None or not configured_network.supports(NetworkCapability.BALANCE):
+            raise WalletProviderError("Token discovery is unavailable for this network.")
+        normalized_address = normalize_evm_address(address)
         credentials = await self.credentials()
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
-        client = self._api_client(credentials)
         page_token = None
+        assets = []
         try:
             for _ in range(MAX_BALANCE_PAGES):
-                result = await client.list_token_balances(
-                    normalized_address,
-                    network,
-                    page_size=100,
-                    page_token=page_token,
+                result = await self._api_client(credentials).list_token_balances(
+                    normalized_address, network, page_size=100, page_token=page_token
                 )
                 balances = result.get("balances") or []
                 if not isinstance(balances, list):
-                    raise WalletProviderError("CDP returned invalid balance data.")
+                    raise ValueError("Invalid token balances")
                 for balance in balances:
+                    if not isinstance(balance, dict):
+                        continue
                     token = balance.get("token") or {}
                     amount = balance.get("amount") or {}
                     contract = str(token.get("contractAddress") or "").lower()
-                    if contract != NATIVE_ETH_CONTRACT:
+                    if contract == NATIVE_ETH_CONTRACT:
                         continue
-                    if int(amount.get("decimals", -1)) != 18:
-                        raise WalletProviderError(
-                            "CDP returned an unexpected decimal count for native ETH."
-                        )
-                    return int(amount.get("amount", 0))
+                    decimals = int(amount.get("decimals", token.get("decimals", -1)))
+                    atomic_amount = int(amount.get("amount", 0))
+                    if (
+                        len(contract) != 42
+                        or not contract.startswith("0x")
+                        or decimals < 0
+                        or decimals > 255
+                        or atomic_amount <= 0
+                    ):
+                        continue
+                    int(contract[2:], 16)
+                    symbol = str(token.get("symbol") or "TOKEN").strip()[:16] or "TOKEN"
+                    assets.append({
+                        "symbol": symbol,
+                        "contract_address": contract,
+                        "amount_atomic": atomic_amount,
+                        "decimals": decimals,
+                    })
                 page_token = str(result.get("nextPageToken") or "")
                 if not page_token:
-                    return 0
-            raise WalletProviderError("CDP returned too many balance pages to inspect safely.")
+                    return assets[:25]
+            raise WalletProviderError("CDP returned too many token pages to inspect safely.")
         except WalletProviderError:
             raise
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
-                f"CDP could not retrieve the {configured_network.name} balance. Try again later."
+                f"{configured_network.name} token discovery is temporarily unavailable."
             ) from exc
 
     async def get_transaction_history(

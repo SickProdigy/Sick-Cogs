@@ -26,10 +26,12 @@ def create_config(cog) -> Config:
         companion_nonces={},
         provider_paused=False,
         provider_usage={},
+        token_registry={},
     )
     config.register_user(
         profile=None,
         selected_network=DEFAULT_NETWORK,
+        selected_environment="testnet",
         claimed_at=0,
         intents={},
         approval_sessions={},
