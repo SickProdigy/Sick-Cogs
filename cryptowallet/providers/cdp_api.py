@@ -292,21 +292,6 @@ class CdpApiClient:
             body={"accessToken": access_token},
         )
 
-    async def get_account_delegation(
-        self, user_id: str, address: str, project_id: str
-    ) -> dict | None:
-        """Return an active account-scoped delegation, or None when absent."""
-        path = (
-            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
-            f"/address/{quote(address, safe='')}/delegation"
-        )
-        try:
-            return await self._request("GET", path, query={"projectID": project_id})
-        except CdpApiError as exc:
-            if exc.status == 404 and exc.error_type == "not_found":
-                return None
-            raise
-
     async def get_user_delegation(self, user_id: str, project_id: str) -> dict | None:
         """Return the user-scoped delegation shared by all accounts, if present."""
         path = f"/v2/embedded-wallet-api/end-users/{quote(user_id)}/delegation"
@@ -324,28 +309,6 @@ class CdpApiClient:
             await self._request(
                 "DELETE", path, body={}, query={"projectID": project_id},
                 developer_auth=True, allow_empty_response=True,
-            )
-        except CdpApiError as exc:
-            if exc.status == 404 and exc.error_type == "not_found":
-                return
-            raise
-
-    async def revoke_account_delegation(
-        self, user_id: str, address: str, project_id: str
-    ) -> None:
-        """Revoke only the active delegation for one end-user account."""
-        path = (
-            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
-            f"/address/{quote(address, safe='')}/delegation"
-        )
-        try:
-            await self._request(
-                "DELETE",
-                path,
-                body={},
-                query={"projectID": project_id},
-                developer_auth=True,
-                allow_empty_response=True,
             )
         except CdpApiError as exc:
             if exc.status == 404 and exc.error_type == "not_found":

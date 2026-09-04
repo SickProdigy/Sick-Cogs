@@ -16,19 +16,10 @@ class WalletAuthorizationCommands:
 
     @staticmethod
     def _active_authorization_embed(status: dict, expiry: datetime) -> discord.Embed:
-        legacy = status.get("scope") == "legacy-account"
-        legacy_name = (
-            "Solana account"
-            if status.get("legacy_network") == "solana-devnet"
-            else "Base account"
-        )
         embed = discord.Embed(
             title="Wallet authorization active",
             description=(
-                f"Your existing authorization covers only the {legacy_name}. Revoke it once, "
-                "then authorize again to cover every wallet account."
-                if legacy
-                else "This authorization permits limited bot signing for every account in "
+                "This authorization permits limited bot signing for every account in "
                 "your Crypto Wallet profile. No new authorization was created."
             ),
             color=discord.Color.green(),
@@ -36,11 +27,7 @@ class WalletAuthorizationCommands:
         embed.add_field(name="Status", value="Active", inline=True)
         embed.add_field(
             name="Scope",
-            value=(
-                f"{legacy_name} only (legacy; revoke once to upgrade)"
-                if legacy
-                else "All wallet accounts"
-            ),
+            value="All wallet accounts",
             inline=True,
         )
         embed.add_field(
