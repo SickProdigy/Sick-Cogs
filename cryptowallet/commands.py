@@ -337,6 +337,40 @@ class WalletCommands:
         ]
         await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
 
+    @staticmethod
+    def _active_authorization_embed(status: dict, expiry: datetime) -> discord.Embed:
+        address = str(status.get("address") or "Unavailable")
+        embed = discord.Embed(
+            title="Wallet authorization active",
+            description=(
+                "This wallet already permits limited bot signing on Base Sepolia. "
+                "No new authorization was created."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Status", value="Active", inline=True)
+        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        embed.add_field(
+            name="Expires",
+            value=f"<t:{int(expiry.timestamp())}:F>\n<t:{int(expiry.timestamp())}:R>",
+            inline=False,
+        )
+        embed.add_field(
+            name="Wallet address",
+            value=f"[{address}]({BASE_SEPOLIA.explorer_url}/address/{address})",
+            inline=False,
+        )
+        embed.add_field(
+            name="Options",
+            value=(
+                "Leave it active for future sends, or use **Revoke authorization** below. "
+                "Revoking does not delete the wallet or move funds."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Future sends require authorization again after revocation or expiry.")
+        return embed
+
     @wallet.command(name="authorize", aliases=("auth",))
     async def wallet_authorize(self, ctx: commands.Context):
         """Authorize limited bot actions for your provisioned wallet."""
@@ -355,9 +389,10 @@ class WalletCommands:
                 expiry = datetime.fromisoformat(
                     status["expires_at"].replace("Z", "+00:00")
                 )
+                embed = self._active_authorization_embed(status, expiry)
                 await ctx.send(
-                    "Your wallet is already authorized for limited signing until "
-                    f"<t:{int(expiry.timestamp())}:F>. No new authorization was created."
+                    embed=embed,
+                    view=WalletRevocationView(self, ctx.author.id, profile),
                 )
                 return
             expires_at = await self.send_authorization_link(ctx.author, profile)
@@ -421,8 +456,8 @@ class WalletCommands:
                 status["expires_at"].replace("Z", "+00:00")
             )
             await ctx.send(
-                "Limited signing authorization is active for your Base Sepolia wallet "
-                f"until <t:{int(expiry.timestamp())}:F>."
+                embed=self._active_authorization_embed(status, expiry),
+                view=WalletRevocationView(self, ctx.author.id, profile),
             )
             return
         await ctx.send(
@@ -480,7 +515,17 @@ class WalletCommands:
             )
             return
         view.disable_controls()
-        await interaction.message.edit(view=view)
+        embed = discord.Embed(
+            title="Wallet authorization revoked",
+            description=(
+                "Limited signing authorization is no longer active. Your wallet and funds "
+                "were not changed; the next send will require authorization again."
+            ),
+            color=discord.Color.light_grey(),
+        )
+        embed.add_field(name="Status", value="Revoked", inline=True)
+        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        await interaction.message.edit(content=None, embed=embed, view=view)
         await interaction.followup.send(
             "Limited signing authorization was revoked. Your wallet and funds were not changed. "
             "The next send will require authorization again.",
