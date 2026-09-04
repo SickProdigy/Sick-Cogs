@@ -62,6 +62,25 @@ Show the current notification setup:
 [p]coc notifications status
 ```
 
+Set the timezone used by war schedules for this Discord server:
+
+```text
+[p]coc timezone America/New_York
+[p]coc timezone Europe/London
+[p]coc timezone UTC
+```
+
+Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]coc timezone` without a value to see the current setting. Aliases are `settimezone` and `tz`.
+
+Choose detailed attack cards or compact one-line attack entries:
+
+```text
+[p]coc notifications attackstyle card
+[p]coc notifications attackstyle compact
+```
+
+The shorter form is `[p]coc notifications attack card|compact`. Other aliases for `attackstyle` are `attackformat` and `logstyle`.
+
 ## War Notifications
 
 War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
@@ -125,7 +144,7 @@ Toggle mentions for one event:
 
 ## Attack Log Updates
 
-When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. Each attack is labeled as a friendly or enemy attack, then leads with the player who attacked, the target, stars, destruction percentage, and the current score summary.
+When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `card` format labels each entry `Friendly Attack` or `Enemy Attack` without redundantly repeating the clan name, then shows the attacker, defender, stars, destruction, and current score summary. The optional `compact` format places up to ten attacks into short one-line entries with blue friendly, orange enemy-player, and red enemy-attack markers.
 
 Attack-log notification embeds do not show the generic status or team size text. Once battle day is active, they only show the war end time instead of repeating preparation and start times.
 
@@ -161,4 +180,4 @@ The roundup includes:
 
 - Notification setup commands are limited to moderators or users with `Manage Channels`.
 - `setapi` is bot-owner only because the API key is shared globally.
-- Current war lookup supports regular wars and attempts a CWL fallback when regular war data is blocked or unavailable.
+- Current war lookup supports regular wars and silently uses the matching CWL war when regular war data is blocked or unavailable. War, attack-log, attack-status, event, and roundup cards state `Clan War` or `Clan War League (CWL)` directly so the shared workflow remains clear. During preparation, the main war card is yellow. During battle day, it is orange and shows only the war end time; enemy attack updates remain red, and completed-war roundups use a neutral blue with a green victory, red defeat, or neutral tie marker.

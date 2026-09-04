@@ -1,8 +1,9 @@
 import aiohttp
 import discord
 from discord.ext import tasks
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from red_commons.logging import getLogger
 from redbot.core import Config, commands, checks
@@ -72,6 +73,7 @@ class Coc(commands.Cog):
             "COC_CLAN_KEY": None,
             "COC_WAR_CHANNEL": None,
             "COC_WAR_NOTIFICATIONS": False,
+            "COC_TIMEZONE": "America/New_York",
             "COC_WAR_MENTION_ROLE": None,
             "WAR_NOTIFY_PREP": True,
             "WAR_NOTIFY_PREP_MENTION": True,
@@ -82,6 +84,7 @@ class Coc(commands.Cog):
             "WAR_NOTIFY_BATTLE_MENTION": True,
             "WAR_NOTIFY_ATTACK_LOG": True,
             "WAR_NOTIFY_ATTACK_LOG_MENTION": True,
+            "WAR_ATTACK_LOG_STYLE": "card",
             "WAR_NOTIFY_END_SOON": True,
             "WAR_NOTIFY_END_SOON_MENTION": True,
             "WAR_END_SOON_MINUTES": 60,
@@ -201,6 +204,7 @@ class Coc(commands.Cog):
                 if response.status != 200:
                     continue
                 war = await response.json()
+            war["_sickgaming_war_type"] = "cwl"
 
             clan = war.get("clan", {})
             opponent = war.get("opponent", {})
@@ -227,13 +231,13 @@ class Coc(commands.Cog):
 
                 cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers)
                 if cwl_data:
-                    return cwl_data, "No regular war is active, but I found a current CWL war."
+                    return cwl_data, ""
                 return {}, f"This clan is not currently in a regular war or CWL war. {cwl_error}"
 
             if response.status == 403:
                 cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers)
                 if cwl_data:
-                    return cwl_data, "Regular war data is blocked, but I found a current CWL war."
+                    return cwl_data, ""
                 return {}, (
                     "Regular war data is blocked, and CWL fallback did not return war data. "
                     f"{cwl_error}"
@@ -501,11 +505,16 @@ class Coc(commands.Cog):
         return stats
 
     @staticmethod
-    def _format_coc_time(raw_time: str) -> str:
+    def _format_coc_time(raw_time: str, timezone_name: str = "America/New_York") -> str:
         war_time = Coc._parse_coc_time(raw_time)
         if war_time is None:
             return "Unknown"
-        return (war_time - timedelta(hours=5)).strftime("%b %d, %Y at %I:%M %p")
+        try:
+            local_zone = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError, TypeError):
+            local_zone = ZoneInfo("America/New_York")
+        local_time = war_time.replace(tzinfo=timezone.utc).astimezone(local_zone)
+        return local_time.strftime("%b %d, %Y at %I:%M %p %Z")
 
     @staticmethod
     def _format_percent(value) -> str:
@@ -520,6 +529,12 @@ class Coc(commands.Cog):
             "notInWar": "Not in War",
         }.get(state, state)
 
+    @staticmethod
+    def _war_type_label(war_data: dict) -> str:
+        if war_data.get("_sickgaming_war_type") == "cwl":
+            return "Clan War League (CWL)"
+        return "Clan War"
+
     def _build_war_embed(
         self,
         war_data: dict,
@@ -528,6 +543,7 @@ class Coc(commands.Cog):
         title: str | None = None,
         intro: str | None = None,
         schedule_keys: tuple[tuple[str, str], ...] | None = None,
+        timezone_name: str = "America/New_York",
     ) -> discord.Embed:
         clan, opponent = self._configured_war_sides(war_data, clan_tag)
 
@@ -535,7 +551,10 @@ class Coc(commands.Cog):
         team_size = war_data.get("teamSize", "Unknown")
         attacks_per_member = war_data.get("attacksPerMember", 2)
         total_attacks = team_size * attacks_per_member if isinstance(team_size, int) else "Unknown"
-        color = 0x2ecc71 if state == "preparation" else 0x992d22
+        color = {
+            "preparation": 0xF1C40F,
+            "inWar": 0xE67E22,
+        }.get(state, 0x992D22)
 
         clan_name = clan.get("name", "Your Clan")
         opponent_name = opponent.get("name", "Opponent")
@@ -547,6 +566,7 @@ class Coc(commands.Cog):
             description=(
                 f"{intro}\n\n" if intro else ""
             ) + (
+                f"**{self._war_type_label(war_data)}**\n"
                 f"Status: **{self._war_state_label(state)}**\n"
                 f"Team size: **{team_size}v{team_size}**"
             ),
@@ -581,13 +601,17 @@ class Coc(commands.Cog):
             inline=True,
         )
 
-        schedule = schedule_keys or [
-            ("Prep", "preparationStartTime"),
-            ("Start", "startTime"),
-            ("End", "endTime"),
-        ]
+        schedule = schedule_keys or (
+            [("War Ends", "endTime")]
+            if state == "inWar"
+            else [
+                ("Prep", "preparationStartTime"),
+                ("Start", "startTime"),
+                ("End", "endTime"),
+            ]
+        )
         schedule_lines = [
-            f"{label}: **{self._format_coc_time(war_data[key])} EST**"
+            f"{label}: **{self._format_coc_time(war_data[key], timezone_name)}**"
             for label, key in schedule
             if war_data.get(key)
         ]
@@ -601,16 +625,41 @@ class Coc(commands.Cog):
         return embed
 
     def _build_war_attack_update_embed(
-        self, war_data: dict, clan_tag: str, new_attacks: list[dict]
+        self, war_data: dict, clan_tag: str, new_attacks: list[dict], *, style: str = "card", timezone_name: str = "America/New_York"
     ) -> discord.Embed:
         clan, opponent = self._configured_war_sides(war_data, clan_tag)
         enemy_attack = any(not attack["is_friendly"] for attack in new_attacks)
         embed = discord.Embed(
             title="War Log Update",
-            description=f"{clan.get('name', 'Your Clan')} vs {opponent.get('name', 'Opponent')}",
+            description=(
+                f"**{self._war_type_label(war_data)}**\n"
+                f"{clan.get('name', 'Your Clan')} vs {opponent.get('name', 'Opponent')}"
+            ),
             color=0x992D22 if enemy_attack else 0x2ECC71,
             timestamp=None,
         )
+
+        if style == "compact":
+            lines = []
+            for attack in new_attacks[:10]:
+                direction_marker = "🔵" if attack["is_friendly"] else "🔴"
+                attacker_marker = "🔵" if attack["is_friendly"] else "🟠"
+                defender_marker = "🟠" if attack["is_friendly"] else "🔵"
+                attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
+                stars = "⭐" * int(attack["stars"] or 0) or "No stars"
+                lines.append(
+                    f"{direction_marker} **{attack_type}** · {attacker_marker} **{attack['attacker_name']}** → "
+                    f"{defender_marker} **{attack['defender_name']}** | {stars} | "
+                    f"**{self._format_percent(attack['destruction'])}**"
+                )
+            remaining = len(new_attacks) - len(lines)
+            if remaining > 0:
+                lines.append(f"…and {remaining} more attack{'s' if remaining != 1 else ''}.")
+            if enemy_attack and any(attack["is_friendly"] for attack in new_attacks):
+                embed.color = 0x5865F2
+            embed.description += "\n\n" + "\n".join(lines)
+            embed.set_footer(text="Brought to you by SickGaming.net")
+            return embed
 
         badge_url = opponent.get("badgeUrls", {}).get("large") if enemy_attack else clan.get("badgeUrls", {}).get("large")
         if badge_url:
@@ -620,7 +669,7 @@ class Coc(commands.Cog):
             stars = attack["stars"]
             star_word = "star" if stars == 1 else "stars"
             attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
-            field_name = f"{attack_type} - {attack['side_name']}"
+            field_name = attack_type
             embed.add_field(
                 name=field_name,
                 value=(
@@ -664,14 +713,14 @@ class Coc(commands.Cog):
         if war_data.get("endTime"):
             embed.add_field(
                 name="War Ends",
-                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                value=f"**{self._format_coc_time(war_data['endTime'], timezone_name)}**",
                 inline=False,
             )
 
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
 
-    def _build_war_roundup_embed(self, war_data: dict, clan_tag: str) -> discord.Embed:
+    def _build_war_roundup_embed(self, war_data: dict, clan_tag: str, timezone_name: str = "America/New_York") -> discord.Embed:
         clan, opponent = self._configured_war_sides(war_data, clan_tag)
         clan_name = clan.get("name", "Your Clan")
         opponent_name = opponent.get("name", "Opponent")
@@ -686,15 +735,17 @@ class Coc(commands.Cog):
         used_attacks = sum(member["used"] for member in member_stats)
         unused_attacks = sum(member["remaining"] for member in member_stats)
         result = self._war_result_label(clan, opponent)
+        result_marker = "🟢" if result.startswith("Victory") else "🔴" if result.startswith("Defeat") else "⚪"
 
         embed = discord.Embed(
             title="War Roundup",
             description=(
+                f"**{self._war_type_label(war_data)}**\n"
                 f"{clan_name} vs {opponent_name}\n"
-                f"Result: **{result}**\n"
+                f"Result: {result_marker} **{result}**\n"
                 f"Attacks used: **{used_attacks}/{attack_total}**"
             ),
-            color=0x2ecc71 if result.startswith("Victory") else 0x992d22,
+            color=0x3498DB,
             timestamp=None,
         )
 
@@ -768,14 +819,14 @@ class Coc(commands.Cog):
         if war_data.get("endTime"):
             embed.add_field(
                 name="War Ended",
-                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                value=f"**{self._format_coc_time(war_data['endTime'], timezone_name)}**",
                 inline=False,
             )
 
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
 
-    def _build_war_attacks_embed(self, war_data: dict, clan_tag: str) -> discord.Embed:
+    def _build_war_attacks_embed(self, war_data: dict, clan_tag: str, timezone_name: str = "America/New_York") -> discord.Embed:
         clan, opponent = self._configured_war_sides(war_data, clan_tag)
         clan_name = clan.get("name", "Your Clan")
         opponent_name = opponent.get("name", "Opponent")
@@ -794,6 +845,7 @@ class Coc(commands.Cog):
         embed = discord.Embed(
             title="War Attack Status",
             description=(
+                f"**{self._war_type_label(war_data)}**\n"
                 f"{clan_name} vs {opponent_name}\n"
                 f"Status: **{self._war_state_label(state)}**\n"
                 f"{state_notes.get(state, 'Current war status is available.')}"
@@ -830,16 +882,16 @@ class Coc(commands.Cog):
             label = "War Ended" if state == "warEnded" else "War Ends"
             embed.add_field(
                 name=label,
-                value=f"**{self._format_coc_time(war_data['endTime'])} EST**",
+                value=f"**{self._format_coc_time(war_data['endTime'], timezone_name)}**",
                 inline=False,
             )
 
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
 
-    def _build_war_event_embed(self, war_data: dict, clan_tag: str, event: str) -> discord.Embed:
+    def _build_war_event_embed(self, war_data: dict, clan_tag: str, event: str, timezone_name: str = "America/New_York") -> discord.Embed:
         if event == "ended":
-            return self._build_war_roundup_embed(war_data, clan_tag)
+            return self._build_war_roundup_embed(war_data, clan_tag, timezone_name)
 
         titles = {
             "prep": "War Preparation Started",
@@ -864,6 +916,7 @@ class Coc(commands.Cog):
             title=titles[event],
             intro=intros[event],
             schedule_keys=schedule_keys,
+            timezone_name=timezone_name,
         )
 
     @staticmethod
@@ -1009,7 +1062,9 @@ class Coc(commands.Cog):
                         await channel.send(notice)
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, event)
-                    embed = self._build_war_event_embed(war_data, clan_tag, event)
+                    embed = self._build_war_event_embed(
+                        war_data, clan_tag, event, str(settings.get("COC_TIMEZONE") or "America/New_York")
+                    )
                     await self._send_embed_with_optional_image(
                         channel,
                         embed,
@@ -1040,7 +1095,13 @@ class Coc(commands.Cog):
                         await channel.send(notice)
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, "attacklog")
-                    embed = self._build_war_attack_update_embed(war_data, clan_tag, new_attacks)
+                    embed = self._build_war_attack_update_embed(
+                        war_data,
+                        clan_tag,
+                        new_attacks,
+                        style=str(settings.get("WAR_ATTACK_LOG_STYLE") or "card"),
+                        timezone_name=str(settings.get("COC_TIMEZONE") or "America/New_York"),
+                    )
                     await self._send_embed_with_optional_image(
                         channel,
                         embed,
@@ -1157,8 +1218,9 @@ class Coc(commands.Cog):
         if notice:
             await ctx.send(notice)
 
-        embed = self._build_war_embed(user_json, clan_key)
         guild_config = self.config.guild(ctx.guild)
+        timezone_name = str(await guild_config.COC_TIMEZONE() or "America/New_York")
+        embed = self._build_war_embed(user_json, clan_key, timezone_name=timezone_name)
         await guild_config.WAR_START_TIME.set(user_json.get("startTime"))
         await guild_config.WAR_END_TIME.set(user_json.get("endTime"))
         await guild_config.LAST_API_PULL.set((datetime.now() - timedelta(hours=5)).isoformat())
@@ -1193,9 +1255,35 @@ class Coc(commands.Cog):
         if notice:
             await ctx.send(notice)
 
-        embed = self._build_war_attacks_embed(war_data, clan_key)
+        timezone_name = str(await self.config.guild(ctx.guild).COC_TIMEZONE() or "America/New_York")
+        embed = self._build_war_attacks_embed(war_data, clan_key, timezone_name)
         await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
         
+    @commands.guild_only()
+    @checks.mod_or_permissions(manage_channels=True)
+    @command_coc.command(name="timezone", aliases=["settimezone", "tz"])
+    async def command_coc_timezone(self, ctx, timezone_name: str = None):
+        """Set the timezone used for this server's war schedules."""
+
+        guild_config = self.config.guild(ctx.guild)
+        if timezone_name is None:
+            current = str(await guild_config.COC_TIMEZONE() or "America/New_York")
+            return await ctx.send(
+                f"War schedule timezone: **{current}**\n"
+                f"Change it with `{ctx.clean_prefix}coc timezone America/New_York`."
+            )
+
+        try:
+            ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            return await ctx.send(
+                "That timezone was not recognized. Use an IANA timezone such as "
+                "`America/New_York`, `America/Chicago`, `Europe/London`, or `UTC`."
+            )
+
+        await guild_config.COC_TIMEZONE.set(timezone_name)
+        await ctx.send(f"War schedules will now use **{timezone_name}** for this server.")
+
     @staticmethod
     def _valid_notification_events_message() -> str:
         return ", ".join(f"`{event}`" for event in WAR_NOTIFICATION_EVENTS)
@@ -1221,7 +1309,7 @@ class Coc(commands.Cog):
         if enabled:
             await guild_config.COC_WAR_NOTIFICATIONS.set(False)
             return await ctx.send(
-                "Clash of Clans war notifications are now off for this server. "
+                "Clash of Clans war notifications are now **OFF** for this server. "
                 f"Turn them back on with `{ctx.clean_prefix}coc notifications`."
             )
 
@@ -1249,7 +1337,7 @@ class Coc(commands.Cog):
             channel = None
         channel_name = channel.mention if channel else f"`{coc_war_channel}`"
         await ctx.send(
-            "Clash of Clans war notifications are now on.\n"
+            "Clash of Clans war notifications are now **ON**.\n"
             f"Clan: `{self._normalize_tag(clan_key)}`\n"
             f"Channel: {channel_name}\n"
             "I will check for war updates about every 5 minutes."
@@ -1272,20 +1360,48 @@ class Coc(commands.Cog):
         except (TypeError, ValueError):
             role = None
         lines = [
-            f"Global notifications: **{'on' if settings.get('COC_WAR_NOTIFICATIONS') else 'off'}**",
+            f"Global notifications: **{'ON' if settings.get('COC_WAR_NOTIFICATIONS') else 'OFF'}**",
             f"Channel: {channel.mention if channel else ('`' + str(channel_id) + '`' if channel_id else '**not set**')}",
             f"Mention role: {role.mention if role else ('`' + str(role_id) + '`' if role_id else '**not set**')}",
+            f"Timezone: **{settings.get('COC_TIMEZONE') or 'America/New_York'}**",
             f"Preparation ending soon: **{settings.get('WAR_PREP_SOON_MINUTES', 5)} minutes** before battle day",
             f"War ending soon: **{settings.get('WAR_END_SOON_MINUTES', 60)} minutes** before war end",
+            f"Attack log format: **{str(settings.get('WAR_ATTACK_LOG_STYLE') or 'card').upper()}**",
             "",
             "Events:",
         ]
         for event, label in WAR_NOTIFICATION_EVENTS.items():
-            enabled = "on" if self._event_enabled(settings, event) else "off"
+            enabled = "ON" if self._event_enabled(settings, event) else "OFF"
             mention = "mention" if self._event_mention_enabled(settings, event) else "no mention"
             lines.append(f"- `{event}` {label}: **{enabled}**, {mention}")
 
         await ctx.send("\n".join(lines))
+
+    @checks.mod_or_permissions(manage_channels=True)
+    @command_coc_warnotification.command(
+        name="attackstyle", aliases=["attack", "attackformat", "logstyle"]
+    )
+    async def command_coc_attackstyle(self, ctx, style: str = None):
+        """Choose compact one-line attack updates or detailed cards."""
+
+        guild_config = self.config.guild(ctx.guild)
+        if style is None:
+            current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "card").upper()
+            return await ctx.send(f"War attack log format is **{current}**.")
+        normalized = style.strip().lower()
+        aliases = {
+            "card": "card",
+            "cards": "card",
+            "compact": "compact",
+            "line": "compact",
+            "lines": "compact",
+            "oneline": "compact",
+        }
+        selected = aliases.get(normalized)
+        if selected is None:
+            return await ctx.send("Choose `card` or `compact`.")
+        await guild_config.WAR_ATTACK_LOG_STYLE.set(selected)
+        await ctx.send(f"War attack log format is now **{selected.upper()}**.")
 
     @checks.mod_or_permissions(manage_channels=True)
     @command_coc_warnotification.command(name="role")
@@ -1320,7 +1436,7 @@ class Coc(commands.Cog):
         await self._reset_war_notification_state(guild_config)
         await ctx.send(
             f"{WAR_NOTIFICATION_EVENTS[event_key]} notifications are now "
-            f"{'on' if enabled else 'off'}."
+            f"**{'ON' if enabled else 'OFF'}**."
         )
 
     @checks.mod_or_permissions(manage_channels=True)
@@ -1339,7 +1455,7 @@ class Coc(commands.Cog):
         await getattr(guild_config, WAR_NOTIFICATION_MENTION_SETTING_NAMES[event_key]).set(enabled)
         await ctx.send(
             f"{WAR_NOTIFICATION_EVENTS[event_key]} role mentions are now "
-            f"{'on' if enabled else 'off'}."
+            f"**{'ON' if enabled else 'OFF'}**."
         )
 
     @checks.mod_or_permissions(manage_channels=True)
