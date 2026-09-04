@@ -82,7 +82,7 @@ class WalletCoreCommands:
             if account is None:
                 continue
             address = str(account.get("address") or "")
-            explorer_address = f"{item.explorer_url}/address/{address}"
+            explorer_address = item.explorer_address_url(address)
             lines = [f"Wallet: [{address}]({explorer_address})"]
             if item.supports(NetworkCapability.BALANCE):
                 try:

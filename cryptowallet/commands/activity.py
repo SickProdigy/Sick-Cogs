@@ -113,7 +113,7 @@ class WalletActivityCommands:
             details = [
                 f"From: `{from_address or 'Unavailable'}`",
                 f"To: `{to_address or 'Contract creation'}`",
-                f"TXID: [{tx_hash}]({network.explorer_url}/tx/{tx_hash})",
+                f"TXID: [{tx_hash}]({network.explorer_transaction_url(tx_hash)})",
             ]
             timestamp = str(content.get("block_timestamp") or "")
             try:
@@ -216,7 +216,7 @@ class WalletActivityCommands:
             )
         embed.add_field(
             name="TXID",
-            value=f"[{lookup}]({network.explorer_url}/tx/{lookup})",
+            value=f"[{lookup}]({network.explorer_transaction_url(lookup)})",
             inline=False,
         )
         if wallet_transfers:
@@ -293,7 +293,7 @@ class WalletActivityCommands:
                 address = str(account.get("address") or "")
                 embed.add_field(
                     name=network.name,
-                    value=f"[View complete activity]({network.explorer_url}/address/{address})",
+                    value=f"[View complete activity]({network.explorer_address_url(address)})",
                     inline=False,
                 )
             embed.set_footer(text="Explorer links do not use CDP history requests")

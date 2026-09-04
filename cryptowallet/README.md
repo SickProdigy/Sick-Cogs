@@ -2,15 +2,15 @@
 
 Crypto Wallet is an experimental, Base-first wallet cog for Red-DiscordBot. Its intended user experience is bot-first: a user's wallet is provisioned automatically when they first interact with the wallet commands, and the bot immediately returns a public deposit address.
 
-The secure Base prototype is tracked in issue #35; multi-network expansion is tracked separately in issue #39. Base Sepolia remains the only enabled network and must not be used with real assets.
+The secure Base prototype is tracked in issue #35; multi-network expansion is tracked separately in issue #39. All enabled networks remain testnets and must not be used with real assets.
 
 ## Multi-network safety boundary
 
 CryptoWallet models each blockchain with an explicit chain family, network reference, native-token precision, testnet state, and independently reviewed capabilities for balances, sends, history, transaction lookup, delegation, recovery, export, and fee sponsorship. EVM chain IDs and Solana cluster names are deliberately different fields.
 
-A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network; unsupported Solana validation fails closed instead of interpreting the address as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
+A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network, including independent 32-byte base58 validation for Solana addresses; a Solana address is never interpreted as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-Ethereum Sepolia is registered as a known, disabled test network using CDP identifier `ethereum-sepolia` and chain ID `11155111`. It has no enabled capabilities and cannot be selected or used. Solana devnet remains undefined, and no mainnet is registered. Each requires its own provider implementation, validation, transaction, history, recovery, and test milestones before entering the enabled registry.
+Base Sepolia remains the only send-enabled network. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account and read-only native SOL balance/explorer support. Solana sending, history, tokens, authorization, recovery, and export remain disabled, and no mainnet is registered.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
@@ -19,15 +19,15 @@ Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CD
 ```text
 User runs the wallet command for the first time
 → Service creates an internal wallet profile
-→ Wallet provider creates a user-associated EVM signer and smart account
-→ Bot immediately displays the Base address
+→ Wallet provider creates user-associated EVM and Solana testnet accounts
+→ Bot immediately displays the enabled testnet portfolio and public addresses
 → Wallet can receive deposits
 ```
 
 Routine account information remains available through Discord:
 
 - public wallet address
-- selected network and chain ID
+- explicit network and chain ID or Solana cluster
 - balance and deposit information
 - transaction-intent creation and status
 - public transaction hashes and confirmations
@@ -68,7 +68,7 @@ Transfers require explicit Discord approval and an active, time-limited, account
 
 ## Custody and identity
 
-Each Discord user receives a distinct wallet profile and Base Sepolia smart account controlled by that user’s exportable signer EOA. A blockchain address cannot be deleted and may still receive funds, but deleting its provider identity or ejecting its signer could remove the supported way to operate it and strand those funds. CryptoWallet therefore exposes neither action. Coinbase Developer Platform (CDP) is the provisional wallet provider, but provider-specific behavior must remain behind an internal adapter.
+Each Discord user receives a distinct wallet profile, a Base Sepolia smart account controlled by that user’s exportable signer EOA, and a separate Solana account provisioned by CDP for devnet testing. A blockchain address cannot be deleted and may still receive funds, but deleting its provider identity or ejecting its signer could remove the supported way to operate it and strand those funds. CryptoWallet therefore exposes neither action. Coinbase Developer Platform (CDP) is the provisional wallet provider, but provider-specific behavior must remain behind an internal adapter.
 
 SickGaming maintains its own wallet-profile identifier. External identities are verified links rather than primary keys:
 
@@ -79,7 +79,8 @@ Wallet profile
 ├── MyBB immutable user ID
 ├── optional Telegram immutable user ID
 ├── EVM owner signer
-└── Base smart account
+├── Base smart account
+└── Solana devnet account
 ```
 
 Never merge accounts by username, display name, supplied platform ID, or wallet address alone.

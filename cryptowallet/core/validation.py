@@ -4,6 +4,8 @@ from .networks import ChainFamily, Network
 
 
 EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}")
+BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ETH_AMOUNT_RE = re.compile(r"^(?P<whole>[0-9]+)(?:\.(?P<fraction>[0-9]+))?$")
 WEI_PER_ETH = 10**18
 MAX_UINT256 = 2**256 - 1
@@ -24,13 +26,30 @@ def normalize_evm_address(value: str) -> str:
     return address
 
 
+def normalize_solana_address(value: str) -> str:
+    """Validate canonical base58 text that decodes to one 32-byte Solana public key."""
+    address = value.strip()
+    if not SOLANA_ADDRESS_RE.fullmatch(address):
+        raise ValueError("Solana addresses must be 32 to 44 base58 characters.")
+    number = 0
+    for character in address:
+        number = number * 58 + BASE58_ALPHABET.index(character)
+    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    leading_zeroes = len(address) - len(address.lstrip("1"))
+    if len(b"\x00" * leading_zeroes + decoded) != 32:
+        raise ValueError("Solana addresses must decode to a 32-byte public key.")
+    return address
+
+
 def normalize_address_for_network(value: str, network: Network) -> str:
     """Validate an address using only the explicitly selected chain family."""
 
+    if not network.enabled:
+        raise ValueError("That network is not enabled.")
     if network.family is ChainFamily.EVM:
         return normalize_evm_address(value)
     if network.family is ChainFamily.SOLANA:
-        raise ValueError("Solana address validation is not enabled yet.")
+        return normalize_solana_address(value)
     raise ValueError("That network uses an unsupported address format.")
 
 

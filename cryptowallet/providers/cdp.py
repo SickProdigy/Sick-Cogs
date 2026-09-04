@@ -13,19 +13,22 @@ from ..core.models import (
 )
 from ..core.networks import (
     AVALANCHE_FUJI,
+    ChainFamily,
     ARBITRUM_SEPOLIA,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
+    SOLANA_DEVNET,
     KNOWN_NETWORKS,
     NetworkCapability,
 )
-from ..core.validation import normalize_evm_address
+from ..core.validation import normalize_evm_address, normalize_solana_address
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import (
     BaseRpcError,
     get_erc20_asset,
     get_native_balance as get_rpc_native_balance,
+    get_solana_native_balance,
     get_user_operation_receipt,
 )
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
@@ -85,6 +88,7 @@ class CdpWalletProvider(WalletProvider):
         ARBITRUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
         POLYGON_AMOY.key: frozenset({NetworkCapability.BALANCE}),
         AVALANCHE_FUJI.key: frozenset({NetworkCapability.BALANCE}),
+        SOLANA_DEVNET.key: frozenset({NetworkCapability.BALANCE}),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -147,19 +151,33 @@ class CdpWalletProvider(WalletProvider):
         provider_user_id = str(end_user.get("userId") or "")
         if not provider_user_id:
             raise WalletProviderError("CDP did not return an end-user identifier.")
+        accounts = [
+            PublicAccount(
+                address=address,
+                network=BASE_SEPOLIA.key,
+                account_type=AccountType.SMART_ACCOUNT,
+                provider_account_id=address,
+            )
+        ]
+        solana_accounts = end_user.get("solanaAccountObjects") or []
+        if isinstance(solana_accounts, list) and solana_accounts:
+            solana_address = normalize_solana_address(
+                str(solana_accounts[0].get("address") or "")
+            )
+            accounts.append(
+                PublicAccount(
+                    address=solana_address,
+                    network=SOLANA_DEVNET.key,
+                    account_type=AccountType.SOLANA_ACCOUNT,
+                    provider_account_id=solana_address,
+                )
+            )
         return WalletProfile(
             profile_id=profile_id,
             discord_user_id=discord_user_id,
             provider="cdp",
             provider_user_id=provider_user_id,
-            accounts=[
-                PublicAccount(
-                    address=address,
-                    network=BASE_SEPOLIA.key,
-                    account_type=AccountType.SMART_ACCOUNT,
-                    provider_account_id=address,
-                )
-            ],
+            accounts=accounts,
         )
 
     def _api_client(self, credentials: CdpCredentials) -> CdpApiClient:
@@ -180,6 +198,39 @@ class CdpWalletProvider(WalletProvider):
             self._idempotency_key(profile_id),
         )
 
+    async def ensure_network_accounts(self, profile: dict) -> dict:
+        """Idempotently add the first Solana account to an existing CDP user."""
+        if any(item.get("network") == SOLANA_DEVNET.key for item in profile.get("accounts") or []):
+            return profile
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        if not provider_user_id or provider_user_id != profile_id:
+            raise WalletProviderError("The stored wallet profile is incomplete.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        idempotency_key = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:solana:{profile_id}")
+        )
+        try:
+            result = await self._api_client(credentials).add_solana_account(
+                provider_user_id, idempotency_key
+            )
+            account = result.get("solanaAccount") or {}
+            address = normalize_solana_address(str(account.get("address") or ""))
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not provision the Solana devnet account."
+            ) from exc
+        updated = dict(profile)
+        updated["accounts"] = [dict(item) for item in profile.get("accounts") or []] + [{
+            "address": address,
+            "network": SOLANA_DEVNET.key,
+            "account_type": AccountType.SOLANA_ACCOUNT.value,
+            "provider_account_id": address,
+        }]
+        return updated
+
     async def get_native_balance(self, address: str, network: str) -> int:
         configured_network = KNOWN_NETWORKS.get(network)
         if (
@@ -188,8 +239,11 @@ class CdpWalletProvider(WalletProvider):
             or not self.supports(network, NetworkCapability.BALANCE)
         ):
             raise WalletProviderError("Native balance lookup is unavailable for this network.")
-        normalized_address = normalize_evm_address(address)
         try:
+            if configured_network.family is ChainFamily.SOLANA:
+                normalized_address = normalize_solana_address(address)
+                return await get_solana_native_balance(normalized_address)
+            normalized_address = normalize_evm_address(address)
             return await get_rpc_native_balance(normalized_address, network)
         except BaseRpcError as exc:
             raise WalletProviderError(

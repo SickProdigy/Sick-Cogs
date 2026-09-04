@@ -262,11 +262,25 @@ class CdpApiClient:
                 "createSmartAccount": True,
                 "enableSpendPermissions": False,
             },
+            "solanaAccount": {},
         }
         return await self._request(
             "POST",
             "/v2/end-users",
             body=body,
+            wallet_auth=True,
+            idempotency_key=idempotency_key,
+        )
+
+    async def add_solana_account(
+        self, user_id: str, idempotency_key: str
+    ) -> dict:
+        """Idempotently add one Solana account to an existing end user."""
+        path = f"/v2/end-users/{quote(user_id, safe='')}/solana"
+        return await self._request(
+            "POST",
+            path,
+            body={},
             wallet_auth=True,
             idempotency_key=idempotency_key,
         )
