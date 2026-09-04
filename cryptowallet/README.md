@@ -93,15 +93,15 @@ The packaged browser assets live in [`web/`](web/) and are intended to be publis
 https://sickgaming.net/cryptowallet
 ```
 
-The cog provides the authoritative backend through its `aiohttp` listener in `companion.py`. The
-separately hosted companion website uses the assets under `web/` and communicates with that cog
-backend. The website and cog are two components; there is no separate companion service.
+The supported authorization and key-export pages authenticate the bot's short-lived, signed
+handoff directly with CDP. They do not require the optional cog listener, website pairing, or a
+downloaded pairing credential. Ordinary provisioning and read-only commands do not require the
+website at all.
 
-The listener currently defaults to loopback, which only works when the reverse proxy and bot share
-a host. SickGaming runs its website and bot on different servers, so the listener must not be made
-public merely to connect them. The next milestone is an authenticated private/restricted
-website-server-to-cog connection with one-time pairing, durable credential rotation, and
-revocation.
+`backend/companion.py`, the pairing commands, and the signed PHP relay remain packaged as dormant
+infrastructure for a future server-consumed workflow. They are not part of routine deployment.
+Keep the listener disabled or bound to loopback; never expose it publicly merely to connect
+separate website and bot hosts.
 
 Static files can be served by the companion, the SickGaming web server, or a future MyBB plugin. Static files cannot safely contain or replace server-side functionality for:
 
@@ -114,11 +114,10 @@ Static files can be served by the companion, the SickGaming web server, or a fut
 
 No API key, OAuth client secret, wallet secret, signing key, or private user material may be embedded in `web/`.
 
-### Initial companion API v1
+### Deferred private companion API
 
-The current implementation establishes the browser-session and response contract. When a reverse
-proxy can securely reach the cog, it preserves the public `/cryptowallet` prefix while forwarding
-it to the listener with that prefix removed. The protected flow is:
+The repository retains a versioned browser-session and response contract for future use. If that
+workflow is deliberately enabled on a private or loopback deployment, the protected flow is:
 
 ```text
 GET /cryptowallet/session/<one-time-token>
@@ -152,10 +151,8 @@ Error envelope:
 The browser cookie is distinct from the OAuth state token, marked `Secure`, `HttpOnly`, and
 `SameSite=Strict`, scoped to the configured companion path, and expires with the approval session.
 
-This is not yet the finished SickGaming two-server contract. Before the web server can call these
-routes, it must pair with the cog and authenticate server-to-server requests. Until that exists,
-keep the listener on loopback or an explicitly restricted private test network; do not expose it
-to the public internet.
+This is not the active authorization/export path and is not yet the finished SickGaming two-server
+contract. Keep it disabled unless the complete authenticated deployment is being tested.
 
 ### Website-server authentication v1
 
@@ -191,11 +188,15 @@ User commands:
 [p]wallet @member
 [p]wallet balance
 [p]wallet networks
-[p]wallet send <address> <amount>
+[p]wallet send <address> <amount>            # Base Sepolia default
+[p]wallet send base <address> <amount>
 [p]wallet send sol <address> <amount>
 [p]wallet intent <bot-reference>
-[p]wallet txid <txid>
-[p]wallet transactions           # Aliases: tx, trans, history
+[p]wallet txid <network> <txid-or-signature>
+[p]wallet transactions [network] # Aliases: tx, trans, history
+[p]wallet token [network]
+[p]wallet token add <network> <contract>
+[p]wallet mode [testnet|live]     # Live remains disabled
 [p]wallet notifications [true|false]
 [p]wallet security              # Show emergency-lock status
 [p]wallet security lock         # Alias: freeze; only bot owner can unlock
@@ -258,28 +259,24 @@ user deliberately completes that browser approval.
 `wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
 
 `wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
-Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is
-`0 ETH (sponsored by CDP)` and the estimated total equals the transfer amount. Approval checks
-CDP's authoritative account-delegation status. When authorization is absent, the bot DMs the
-short-lived authorization link and leaves the intent pending for another approval after completion.
-When authorization is active, the approval view is checked against the exact quote originally
-displayed. The provider then rebuilds the sponsored Base Sepolia quote immediately before signing;
-any material change updates the preview and requires another approval. An unchanged quote atomically moves the intent into processing, rechecks its balance and immutable
-fields, and submits a sponsored Base Sepolia smart-account user operation
-with a stable CDP idempotency key. The bot stores the public user-operation hash, transaction hash,
-provider status, and block number when returned. One persistent global processor checks submitted
-operations at no more than once per second without resubmitting them. The first check occurs after
-20–30 seconds; pending operations back off through roughly 45 seconds, 90 seconds, three minutes,
-and then five-minute intervals. The persisted schedule survives cog reloads and bot restarts. When
-confirmation arrives, the bot can send the owner a separate user-only message containing the
-explorer link. The original approval card progresses from pending to submitted, then updates with the final
-status, transaction hash, and block number when confirmation arrives. Submitted operations
-can also be refreshed on demand through `wallet intent <bot-reference>`.
-`wallet transactions` (or `wallet tx`/`wallet trans`) provides owner-bound, ten-at-a-time
-pagination over the wallet's indexed incoming and outgoing Base Sepolia activity, including
-native, ERC-20, and ERC-721 interactions. `wallet txid <txid>` independently retrieves a public
-transaction, receipt, and smart-account internal-transfer data directly from Base Sepolia; it
-does not expose the bot's private intent metadata.
+Base Sepolia sends use CDP-sponsored smart-account operations and display a zero user-paid gas
+fee. Solana devnet sends show the current network fee and submit a strict native System Program
+transfer. Before either transaction is accepted as confirmed, its public-chain result must match
+the stored sender, recipient, and exact atomic amount. Ethereum Sepolia and the additional EVM
+testnets remain read-only because no reviewed, complete pre-approval fee path is available.
+
+Approval checks CDP's authoritative profile-wide delegation status. When authorization is absent,
+the bot DMs a short-lived authorization link and leaves the intent pending for another approval.
+An unchanged quote atomically moves the intent into processing and uses a stable provider
+idempotency key. The persistent global processor begins confirmation after roughly 20–30 seconds,
+applies jittered backoff, survives reloads, and never resubmits merely because status is delayed.
+`wallet intent <bot-reference>` displays private bot-operation state.
+
+`wallet transactions` without a network returns lightweight explorer links. Supplying `base`,
+`eth`, or `sol` retrieves at most the latest ten supported activity records and links to complete
+public history. `wallet txid <network> <txid-or-signature>` performs an explicit-network public
+lookup and does not expose private intent metadata. Arbitrum Sepolia, Polygon Amoy, and Avalanche
+Fuji support explicit TXID lookup but not indexed activity.
 
 ## Current implementation status
 
@@ -287,7 +284,7 @@ Completed:
 
 1. Provider-neutral cog foundation.
 2. Wallet profile, public account, transaction intent, and capability-aware provider models.
-3. Explicit EVM/Solana chain-family metadata with Base Sepolia as the only enabled network.
+3. Explicit EVM/Solana chain-family metadata with capability-limited testnet registrations.
 4. Network-dispatched address and native atomic-unit validation with legacy Base wei compatibility.
 5. Expiring, user-scoped unsigned transaction intents.
 6. Loopback companion listener and HTTPS public-URL configuration.
@@ -300,10 +297,10 @@ Completed:
 13. PHP CLI pairing and status tools with server-only, atomic credential storage.
 14. Signed PHP session proxy requiring paired-server authentication plus the user browser session.
 15. Server-only CDP credential loading and readiness reporting without exposing secret values.
-16. Idempotent, deployment-scoped CDP end-user and Base Sepolia smart-account provisioning.
+16. Idempotent, deployment-scoped CDP end-user, EVM smart-account, and Solana-account provisioning.
 17. Per-user concurrency control and public profile persistence after successful provisioning.
-18. Read-only Base Sepolia native ETH balance lookup with bounded pagination.
-19. Explorer-linked address and balance display in `wallet` and `wallet balance`.
+18. Aggregated native and registered-token balance reads across enabled testnets.
+19. Explorer-linked multi-network portfolio display in `wallet` and `wallet balance`.
 20. Automatically generated, server-only P-256 custom-auth signing key with stable JWK thumbprint.
 21. Owner-only public JWKS export and a static PHP JWKS endpoint with no bot connection.
 22. Three-minute, issuer-, audience-, deployment-, application-, purpose-, user-, and address-bound
@@ -315,7 +312,9 @@ Completed:
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
 28. Submitted-operation reconciliation with bounded automatic polling, user-only confirmation
-    notices, persistent transaction hashes, and on-demand refresh after a cog restart.
+    notices, persistent transaction hashes/signatures, and on-demand refresh after a cog restart.
+29. Read-only Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji capabilities.
+30. Solana devnet balance, activity, lookup, protected native sends, confirmation, and key export.
 
 ### CDP and custom-auth configuration
 
@@ -492,7 +491,8 @@ Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy 
 
 1. Complete the combined Discord acceptance pass for Base Sepolia and Solana devnet.
 2. Verify the deployed dual-account recovery page with both Coinbase isolated export controls.
-3. Verify non-owner cooldown behavior with a second Discord test account.
+3. Live-check non-owner cooldown wording with a second Discord account; automated enforcement and
+   owner/administrator exemption coverage passes in the representative Red environment.
 4. Decide whether optional independent 2FA/risk policies and a server-consumed private relay are required for a later release.
 5. Complete security and jurisdiction-specific legal review before considering any mainnet path.
 
@@ -509,4 +509,4 @@ Until those milestones are complete:
 - Keep each user’s wallet profile and public deposit address intact even if authorization is revoked or the user stops using the bot.
 - Do not treat Discord commands or OAuth identity verification as blockchain signatures.
 - Keep trading logic separate from wallet ownership and signing logic.
-- Do not enable Base mainnet, Ethereum mainnet, or Solana.
+- Do not enable Base mainnet, Ethereum mainnet, Solana mainnet, or any other real-asset network.
