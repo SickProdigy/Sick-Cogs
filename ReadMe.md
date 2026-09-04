@@ -14,6 +14,7 @@ Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `coc` - Clash of Clans clan and war status utilities.
 - `donate` - Configurable donation information command.
+- `movies` - Configurable TMDb new movie release announcements.
 - `rss` - Configurable RSS and Atom feed notifications.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
