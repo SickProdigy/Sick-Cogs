@@ -11,7 +11,12 @@ from ..core.models import (
     TransactionIntent,
     WalletProfile,
 )
-from ..core.networks import BASE_SEPOLIA, NetworkCapability
+from ..core.networks import (
+    BASE_SEPOLIA,
+    ETHEREUM_SEPOLIA,
+    KNOWN_NETWORKS,
+    NetworkCapability,
+)
 from ..core.validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import BaseRpcError, get_user_operation_receipt
@@ -63,6 +68,7 @@ class CdpWalletProvider(WalletProvider):
             NetworkCapability.DELEGATION,
             NetworkCapability.SPONSORSHIP,
         }),
+        ETHEREUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -159,8 +165,13 @@ class CdpWalletProvider(WalletProvider):
         )
 
     async def get_native_balance(self, address: str, network: str) -> int:
-        if network != BASE_SEPOLIA.key:
-            raise WalletProviderError("CDP balance lookup is restricted to Base Sepolia.")
+        configured_network = KNOWN_NETWORKS.get(network)
+        if (
+            configured_network is None
+            or not configured_network.supports(NetworkCapability.BALANCE)
+            or not self.supports(network, NetworkCapability.BALANCE)
+        ):
+            raise WalletProviderError("Native balance lookup is unavailable for this network.")
         normalized_address = normalize_evm_address(address)
         credentials = await self.credentials()
         if credentials is None:
@@ -171,7 +182,7 @@ class CdpWalletProvider(WalletProvider):
             for _ in range(MAX_BALANCE_PAGES):
                 result = await client.list_token_balances(
                     normalized_address,
-                    BASE_SEPOLIA.key,
+                    network,
                     page_size=100,
                     page_token=page_token,
                 )
@@ -197,7 +208,7 @@ class CdpWalletProvider(WalletProvider):
             raise
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
-                "CDP could not retrieve the Base Sepolia balance. Try again later."
+                f"CDP could not retrieve the {configured_network.name} balance. Try again later."
             ) from exc
 
     async def get_transaction_history(

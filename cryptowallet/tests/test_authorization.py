@@ -481,19 +481,35 @@ class FailClosedTransactionTests(unittest.TestCase):
 
 class NetworkArchitectureTests(unittest.TestCase):
     def test_base_capabilities_are_explicit_and_provider_declared(self):
-        self.assertEqual(set(NETWORKS), {BASE_SEPOLIA.key})
+        self.assertEqual(set(NETWORKS), {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key})
         self.assertEqual(
             set(KNOWN_NETWORKS), {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key}
         )
-        self.assertFalse(ETHEREUM_SEPOLIA.enabled)
+        self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
-        self.assertEqual(ETHEREUM_SEPOLIA.capabilities.enabled(), ())
+        self.assertEqual(
+            ETHEREUM_SEPOLIA.capabilities.enabled(), (NetworkCapability.BALANCE,)
+        )
         self.assertIs(BASE_SEPOLIA.family, ChainFamily.EVM)
         self.assertEqual(BASE_SEPOLIA.reference_label, "chain ID")
         self.assertEqual(BASE_SEPOLIA.reference, "84532")
         self.assertTrue(BASE_SEPOLIA.supports(NetworkCapability.SEND))
         provider = CdpWalletProvider(SimpleNamespace())
         self.assertTrue(provider.supports(BASE_SEPOLIA.key, NetworkCapability.SEND))
+        self.assertTrue(
+            provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.BALANCE)
+        )
+        self.assertFalse(
+            provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.SEND)
+        )
+        self.assertFalse(ETHEREUM_SEPOLIA.supports(NetworkCapability.DELEGATION))
+        profile = _profile()
+        self.assertIs(
+            WalletCoreCommands._account_for_network(
+                profile, ETHEREUM_SEPOLIA.key
+            ),
+            profile["accounts"][0],
+        )
 
     def test_disabled_solana_metadata_cannot_enable_capabilities(self):
         solana = Network(

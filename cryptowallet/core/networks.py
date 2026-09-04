@@ -111,8 +111,8 @@ ETHEREUM_SEPOLIA = Network(
     native_decimals=18,
     explorer_url="https://sepolia.etherscan.io",
     testnet=True,
-    enabled=False,
-    capabilities=NetworkCapabilities(),
+    enabled=True,
+    capabilities=NetworkCapabilities(balance=True),
 )
 
 # KNOWN_NETWORKS includes planned entries for diagnostics and documentation. Only
@@ -121,8 +121,8 @@ KNOWN_NETWORKS = {
     network.key: network for network in (BASE_SEPOLIA, ETHEREUM_SEPOLIA)
 }
 
-# Only reviewed networks belong in NETWORKS. Ethereum Sepolia remains disabled, and
-# Solana devnet remains undefined until their milestones satisfy issue #39.
+# Only reviewed networks belong in NETWORKS. Ethereum Sepolia is read-only, and
+# Solana devnet remains undefined until its milestone satisfies issue #39.
 NETWORKS = {
     key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
 }
