@@ -20,7 +20,20 @@ from ..commands.admin import WalletAdminCommands
 from ..core.models import (
     ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
 )
-from ..core.networks import NETWORKS
+from ..core.networks import (
+    BASE_SEPOLIA,
+    NETWORKS,
+    ChainFamily,
+    Network,
+    NetworkCapabilities,
+    NetworkCapability,
+)
+from ..core.validation import (
+    format_atomic_amount,
+    normalize_address_for_network,
+    parse_native_amount,
+)
+from ..providers.cdp import CdpWalletProvider
 
 
 class _Value:
@@ -462,6 +475,57 @@ class FailClosedTransactionTests(unittest.TestCase):
         )
         self.assertEqual(embed.title, "Transaction outcome uncertain")
         self.assertIn("do not send a replacement", embed.footer.text)
+
+
+class NetworkArchitectureTests(unittest.TestCase):
+    def test_base_capabilities_are_explicit_and_provider_declared(self):
+        self.assertEqual(set(NETWORKS), {BASE_SEPOLIA.key})
+        self.assertIs(BASE_SEPOLIA.family, ChainFamily.EVM)
+        self.assertEqual(BASE_SEPOLIA.reference_label, "chain ID")
+        self.assertEqual(BASE_SEPOLIA.reference, "84532")
+        self.assertTrue(BASE_SEPOLIA.supports(NetworkCapability.SEND))
+        provider = CdpWalletProvider(SimpleNamespace())
+        self.assertTrue(provider.supports(BASE_SEPOLIA.key, NetworkCapability.SEND))
+
+    def test_disabled_solana_metadata_cannot_enable_capabilities(self):
+        solana = Network(
+            key="solana-devnet",
+            name="Solana Devnet",
+            family=ChainFamily.SOLANA,
+            cluster="devnet",
+            native_symbol="SOL",
+            native_decimals=9,
+            explorer_url="https://explorer.solana.com",
+            testnet=True,
+            enabled=False,
+            capabilities=NetworkCapabilities(balance=True),
+        )
+        self.assertEqual(solana.reference_label, "cluster")
+        self.assertEqual(solana.reference, "devnet")
+        self.assertFalse(solana.supports(NetworkCapability.BALANCE))
+        with self.assertRaisesRegex(ValueError, "not enabled"):
+            normalize_address_for_network(
+                "0x7930fB6E9853B3835Cf047f36855993cb82d4387", solana
+            )
+        self.assertEqual(parse_native_amount("1.25", solana), 1_250_000_000)
+        self.assertEqual(format_atomic_amount(1_250_000_000, solana), "1.25")
+
+    def test_intent_reads_legacy_wei_and_writes_neutral_atomic_amount(self):
+        legacy = {
+            "intent_id": "intent-atomic",
+            "profile_id": "profile-atomic",
+            "network": BASE_SEPOLIA.key,
+            "from_address": "from",
+            "to_address": "to",
+            "value_wei": 7,
+            "estimated_gas_fee_wei": 3,
+            "created_at": 1,
+            "expires_at": 2,
+        }
+        stored = TransactionIntent.from_dict(legacy).to_dict()
+        self.assertEqual(stored["value_atomic"], 7)
+        self.assertEqual(stored["estimated_fee_atomic"], 3)
+        self.assertEqual(stored["value_wei"], 7)
 
 
 if __name__ == "__main__":

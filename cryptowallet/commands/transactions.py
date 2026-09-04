@@ -5,9 +5,13 @@ import discord
 from redbot.core import commands
 
 from ..core.models import IntentStatus, TransactionIntent
-from ..core.networks import NETWORKS
+from ..core.networks import NETWORKS, NetworkCapability
 from ..providers import WalletProviderError
-from ..core.validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
+from ..core.validation import (
+    format_atomic_amount,
+    normalize_address_for_network,
+    parse_native_amount,
+)
 from .constants import INTENT_LIFETIME_SECONDS, WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
 from .views import WalletIntentView
@@ -55,20 +59,20 @@ class WalletTransactionCommands:
             color=colors.get(intent.status, color),
         )
         embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
-        embed.add_field(name="Network", value=f"{network.name} (`{network.chain_id}`)", inline=True)
+        embed.add_field(name="Network", value=f"{network.name} ({network.reference_label} `{network.reference}`)", inline=True)
         embed.add_field(
             name="Amount",
-            value=f"{format_wei_as_eth(intent.value_wei)} {network.native_symbol}",
+            value=f"{format_atomic_amount(intent.value_wei, network)} {network.native_symbol}",
             inline=True,
         )
-        gas_value = f"{format_wei_as_eth(intent.estimated_gas_fee_wei)} {network.native_symbol}"
+        gas_value = f"{format_atomic_amount(intent.estimated_gas_fee_wei, network)} {network.native_symbol}"
         if intent.gas_sponsored:
             gas_value += " (sponsored by CDP)"
         embed.add_field(name="Estimated gas fee", value=gas_value, inline=True)
         embed.add_field(
             name="Estimated total",
             value=(
-                f"{format_wei_as_eth(intent.value_wei + intent.estimated_gas_fee_wei)} "
+                f"{format_atomic_amount(intent.value_wei + intent.estimated_gas_fee_wei, network)} "
                 f"{network.native_symbol}"
             ),
             inline=True,
@@ -102,11 +106,11 @@ class WalletTransactionCommands:
         elif intent.status is IntentStatus.UNCERTAIN:
             footer = "Submission outcome unknown — do not send a replacement"
         elif intent.status is IntentStatus.CONFIRMED:
-            footer = "Confirmed Base Sepolia testnet transaction"
+            footer = f"Confirmed {network.name} testnet transaction"
         elif intent.status is IntentStatus.SUBMITTED:
-            footer = "Submitted to Base Sepolia — awaiting confirmation"
+            footer = f"Submitted to {network.name} — awaiting confirmation"
         else:
-            footer = "Base Sepolia testnet transaction intent"
+            footer = f"{network.name} testnet transaction intent"
         embed.set_footer(text=footer)
         return embed
 
@@ -370,11 +374,11 @@ class WalletTransactionCommands:
             embed=self._intent_embed(intent, network, color), view=view
         )
         if final_status is IntentStatus.CONFIRMED:
-            message = "Transaction confirmed on Base Sepolia."
+            message = f"Transaction confirmed on {network.name}."
         elif final_status is IntentStatus.FAILED:
             message = "CDP reported that the transaction failed or was dropped."
         else:
-            message = "Transaction submitted to Base Sepolia and awaiting confirmation."
+            message = f"Transaction submitted to {network.name} and awaiting confirmation."
         await interaction.followup.send(message, ephemeral=True)
         if final_status is IntentStatus.SUBMITTED:
             await self.schedule_confirmation(
@@ -385,7 +389,7 @@ class WalletTransactionCommands:
 
     @WalletCoreCommands.wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
-        """Prepare an unsigned Base Sepolia ETH transfer intent."""
+        """Prepare an unsigned native-token transfer on the enabled test network."""
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if not await self._wallet_read_allowed(
@@ -396,7 +400,12 @@ class WalletTransactionCommands:
         if profile is None:
             return
         network = NETWORKS.get(await self.config.default_network())
-        if network is None or not network.testnet:
+        if (
+            network is None
+            or not network.testnet
+            or not network.supports(NetworkCapability.SEND)
+            or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)
+        ):
             await ctx.send("Transaction intents are restricted to an enabled test network.")
             return
         account = self._account_for_network(profile, network.key)
@@ -404,9 +413,9 @@ class WalletTransactionCommands:
             await ctx.send(f"Your wallet profile has no account for {network.name}.")
             return
         try:
-            from_address = normalize_evm_address(str(account.get("address") or ""))
-            recipient = normalize_evm_address(to_address)
-            value_wei = parse_eth_to_wei(amount)
+            from_address = normalize_address_for_network(str(account.get("address") or ""), network)
+            recipient = normalize_address_for_network(to_address, network)
+            value_wei = parse_native_amount(amount, network)
         except ValueError as exc:
             await ctx.send(str(exc))
             return
@@ -419,8 +428,8 @@ class WalletTransactionCommands:
             return
         if value_wei > balance_wei:
             await ctx.send(
-                "Insufficient Base Sepolia balance. Available: "
-                f"`{format_wei_as_eth(balance_wei)} {network.native_symbol}`."
+                f"Insufficient {network.name} balance. Available: "
+                f"`{format_atomic_amount(balance_wei, network)} {network.native_symbol}`."
             )
             return
         now = int(time.time())

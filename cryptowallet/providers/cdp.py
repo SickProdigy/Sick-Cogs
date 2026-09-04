@@ -11,7 +11,7 @@ from ..core.models import (
     TransactionIntent,
     WalletProfile,
 )
-from ..core.networks import BASE_SEPOLIA
+from ..core.networks import BASE_SEPOLIA, NetworkCapability
 from ..core.validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import BaseRpcError, get_user_operation_receipt
@@ -55,6 +55,15 @@ class CdpWalletProvider(WalletProvider):
     """CDP provider boundary for end-user smart wallets."""
 
     name = "cdp"
+    supported_capabilities = {
+        BASE_SEPOLIA.key: frozenset({
+            NetworkCapability.BALANCE,
+            NetworkCapability.SEND,
+            NetworkCapability.HISTORY,
+            NetworkCapability.DELEGATION,
+            NetworkCapability.SPONSORSHIP,
+        }),
+    }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
         self.bot = bot
