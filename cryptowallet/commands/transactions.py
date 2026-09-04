@@ -34,6 +34,7 @@ class WalletTransactionCommands:
     @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
         titles = {
+            IntentStatus.UNCERTAIN: "Transaction outcome uncertain",
             IntentStatus.SUBMITTED: "Submitted wallet transaction",
             IntentStatus.CONFIRMED: "Confirmed wallet transaction",
             IntentStatus.FAILED: "Failed wallet transaction",
@@ -41,6 +42,7 @@ class WalletTransactionCommands:
         colors = {
             IntentStatus.PENDING: discord.Color.blurple(),
             IntentStatus.PROCESSING: discord.Color.blurple(),
+            IntentStatus.UNCERTAIN: discord.Color.orange(),
             IntentStatus.APPROVED: discord.Color.blurple(),
             IntentStatus.SUBMITTED: discord.Color.gold(),
             IntentStatus.CONFIRMED: discord.Color.green(),
@@ -97,6 +99,8 @@ class WalletTransactionCommands:
             embed.add_field(name="Block", value=f"`{intent.block_number}`", inline=True)
         if intent.status in {IntentStatus.PENDING, IntentStatus.PROCESSING}:
             footer = "Unsigned testnet intent — no transaction has been sent"
+        elif intent.status is IntentStatus.UNCERTAIN:
+            footer = "Submission outcome unknown — do not send a replacement"
         elif intent.status is IntentStatus.CONFIRMED:
             footer = "Confirmed Base Sepolia testnet transaction"
         elif intent.status is IntentStatus.SUBMITTED:
@@ -321,10 +325,15 @@ class WalletTransactionCommands:
             async with self.config.user_from_id(view.user_id).intents() as intents:
                 stored = intents.get(intent.intent_id)
                 if stored and stored.get("status") == IntentStatus.PROCESSING.value:
+                    stored["status"] = IntentStatus.UNCERTAIN.value
                     stored["provider_status"] = "unknown"
+                    intent = TransactionIntent.from_dict(stored)
+            await interaction.message.edit(
+                embed=self._intent_embed(intent, network, color), view=view
+            )
             await interaction.followup.send(
                 f"Submission outcome is uncertain: {exc} Do not create a replacement transfer; "
-                "check this intent before taking further action.",
+                "keep this intent ID and contact the bot owner before taking further action.",
                 ephemeral=True,
             )
             return

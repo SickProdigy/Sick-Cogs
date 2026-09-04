@@ -11,6 +11,7 @@ class AccountType(str, Enum):
 class IntentStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
+    UNCERTAIN = "uncertain"
     APPROVED = "approved"
     SUBMITTED = "submitted"
     CONFIRMED = "confirmed"

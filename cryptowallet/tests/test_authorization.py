@@ -12,6 +12,9 @@ from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..commands.account import WalletAccountCommands
 from ..commands.authorization import WalletAuthorizationCommands
 from ..commands.views import WalletAuthorizationView, WalletRevocationView
+from ..commands.transactions import WalletTransactionCommands
+from ..core.models import IntentStatus, TransactionIntent
+from ..core.networks import NETWORKS
 
 
 class _Value:
@@ -215,6 +218,30 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(profile=profile):
                 with self.assertRaises(RuntimeError):
                     await harness.create_authorization_handoff(7, profile)
+
+
+class FailClosedTransactionTests(unittest.TestCase):
+    def test_uncertain_intent_round_trips_and_warns_against_replacement(self):
+        intent = TransactionIntent(
+            intent_id="intent-7",
+            profile_id="profile-7",
+            network="base-sepolia",
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            value_wei=1,
+            created_at=1_800_000_000,
+            expires_at=1_800_000_900,
+            gas_sponsored=True,
+            status=IntentStatus.UNCERTAIN,
+            provider_status="unknown",
+        )
+        restored = TransactionIntent.from_dict(intent.to_dict())
+        self.assertIs(restored.status, IntentStatus.UNCERTAIN)
+        embed = WalletTransactionCommands._intent_embed(
+            restored, NETWORKS[restored.network], None
+        )
+        self.assertEqual(embed.title, "Transaction outcome uncertain")
+        self.assertIn("do not send a replacement", embed.footer.text)
 
 
 if __name__ == "__main__":
