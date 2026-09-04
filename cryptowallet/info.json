@@ -2,7 +2,7 @@
   "author": ["SickProdigy"],
   "description": "Provider-neutral, Base-first smart wallet integration for Red-DiscordBot.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores wallet profile identifiers, linked platform identifiers, public wallet addresses, and public transaction status metadata. It never stores private keys, recovery phrases, wallet passwords, or one-time authentication codes.",
+  "end_user_data_statement": "This cog stores wallet profile identifiers, linked platform identifiers, public wallet addresses, public transaction metadata, notification preferences, and emergency-lock status. It never stores private keys, recovery phrases, wallet passwords, or one-time authentication codes.",
   "hidden": false,
   "install_msg": "This cog is an early Base Sepolia prototype. The companion site is for wallet authorization, recovery, security, and exceptional approvals; ordinary wallet provisioning happens through bot commands. Do not use it with real funds.",
   "min_bot_version": "3.5.0",
@@ -11,5 +11,5 @@
   "short": "Base-first self-custodial smart wallet integration",
   "tags": ["wallet", "crypto", "base", "ethereum", "smart-wallet", "testnet"],
   "type": "COG",
-  "version": "0.23.0"
+  "version": "0.24.0"
 }

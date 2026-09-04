@@ -83,6 +83,11 @@ class WalletAuthorizationCommands:
         self, user, profile: dict, *, renewal: bool = False
     ) -> int:
         """DM a short-lived authorization link and return its expiry."""
+        if await self.config.user_from_id(user.id).security_locked():
+            raise RuntimeError(
+                "This wallet is emergency-locked; new authorization is blocked until "
+                "the bot owner completes an identity review and unlocks it."
+            )
         approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
         token, expires_at = await self.create_authorization_handoff(user.id, profile)
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"

@@ -185,6 +185,8 @@ User commands:
 [p]wallet txid <txid>
 [p]wallet transactions           # Aliases: tx, trans, history
 [p]wallet notifications [true|false]
+[p]wallet security              # Show emergency-lock status
+[p]wallet security lock         # Alias: freeze; only bot owner can unlock
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
@@ -197,6 +199,8 @@ Owner commands:
 ```text
 [p]walletset view
 [p]walletset usage
+[p]walletset lock <mention-or-user-id>      # Alias: freeze
+[p]walletset unlock <mention-or-user-id>    # Alias: unfreeze
 [p]walletset pause
 [p]walletset resume
 [p]walletset cdpstatus
@@ -234,6 +238,8 @@ is inactive; it does not delete the wallet or move funds. When authorization is 
 `wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
 Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
 user deliberately completes that browser approval.
+
+`wallet security lock` immediately persists an emergency lock, rejects pending send intents, and attempts to revoke the current bot signing delegation. While locked, receiving funds, balances, history, public transaction lookup, and authorization revocation remain available; new sends, approval clicks, authorization/renewal links, and signer export are blocked. Only the configured Red bot owner can remove the lock with `walletset unlock <mention-or-user-id>` after an independent identity review. An already-issued signed handoff can remain usable until its three-minute expiry, so the owner should retry delegation revocation if CDP was unavailable during locking. This is the current compromised-Discord response; a Discord-only PIN would not be an independent factor, and optional external 2FA remains future work.
 
 `wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
 
@@ -433,6 +439,37 @@ cryptowallet/
 │   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
 └── info.json
 ```
+
+## Base Sepolia threat model
+
+Protected assets are user testnet funds, signer ownership, the immutable Discord-to-CDP wallet mapping, CDP and Discord OAuth credentials, the deployment JWT key, limited signing delegations, and short-lived handoff tokens. The bot host and server-side secret stores are trusted; Discord accounts, Discord channels and DMs, browser assets, public RPC endpoints, explorer data, and all user input are treated as potentially compromised. CDP is currently trusted to preserve embedded-wallet identities, secure signer material, and enforce account-scoped delegation.
+
+| Threat | Enforced control | Residual risk and response |
+| --- | --- | --- |
+| Compromised Discord account | Persistent emergency lock, owner-only unlock, pending-intent rejection, and attempted delegation revocation | A signed handoff already delivered by DM may remain usable until its three-minute expiry; lock and retry revocation, then independently verify identity |
+| Duplicate clicks or delayed provider response | Atomic intent claim, deterministic idempotency key, explicit uncertain state, and no automatic resubmission | Bot owner must reconcile an uncertain intent before permitting a replacement |
+| CDP or RPC outage | Fail closed before submission; persist submitted or uncertain state and use jittered confirmation backoff | Status and revocation may remain temporarily unconfirmed |
+| Bot restart during submission | Persist processing before the provider call and convert interrupted processing to uncertain on restart | Manual reconciliation is required when no operation hash was returned |
+| Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Direct stateless handoffs are expiry-bounded, not server-consumed |
+| Browser or public website compromise | No CDP secret, JWT private key, signer key, or raw private key is available to site JavaScript; export uses the Coinbase isolated iframe | A malicious page could mislead users, so deployment integrity and HTTPS remain operational requirements |
+| Bot-host or CDP credential compromise | Account-scoped 24-hour delegation, owner pause, per-wallet lock, usage warnings, and Base Sepolia-only restriction | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
+| Destructive account action | No wallet deletion, provider-account deletion, signer ejection, or automatic balance migration command exists | Users deliberately transfer funds and may separately export their signer or revoke bot authorization |
+
+### Adversarial acceptance checklist
+
+Automated coverage verifies malformed and expired JWTs, wrong project audience, unsupported purpose creation, mismatched profile, provider, and Discord identity, missing or invalid accounts, unknown and expired stored sessions, wrong-user consumption, replay rejection in the private session layer, foreign deployment and application rejection, emergency-lock authorization blocking, and uncertain-submission persistence. The combined Base Sepolia test must still verify:
+
+- lock immediately after creating a pending intent, then confirm its old approval button cannot submit;
+- lock with active delegation, verify revocation, and confirm only a bot owner can unlock;
+- simulate CDP failure before and after the atomic submission boundary without creating a duplicate transfer;
+- restart with processing and submitted intents and verify uncertain conversion versus normal confirmation recovery;
+- verify a recovery token cannot be mistaken for authorization by the packaged UI;
+- confirm secrets and bearer values never appear in channels, logs, server URLs, Git, or public browser assets;
+- confirm wallet address, deposits, balances, history, TXID lookup, and revocation remain usable under the documented lock and pause rules.
+
+### One-time handoff boundary
+
+The current direct custom-auth handoff is signed, purpose-bound, identity-bound, account-bound, and limited to three minutes, but it is not server-consumed and must not be described as single-use. The existing private session layer rejects replay after OAuth consumption, but it remains deferred infrastructure. Enabling it requires a complete authenticated two-server relay with durable credential rotation and deployment instructions; normal wallet provisioning, reads, and sends must not depend on manual listener or pairing steps.
 
 ## Remaining work
 

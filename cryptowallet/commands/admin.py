@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import re
 import time
 from urllib.parse import urlparse
 
@@ -8,6 +9,7 @@ import discord
 from redbot.core import commands
 
 from ..core.networks import BASE_SEPOLIA, NETWORKS
+from ..providers import WalletProviderError
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
     NODE_SAFETY_TARGET,
@@ -28,6 +30,72 @@ class WalletAdminCommands:
         """Configure CryptoWallet and inspect optional companion infrastructure."""
 
         await ctx.send_help()
+
+
+    def _wallet_user_id(self, reference: str) -> int | None:
+        """Parse a raw Discord snowflake or an actual user mention."""
+        match = re.fullmatch(r"<@!?(\d+)>|(\d+)", reference.strip())
+        if match is None:
+            return None
+        user_id = int(match.group(1) or match.group(2))
+        return user_id if 0 < user_id < 2**64 else None
+
+    @walletset.command(name="lock", aliases=("freeze",))
+    @commands.is_owner()
+    async def walletset_lock(self, ctx: commands.Context, target: str):
+        """Emergency-lock a user wallet and revoke its bot signing authorization."""
+        user_id = self._wallet_user_id(target)
+        if user_id is None:
+            await ctx.send("Provide a Discord user mention or numeric Discord user ID.")
+            return
+        user_config = self.config.user_from_id(user_id)
+        mention = f"<{chr(64)}{user_id}>"
+        already_locked = await user_config.security_locked()
+        await user_config.security_locked.set(True)
+        await user_config.security_locked_at.set(int(time.time()))
+        await user_config.security_lock_source.set("owner")
+        async with user_config.intents() as intents:
+            for intent in intents.values():
+                if intent.get("status") == "pending":
+                    intent["status"] = "rejected"
+        profile = await user_config.profile()
+        revocation = "No stored wallet profile needed provider revocation."
+        if profile is not None:
+            try:
+                await self.wallet_provider.revoke_authorization(profile, BASE_SEPOLIA.key)
+                revocation = "The current bot signing authorization was revoked."
+            except WalletProviderError:
+                log.exception("Emergency wallet-lock delegation revocation failed")
+                revocation = (
+                    "CDP revocation could not be confirmed; the local lock remains active. "
+                    "Retry this command when CDP is available."
+                )
+        state = "remains" if already_locked else "is now"
+        await ctx.send(
+            f"{mention}’s wallet {state} emergency-locked. {revocation} "
+            "Only a bot owner can unlock it."
+        )
+
+    @walletset.command(name="unlock", aliases=("unfreeze",))
+    @commands.is_owner()
+    async def walletset_unlock(self, ctx: commands.Context, target: str):
+        """Remove an emergency wallet lock after identity review."""
+        user_id = self._wallet_user_id(target)
+        if user_id is None:
+            await ctx.send("Provide a Discord user mention or numeric Discord user ID.")
+            return
+        user_config = self.config.user_from_id(user_id)
+        mention = f"<{chr(64)}{user_id}>"
+        if not await user_config.security_locked():
+            await ctx.send(f"{mention}’s wallet is not emergency-locked.")
+            return
+        await user_config.security_locked.set(False)
+        await user_config.security_locked_at.set(0)
+        await user_config.security_lock_source.set(None)
+        await ctx.send(
+            f"{mention}’s wallet is unlocked. No signing authorization was "
+            "created; their next send may require protected authorization."
+        )
 
     @walletset.command(name="pause")
     @commands.is_owner()

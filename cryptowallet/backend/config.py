@@ -33,6 +33,9 @@ def create_config(cog) -> Config:
         intents={},
         approval_sessions={},
         notifications_enabled=True,
+        security_locked=False,
+        security_locked_at=0,
+        security_lock_source=None,
     )
     return config
 

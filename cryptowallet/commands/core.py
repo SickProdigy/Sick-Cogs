@@ -34,6 +34,17 @@ class WalletCoreCommands:
         self.wallet_read_cooldowns[cooldown_key] = now + cooldown_seconds
         return True
 
+    async def _wallet_sensitive_allowed(self, ctx: commands.Context) -> bool:
+        """Block signing-capable operations while an emergency lock is active."""
+        if not await self.config.user(ctx.author).security_locked():
+            return True
+        await ctx.send(
+            "This wallet is emergency-locked. Receiving funds, balances, history, and "
+            "authorization revocation remain available, but sends, new authorization, "
+            "and signer export are blocked. Contact the bot owner to unlock it."
+        )
+        return False
+
     async def _wallet_profile_or_error(self, ctx: commands.Context) -> dict | None:
         if await self.config.provider_paused():
             await ctx.send(
@@ -136,6 +147,57 @@ class WalletCoreCommands:
             f"Wallet transaction DMs are now **{state}**. "
             "Transaction cards will continue updating either way. Automatic "
             "incoming-deposit alerts are not implemented yet."
+        )
+
+    @wallet.group(name="security", invoke_without_command=True)
+    async def wallet_security(self, ctx: commands.Context):
+        """Show emergency wallet-lock status and available protections."""
+        locked = await self.config.user(ctx.author).security_locked()
+        if locked:
+            locked_at = int(await self.config.user(ctx.author).security_locked_at() or 0)
+            when = f" since <t:{locked_at}:F>" if locked_at else ""
+            await ctx.send(
+                f"**Wallet security: emergency-locked{when}**\n"
+                "New sends, authorization, renewal, and signer export are blocked. "
+                "Receiving funds, public wallet data, and authorization revocation remain "
+                "available. Only the bot owner can unlock this wallet."
+            )
+            return
+        await ctx.send(
+            "**Wallet security: standard**\n"
+            f"Use `{ctx.clean_prefix}wallet security lock` if your Discord account or "
+            "wallet access may be compromised. The lock takes effect immediately and "
+            "only the bot owner can remove it. Optional independent 2FA is not configured yet."
+        )
+
+    @wallet_security.command(name="lock", aliases=("freeze",))
+    async def wallet_security_lock(self, ctx: commands.Context):
+        """Emergency-lock your wallet and revoke current bot signing authorization."""
+        user_config = self.config.user(ctx.author)
+        if await user_config.security_locked():
+            await ctx.send("Your wallet is already emergency-locked.")
+            return
+        await user_config.security_locked.set(True)
+        await user_config.security_locked_at.set(int(time.time()))
+        await user_config.security_lock_source.set("user")
+        async with user_config.intents() as intents:
+            for intent in intents.values():
+                if intent.get("status") == "pending":
+                    intent["status"] = "rejected"
+        profile = await user_config.profile()
+        revocation = "No wallet profile or active authorization needed revocation."
+        if profile is not None:
+            try:
+                await self.wallet_provider.revoke_authorization(profile, BASE_SEPOLIA.key)
+                revocation = "The current bot signing authorization was revoked."
+            except WalletProviderError:
+                revocation = (
+                    "The lock is active, but CDP revocation could not be confirmed. "
+                    "The bot owner should retry revocation."
+                )
+        await ctx.send(
+            "Your wallet is now emergency-locked. " + revocation + " Only the bot owner "
+            "can unlock it; receiving funds and read-only wallet commands still work."
         )
 
     @wallet.command(name="networks")

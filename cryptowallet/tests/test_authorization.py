@@ -6,14 +6,20 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import jwt
+from jwt import DecodeError, ExpiredSignatureError, InvalidAudienceError
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
+from ..backend.sessions import ApprovalSessionMixin
 from ..commands.account import WalletAccountCommands
 from ..commands.authorization import WalletAuthorizationCommands
 from ..commands.views import WalletAuthorizationView, WalletRevocationView
 from ..commands.transactions import WalletTransactionCommands
-from ..core.models import IntentStatus, TransactionIntent
+from ..commands.core import WalletCoreCommands
+from ..commands.admin import WalletAdminCommands
+from ..core.models import (
+    ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
+)
 from ..core.networks import NETWORKS
 
 
@@ -23,6 +29,11 @@ class _Value:
 
     async def __call__(self):
         return self.value
+
+
+class _MutableValue(_Value):
+    async def set(self, value):
+        self.value = value
 
 
 class _JwtHarness(JwtAuthMixin):
@@ -56,13 +67,55 @@ def _interaction(user_id=7):
     )
 
 
+class _ApprovalStore:
+    def __init__(self):
+        self.data = {}
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self.data
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class _SessionConfig:
+    def __init__(self, deployment_id="deployment"):
+        self.deployment_id = _Value(deployment_id)
+        self.stores = {}
+
+    def user_from_id(self, user_id):
+        store = self.stores.setdefault(int(user_id), _ApprovalStore())
+        return SimpleNamespace(approval_sessions=store)
+
+    async def all_users(self):
+        return {
+            user_id: {"approval_sessions": store.data}
+            for user_id, store in self.stores.items()
+        }
+
+
+class _SessionHarness(ApprovalSessionMixin):
+    def __init__(self, deployment_id="deployment", application_id=42):
+        self.config = _SessionConfig(deployment_id)
+        self.application_id = application_id
+
+    def discord_application_id(self):
+        return self.application_id
+
+
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_authorization_handoff_is_sent_as_message_content(self):
         token = "x" * 600
         user = SimpleNamespace(id=7, send=AsyncMock())
         cog = SimpleNamespace(
             config=SimpleNamespace(
-                approval_base_url=_Value("https://wallet.example.test/cryptowallet")
+                approval_base_url=_Value("https://wallet.example.test/cryptowallet"),
+                user_from_id=lambda user_id: SimpleNamespace(
+                    security_locked=_Value(False)
+                ),
             ),
             create_authorization_handoff=AsyncMock(
                 return_value=(token, 1_800_000_000)
@@ -85,6 +138,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(author=author, send=AsyncMock())
         cog = SimpleNamespace(
             _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
             _wallet_profile_or_error=AsyncMock(return_value=_profile()),
             _account_for_network=lambda profile, network: profile["accounts"][0],
             config=SimpleNamespace(
@@ -102,6 +156,28 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("view", sent)
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
+
+    async def test_emergency_lock_blocks_new_authorization_link(self):
+        locked_config = SimpleNamespace(security_locked=_Value(True))
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda user_id: locked_config)
+        )
+        with self.assertRaisesRegex(RuntimeError, "emergency-locked"):
+            await WalletAuthorizationCommands.send_authorization_link(
+                cog, SimpleNamespace(id=7), _profile()
+            )
+
+    async def test_emergency_lock_blocks_sensitive_commands_but_explains_reads(self):
+        locked_config = SimpleNamespace(security_locked=_Value(True))
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user=lambda user: locked_config)
+        )
+        allowed = await WalletCoreCommands._wallet_sensitive_allowed(cog, ctx)
+        self.assertFalse(allowed)
+        message = ctx.send.await_args.args[0]
+        self.assertIn("Receiving funds", message)
+        self.assertIn("authorization revocation remain available", message)
 
     async def test_active_and_revoke_only_controls_are_distinct(self):
         active = WalletAuthorizationView(object(), 7, _profile())
@@ -202,6 +278,52 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             "0x7930fB6E9853B3835Cf047f36855993cb82d4387",
         )
 
+    async def test_malformed_handoff_is_rejected_by_jwt_decoder(self):
+        with self.assertRaises(DecodeError):
+            jwt.decode(
+                "not-a-jwt",
+                self.key.public_key(),
+                algorithms=["ES256"],
+                audience="project-id",
+                issuer="https://wallet.example.test",
+            )
+
+    async def test_expired_handoff_is_rejected_by_jwt_decoder(self):
+        harness = _JwtHarness(self.configuration)
+        token, _ = await harness.create_authorization_handoff(7, _profile())
+        claims = jwt.decode(token, options={"verify_signature": False})
+        claims["exp"] = int(time.time()) - 1
+        expired = jwt.encode(
+            claims, self.key, algorithm="ES256", headers={"kid": self.configuration["kid"]}
+        )
+        with self.assertRaises(ExpiredSignatureError):
+            jwt.decode(
+                expired,
+                self.key.public_key(),
+                algorithms=["ES256"],
+                audience="project-id",
+                issuer="https://wallet.example.test",
+            )
+
+    async def test_wrong_project_handoff_is_rejected_by_jwt_decoder(self):
+        harness = _JwtHarness(self.configuration)
+        token, _ = await harness.create_authorization_handoff(7, _profile())
+        with self.assertRaises(InvalidAudienceError):
+            jwt.decode(
+                token,
+                self.key.public_key(),
+                algorithms=["ES256"],
+                audience="other-project",
+                issuer="https://wallet.example.test",
+            )
+
+    async def test_unsupported_handoff_purpose_is_rejected(self):
+        harness = _JwtHarness(self.configuration)
+        with self.assertRaises(ValueError):
+            await harness._create_wallet_handoff(
+                7, _profile(), purpose="transaction"
+            )
+
     async def test_handoff_rejects_mismatched_stored_identity(self):
         cases = []
         wrong_provider = copy.deepcopy(_profile())
@@ -213,11 +335,109 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         missing_account = copy.deepcopy(_profile())
         missing_account["accounts"] = []
         cases.append(missing_account)
+        invalid_account = copy.deepcopy(_profile())
+        invalid_account["accounts"][0]["address"] = "not-an-address"
+        cases.append(invalid_account)
         harness = _JwtHarness(self.configuration)
         for profile in cases:
             with self.subTest(profile=profile):
                 with self.assertRaises(RuntimeError):
                     await harness.create_authorization_handoff(7, profile)
+
+
+class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
+
+    def _user_config(self, *, locked=False):
+        intents = _ApprovalStore()
+        intents.data["pending-intent"] = {"status": "pending"}
+        return SimpleNamespace(
+            security_locked=_MutableValue(locked),
+            security_locked_at=_MutableValue(0),
+            security_lock_source=_MutableValue(None),
+            intents=intents,
+            profile=_Value(None),
+        )
+
+    async def test_user_lock_persists_before_provider_and_rejects_pending_intents(self):
+        user_config = self._user_config()
+        author = SimpleNamespace(id=7)
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user=lambda user: user_config),
+            wallet_provider=SimpleNamespace(revoke_authorization=AsyncMock()),
+        )
+        await WalletCoreCommands.wallet_security_lock.callback(cog, ctx)
+        self.assertTrue(user_config.security_locked.value)
+        self.assertGreater(user_config.security_locked_at.value, 0)
+        self.assertEqual(user_config.security_lock_source.value, "user")
+        self.assertEqual(user_config.intents.data["pending-intent"]["status"], "rejected")
+        cog.wallet_provider.revoke_authorization.assert_not_awaited()
+
+    def test_owner_target_parser_accepts_mentions_and_raw_ids(self):
+        parser = lambda value: WalletAdminCommands._wallet_user_id(None, value)
+        self.assertEqual(parser("123456789012345678"), 123456789012345678)
+        self.assertEqual(parser(f"<{chr(64)}123456789012345678>"), 123456789012345678)
+        self.assertEqual(parser(f"<{chr(64)}!123456789012345678>"), 123456789012345678)
+        self.assertIsNone(parser("username"))
+        self.assertIsNone(parser("0"))
+
+    async def test_only_owner_command_removes_lock_without_authorizing(self):
+        user_config = self._user_config(locked=True)
+        ctx = SimpleNamespace(send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda user_id: user_config),
+            _wallet_user_id=lambda reference: WalletAdminCommands._wallet_user_id(
+                None, reference
+            ),
+        )
+        await WalletAdminCommands.walletset_unlock.callback(cog, ctx, "7")
+        self.assertFalse(user_config.security_locked.value)
+        self.assertEqual(user_config.security_locked_at.value, 0)
+        self.assertIsNone(user_config.security_lock_source.value)
+        self.assertIn("No signing authorization was created", ctx.send.await_args.args[0])
+
+
+class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_malformed_or_unknown_session_token_is_rejected(self):
+        harness = _SessionHarness()
+        self.assertIsNone(await harness.resolve_approval_session("short"))
+        self.assertIsNone(await harness.resolve_approval_session("x" * 40))
+
+    async def test_expired_session_is_rejected(self):
+        harness = _SessionHarness()
+        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
+        digest = harness._token_digest(token)
+        harness.config.stores[7].data[digest]["expires_at"] = int(time.time()) - 1
+        self.assertIsNone(await harness.resolve_approval_session(token))
+
+    async def test_wrong_discord_user_cannot_consume_session(self):
+        harness = _SessionHarness()
+        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
+        self.assertIsNone(await harness.establish_browser_session(token, 8))
+        self.assertIsNotNone(await harness.resolve_approval_session(token))
+
+    async def test_consumed_session_rejects_replay(self):
+        harness = _SessionHarness()
+        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
+        browser_token = await harness.establish_browser_session(token, 7)
+        self.assertIsNotNone(browser_token)
+        self.assertIsNone(await harness.resolve_approval_session(token))
+        self.assertIsNone(await harness.establish_browser_session(token, 7))
+        resolved = await harness.resolve_browser_session(browser_token)
+        self.assertIsNotNone(resolved)
+        self.assertIs(resolved.status, ApprovalStatus.IDENTITY_VERIFIED)
+        self.assertIs(resolved.purpose, ApprovalPurpose.RECOVERY)
+
+    async def test_wrong_deployment_or_application_rejects_session(self):
+        harness = _SessionHarness()
+        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
+        harness.config.deployment_id = _Value("foreign-deployment")
+        self.assertIsNone(await harness.resolve_approval_session(token))
+
+        harness = _SessionHarness()
+        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
+        harness.application_id = 99
+        self.assertIsNone(await harness.resolve_approval_session(token))
 
 
 class FailClosedTransactionTests(unittest.TestCase):
