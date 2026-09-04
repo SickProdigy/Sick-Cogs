@@ -9,6 +9,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
+from ..commands.account import WalletAccountCommands
 from ..commands.authorization import WalletAuthorizationCommands
 from ..commands.views import WalletAuthorizationView, WalletRevocationView
 
@@ -53,6 +54,46 @@ def _interaction(user_id=7):
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authorization_handoff_is_sent_as_message_content(self):
+        token = "x" * 600
+        user = SimpleNamespace(id=7, send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=_Value("https://wallet.example.test/cryptowallet")
+            ),
+            create_authorization_handoff=AsyncMock(
+                return_value=(token, 1_800_000_000)
+            ),
+        )
+        expires_at = await WalletAuthorizationCommands.send_authorization_link(
+            cog, user, _profile()
+        )
+        sent = user.send.await_args.kwargs
+        self.assertEqual(expires_at, 1_800_000_000)
+        self.assertIn(f"#handoff={token}", sent["content"])
+        self.assertNotIn("view", sent)
+
+    async def test_recovery_handoff_is_sent_as_message_content(self):
+        token = "x" * 600
+        author = SimpleNamespace(id=7, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        cog = SimpleNamespace(
+            _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_profile_or_error=AsyncMock(return_value=_profile()),
+            _account_for_network=lambda profile, network: profile["accounts"][0],
+            config=SimpleNamespace(
+                approval_base_url=_Value("https://wallet.example.test/cryptowallet")
+            ),
+            create_recovery_handoff=AsyncMock(
+                return_value=(token, 1_800_000_000)
+            ),
+        )
+        await WalletAccountCommands.wallet_recovery.callback(cog, ctx)
+        sent = author.send.await_args.kwargs
+        self.assertIn(f"#handoff={token}", sent["content"])
+        self.assertNotIn("view", sent)
+        self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
+
     async def test_active_and_revoke_only_controls_are_distinct(self):
         active = WalletAuthorizationView(object(), 7, _profile())
         revoke = WalletRevocationView(object(), 7, _profile())
