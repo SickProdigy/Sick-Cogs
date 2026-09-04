@@ -56,6 +56,7 @@ class ConfirmationProcessorMixin:
 
     async def _confirmation_processor(self) -> None:
         await self.bot.wait_until_red_ready()
+        await self._recover_interrupted_submissions()
         while True:
             try:
                 if await self.config.provider_paused():
@@ -71,6 +72,20 @@ class ConfirmationProcessorMixin:
                 raise
             except Exception:
                 await asyncio.sleep(IDLE_SCAN_SECONDS)
+
+    async def _recover_interrupted_submissions(self) -> None:
+        """Fail closed after a restart during the provider submission window."""
+        all_users = await self.config.all_users()
+        for user_id, user_data in all_users.items():
+            for intent_id, data in (user_data.get("intents") or {}).items():
+                if data.get("status") != IntentStatus.PROCESSING.value:
+                    continue
+                await self.config.user_from_id(int(user_id)).intents.set_raw(
+                    str(intent_id), "status", value=IntentStatus.UNCERTAIN.value
+                )
+                await self.config.user_from_id(int(user_id)).intents.set_raw(
+                    str(intent_id), "provider_status", value="unknown"
+                )
 
     async def _wait_for_confirmation_work(self, seconds: float) -> None:
         self.confirmation_wakeup.clear()
