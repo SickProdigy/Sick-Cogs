@@ -8,7 +8,7 @@ from ..core.networks import BASE_SEPOLIA
 from ..providers import WalletProviderError
 from .constants import WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
-from .views import WalletRevocationView
+from .views import WalletAuthorizationView, WalletRevocationView
 
 
 class WalletAuthorizationCommands:
@@ -40,7 +40,8 @@ class WalletAuthorizationCommands:
         embed.add_field(
             name="Options",
             value=(
-                "Leave it active for future sends, or use **Revoke authorization** below. "
+                "Leave it active for future sends, deliberately renew it for another "
+                "24 hours, or use **Revoke authorization** below. "
                 "Revoking does not delete the wallet or move funds."
             ),
             inline=False,
@@ -69,7 +70,7 @@ class WalletAuthorizationCommands:
                 embed = self._active_authorization_embed(status, expiry)
                 await ctx.send(
                     embed=embed,
-                    view=WalletRevocationView(self, ctx.author.id, profile),
+                    view=WalletAuthorizationView(self, ctx.author.id, profile),
                 )
                 return
             expires_at = await self.send_authorization_link(ctx.author, profile)
@@ -78,26 +79,42 @@ class WalletAuthorizationCommands:
             return
         await ctx.send(f"I sent your wallet authorization link by DM; it expires <t:{expires_at}:R>.")
 
-    async def send_authorization_link(self, user, profile: dict) -> int:
+    async def send_authorization_link(
+        self, user, profile: dict, *, renewal: bool = False
+    ) -> int:
         """DM a short-lived authorization link and return its expiry."""
         approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
         token, expires_at = await self.create_authorization_handoff(user.id, profile)
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
         embed = discord.Embed(
-            title="Authorize Crypto Wallet",
+            title=(
+                "Renew Crypto Wallet Authorization"
+                if renewal
+                else "Authorize Crypto Wallet"
+            ),
             description=(
-                "Grant the bot limited signing access to this Base Sepolia test wallet."
+                "Create a new 24-hour limited signing grant for this Base Sepolia "
+                "test wallet. The existing authorization remains unchanged until "
+                "you complete this protected approval."
+                if renewal
+                else "Grant the bot limited signing access to this Base Sepolia test wallet."
             ),
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>", inline=True)
         embed.add_field(name="Authorization duration", value="24 hours", inline=True)
         embed.add_field(name="Scope", value="This wallet only", inline=False)
-        embed.set_footer(text="Do not share or forward this authorization.")
+        embed.set_footer(
+            text=(
+                "Renewal is optional. Do not share or forward this authorization."
+                if renewal
+                else "Do not share or forward this authorization."
+            )
+        )
         view = discord.ui.View(timeout=3 * 60)
         view.add_item(
             discord.ui.Button(
-                label="Authorize wallet",
+                label="Renew authorization" if renewal else "Authorize wallet",
                 emoji="🔐",
                 style=discord.ButtonStyle.link,
                 url=link,
@@ -134,7 +151,7 @@ class WalletAuthorizationCommands:
             )
             await ctx.send(
                 embed=self._active_authorization_embed(status, expiry),
-                view=WalletRevocationView(self, ctx.author.id, profile),
+                view=WalletAuthorizationView(self, ctx.author.id, profile),
             )
             return
         await ctx.send(
@@ -169,6 +186,38 @@ class WalletAuthorizationCommands:
             "This does not delete the wallet or move funds. Future sends will require "
             f"authorization again. The current authorization expires <t:{int(expiry.timestamp())}:R>.",
             view=WalletRevocationView(self, ctx.author.id, profile),
+        )
+
+    async def renew_authorization_interaction(
+        self, interaction: discord.Interaction, view: WalletAuthorizationView
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            status = await self.wallet_provider.get_delegation_status(
+                view.profile, BASE_SEPOLIA.key
+            )
+            expires_at = await self.send_authorization_link(
+                interaction.user, view.profile, renewal=status["active"]
+            )
+        except (RuntimeError, WalletProviderError) as exc:
+            await interaction.followup.send(
+                f"Wallet authorization renewal is unavailable: {exc}", ephemeral=True
+            )
+            return
+        view.disable_renewal()
+        await interaction.message.edit(view=view)
+        if status["active"]:
+            message = (
+                "I sent a deliberate renewal link by DM. Your current authorization "
+                "remains active and unchanged unless you complete it. "
+            )
+        else:
+            message = (
+                "The previous authorization has expired, so I sent a new authorization "
+                "link by DM. "
+            )
+        await interaction.followup.send(
+            message + f"The link expires <t:{expires_at}:R>.", ephemeral=True
         )
 
     async def revoke_authorization_interaction(
