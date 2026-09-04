@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import time
 from urllib.parse import urlparse
 
 import discord
@@ -21,6 +22,55 @@ class WalletAdminCommands:
         """Configure the global wallet companion integration."""
 
         await ctx.send_help()
+
+    @walletset.command(name="pause")
+    @commands.is_owner()
+    async def walletset_pause(self, ctx: commands.Context):
+        """Pause provider-backed wallet operations and confirmation checks."""
+        if await self.config.provider_paused():
+            await ctx.send("CryptoWallet provider processing is already paused.")
+            return
+        await self.config.provider_paused.set(True)
+        await ctx.send(
+            "CryptoWallet provider processing is paused. No submitted transaction will "
+            "be resubmitted; confirmation checks will resume from persisted state."
+        )
+
+    @walletset.command(name="resume")
+    @commands.is_owner()
+    async def walletset_resume(self, ctx: commands.Context):
+        """Resume provider-backed wallet operations and confirmation checks."""
+        if not await self.config.provider_paused():
+            await ctx.send("CryptoWallet provider processing is already active.")
+            return
+        await self.config.provider_paused.set(False)
+        self.confirmation_wakeup.set()
+        await ctx.send("CryptoWallet provider processing resumed.")
+
+    @walletset.command(name="usage")
+    @commands.is_owner()
+    async def walletset_usage(self, ctx: commands.Context):
+        """Show confirmation workload and provider safety state."""
+        pending = 0
+        due = 0
+        now = int(time.time())
+        for user_data in (await self.config.all_users()).values():
+            for data in (user_data.get("intents") or {}).values():
+                if data.get("status") != "submitted":
+                    continue
+                pending += 1
+                if int(data.get("confirmation_next_check_at", 0) or 0) <= now:
+                    due += 1
+        paused = await self.config.provider_paused()
+        await ctx.send(
+            "**CryptoWallet usage and processing**\n"
+            f"Provider processing: `{'paused' if paused else 'active'}`\n"
+            f"Pending confirmations: `{pending}` (`{due}` currently due)\n"
+            "Confirmation limit: `60 checks/minute`\n"
+            "First check: `20–30 seconds after submission`\n"
+            "Monthly CDP accounting: `not instrumented yet`\n"
+            "The CDP billing portal remains authoritative."
+        )
 
     @walletset.command(name="view")
     @commands.is_owner()

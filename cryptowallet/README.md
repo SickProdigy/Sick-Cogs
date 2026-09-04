@@ -193,6 +193,9 @@ Owner commands:
 
 ```text
 [p]walletset view
+[p]walletset usage
+[p]walletset pause
+[p]walletset resume
 [p]walletset cdpstatus
 [p]walletset cdpcheck
 [p]walletset jwtstatus
@@ -225,9 +228,12 @@ displayed. The provider then rebuilds the sponsored Base Sepolia quote immediate
 any material change updates the preview and requires another approval. An unchanged quote atomically moves the intent into processing, rechecks its balance and immutable
 fields, and submits a sponsored Base Sepolia smart-account user operation
 with a stable CDP idempotency key. The bot stores the public user-operation hash, transaction hash,
-provider status, and block number when returned. It then polls the same operation without
-resubmitting it and sends the owner a separate user-only confirmation containing the explorer
-link. The original approval card progresses from pending to submitted, then updates with the final
+provider status, and block number when returned. One persistent global processor checks submitted
+operations at no more than once per second without resubmitting them. The first check occurs after
+20–30 seconds; pending operations back off through roughly 45 seconds, 90 seconds, three minutes,
+and then five-minute intervals. The persisted schedule survives cog reloads and bot restarts. When
+confirmation arrives, the bot can send the owner a separate user-only message containing the
+explorer link. The original approval card progresses from pending to submitted, then updates with the final
 status, transaction hash, and block number when confirmation arrives. Submitted operations
 can also be refreshed on demand through `wallet intent <bot-reference>`.
 `wallet transactions` (or `wallet tx`/`wallet trans`) provides owner-bound, ten-at-a-time
@@ -347,7 +353,7 @@ Not implemented:
 
 - wallet recovery or export
 - independent delegation revocation and broader policy enforcement
-- restart-time background resumption for submitted-operation polling (manual refresh is available)
+- authoritative monthly CDP usage accounting and owner threshold warnings (the usage command currently reports processor workload only)
 - mainnet support
 
 ## Module layout
@@ -356,6 +362,7 @@ Not implemented:
 cryptowallet/
 ├── __init__.py
 ├── cryptowallet.py       # Thin Red cog and lifecycle
+├── confirmation.py     # Persistent global confirmation scheduler
 ├── commands.py           # User wallet commands
 ├── admin.py              # Owner configuration commands
 ├── config.py             # Config registration and stored-data helpers

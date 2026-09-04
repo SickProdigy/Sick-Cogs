@@ -1,4 +1,3 @@
-import asyncio
 import secrets
 import time
 from datetime import datetime
@@ -14,8 +13,6 @@ from .providers.base_rpc import BaseRpcError, get_transaction
 from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
-CONFIRMATION_POLL_SECONDS = 5
-CONFIRMATION_POLL_ATTEMPTS = 24
 HISTORY_PAGE_SIZE = 10
 WALLET_SUMMARY_COOLDOWN_SECONDS = 10
 WALLET_HISTORY_COOLDOWN_SECONDS = 15
@@ -74,6 +71,12 @@ class WalletHistoryView(discord.ui.View):
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if await self.cog.config.provider_paused():
+            await interaction.response.send_message(
+                "CryptoWallet provider processing is paused by the bot owner.",
+                ephemeral=True,
+            )
+            return
         if self.page_index >= len(self.pages) - 1:
             now = time.monotonic()
             if now < self.next_allowed_at:
@@ -219,6 +222,12 @@ class WalletCommands:
         return True
 
     async def _wallet_profile_or_error(self, ctx: commands.Context) -> dict | None:
+        if await self.config.provider_paused():
+            await ctx.send(
+                "CryptoWallet provider processing is paused by the bot owner. "
+                "Local wallet settings remain available."
+            )
+            return None
         try:
             return await self.get_or_create_wallet_profile(ctx.author)
         except WalletProviderError as exc:
@@ -263,6 +272,12 @@ class WalletCommands:
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
+            return
+        if await self.config.provider_paused():
+            await ctx.send(
+                "CryptoWallet provider processing is paused by the bot owner. "
+                "Local wallet settings remain available."
+            )
             return
         target = member or ctx.author
         if target.id == ctx.author.id:
@@ -674,50 +689,6 @@ class WalletCommands:
             stored["block_number"] = result["block_number"]
             return TransactionIntent.from_dict(stored)
 
-    async def _poll_submitted_intent(
-        self, user_id: int, intent_id: str, user, message: discord.Message
-    ) -> None:
-        try:
-            for _ in range(CONFIRMATION_POLL_ATTEMPTS):
-                await asyncio.sleep(CONFIRMATION_POLL_SECONDS)
-                intent = await self._refresh_submitted_intent(user_id, intent_id)
-                if intent.status is IntentStatus.SUBMITTED:
-                    continue
-                network = NETWORKS[intent.network]
-                if intent.status is IntentStatus.CONFIRMED and intent.transaction_hash:
-                    explorer_url = (
-                        f"{network.explorer_url}/tx/{intent.transaction_hash}"
-                    )
-                    try:
-                        await message.edit(
-                            embed=self._intent_embed(intent, network, None)
-                        )
-                    except discord.HTTPException:
-                        pass
-                    if not await self.config.user_from_id(user_id).notifications_enabled():
-                        return
-                    await user.send(
-                        "Transaction confirmed on Base Sepolia.\n"
-                        f"**TXID:** [{intent.transaction_hash}]({explorer_url})\n"
-                        "**Copy TXID:**\n"
-                        f"```text\n{intent.transaction_hash}\n```"
-                    )
-                elif intent.status is IntentStatus.FAILED:
-                    try:
-                        await message.edit(
-                            embed=self._intent_embed(intent, network, None)
-                        )
-                    except discord.HTTPException:
-                        pass
-                    if not await self.config.user_from_id(user_id).notifications_enabled():
-                        return
-                    await user.send(
-                        f"Transaction `{intent.intent_id}` failed or was dropped by CDP.",
-                    )
-                return
-        except (WalletProviderError, RuntimeError, discord.HTTPException):
-            return
-
     async def _stored_intent(self, user_id: int, intent_id: str) -> TransactionIntent | None:
         data = await self.config.user_from_id(user_id).intents.get_raw(intent_id, default=None)
         if data is None:
@@ -752,6 +723,13 @@ class WalletCommands:
         self, interaction: discord.Interaction, view: WalletIntentView
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
+        if await self.config.provider_paused():
+            await interaction.followup.send(
+                "CryptoWallet provider processing is paused by the bot owner. "
+                "This intent remains pending and nothing was submitted.",
+                ephemeral=True,
+            )
+            return
         intent = await self._stored_intent(view.user_id, view.intent_id)
         if intent is None or intent.status is not IntentStatus.PENDING:
             await interaction.followup.send("This transaction is no longer pending.", ephemeral=True)
@@ -940,16 +918,11 @@ class WalletCommands:
             message = "Transaction submitted to Base Sepolia and awaiting confirmation."
         await interaction.followup.send(message, ephemeral=True)
         if final_status is IntentStatus.SUBMITTED:
-            task = self.bot.loop.create_task(
-                self._poll_submitted_intent(
-                    view.user_id,
-                    intent.intent_id,
-                    interaction.user,
-                    interaction.message,
-                )
+            await self.schedule_confirmation(
+                view.user_id,
+                intent.intent_id,
+                interaction.message,
             )
-            self.confirmation_tasks.add(task)
-            task.add_done_callback(self.confirmation_tasks.discard)
 
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
@@ -1025,7 +998,10 @@ class WalletCommands:
         except (KeyError, TypeError, ValueError):
             await ctx.send("That stored transaction intent is invalid and cannot be displayed.")
             return
-        if intent.status is IntentStatus.SUBMITTED:
+        if (
+            intent.status is IntentStatus.SUBMITTED
+            and not await self.config.provider_paused()
+        ):
             try:
                 intent = await self._refresh_submitted_intent(ctx.author.id, intent.intent_id)
             except (RuntimeError, WalletProviderError) as exc:
