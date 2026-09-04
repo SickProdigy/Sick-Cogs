@@ -10,7 +10,7 @@ CryptoWallet models each blockchain with an explicit chain family, network refer
 
 A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network, including independent 32-byte base58 validation for Solana addresses; a Solana address is never interpreted as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-Base Sepolia and Solana devnet are the only send-enabled networks. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with native SOL balance, recent activity, transaction-signature lookup, explorer support, and protected native-SOL sends. Solana tokens, recovery, and export remain disabled, and no mainnet is registered.
+Base Sepolia and Solana devnet are the only send-enabled networks. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with native SOL balance, recent activity, transaction-signature lookup, explorer support, protected native-SOL sends, and isolated Coinbase key export. Solana tokens remain disabled, and no mainnet is registered.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
@@ -360,7 +360,7 @@ companion pairing credential for any field above.
    ```
 
 5. Reload the cog so CryptoWallet initializes its server-only JWT identity key.
-6. Run `[p]walletset cdpstatus`, then test `[p]wallet` using Base Sepolia only.
+6. Run `[p]walletset cdpstatus`, then test `[p]wallet` using valueless testnet assets only.
 
 The companion website and CDP custom-auth/JWKS configuration are not required to provision and
 display a wallet address. Configure those later when implementing authorization, recovery,
@@ -465,7 +465,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 | Bot restart during submission | Persist processing before the provider call and convert interrupted processing to uncertain on restart | Manual reconciliation is required when no operation hash was returned |
 | Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Direct stateless handoffs are expiry-bounded, not server-consumed |
 | Browser or public website compromise | No CDP secret, JWT private key, signer key, or raw private key is available to site JavaScript; export uses the Coinbase isolated iframe | A malicious page could mislead users, so deployment integrity and HTTPS remain operational requirements |
-| Bot-host or CDP credential compromise | Profile-wide one-year testnet delegation, owner pause, per-wallet lock, usage warnings, and Base Sepolia-only restriction | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
+| Bot-host or CDP credential compromise | Profile-wide one-year testnet delegation, owner pause, per-wallet lock, usage warnings, capability allowlists, and testnet-only enforcement | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
 | Destructive account action | No wallet deletion, provider-account deletion, signer ejection, or automatic balance migration command exists | Users deliberately transfer funds and may separately export their signer or revoke bot authorization |
 
 ### Adversarial acceptance checklist
@@ -490,12 +490,11 @@ Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci && npm run buil
 `cryptowallet/web/` whenever the pinned frontend dependencies or `src/cdp-wallet.js` change.
 Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy `node_modules/`.
 
-1. Finish and test fail-closed handling for CDP/RPC outages, uncertain submissions, and bot restarts.
-2. Define compromised-Discord behavior and optional higher-risk policy/2FA hooks.
-3. Test malformed, expired, replayed, wrong-purpose, wrong-user, wrong-project, wrong-profile, and wrong-account handoffs.
-4. Add server-enforced one-time handoff consumption only with a complete private relay deployment.
-5. Complete the Base Sepolia threat model, adversarial tests, and combined acceptance test.
-6. Complete security and jurisdiction-specific legal review before considering any mainnet path.
+1. Complete the combined Discord acceptance pass for Base Sepolia and Solana devnet.
+2. Verify the deployed dual-account recovery page with both Coinbase isolated export controls.
+3. Verify non-owner cooldown behavior with a second Discord test account.
+4. Decide whether optional independent 2FA/risk policies and a server-consumed private relay are required for a later release.
+5. Complete security and jurisdiction-specific legal review before considering any mainnet path.
 
 ## Security boundary
 

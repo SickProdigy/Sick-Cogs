@@ -671,7 +671,7 @@ class CdpWalletProvider(WalletProvider):
     @staticmethod
     def _not_connected() -> WalletProviderError:
         return WalletProviderError(
-            "This CDP operation is not implemented yet; Base Sepolia only remains enforced."
+            "This CDP operation is not implemented for the selected testnet."
         )
 
     async def create_wallet(self, profile_id: str, discord_user_id: int) -> WalletProfile:

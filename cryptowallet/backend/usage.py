@@ -79,7 +79,9 @@ class ProviderUsageMixin:
         if 200 <= status < 300:
             if method == "POST" and path == "/v2/end-users":
                 self.usage_pending["wallet_operations_estimated"] += 1
-            elif method == "POST" and path.endswith("/send"):
+            elif method == "POST" and (
+                path.endswith("/send") or "/send/" in path
+            ):
                 self.usage_pending["wallet_operations_estimated"] += 3
             elif method == "DELETE" and path.endswith("/delegation"):
                 self.usage_pending["wallet_operations_estimated"] += 1
