@@ -3,7 +3,13 @@ import time
 import discord
 from redbot.core import commands
 
-from ..core.networks import BASE_SEPOLIA, KNOWN_NETWORKS, NETWORKS
+from ..core.networks import (
+    BASE_SEPOLIA,
+    KNOWN_NETWORKS,
+    NETWORKS,
+    ChainFamily,
+    NetworkCapability,
+)
 from ..providers import WalletProviderError
 from ..core.validation import format_wei_as_eth
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
@@ -61,27 +67,29 @@ class WalletCoreCommands:
         return None
 
     async def _wallet_embed(
-        self, ctx: commands.Context, profile: dict, user=None
+        self, ctx: commands.Context, profile: dict, user=None, network=None
     ) -> discord.Embed:
+        network = network or NETWORKS.get(
+            await self.config.user(user or ctx.author).selected_network(), BASE_SEPOLIA
+        )
         embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
-        embed.add_field(name="Network", value=f"{BASE_SEPOLIA.name} (testnet)", inline=False)
+        embed.add_field(name="Network", value=f"{network.name} (testnet)", inline=False)
         display_name = discord.utils.escape_markdown((user or ctx.author).display_name)
         embed.description = f"{display_name}’s public wallet and balance."
-        accounts = profile.get("accounts") or []
-        for account in accounts[:5]:
+        account = self._account_for_network(profile, network.key)
+        if account is not None:
             address = str(account.get("address") or "Unavailable")
             embed.add_field(
                 name="Wallet Address",
-                value=f"[{address}]({BASE_SEPOLIA.explorer_url}/address/{address})",
+                value=f"[{address}]({network.explorer_url}/address/{address})",
                 inline=False,
             )
-        account = self._account_for_network(profile, BASE_SEPOLIA.key)
-        if account is not None:
+        if account is not None and network.supports(NetworkCapability.BALANCE):
             try:
-                balance_wei = await self.wallet_provider.get_native_balance(
-                    str(account.get("address") or ""), BASE_SEPOLIA.key
+                balance_atomic = await self.wallet_provider.get_native_balance(
+                    str(account.get("address") or ""), network.key
                 )
-                balance = f"{format_wei_as_eth(balance_wei)} {BASE_SEPOLIA.native_symbol}"
+                balance = f"{format_wei_as_eth(balance_atomic)} {network.native_symbol}"
             except (ValueError, WalletProviderError):
                 balance = "Temporarily unavailable"
             embed.add_field(name="Balance", value=balance, inline=False)
@@ -118,7 +126,7 @@ class WalletCoreCommands:
 
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context):
-        """Show your Base Sepolia address and native ETH balance."""
+        """Show your selected testnet address and native balance."""
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -224,6 +232,30 @@ class WalletCoreCommands:
             message += "\n\n**Planned test networks (disabled)**\n" + "\n".join(planned)
         await ctx.send(message)
 
+    @wallet.command(name="network")
+    async def wallet_network(self, ctx: commands.Context, network_key: str = None):
+        """Show or select the network used by wallet summary and balance commands."""
+        user_config = self.config.user(ctx.author)
+        current_key = await user_config.selected_network()
+        if network_key is None:
+            current = NETWORKS.get(current_key, BASE_SEPOLIA)
+            await ctx.send(
+                f"Your wallet display network is **{current.name}** (`{current.key}`). "
+                f"Use `{ctx.clean_prefix}wallet networks` to see available networks."
+            )
+            return
+        network = NETWORKS.get(network_key.strip().lower())
+        if network is None or not network.supports(NetworkCapability.BALANCE):
+            await ctx.send(
+                f"That network is not available for wallet balances. Use "
+                f"`{ctx.clean_prefix}wallet networks` to see available networks."
+            )
+            return
+        await user_config.selected_network.set(network.key)
+        await ctx.send(
+            f"Wallet summary and balance commands now use **{network.name}**. "
+            "Transaction sending remains unavailable unless that network separately supports it."
+        )
 
     @staticmethod
     def _account_for_network(profile: dict, network_key: str) -> dict | None:
@@ -231,4 +263,10 @@ class WalletCoreCommands:
         for account in profile.get("accounts") or []:
             if account.get("network") == network_key:
                 return account
+        network = NETWORKS.get(network_key)
+        if network is not None and network.family is ChainFamily.EVM:
+            for account in profile.get("accounts") or []:
+                account_network = KNOWN_NETWORKS.get(str(account.get("network") or ""))
+                if account_network is not None and account_network.family is ChainFamily.EVM:
+                    return account
         return None

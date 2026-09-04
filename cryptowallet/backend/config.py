@@ -29,6 +29,7 @@ def create_config(cog) -> Config:
     )
     config.register_user(
         profile=None,
+        selected_network=DEFAULT_NETWORK,
         claimed_at=0,
         intents={},
         approval_sessions={},
