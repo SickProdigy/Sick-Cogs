@@ -4,16 +4,17 @@ import secrets
 
 from redbot.core import commands
 
-from .admin import WalletAdminCommands
-from .commands import WalletCommands
+from .backend import (
+    ApprovalSessionMixin,
+    CompanionPairingMixin,
+    CompanionServer,
+    JwtAuthMixin,
+)
+from .commands import WalletAdminCommands, WalletCommands
 from .confirmation import ConfirmationProcessorMixin
-from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
-from .jwt_auth import JwtAuthMixin
-from .pairing import CompanionPairingMixin
 from .providers import CdpWalletProvider
 from .provisioning import WalletProvisioningMixin
-from .sessions import ApprovalSessionMixin
 from .usage import ProviderUsageMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")

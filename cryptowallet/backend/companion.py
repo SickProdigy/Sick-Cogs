@@ -7,10 +7,10 @@ from urllib.parse import urlencode, urlparse
 import aiohttp
 from aiohttp import web
 
-from .providers import WalletProviderError
+from ..providers import WalletProviderError
 
 DISCORD_API = "https://discord.com/api/v10"
-WEB_ROOT = Path(__file__).with_name("web")
+WEB_ROOT = Path(__file__).resolve().parents[1] / "web"
 SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "Content-Security-Policy": (

@@ -3,7 +3,7 @@ import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
-from ..jwt_auth import JWT_TOKEN_NAMESPACE
+from ..backend.auth import JWT_TOKEN_NAMESPACE
 from ..models import (
     AccountType,
     IntentStatus,
