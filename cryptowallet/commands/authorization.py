@@ -16,32 +16,43 @@ class WalletAuthorizationCommands:
 
     @staticmethod
     def _active_authorization_embed(status: dict, expiry: datetime) -> discord.Embed:
-        address = str(status.get("address") or "Unavailable")
+        legacy = status.get("scope") == "legacy-account"
+        legacy_name = (
+            "Solana account"
+            if status.get("legacy_network") == "solana-devnet"
+            else "Base account"
+        )
         embed = discord.Embed(
             title="Wallet authorization active",
             description=(
-                "This wallet already permits limited bot signing on Base Sepolia. "
-                "No new authorization was created."
+                f"Your existing authorization covers only the {legacy_name}. Revoke it once, "
+                "then authorize again to cover every wallet account."
+                if legacy
+                else "This authorization permits limited bot signing for every account in "
+                "your Crypto Wallet profile. No new authorization was created."
             ),
             color=discord.Color.green(),
         )
         embed.add_field(name="Status", value="Active", inline=True)
-        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        embed.add_field(
+            name="Scope",
+            value=(
+                f"{legacy_name} only (legacy; revoke once to upgrade)"
+                if legacy
+                else "All wallet accounts"
+            ),
+            inline=True,
+        )
         embed.add_field(
             name="Expires",
             value=f"<t:{int(expiry.timestamp())}:F>\n<t:{int(expiry.timestamp())}:R>",
             inline=False,
         )
         embed.add_field(
-            name="Wallet address",
-            value=f"[{address}]({BASE_SEPOLIA.explorer_url}/address/{address})",
-            inline=False,
-        )
-        embed.add_field(
             name="Options",
             value=(
                 "Leave it active for future sends, deliberately renew it for another "
-                "24 hours, or use **Revoke authorization** below. "
+                "one year, or use **Revoke authorization** below. "
                 "Revoking does not delete the wallet or move funds."
             ),
             inline=False,
@@ -101,17 +112,17 @@ class WalletAuthorizationCommands:
                 else "Authorize Crypto Wallet"
             ),
             description=(
-                "Create a new 24-hour limited signing grant for this Base Sepolia "
-                "test wallet. The existing authorization remains unchanged until "
+                "Create a new one-year limited signing grant for every account in this "
+                "test wallet profile. The existing authorization remains unchanged until "
                 "you complete this protected approval."
                 if renewal
-                else "Grant the bot limited signing access to this Base Sepolia test wallet."
+                else "Grant the bot limited signing access to every account in this test wallet profile."
             ),
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>", inline=True)
-        embed.add_field(name="Authorization duration", value="24 hours", inline=True)
-        embed.add_field(name="Scope", value="This wallet only", inline=False)
+        embed.add_field(name="Authorization duration", value="1 year", inline=True)
+        embed.add_field(name="Scope", value="All current wallet accounts", inline=False)
         embed.set_footer(
             text=(
                 "Renewal is optional. Do not share or forward this authorization."
@@ -161,7 +172,7 @@ class WalletAuthorizationCommands:
 
     @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize",))
     async def wallet_revoke(self, ctx: commands.Context):
-        """Revoke limited signing authorization for your Base Sepolia wallet."""
+        """Revoke limited signing authorization for every account in your wallet profile."""
         if not await self._wallet_read_allowed(
             ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):
@@ -177,12 +188,11 @@ class WalletAuthorizationCommands:
             await ctx.send(f"Wallet authorization status is unavailable: {exc}")
             return
         if not status["active"]:
-            await ctx.send("No active signing authorization exists for this wallet.")
+            await ctx.send("No active signing authorization exists for this wallet profile.")
             return
         expiry = datetime.fromisoformat(status["expires_at"].replace("Z", "+00:00"))
         await ctx.send(
-            "Revoke limited signing authorization for "
-            f"{status['address']}?\n"
+            "Revoke limited signing authorization for every account in your wallet profile?\n"
             "This does not delete the wallet or move funds. Future sends will require "
             f"authorization again. The current authorization expires <t:{int(expiry.timestamp())}:R>.",
             view=WalletRevocationView(self, ctx.author.id, profile),
@@ -236,7 +246,7 @@ class WalletAuthorizationCommands:
             return
         if status["active"]:
             await interaction.followup.send(
-                "CDP still reports this wallet authorization as active; no success was recorded.",
+                "CDP still reports this wallet-profile authorization as active; no success was recorded.",
                 ephemeral=True,
             )
             return
@@ -250,10 +260,11 @@ class WalletAuthorizationCommands:
             color=discord.Color.light_grey(),
         )
         embed.add_field(name="Status", value="Revoked", inline=True)
-        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        embed.add_field(name="Scope", value="All wallet accounts", inline=True)
         await interaction.message.edit(content=None, embed=embed, view=view)
         await interaction.followup.send(
-            "Limited signing authorization was revoked. Your wallet and funds were not changed. "
+            "Limited signing authorization was revoked for every wallet account. "
+            "Your wallet and funds were not changed. "
             "The next send will require authorization again.",
             ephemeral=True,
         )

@@ -51,7 +51,7 @@ class WalletProvider(ABC):
 
     @abstractmethod
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
-        """Return authoritative, non-secret delegated-signing status."""
+        """Return authoritative, non-secret wallet-profile signing status."""
 
     @abstractmethod
     async def get_transaction_history(
@@ -84,4 +84,4 @@ class WalletProvider(ABC):
 
     @abstractmethod
     async def revoke_authorization(self, profile: dict, network: str) -> None:
-        """Revoke account-scoped application authority without signing a transaction."""
+        """Revoke wallet-profile application authority without signing a transaction."""
