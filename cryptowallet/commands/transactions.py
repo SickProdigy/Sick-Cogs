@@ -4,10 +4,10 @@ import time
 import discord
 from redbot.core import commands
 
-from ..models import IntentStatus, TransactionIntent
-from ..networks import NETWORKS
+from ..core.models import IntentStatus, TransactionIntent
+from ..core.networks import NETWORKS
 from ..providers import WalletProviderError
-from ..validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
+from ..core.validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 from .constants import INTENT_LIFETIME_SECONDS, WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
 from .views import WalletIntentView

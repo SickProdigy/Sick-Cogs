@@ -2,8 +2,8 @@ import time
 
 from redbot.core import Config
 
-from .models import IntentStatus
-from .networks import DEFAULT_NETWORK, NETWORKS
+from ..core.models import IntentStatus
+from ..core.networks import DEFAULT_NETWORK, NETWORKS
 
 CONFIG_IDENTIFIER = 9365048217
 MAX_STORED_INTENTS = 25

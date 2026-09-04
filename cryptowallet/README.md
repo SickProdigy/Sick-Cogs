@@ -389,15 +389,17 @@ cryptowallet/
 │   ├── __init__.py
 │   ├── auth.py         # ES256 key lifecycle, JWKS, and custom-auth JWTs
 │   ├── companion.py    # HTTP routes, OAuth, and listener lifecycle
+│   ├── config.py       # Config registration and stored-data helpers
+│   ├── confirmation.py # Persistent global confirmation scheduler
 │   ├── pairing.py      # Website-server pairing and credential lifecycle
-│   └── sessions.py     # One-time state and replay prevention
-├── confirmation.py     # Persistent global confirmation scheduler
-├── usage.py            # CDP traffic limits, accounting, and owner warnings
-├── config.py           # Config registration and stored-data helpers
-├── models.py           # Profiles, accounts, intents, and approval sessions
-├── networks.py         # Supported chain metadata
-├── validation.py       # Address and amount validation
-├── provisioning.py     # Idempotent automatic wallet provisioning
+│   ├── provisioning.py # Idempotent automatic wallet provisioning
+│   ├── sessions.py     # One-time state and replay prevention
+│   └── usage.py        # CDP traffic limits, accounting, and owner warnings
+├── core/
+│   ├── __init__.py
+│   ├── models.py       # Profiles, accounts, intents, and approval sessions
+│   ├── networks.py     # Supported chain metadata
+│   └── validation.py   # Address and amount validation
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface

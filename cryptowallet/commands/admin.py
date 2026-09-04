@@ -7,8 +7,8 @@ from urllib.parse import urlparse
 import discord
 from redbot.core import commands
 
-from ..networks import BASE_SEPOLIA, NETWORKS
-from ..usage import (
+from ..core.networks import BASE_SEPOLIA, NETWORKS
+from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
     NODE_SAFETY_TARGET,
     WALLET_FREE_OPERATIONS,

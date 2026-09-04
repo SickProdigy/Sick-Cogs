@@ -4,7 +4,7 @@ from urllib.parse import quote
 import discord
 from redbot.core import commands
 
-from ..networks import BASE_SEPOLIA
+from ..core.networks import BASE_SEPOLIA
 from ..providers import WalletProviderError
 from .constants import WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
