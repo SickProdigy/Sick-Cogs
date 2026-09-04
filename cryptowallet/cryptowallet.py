@@ -6,6 +6,7 @@ from redbot.core import commands
 
 from .admin import WalletAdminCommands
 from .commands import WalletCommands
+from .confirmation import ConfirmationProcessorMixin
 from .companion import CompanionServer
 from .config import WalletConfigMixin, create_config
 from .jwt_auth import JwtAuthMixin
@@ -18,6 +19,7 @@ log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
 class CryptoWallet(
+    ConfirmationProcessorMixin,
     WalletCommands,
     WalletAdminCommands,
     WalletConfigMixin,
@@ -33,11 +35,11 @@ class CryptoWallet(
         self.bot = bot
         self.config = create_config(self)
         self.pairing_lock = asyncio.Lock()
-        self.confirmation_tasks = set()
         self.wallet_read_cooldowns = {}
         self.initialize_provisioning()
         self.wallet_provider = CdpWalletProvider(bot)
         self.companion = CompanionServer(self)
+        self.initialize_confirmation_processor()
 
     async def initialize(self):
         """Restore the loopback companion only when explicitly enabled."""
@@ -57,8 +59,7 @@ class CryptoWallet(
                 log.exception("The configured wallet companion listener could not start")
 
     def cog_unload(self):
-        for task in self.confirmation_tasks:
-            task.cancel()
+        self.confirmation_processor_task.cancel()
         self.bot.loop.create_task(self.companion.stop())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
