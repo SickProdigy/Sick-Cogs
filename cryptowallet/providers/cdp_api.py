@@ -355,6 +355,27 @@ class CdpApiClient:
         )
         return await self._request("GET", path, query={"projectID": project_id})
 
+    async def send_solana_transaction(
+        self, user_id: str, address: str, project_id: str, network: str,
+        transaction: str, idempotency_key: str,
+    ) -> dict:
+        """Sign and submit one serialized Solana transaction for an end user."""
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            "/solana/send/transaction"
+        )
+        return await self._request(
+            "POST", path,
+            body={
+                "network": network,
+                "address": address,
+                "transaction": transaction,
+                "useCdpSponsor": False,
+            },
+            query={"projectID": project_id}, wallet_auth=True,
+            idempotency_key=idempotency_key,
+        )
+
     async def list_token_balances(
         self,
         address: str,

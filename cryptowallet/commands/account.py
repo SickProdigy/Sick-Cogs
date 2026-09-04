@@ -12,7 +12,7 @@ class WalletAccountCommands:
 
     @WalletCoreCommands.wallet.command(name="recovery", aliases=("backup",))
     async def wallet_recovery(self, ctx: commands.Context):
-        """DM a protected link for backing up the smart-account wallet signer key."""
+        """DM a protected link for backing up the wallet profile's account keys."""
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if not await self._wallet_read_allowed(
@@ -45,9 +45,9 @@ class WalletAccountCommands:
                     "The protected wallet link is too long for Discord delivery."
                 )
             embed = discord.Embed(
-                title="Back Up Your Wallet Signer",
+                title="Back Up Your Wallet Keys",
                 description=(
-                    "Securely export the wallet signer private key "
+                    "Securely export an EVM signer or Solana account private key "
                     "without exposing it to Discord or the bot."
                 ),
                 color=discord.Color.blurple(),
@@ -56,11 +56,11 @@ class WalletAccountCommands:
                 name="Link expires", value=f"<t:{expires_at}:R>", inline=True
             )
             embed.add_field(
-                name="Wallet", value=f"`{account['address']}`", inline=False
+                name="Base smart account", value=f"`{account['address']}`", inline=False
             )
             embed.add_field(
                 name="Private-key safety",
-                value="Coinbase displays the key only inside its isolated secure export frame.",
+                value="Choose the account on the protected page. Coinbase displays its key only inside the isolated secure export frame.",
                 inline=False,
             )
             await ctx.author.send(content=link_message, embed=embed)

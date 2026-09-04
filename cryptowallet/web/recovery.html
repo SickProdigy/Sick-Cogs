@@ -9,14 +9,18 @@
 <body>
   <main class="card">
     <p class="eyebrow">SickGaming Crypto Wallet</p>
-    <h1>Back up your wallet signer</h1>
+    <h1>Back up your wallet keys</h1>
     <p id="recovery-status" role="status">Open the protected link sent by the Discord bot.</p>
     <dl id="recovery-details" hidden></dl>
     <section id="recovery-controls" hidden>
       <div class="notice danger">
         <strong>Private-key safety</strong>
-        <p>This exports the EOA key that owns your smart account. Anyone with that key may control the wallet. Never paste it into Discord, send it to another person, or store it as a screenshot.</p>
+        <p>This exports the private key for the selected wallet account. Anyone with that key may control that account. Never paste it into Discord, send it to another person, or store it as a screenshot.</p>
       </div>
+      <label>
+        Wallet account
+        <select id="recovery-account"></select>
+      </label>
       <label class="acknowledgement">
         <input id="recovery-confirm" type="checkbox">
         I understand that I must store this private key securely and privately.
@@ -24,7 +28,7 @@
       <button id="prepare-export" type="button" disabled>Continue to secure export</button>
       <div id="key-export-container" aria-live="polite"></div>
     </section>
-    <p class="notice info">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds or delete your provider account. Your smart-account balance may not appear automatically after importing the signer into another wallet. Move funds to an external address before leaving CDP unless the destination explicitly supports this smart account.</p>
+    <p class="notice info">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds, revoke bot access, or delete your provider account. An exported EVM signer controls the Base smart account through its owner relationship; an exported Solana key directly controls the displayed Solana account.</p>
     <a href="./">Return to wallet home</a>
   </main>
   <script src="recovery.js" type="module"></script>

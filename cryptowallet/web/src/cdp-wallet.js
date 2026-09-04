@@ -2,6 +2,7 @@ import {
   authenticateWithJWT,
   createDelegation,
   createEvmKeyExportIframe,
+  createSolanaKeyExportIframe,
   initialize,
   isSignedIn,
   signOut,
@@ -72,19 +73,24 @@ export function resolveSmartAccountOwner(user, expectedAddress) {
 }
 
 export async function prepareRecoveryExport(
-  projectId, expectedUserId, expectedAddress, handoffToken, target
+  projectId, expectedUserId, expectedAccounts, selectedAccount, handoffToken, target
 ) {
   try {
-    const user = await authenticateWallet(
-      projectId, expectedUserId, [{ family: "evm", address: expectedAddress }], handoffToken
-    );
-    const ownerAddress = resolveSmartAccountOwner(user, expectedAddress);
-    await createEvmKeyExportIframe({
-      address: ownerAddress,
+    const user = await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
+    const exportAddress = selectedAccount.family === "evm"
+      ? resolveSmartAccountOwner(user, selectedAccount.address)
+      : selectedAccount.address;
+    const createExportIframe = selectedAccount.family === "evm"
+      ? createEvmKeyExportIframe
+      : createSolanaKeyExportIframe;
+    await createExportIframe({
+      address: exportAddress,
       target,
       projectId,
-      label: "Copy wallet signer private key",
-      copiedLabel: "Wallet signer private key copied",
+      label: selectedAccount.family === "evm"
+        ? "Copy EVM wallet signer private key"
+        : "Copy Solana wallet private key",
+      copiedLabel: "Wallet private key copied",
       fullWidth: true,
       onStatusUpdate: (status, message) => {
         const event = new CustomEvent("sickwallet-export-status", {
@@ -96,7 +102,7 @@ export async function prepareRecoveryExport(
         }
       },
     });
-    return { ownerAddress };
+    return { exportAddress, family: selectedAccount.family };
   } catch (error) {
     await signOut().catch(() => undefined);
     throw error;

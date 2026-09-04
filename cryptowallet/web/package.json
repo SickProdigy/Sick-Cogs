@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/cdp-wallet.js --bundle --format=esm --minify --outfile=cdp-wallet.js"
+    "build": "esbuild src/cdp-wallet.js --bundle --format=esm --minify --legal-comments=none --outfile=cdp-wallet.js"
   },
   "dependencies": {
     "@coinbase/cdp-core": "0.0.123",
