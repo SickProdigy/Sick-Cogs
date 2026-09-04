@@ -374,20 +374,24 @@ Not implemented:
 ```text
 cryptowallet/
 ├── __init__.py
-├── cryptowallet.py       # Thin Red cog and lifecycle
+├── cryptowallet.py     # Thin Red cog composition and lifecycle
+├── commands/
+│   ├── __init__.py
+│   ├── user.py         # User commands and owner-bound Discord controls
+│   └── admin.py        # Bot-owner configuration and diagnostics
+├── backend/
+│   ├── __init__.py
+│   ├── auth.py         # ES256 key lifecycle, JWKS, and custom-auth JWTs
+│   ├── companion.py    # HTTP routes, OAuth, and listener lifecycle
+│   ├── pairing.py      # Website-server pairing and credential lifecycle
+│   └── sessions.py     # One-time state and replay prevention
 ├── confirmation.py     # Persistent global confirmation scheduler
 ├── usage.py            # CDP traffic limits, accounting, and owner warnings
-├── commands.py           # User wallet commands
-├── admin.py              # Owner configuration commands
-├── config.py             # Config registration and stored-data helpers
-├── models.py             # Profiles, accounts, intents, and approval sessions
-├── networks.py           # Supported chain metadata
-├── validation.py         # Address and amount validation
-├── provisioning.py       # Idempotent automatic wallet provisioning
-├── jwt_auth.py           # ES256 key lifecycle, JWKS, and custom-auth JWTs
-├── sessions.py           # One-time state and replay prevention
-├── pairing.py            # Website-server pairing and credential lifecycle
-├── companion.py          # HTTP routes, OAuth, and listener lifecycle
+├── config.py           # Config registration and stored-data helpers
+├── models.py           # Profiles, accounts, intents, and approval sessions
+├── networks.py         # Supported chain metadata
+├── validation.py       # Address and amount validation
+├── provisioning.py     # Idempotent automatic wallet provisioning
 ├── providers/
 │   ├── __init__.py
 │   ├── base.py           # Provider interface

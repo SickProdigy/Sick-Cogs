@@ -2,7 +2,7 @@ import hashlib
 import secrets
 import time
 
-from .models import ApprovalPurpose, ApprovalSession, ApprovalStatus
+from ..models import ApprovalPurpose, ApprovalSession, ApprovalStatus
 
 APPROVAL_LIFETIME_SECONDS = 10 * 60
 MAX_STORED_APPROVALS = 10

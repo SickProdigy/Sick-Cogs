@@ -6,11 +6,11 @@ from urllib.parse import quote
 import discord
 from redbot.core import commands
 
-from .models import IntentStatus, TransactionIntent
-from .networks import BASE_SEPOLIA, NETWORKS
-from .providers import WalletProviderError
-from .providers.base_rpc import BaseRpcError, get_transaction
-from .validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
+from ..models import IntentStatus, TransactionIntent
+from ..networks import BASE_SEPOLIA, NETWORKS
+from ..providers import WalletProviderError
+from ..providers.base_rpc import BaseRpcError, get_transaction
+from ..validation import format_wei_as_eth, normalize_evm_address, parse_eth_to_wei
 
 INTENT_LIFETIME_SECONDS = 15 * 60
 HISTORY_PAGE_SIZE = 10
