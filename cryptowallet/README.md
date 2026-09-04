@@ -408,6 +408,8 @@ cryptowallet/
 │   ├── base.py           # Provider interface
 │   ├── cdp.py            # Server-only CDP configuration and provider boundary
 │   └── cdp_api.py        # Minimal authenticated CDP v2 HTTP client
+├── tests/
+│   └── test_authorization.py # Authorization UI, renewal, and handoff regression tests
 ├── web/
 │   ├── index.html
 │   ├── recovery.html
