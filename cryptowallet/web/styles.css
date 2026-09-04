@@ -120,6 +120,11 @@ button:disabled {
   background: #2a1114;
 }
 
+.notice.info {
+  border-left-color: #3b82f6;
+  background: #101d33;
+}
+
 .acknowledgement {
   display: flex;
   align-items: flex-start;
