@@ -134,6 +134,24 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
 
+    async def test_recovery_handoff_has_a_distinct_bound_purpose(self):
+        harness = _JwtHarness(self.configuration)
+        token, _ = await harness.create_recovery_handoff(7, _profile())
+        claims = jwt.decode(
+            token,
+            self.key.public_key(),
+            algorithms=["ES256"],
+            audience="project-id",
+            issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "recovery")
+        self.assertEqual(claims["sub"], "profile-7")
+        self.assertEqual(claims["sickwallet_discord_user"], "7")
+        self.assertEqual(
+            claims["sickwallet_address"],
+            "0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+        )
+
     async def test_handoff_rejects_mismatched_stored_identity(self):
         cases = []
         wrong_provider = copy.deepcopy(_profile())

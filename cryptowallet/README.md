@@ -188,6 +188,7 @@ User commands:
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
+[p]wallet recovery             # Alias: backup
 [p]wallet revoke
 ```
 
@@ -233,6 +234,11 @@ is inactive; it does not delete the wallet or move funds. When authorization is 
 `wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
 Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
 user deliberately completes that browser approval.
+
+`wallet recovery` DMs a three-minute, purpose-bound link for enrolling and verifying an independent
+recovery email directly with CDP. The browser validates the expected CDP user and smart-account
+address before requesting the email OTP. Neither the email nor OTP is sent to Discord, the bot, or
+the optional companion relay. This enrollment does not export a key or move funds.
 
 `wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
 Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is
@@ -381,6 +387,7 @@ cryptowallet/
 ├── commands/
 │   ├── __init__.py
 │   ├── user.py         # Small user-command composition layer
+│   ├── account.py      # Recovery and account-exit commands
 │   ├── core.py         # Wallet summary, balance, settings, and cooldowns
 │   ├── authorization.py # Signing authorization lifecycle
 │   ├── transactions.py # Send intents, approval, and intent status
@@ -413,6 +420,7 @@ cryptowallet/
 ├── web/
 │   ├── index.html
 │   ├── recovery.html
+│   ├── recovery.js
 │   ├── security.html
 │   ├── session.html
 │   ├── app.js

@@ -74,8 +74,12 @@ class CompanionServer:
         app.router.add_get("/security", self.security)
         app.router.add_get("/session", self.session_page)
         app.router.add_get("/assets/app.js", self.app_script)
+        app.router.add_get("/app.js", self.app_script)
         app.router.add_get("/assets/cdp-wallet.js", self.cdp_wallet_script)
+        app.router.add_get("/cdp-wallet.js", self.cdp_wallet_script)
+        app.router.add_get("/recovery.js", self.recovery_script)
         app.router.add_get("/assets/styles.css", self.styles)
+        app.router.add_get("/styles.css", self.styles)
         app.router.add_get("/health", self.health)
         app.router.add_get("/session/{token}", self.begin_session)
         app.router.add_get("/oauth/callback", self.oauth_callback)
@@ -137,6 +141,9 @@ class CompanionServer:
 
     async def cdp_wallet_script(self, request: web.Request) -> web.Response:
         return self._static_response("cdp-wallet.js", "application/javascript")
+
+    async def recovery_script(self, request: web.Request) -> web.Response:
+        return self._static_response("recovery.js", "application/javascript")
 
     async def styles(self, request: web.Request) -> web.Response:
         return self._static_response("styles.css", "text/css")
