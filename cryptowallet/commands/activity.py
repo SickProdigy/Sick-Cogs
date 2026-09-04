@@ -26,6 +26,15 @@ class WalletActivityCommands:
         "eth": "ethereum-sepolia",
         "ethereum": "ethereum-sepolia",
         "ethereum-sepolia": "ethereum-sepolia",
+        "arb": "arbitrum-sepolia",
+        "arbitrum": "arbitrum-sepolia",
+        "arbitrum-sepolia": "arbitrum-sepolia",
+        "polygon": "polygon-amoy",
+        "pol": "polygon-amoy",
+        "polygon-amoy": "polygon-amoy",
+        "avax": "avalanche-fuji",
+        "avalanche": "avalanche-fuji",
+        "avalanche-fuji": "avalanche-fuji",
     }
 
     @classmethod
@@ -133,7 +142,7 @@ class WalletActivityCommands:
         network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.TRANSACTION_LOOKUP):
             await ctx.send(
-                f"Choose `base` or `eth`, for example: "
+                f"Choose `base`, `eth`, `arb`, `polygon`, or `avax`, for example: "
                 f"`{ctx.clean_prefix}wallet txid base 0x...`"
             )
             return
@@ -292,7 +301,7 @@ class WalletActivityCommands:
             return
         network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.HISTORY):
-            await ctx.send("Choose `base` or `eth` for indexed transaction history.")
+            await ctx.send("Choose `base`, `eth`, `arb`, `polygon`, or `avax` for indexed transaction history.")
             return
         if not await self._wallet_read_allowed(
             ctx, "history", WALLET_HISTORY_COOLDOWN_SECONDS

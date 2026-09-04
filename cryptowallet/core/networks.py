@@ -13,6 +13,7 @@ class NetworkCapability(str, Enum):
     """Operations that may be independently enabled for one network."""
 
     BALANCE = "balance"
+    TOKEN_DISCOVERY = "token_discovery"
     SEND = "send"
     HISTORY = "history"
     TRANSACTION_LOOKUP = "transaction_lookup"
@@ -27,6 +28,7 @@ class NetworkCapabilities:
     """Fail-closed feature switches for a blockchain network."""
 
     balance: bool = False
+    token_discovery: bool = False
     send: bool = False
     history: bool = False
     transaction_lookup: bool = False
@@ -92,6 +94,7 @@ BASE_SEPOLIA = Network(
     enabled=True,
     capabilities=NetworkCapabilities(
         balance=True,
+        token_discovery=True,
         send=True,
         history=True,
         transaction_lookup=True,
@@ -100,6 +103,45 @@ BASE_SEPOLIA = Network(
         export=True,
         sponsorship=True,
     ),
+)
+
+ARBITRUM_SEPOLIA = Network(
+    key="arbitrum-sepolia",
+    name="Arbitrum Sepolia",
+    family=ChainFamily.EVM,
+    chain_id=421614,
+    native_symbol="ETH",
+    native_decimals=18,
+    explorer_url="https://sepolia.arbiscan.io",
+    testnet=True,
+    enabled=True,
+    capabilities=NetworkCapabilities(balance=True, transaction_lookup=True),
+)
+
+POLYGON_AMOY = Network(
+    key="polygon-amoy",
+    name="Polygon Amoy",
+    family=ChainFamily.EVM,
+    chain_id=80002,
+    native_symbol="POL",
+    native_decimals=18,
+    explorer_url="https://amoy.polygonscan.com",
+    testnet=True,
+    enabled=True,
+    capabilities=NetworkCapabilities(balance=True, transaction_lookup=True),
+)
+
+AVALANCHE_FUJI = Network(
+    key="avalanche-fuji",
+    name="Avalanche Fuji",
+    family=ChainFamily.EVM,
+    chain_id=43113,
+    native_symbol="AVAX",
+    native_decimals=18,
+    explorer_url="https://testnet.snowtrace.io",
+    testnet=True,
+    enabled=True,
+    capabilities=NetworkCapabilities(balance=True, transaction_lookup=True),
 )
 
 ETHEREUM_SEPOLIA = Network(
@@ -114,6 +156,7 @@ ETHEREUM_SEPOLIA = Network(
     enabled=True,
     capabilities=NetworkCapabilities(
         balance=True,
+        token_discovery=True,
         history=True,
         transaction_lookup=True,
     ),
@@ -122,7 +165,13 @@ ETHEREUM_SEPOLIA = Network(
 # KNOWN_NETWORKS includes planned entries for diagnostics and documentation. Only
 # independently reviewed, enabled entries are exposed through NETWORKS.
 KNOWN_NETWORKS = {
-    network.key: network for network in (BASE_SEPOLIA, ETHEREUM_SEPOLIA)
+    network.key: network for network in (
+        BASE_SEPOLIA,
+        ETHEREUM_SEPOLIA,
+        ARBITRUM_SEPOLIA,
+        POLYGON_AMOY,
+        AVALANCHE_FUJI,
+    )
 }
 
 # Only reviewed networks belong in NETWORKS. Ethereum Sepolia is read-only, and
