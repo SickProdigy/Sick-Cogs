@@ -96,16 +96,23 @@ def _decode_abi_text(value: str) -> str:
     return text.decode("utf-8").strip()
 
 
-async def get_transaction(tx_hash: str) -> dict | None:
-    """Return public Base Sepolia transaction and receipt data by hash."""
-    transaction = await _rpc("eth_getTransactionByHash", [tx_hash])
+async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict | None:
+    """Return public EVM transaction and receipt data by hash."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Transaction lookup is unavailable for this network.")
+    transaction = await _rpc_with_urls(
+        rpc_urls, "eth_getTransactionByHash", [tx_hash], network
+    )
     if transaction is None:
         return None
     if not isinstance(transaction, dict):
-        raise BaseRpcError("Base Sepolia returned an invalid transaction.")
-    receipt = await _rpc("eth_getTransactionReceipt", [tx_hash])
+        raise BaseRpcError(f"{network} returned an invalid transaction.")
+    receipt = await _rpc_with_urls(
+        rpc_urls, "eth_getTransactionReceipt", [tx_hash], network
+    )
     if receipt is not None and not isinstance(receipt, dict):
-        raise BaseRpcError("Base Sepolia returned an invalid transaction receipt.")
+        raise BaseRpcError(f"{network} returned an invalid transaction receipt.")
     try:
         returned_hash = str(transaction["hash"]).lower()
         value_wei = int(str(transaction["value"]), 16)
@@ -116,15 +123,15 @@ async def get_transaction(tx_hash: str) -> dict | None:
         receipt_status = receipt.get("status") if receipt else None
         success = int(str(receipt_status), 16) == 1 if receipt_status is not None else None
     except (KeyError, TypeError, ValueError) as exc:
-        raise BaseRpcError("Base Sepolia returned malformed transaction data.") from exc
+        raise BaseRpcError(f"{network} returned malformed transaction data.") from exc
     wallet_transfers = []
     if receipt is not None and success is True and value_wei == 0:
         try:
-            wallet_transfers = await _get_wallet_transfers(tx_hash, receipt)
+            wallet_transfers = await _get_wallet_transfers(tx_hash, receipt, network)
         except BaseRpcError:
             wallet_transfers = None
     if returned_hash != tx_hash.lower():
-        raise BaseRpcError("Base Sepolia returned a mismatched transaction.")
+        raise BaseRpcError(f"{network} returned a mismatched transaction.")
     return {
         "transaction_hash": returned_hash,
         "from_address": from_address,
@@ -136,7 +143,7 @@ async def get_transaction(tx_hash: str) -> dict | None:
     }
 
 
-async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
+async def _get_wallet_transfers(tx_hash: str, receipt: dict, network: str) -> list[dict]:
     """Find successful native transfers initiated by ERC-4337 wallet senders."""
     senders = set()
     logs = receipt.get("logs")
@@ -158,9 +165,14 @@ async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
     if not senders:
         return []
 
-    trace = await _rpc("debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}])
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Transaction tracing is unavailable for this network.")
+    trace = await _rpc_with_urls(
+        rpc_urls, "debug_traceTransaction", [tx_hash, {"tracer": "callTracer"}], network
+    )
     if not isinstance(trace, dict):
-        raise BaseRpcError("Base Sepolia returned an invalid transaction trace.")
+        raise BaseRpcError(f"{network} returned an invalid transaction trace.")
     transfers = []
     stack = [trace]
     visited = 0
@@ -168,7 +180,7 @@ async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
         call = stack.pop()
         visited += 1
         if visited > 10_000:
-            raise BaseRpcError("Base Sepolia returned an oversized transaction trace.")
+            raise BaseRpcError(f"{network} returned an oversized transaction trace.")
         children = call.get("calls")
         if isinstance(children, list):
             stack.extend(child for child in children if isinstance(child, dict))
@@ -181,7 +193,7 @@ async def _get_wallet_transfers(tx_hash: str, receipt: dict) -> list[dict]:
         try:
             value_wei = int(str(call.get("value") or "0x0"), 16)
         except ValueError as exc:
-            raise BaseRpcError("Base Sepolia returned an invalid trace value.") from exc
+            raise BaseRpcError(f"{network} returned an invalid trace value.") from exc
         to_address = str(call.get("to") or "")
         if value_wei > 0 and len(to_address) == 42:
             transfers.append(
