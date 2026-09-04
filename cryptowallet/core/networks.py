@@ -162,7 +162,7 @@ SOLANA_DEVNET = Network(
     explorer_url="https://explorer.solana.com",
     testnet=True,
     enabled=True,
-    capabilities=NetworkCapabilities(balance=True),
+    capabilities=NetworkCapabilities(balance=True, history=True, transaction_lookup=True),
 )
 
 ETHEREUM_SEPOLIA = Network(

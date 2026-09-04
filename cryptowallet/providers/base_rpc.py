@@ -2,6 +2,8 @@ import json
 
 import aiohttp
 
+from ..core.validation import normalize_solana_signature
+
 
 EVM_RPC_URLS = {
     "base-sepolia": (
@@ -42,6 +44,98 @@ async def get_solana_native_balance(address: str) -> int:
         return int(value)
     except (KeyError, TypeError, ValueError) as exc:
         raise BaseRpcError("Solana Devnet returned an invalid balance.") from exc
+
+
+async def get_solana_transaction(signature: str) -> dict | None:
+    """Return bounded public Solana devnet transaction metadata."""
+    result = await _rpc_with_urls(
+        SOLANA_DEVNET_RPC_URLS,
+        "getTransaction",
+        [signature, {"encoding": "jsonParsed", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}],
+        "Solana Devnet",
+    )
+    if result is None:
+        return None
+    try:
+        transaction = result["transaction"]
+        message = transaction["message"]
+        signatures = transaction["signatures"]
+        meta = result["meta"]
+        raw_keys = message["accountKeys"]
+        pre_balances = meta["preBalances"]
+        post_balances = meta["postBalances"]
+        if (
+            not isinstance(signatures, list)
+            or signature not in signatures
+            or not isinstance(raw_keys, list)
+            or not isinstance(pre_balances, list)
+            or not isinstance(post_balances, list)
+            or len(raw_keys) != len(pre_balances)
+            or len(raw_keys) != len(post_balances)
+            or len(raw_keys) > 256
+        ):
+            raise ValueError("Invalid Solana transaction arrays")
+        account_changes = []
+        for raw_key, before, after in zip(raw_keys, pre_balances, post_balances):
+            address = str(raw_key.get("pubkey") if isinstance(raw_key, dict) else raw_key)
+            before = int(before)
+            after = int(after)
+            if before < 0 or after < 0:
+                raise ValueError("Invalid Solana balance")
+            if before != after:
+                account_changes.append({"address": address, "change_atomic": after - before})
+        fee = int(meta["fee"] or 0)
+        slot = int(result["slot"] or 0)
+        block_time = int(result.get("blockTime") or 0)
+        if fee < 0 or slot <= 0 or block_time < 0:
+            raise ValueError("Invalid Solana transaction metadata")
+        return {
+            "signature": signature,
+            "slot": slot,
+            "block_time": block_time,
+            "success": meta.get("err") is None,
+            "fee_atomic": fee,
+            "account_changes": account_changes,
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BaseRpcError("Solana Devnet returned malformed transaction data.") from exc
+
+
+async def get_solana_transaction_history(address: str, limit: int = 10) -> dict:
+    """Return up to ten recent Solana devnet signatures with wallet balance changes."""
+    if limit < 1 or limit > 10:
+        raise BaseRpcError("Solana Devnet history is limited to 10 transactions.")
+    result = await _rpc_with_urls(
+        SOLANA_DEVNET_RPC_URLS,
+        "getSignaturesForAddress",
+        [address, {"limit": limit, "commitment": "confirmed"}],
+        "Solana Devnet",
+    )
+    if not isinstance(result, list) or len(result) > limit:
+        raise BaseRpcError("Solana Devnet returned invalid transaction history.")
+    transactions = []
+    for item in result:
+        try:
+            signature = normalize_solana_signature(str(item["signature"]))
+            slot = int(item["slot"] or 0)
+            block_time = int(item.get("blockTime") or 0)
+            if slot <= 0 or block_time < 0:
+                raise ValueError("Invalid Solana history metadata")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BaseRpcError("Solana Devnet returned malformed transaction history.") from exc
+        try:
+            detail = await get_solana_transaction(signature)
+        except BaseRpcError:
+            detail = None
+        transactions.append(detail or {
+            "signature": signature,
+            "slot": slot,
+            "block_time": block_time,
+            "success": item.get("err") is None,
+            "fee_atomic": 0,
+            "account_changes": [],
+        })
+    return {"transactions": transactions, "has_more": len(result) == limit, "next_page": ""}
 
 
 async def get_native_balance(address: str, network: str) -> int:

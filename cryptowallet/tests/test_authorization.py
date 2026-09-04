@@ -39,6 +39,7 @@ from ..core.validation import (
     format_atomic_amount,
     normalize_address_for_network,
     normalize_solana_address,
+    normalize_solana_signature,
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
@@ -544,6 +545,7 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertIs(WalletActivityCommands._activity_network("arb"), ARBITRUM_SEPOLIA)
         self.assertIs(WalletActivityCommands._activity_network("polygon"), POLYGON_AMOY)
         self.assertIs(WalletActivityCommands._activity_network("avax"), AVALANCHE_FUJI)
+        self.assertIs(WalletActivityCommands._activity_network("sol"), SOLANA_DEVNET)
         self.assertIsNone(WalletActivityCommands._activity_network("unknown"))
 
     def test_additional_evm_testnets_remain_read_only(self):
@@ -618,7 +620,8 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertEqual(SOLANA_DEVNET.native_decimals, 9)
         self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.BALANCE))
         self.assertFalse(SOLANA_DEVNET.supports(NetworkCapability.SEND))
-        self.assertFalse(SOLANA_DEVNET.supports(NetworkCapability.HISTORY))
+        self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.HISTORY))
+        self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.TRANSACTION_LOOKUP))
         self.assertTrue(provider.supports(SOLANA_DEVNET.key, NetworkCapability.BALANCE))
         self.assertFalse(provider.supports(SOLANA_DEVNET.key, NetworkCapability.SEND))
         self.assertEqual(
@@ -627,6 +630,25 @@ class NetworkArchitectureTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             normalize_solana_address("0OIl" * 8)
+        self.assertEqual(normalize_solana_signature("1" * 64), "1" * 64)
+        with self.assertRaises(ValueError):
+            normalize_solana_signature("0" * 88)
+
+        page = {
+            "transactions": [{
+                "signature": "1" * 64,
+                "block_time": 1_800_000_000,
+                "success": True,
+                "account_changes": [{
+                    "address": address,
+                    "change_atomic": 1_250_000_000,
+                }],
+            }]
+        }
+        embed = WalletActivityCommands._activity_embed(address, page, 0, 0, SOLANA_DEVNET)
+        self.assertIn("Received", embed.fields[0].name)
+        self.assertIn("1.25 SOL net", embed.fields[0].name)
+        self.assertIn("cluster=devnet", embed.fields[0].value)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]

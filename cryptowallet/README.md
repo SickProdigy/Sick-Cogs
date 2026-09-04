@@ -10,7 +10,7 @@ CryptoWallet models each blockchain with an explicit chain family, network refer
 
 A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network, including independent 32-byte base58 validation for Solana addresses; a Solana address is never interpreted as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-Base Sepolia remains the only send-enabled network. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account and read-only native SOL balance/explorer support. Solana sending, history, tokens, authorization, recovery, and export remain disabled, and no mainnet is registered.
+Base Sepolia remains the only send-enabled network. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with read-only native SOL balance, recent activity, transaction-signature lookup, and explorer support. Solana sending, history, tokens, authorization, recovery, and export remain disabled, and no mainnet is registered.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 

@@ -4,10 +4,16 @@ import discord
 from redbot.core import commands
 
 from ..core.models import TransactionIntent
-from ..core.networks import BASE_SEPOLIA, NETWORKS, NetworkCapability
+from ..core.networks import BASE_SEPOLIA, NETWORKS, ChainFamily, NetworkCapability
 from ..providers import WalletProviderError
-from ..providers.base_rpc import BaseRpcError, get_transaction
-from ..core.validation import format_wei_as_eth, normalize_evm_address
+from ..providers.base_rpc import BaseRpcError, get_solana_transaction, get_transaction
+from ..core.validation import (
+    format_atomic_amount,
+    format_wei_as_eth,
+    normalize_address_for_network,
+    normalize_evm_address,
+    normalize_solana_signature,
+)
 from .constants import (
     HISTORY_PAGE_SIZE,
     WALLET_HISTORY_COOLDOWN_SECONDS,
@@ -35,6 +41,9 @@ class WalletActivityCommands:
         "avax": "avalanche-fuji",
         "avalanche": "avalanche-fuji",
         "avalanche-fuji": "avalanche-fuji",
+        "sol": "solana-devnet",
+        "solana": "solana-devnet",
+        "solana-devnet": "solana-devnet",
     }
 
     @classmethod
@@ -44,6 +53,8 @@ class WalletActivityCommands:
     @staticmethod
     def _activity_embed(address: str, page: dict, page_index: int, color, network=BASE_SEPOLIA) -> discord.Embed:
         """Render one CDP-indexed page of public address activity."""
+        if network.family is ChainFamily.SOLANA:
+            return WalletActivityCommands._solana_activity_embed(address, page, color, network)
         embed = discord.Embed(title="Your Wallet Activity", color=color)
         normalized_address = address.lower()
         for item in page["transactions"][:HISTORY_PAGE_SIZE]:
@@ -134,6 +145,37 @@ class WalletActivityCommands:
         embed.set_footer(text="Latest 10 indexed transactions · Use the explorer for complete history")
         return embed
 
+    @staticmethod
+    def _solana_activity_embed(address: str, page: dict, color, network) -> discord.Embed:
+        embed = discord.Embed(title="Your Wallet Activity", color=color)
+        for item in page["transactions"][:HISTORY_PAGE_SIZE]:
+            changes = item.get("account_changes") or []
+            wallet_change = next(
+                (int(change["change_atomic"]) for change in changes if change.get("address") == address),
+                0,
+            )
+            if wallet_change > 0:
+                direction = "🟢 Received"
+            elif wallet_change < 0:
+                direction = "🔴 Sent"
+            else:
+                direction = "⚪ Account activity"
+            amount = (
+                f" · {format_atomic_amount(abs(wallet_change), network)} {network.native_symbol} net"
+                if wallet_change else ""
+            )
+            signature = str(item.get("signature") or "")
+            details = [f"Signature: [{signature}]({network.explorer_transaction_url(signature)})"]
+            block_time = int(item.get("block_time") or 0)
+            if block_time:
+                details.append(f"Confirmed <t:{block_time}:R>")
+            details.append("Status: Confirmed" if item.get("success") else "Status: Failed")
+            embed.add_field(name=f"{direction}{amount}", value="\n".join(details), inline=False)
+        if not embed.fields:
+            embed.description = f"No recent {network.name} activity was found for this wallet."
+        embed.set_footer(text="Latest 10 transactions · Amount is the wallet net balance change")
+        return embed
+
     @WalletCoreCommands.wallet.command(name="txid")
     async def wallet_txid(
         self, ctx: commands.Context, network_key: str, txid: str
@@ -142,9 +184,60 @@ class WalletActivityCommands:
         network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.TRANSACTION_LOOKUP):
             await ctx.send(
-                f"Choose `base`, `eth`, `arb`, `polygon`, or `avax`, for example: "
+                f"Choose `base`, `eth`, `arb`, `polygon`, `avax`, or `sol`, for example: "
                 f"`{ctx.clean_prefix}wallet txid base 0x...`"
             )
+            return
+        if network.family is ChainFamily.SOLANA:
+            try:
+                lookup = normalize_solana_signature(txid)
+            except ValueError as exc:
+                await ctx.send(str(exc))
+                return
+            if not await self._wallet_read_allowed(ctx, "rpc", WALLET_RPC_COOLDOWN_SECONDS):
+                return
+            try:
+                transaction = await get_solana_transaction(lookup)
+            except BaseRpcError as exc:
+                await ctx.send(f"{network.name} transaction lookup is unavailable: {exc}")
+                return
+            if transaction is None:
+                await ctx.send(f"No {network.name} transaction was found with that signature.")
+                return
+            success = transaction["success"]
+            status = "Confirmed" if success else "Failed"
+            color = discord.Color.green() if success else discord.Color.red()
+            embed = discord.Embed(title=f"{status} {network.name} transaction", color=color)
+            embed.add_field(name="Status", value=status, inline=True)
+            embed.add_field(name="Network", value=f"{network.name} (`{network.cluster}`)", inline=True)
+            embed.add_field(name="Slot", value=f"`{transaction['slot']}`", inline=True)
+            embed.add_field(
+                name="Network fee",
+                value=f"{format_atomic_amount(transaction['fee_atomic'], network)} SOL",
+                inline=True,
+            )
+            for item in transaction["account_changes"][:5]:
+                received = item["change_atomic"] > 0
+                embed.add_field(
+                    name="To" if received else "From",
+                    value=(
+                        f"Amount: **{format_atomic_amount(abs(item['change_atomic']), network)} SOL**\n"
+                        f"Wallet: `{item['address']}`"
+                    ),
+                    inline=False,
+                )
+            if transaction["block_time"]:
+                embed.add_field(
+                    name="Confirmed", value=f"<t:{transaction['block_time']}:R>", inline=True
+                )
+            embed.set_footer(text="Public Solana devnet transaction data")
+            view = discord.ui.View(timeout=None)
+            view.add_item(discord.ui.Button(
+                label="View transaction",
+                style=discord.ButtonStyle.link,
+                url=network.explorer_transaction_url(lookup),
+            ))
+            await ctx.send(embed=embed, view=view)
             return
         lookup = txid.strip().lower()
         if len(lookup) != 66 or not lookup.startswith("0x"):
@@ -279,8 +372,9 @@ class WalletActivityCommands:
                 title="Recent Wallet Transactions",
                 description=(
                     "Choose a network below to view this wallet directly in its public "
-                    f"block explorer. Use `{ctx.clean_prefix}wallet transactions base` or "
-                    f"`{ctx.clean_prefix}wallet transactions eth` to load 10 indexed transactions in Discord."
+                    f"block explorer. Use `{ctx.clean_prefix}wallet transactions base`, "
+                    f"`{ctx.clean_prefix}wallet transactions eth`, or `{ctx.clean_prefix}wallet transactions sol` "
+                    "to load 10 recent transactions in Discord."
                 ),
                 color=discord.Color.blurple(),
             )
@@ -301,7 +395,7 @@ class WalletActivityCommands:
             return
         network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.HISTORY):
-            await ctx.send("Choose `base`, `eth`, `arb`, `polygon`, or `avax` for indexed transaction history.")
+            await ctx.send("Choose `base`, `eth`, or `sol` for recent transaction history.")
             return
         if not await self._wallet_read_allowed(
             ctx, "history", WALLET_HISTORY_COOLDOWN_SECONDS
@@ -312,7 +406,7 @@ class WalletActivityCommands:
             await ctx.send(f"Your wallet profile has no account for {network.name}.")
             return
         try:
-            address = normalize_evm_address(str(account.get("address") or ""))
+            address = normalize_address_for_network(str(account.get("address") or ""), network)
             page = await self.wallet_provider.get_transaction_history(
                 address,
                 network.key,
