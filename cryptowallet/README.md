@@ -377,8 +377,10 @@ cryptowallet/
 ├── cryptowallet.py     # Thin Red cog composition and lifecycle
 ├── commands/
 │   ├── __init__.py
-│   ├── user.py         # User commands and owner-bound Discord controls
-│   └── admin.py        # Bot-owner configuration and diagnostics
+│   ├── user.py         # User wallet command logic
+│   ├── admin.py        # Bot-owner configuration and diagnostics
+│   ├── constants.py    # Shared command limits and cooldowns
+│   └── views.py        # Owner-bound Discord buttons and pagination
 ├── backend/
 │   ├── __init__.py
 │   ├── auth.py         # ES256 key lifecycle, JWKS, and custom-auth JWTs
