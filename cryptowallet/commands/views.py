@@ -2,8 +2,8 @@ import time
 
 import discord
 
-from ..models import TransactionIntent
-from ..networks import BASE_SEPOLIA
+from ..core.models import TransactionIntent
+from ..core.networks import BASE_SEPOLIA
 from ..providers import WalletProviderError
 
 from .constants import (

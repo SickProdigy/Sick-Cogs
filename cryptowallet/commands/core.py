@@ -3,9 +3,9 @@ import time
 import discord
 from redbot.core import commands
 
-from ..networks import BASE_SEPOLIA, NETWORKS
+from ..core.networks import BASE_SEPOLIA, NETWORKS
 from ..providers import WalletProviderError
-from ..validation import format_wei_as_eth
+from ..core.validation import format_wei_as_eth
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
 
 

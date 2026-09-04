@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from ..models import TransactionIntent, WalletProfile
+from ..core.models import TransactionIntent, WalletProfile
 
 
 class WalletProviderError(RuntimeError):

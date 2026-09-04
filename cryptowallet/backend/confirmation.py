@@ -4,9 +4,9 @@ import time
 
 import discord
 
-from .models import IntentStatus, TransactionIntent
-from .networks import NETWORKS
-from .providers import WalletProviderError
+from ..core.models import IntentStatus, TransactionIntent
+from ..core.networks import NETWORKS
+from ..providers import WalletProviderError
 
 
 FIRST_CHECK_MIN_SECONDS = 20

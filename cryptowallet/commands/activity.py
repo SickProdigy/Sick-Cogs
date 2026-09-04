@@ -3,11 +3,11 @@ from datetime import datetime
 import discord
 from redbot.core import commands
 
-from ..models import TransactionIntent
-from ..networks import BASE_SEPOLIA
+from ..core.models import TransactionIntent
+from ..core.networks import BASE_SEPOLIA
 from ..providers import WalletProviderError
 from ..providers.base_rpc import BaseRpcError, get_transaction
-from ..validation import format_wei_as_eth, normalize_evm_address
+from ..core.validation import format_wei_as_eth, normalize_evm_address
 from .constants import (
     HISTORY_PAGE_SIZE,
     WALLET_HISTORY_COOLDOWN_SECONDS,

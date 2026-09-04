@@ -4,15 +4,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from ..backend.auth import JWT_TOKEN_NAMESPACE
-from ..models import (
+from ..core.models import (
     AccountType,
     IntentStatus,
     PublicAccount,
     TransactionIntent,
     WalletProfile,
 )
-from ..networks import BASE_SEPOLIA
-from ..validation import normalize_evm_address
+from ..core.networks import BASE_SEPOLIA
+from ..core.validation import normalize_evm_address
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import BaseRpcError, get_user_operation_receipt
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError

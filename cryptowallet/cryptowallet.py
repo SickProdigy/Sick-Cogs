@@ -10,12 +10,12 @@ from .backend import (
     CompanionServer,
     JwtAuthMixin,
 )
+from .backend.confirmation import ConfirmationProcessorMixin
+from .backend.config import WalletConfigMixin, create_config
+from .backend.provisioning import WalletProvisioningMixin
+from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
-from .confirmation import ConfirmationProcessorMixin
-from .config import WalletConfigMixin, create_config
 from .providers import CdpWalletProvider
-from .provisioning import WalletProvisioningMixin
-from .usage import ProviderUsageMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
