@@ -37,6 +37,10 @@ class WalletAccountCommands:
                 ctx.author.id, profile
             )
             link = f"{approval_base_url}/recovery.html#handoff={quote(token, safe='')}"
+            if len(link) > 2000:
+                raise RuntimeError(
+                    "The protected wallet link is too long for Discord delivery."
+                )
             embed = discord.Embed(
                 title="Set Up Wallet Recovery",
                 description=(
@@ -56,18 +60,12 @@ class WalletAccountCommands:
                 value="Your email and verification code are never sent to Discord or the bot.",
                 inline=False,
             )
-            view = discord.ui.View(timeout=3 * 60)
-            view.add_item(
-                discord.ui.Button(
-                    label="Set up recovery",
-                    emoji="🛟",
-                    style=discord.ButtonStyle.link,
-                    url=link,
-                )
+            await ctx.author.send(content=link, embed=embed)
+        except discord.HTTPException:
+            await ctx.send(
+                "Discord could not deliver the protected wallet link. "
+                "Enable direct messages and try again."
             )
-            await ctx.author.send(embed=embed, view=view)
-        except discord.Forbidden:
-            await ctx.send("I could not DM you. Enable direct messages and try again.")
             return
         except (KeyError, RuntimeError) as exc:
             await ctx.send(f"Wallet recovery is unavailable: {exc}")
