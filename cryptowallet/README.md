@@ -229,7 +229,10 @@ handoff URL by DM. The URL token stays in the fragment, is removed from browser 
 and is validated by CDP custom authentication before the browser can grant a 24-hour delegation for
 the exact provisioned Base Sepolia smart account. `wallet revoke` requires an owner-bound
 Discord confirmation, revokes only that account-scoped delegation, and verifies with CDP that it
-is inactive; it does not delete the wallet or move funds.
+is inactive; it does not delete the wallet or move funds. When authorization is already active,
+`wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
+Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
+user deliberately completes that browser approval.
 
 `wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
 Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is
