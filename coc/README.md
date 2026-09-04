@@ -19,15 +19,17 @@ Bot owners set the shared Clash of Clans API key:
 Server moderators or users with `Manage Channels` set the clan tag:
 
 ```text
-[p]coc setclan <clan_tag>
+[p]coc set clan <clan_tag>
 ```
 
-Set the war update channel. If no channel is passed, the current channel is used. This also turns war notifications on:
+Set or change the war update channel explicitly. If no channel is passed, the current channel is used. This also turns war notifications on:
 
 ```text
-[p]coc setwarchannel
-[p]coc setwarchannel #war-updates
+[p]coc set warchannel
+[p]coc set warchannel #war-updates
 ```
+
+Use `[p]help coc set` for all server configuration. Use `[p]help coc notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
 
 ## Commands
 
@@ -50,7 +52,7 @@ Show who has and has not attacked in the current war:
 [p]coc attack
 ```
 
-Toggle all war notifications for the server:
+Toggle all war notifications for the server. When enabling them without a configured destination, the current channel is saved automatically:
 
 ```text
 [p]coc notifications
@@ -61,6 +63,26 @@ Show the current notification setup:
 ```text
 [p]coc notifications status
 ```
+
+Set the timezone used by war schedules for this Discord server:
+
+```text
+[p]coc set timezone America/New_York
+[p]coc set timezone Europe/London
+[p]coc set timezone UTC
+```
+
+Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]coc set timezone` without a value to see the current setting.
+
+Toggle between detailed attack cards and compact one-line entries, or select a mode explicitly:
+
+```text
+[p]coc set attack
+[p]coc set attack card
+[p]coc set attack compact
+```
+
+The bare command toggles the current format. Pass `card` or `compact` when you need to select one explicitly. Use `[p]coc notifications status` to view the current format.
 
 ## War Notifications
 
@@ -89,29 +111,40 @@ Default behavior:
 Toggle one event:
 
 ```text
-[p]coc notifications event prep on
-[p]coc notifications event attacklog off
+[p]coc set event prep on
+[p]coc set event attacklog off
 ```
 
-Change warning times:
+Change server warning times:
 
 ```text
-[p]coc notifications prepsoonminutes 5
-[p]coc notifications endsoonminutes 60
+[p]coc set prepwarning 5
+[p]coc set endwarning 60
 ```
+
+## Management and Role Mentions
+
+Server administrators can optionally delegate CoC setup and notification management to one Discord role:
+
+```text
+[p]coc set managerrole @CoC Manager
+[p]coc set managerrole clear
+```
+
+The configured role can use the commands under `[p]coc set` and `[p]coc notifications` without receiving broader Discord permissions. Only server administrators can change the manager role.
 
 ## Role Mentions
 
 Set one role for war notification mentions:
 
 ```text
-[p]coc notifications role @War
+[p]coc set notificationrole @War
 ```
 
 Clear the mention role:
 
 ```text
-[p]coc notifications clearrole
+[p]coc set notificationrole clear
 ```
 
 Mention toggles are on by default for every event, but no ping is sent unless a mention role is configured.
@@ -119,13 +152,13 @@ Mention toggles are on by default for every event, but no ping is sent unless a 
 Toggle mentions for one event:
 
 ```text
-[p]coc notifications mention prepsoon on
-[p]coc notifications mention attacklog off
+[p]coc set mention prepsoon on
+[p]coc set mention attacklog off
 ```
 
 ## Attack Log Updates
 
-When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. Each attack is labeled as a friendly or enemy attack, then leads with the player who attacked, the target, stars, destruction percentage, and the current score summary.
+When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `card` format labels each entry `Friendly Attack` or `Enemy Attack` without redundantly repeating the clan name, then shows the attacker, defender, stars, destruction, and current score summary. The optional `compact` format places up to ten attacks into short one-line entries with blue friendly, orange enemy-player, and red enemy-attack markers.
 
 Attack-log notification embeds do not show the generic status or team size text. Once battle day is active, they only show the war end time instead of repeating preparation and start times.
 
@@ -161,4 +194,4 @@ The roundup includes:
 
 - Notification setup commands are limited to moderators or users with `Manage Channels`.
 - `setapi` is bot-owner only because the API key is shared globally.
-- Current war lookup supports regular wars and attempts a CWL fallback when regular war data is blocked or unavailable.
+- Current war lookup supports regular wars and silently uses the matching CWL war when regular war data is blocked or unavailable. War, attack-log, attack-status, event, and roundup cards state `Clan War` or `Clan War League (CWL)` directly so the shared workflow remains clear. During preparation, the main war card is yellow. During battle day, it is orange and shows only the war end time; enemy attack updates remain red, and completed-war roundups use a neutral blue with a green victory, red defeat, or neutral tie marker.
