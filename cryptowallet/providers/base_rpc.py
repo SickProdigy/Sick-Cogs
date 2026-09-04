@@ -12,6 +12,9 @@ EVM_RPC_URLS = {
         "https://ethereum-sepolia-rpc.publicnode.com",
         "https://rpc.sepolia.org",
     ),
+    "arbitrum-sepolia": ("https://sepolia-rollup.arbitrum.io/rpc",),
+    "polygon-amoy": ("https://polygon-amoy.drpc.org",),
+    "avalanche-fuji": ("https://api.avax-test.network/ext/bc/C/rpc",),
 }
 BASE_SEPOLIA_RPC_URLS = EVM_RPC_URLS["base-sepolia"]
 ENTRY_POINT_V06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"

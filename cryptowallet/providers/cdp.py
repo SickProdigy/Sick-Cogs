@@ -12,8 +12,11 @@ from ..core.models import (
     WalletProfile,
 )
 from ..core.networks import (
+    AVALANCHE_FUJI,
+    ARBITRUM_SEPOLIA,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
+    POLYGON_AMOY,
     KNOWN_NETWORKS,
     NetworkCapability,
 )
@@ -68,6 +71,7 @@ class CdpWalletProvider(WalletProvider):
     supported_capabilities = {
         BASE_SEPOLIA.key: frozenset({
             NetworkCapability.BALANCE,
+            NetworkCapability.TOKEN_DISCOVERY,
             NetworkCapability.SEND,
             NetworkCapability.HISTORY,
             NetworkCapability.DELEGATION,
@@ -75,8 +79,12 @@ class CdpWalletProvider(WalletProvider):
         }),
         ETHEREUM_SEPOLIA.key: frozenset({
             NetworkCapability.BALANCE,
+            NetworkCapability.TOKEN_DISCOVERY,
             NetworkCapability.HISTORY,
         }),
+        ARBITRUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
+        POLYGON_AMOY.key: frozenset({NetworkCapability.BALANCE}),
+        AVALANCHE_FUJI.key: frozenset({NetworkCapability.BALANCE}),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -206,8 +214,12 @@ class CdpWalletProvider(WalletProvider):
     async def get_token_balances(self, address: str, network: str) -> list[dict]:
         """Return bounded indexed token balances; all contracts remain explicitly identifiable."""
         configured_network = KNOWN_NETWORKS.get(network)
-        if configured_network is None or not configured_network.supports(NetworkCapability.BALANCE):
-            raise WalletProviderError("Token discovery is unavailable for this network.")
+        if (
+            configured_network is None
+            or not configured_network.supports(NetworkCapability.TOKEN_DISCOVERY)
+            or not self.supports(network, NetworkCapability.TOKEN_DISCOVERY)
+        ):
+            raise WalletProviderError("Automatic token discovery is unavailable for this network.")
         normalized_address = normalize_evm_address(address)
         credentials = await self.credentials()
         if credentials is None:

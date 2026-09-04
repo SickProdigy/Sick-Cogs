@@ -22,8 +22,11 @@ from ..core.models import (
     ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
 )
 from ..core.networks import (
+    AVALANCHE_FUJI,
+    ARBITRUM_SEPOLIA,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
+    POLYGON_AMOY,
     KNOWN_NETWORKS,
     NETWORKS,
     ChainFamily,
@@ -483,15 +486,25 @@ class FailClosedTransactionTests(unittest.TestCase):
 
 class NetworkArchitectureTests(unittest.TestCase):
     def test_base_capabilities_are_explicit_and_provider_declared(self):
-        self.assertEqual(set(NETWORKS), {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key})
         self.assertEqual(
-            set(KNOWN_NETWORKS), {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key}
+            set(NETWORKS),
+            {
+                BASE_SEPOLIA.key,
+                ETHEREUM_SEPOLIA.key,
+                ARBITRUM_SEPOLIA.key,
+                POLYGON_AMOY.key,
+                AVALANCHE_FUJI.key,
+            },
+        )
+        self.assertEqual(
+            set(KNOWN_NETWORKS), set(NETWORKS)
         )
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(
             ETHEREUM_SEPOLIA.capabilities.enabled(), (
                 NetworkCapability.BALANCE,
+                NetworkCapability.TOKEN_DISCOVERY,
                 NetworkCapability.HISTORY,
                 NetworkCapability.TRANSACTION_LOOKUP,
             )
@@ -525,7 +538,29 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertIs(
             WalletActivityCommands._activity_network("eth"), ETHEREUM_SEPOLIA
         )
+        self.assertIs(WalletActivityCommands._activity_network("arb"), ARBITRUM_SEPOLIA)
+        self.assertIs(WalletActivityCommands._activity_network("polygon"), POLYGON_AMOY)
+        self.assertIs(WalletActivityCommands._activity_network("avax"), AVALANCHE_FUJI)
         self.assertIsNone(WalletActivityCommands._activity_network("unknown"))
+
+    def test_additional_evm_testnets_remain_read_only(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        expected = {
+            ARBITRUM_SEPOLIA: (421614, "ETH"),
+            POLYGON_AMOY: (80002, "POL"),
+            AVALANCHE_FUJI: (43113, "AVAX"),
+        }
+        for network, (chain_id, symbol) in expected.items():
+            with self.subTest(network=network.key):
+                self.assertEqual(network.chain_id, chain_id)
+                self.assertEqual(network.native_symbol, symbol)
+                self.assertTrue(network.supports(NetworkCapability.BALANCE))
+                self.assertTrue(network.supports(NetworkCapability.TRANSACTION_LOOKUP))
+                self.assertFalse(network.supports(NetworkCapability.HISTORY))
+                self.assertFalse(network.supports(NetworkCapability.SEND))
+                self.assertFalse(network.supports(NetworkCapability.TOKEN_DISCOVERY))
+                self.assertTrue(provider.supports(network.key, NetworkCapability.BALANCE))
+                self.assertFalse(provider.supports(network.key, NetworkCapability.SEND))
 
     def test_activity_embed_uses_selected_network_explorer(self):
         address = _profile()["accounts"][0]["address"]
