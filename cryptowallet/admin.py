@@ -8,6 +8,12 @@ import discord
 from redbot.core import commands
 
 from .networks import BASE_SEPOLIA, NETWORKS
+from .usage import (
+    NODE_FREE_BILLING_UNITS,
+    NODE_SAFETY_TARGET,
+    WALLET_FREE_OPERATIONS,
+    WALLET_SAFETY_TARGET,
+)
 
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -62,14 +68,27 @@ class WalletAdminCommands:
                 if int(data.get("confirmation_next_check_at", 0) or 0) <= now:
                     due += 1
         paused = await self.config.provider_paused()
+        usage = await self.flush_provider_usage()
+        wallet_operations = int(usage.get("wallet_operations_estimated", 0) or 0)
+        node_units = int(usage.get("node_billing_units_estimated", 0) or 0)
         await ctx.send(
             "**CryptoWallet usage and processing**\n"
+            f"Accounting period: `{usage.get('period', 'unknown')} UTC`\n"
             f"Provider processing: `{'paused' if paused else 'active'}`\n"
             f"Pending confirmations: `{pending}` (`{due}` currently due)\n"
             "Confirmation limit: `60 checks/minute`\n"
             "First check: `20–30 seconds after submission`\n"
-            "Monthly CDP accounting: `not instrumented yet`\n"
-            "The CDP billing portal remains authoritative."
+            f"CDP requests: `{usage.get('cdp_reads', 0)} reads`, "
+            f"`{usage.get('cdp_writes', 0)} writes` "
+            f"(`{self.recent_cdp_request_count()}` in the last minute)\n"
+            f"Onchain Data reads: `{usage.get('onchain_data_reads', 0)}`\n"
+            f"Estimated wallet operations: `{wallet_operations} / {WALLET_SAFETY_TARGET}` "
+            f"safety target (`{WALLET_FREE_OPERATIONS}` published free allowance)\n"
+            f"Estimated CDP Node usage: `{node_units:,} / {NODE_SAFETY_TARGET:,} BU` "
+            f"safety target (`{NODE_FREE_BILLING_UNITS:,} BU` published free allowance)\n"
+            "Current Base Sepolia RPC fallbacks are public endpoints and add no estimated "
+            "CDP Node BU. Local figures are conservative estimates; the CDP billing "
+            "portal remains authoritative. No operation is stopped automatically."
         )
 
     @walletset.command(name="view")

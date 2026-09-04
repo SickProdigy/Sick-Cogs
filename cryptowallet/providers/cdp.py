@@ -56,8 +56,10 @@ class CdpWalletProvider(WalletProvider):
 
     name = "cdp"
 
-    def __init__(self, bot):
+    def __init__(self, bot, *, request_limiter=None, request_observer=None):
         self.bot = bot
+        self.request_limiter = request_limiter
+        self.request_observer = request_observer
 
     async def credentials(self) -> CdpCredentials | None:
         tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
@@ -129,14 +131,15 @@ class CdpWalletProvider(WalletProvider):
             ],
         )
 
-    @staticmethod
-    def _api_client(credentials: CdpCredentials) -> CdpApiClient:
+    def _api_client(self, credentials: CdpCredentials) -> CdpApiClient:
         return CdpApiClient(
             CdpApiCredentials(
                 api_key_id=credentials.api_key_id,
                 api_key_secret=credentials.api_key_secret,
                 wallet_secret=credentials.wallet_secret,
-            )
+            ),
+            request_limiter=self.request_limiter,
+            request_observer=self.request_observer,
         )
 
     async def _create_end_user(self, credentials: CdpCredentials, profile_id: str) -> dict:

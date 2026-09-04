@@ -16,6 +16,8 @@ INTENT_LIFETIME_SECONDS = 15 * 60
 HISTORY_PAGE_SIZE = 10
 WALLET_SUMMARY_COOLDOWN_SECONDS = 10
 WALLET_HISTORY_COOLDOWN_SECONDS = 15
+WALLET_PROVIDER_COOLDOWN_SECONDS = 10
+WALLET_RPC_COOLDOWN_SECONDS = 5
 HISTORY_NEXT_COOLDOWN_SECONDS = 3
 
 
@@ -338,6 +340,10 @@ class WalletCommands:
     @wallet.command(name="authorize", aliases=("auth",))
     async def wallet_authorize(self, ctx: commands.Context):
         """Authorize limited bot actions for your provisioned wallet."""
+        if not await self._wallet_read_allowed(
+            ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
@@ -396,6 +402,10 @@ class WalletCommands:
     @wallet.command(name="authorization", aliases=("authstatus",))
     async def wallet_authorization(self, ctx: commands.Context):
         """Show whether the bot currently has limited signing authorization."""
+        if not await self._wallet_read_allowed(
+            ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
@@ -423,6 +433,10 @@ class WalletCommands:
     @wallet.command(name="revoke", aliases=("deauthorize",))
     async def wallet_revoke(self, ctx: commands.Context):
         """Revoke limited signing authorization for your Base Sepolia wallet."""
+        if not await self._wallet_read_allowed(
+            ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
@@ -927,6 +941,10 @@ class WalletCommands:
     @wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
         """Prepare an unsigned Base Sepolia ETH transfer intent."""
+        if not await self._wallet_read_allowed(
+            ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
@@ -1002,6 +1020,10 @@ class WalletCommands:
             intent.status is IntentStatus.SUBMITTED
             and not await self.config.provider_paused()
         ):
+            if not await self._wallet_read_allowed(
+                ctx, "intent", WALLET_PROVIDER_COOLDOWN_SECONDS
+            ):
+                return
             try:
                 intent = await self._refresh_submitted_intent(ctx.author.id, intent.intent_id)
             except (RuntimeError, WalletProviderError) as exc:
@@ -1024,6 +1046,10 @@ class WalletCommands:
             int(lookup[2:], 16)
         except ValueError:
             await ctx.send("Enter a valid hexadecimal transaction hash.")
+            return
+        if not await self._wallet_read_allowed(
+            ctx, "rpc", WALLET_RPC_COOLDOWN_SECONDS
+        ):
             return
         try:
             transaction = await get_transaction(lookup)

@@ -14,11 +14,13 @@ from .pairing import CompanionPairingMixin
 from .providers import CdpWalletProvider
 from .provisioning import WalletProvisioningMixin
 from .sessions import ApprovalSessionMixin
+from .usage import ProviderUsageMixin
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
 class CryptoWallet(
+    ProviderUsageMixin,
     ConfirmationProcessorMixin,
     WalletCommands,
     WalletAdminCommands,
@@ -37,7 +39,12 @@ class CryptoWallet(
         self.pairing_lock = asyncio.Lock()
         self.wallet_read_cooldowns = {}
         self.initialize_provisioning()
-        self.wallet_provider = CdpWalletProvider(bot)
+        self.initialize_provider_usage()
+        self.wallet_provider = CdpWalletProvider(
+            bot,
+            request_limiter=self.limit_cdp_request,
+            request_observer=self.record_cdp_request,
+        )
         self.companion = CompanionServer(self)
         self.initialize_confirmation_processor()
 
@@ -60,6 +67,8 @@ class CryptoWallet(
 
     def cog_unload(self):
         self.confirmation_processor_task.cancel()
+        self.usage_flush_task.cancel()
+        self.bot.loop.create_task(self.flush_provider_usage())
         self.bot.loop.create_task(self.companion.stop())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):

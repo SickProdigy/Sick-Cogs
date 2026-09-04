@@ -129,10 +129,14 @@ class CdpApiClient:
         *,
         base_url: str = CDP_API_BASE_URL,
         session: aiohttp.ClientSession | None = None,
+        request_limiter=None,
+        request_observer=None,
     ):
         self.credentials = credentials
         self.base_url = base_url.rstrip("/")
         self.session = session
+        self.request_limiter = request_limiter
+        self.request_observer = request_observer
 
     def validate_key_material(self) -> None:
         """Parse both server-side signing keys without exposing their values."""
@@ -152,12 +156,14 @@ class CdpApiClient:
         allow_empty_response: bool = False,
     ) -> dict:
         method = method.upper()
+        if self.request_limiter is not None:
+            await self.request_limiter(method, path)
         request_body = body or {}
         headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
             "Authorization": f"Bearer {_api_jwt(self.credentials, method, path)}",
-            "User-Agent": "Sick-Cogs-CryptoWallet/0.14",
+            "User-Agent": "Sick-Cogs-CryptoWallet/0.19",
         }
         if wallet_auth:
             headers["X-Wallet-Auth"] = _wallet_jwt(
@@ -182,6 +188,22 @@ class CdpApiClient:
                 headers=headers,
                 json=request_body if body is not None else None,
             ) as response:
+                if self.request_observer is not None:
+                    try:
+                        retry_after = 0.0
+                        if response.status == 429:
+                            try:
+                                retry_after = min(
+                                    300.0,
+                                    float(response.headers.get("Retry-After", 1)),
+                                )
+                            except (TypeError, ValueError):
+                                retry_after = 1.0
+                        await self.request_observer(
+                            method, path, response.status, retry_after
+                        )
+                    except Exception:
+                        pass
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(64 * 1024):
                     raw.extend(chunk)
