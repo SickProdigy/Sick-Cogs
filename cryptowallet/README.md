@@ -35,7 +35,7 @@ The browser interface is not an enrollment requirement. It is an independent acc
 - authorizing limited bot actions for an automatically provisioned wallet
 - recovery and backup configuration
 - signer or key export where supported
-- provider migration
+- emergency signer backup without wallet or provider-account deletion
 - authentication-method management
 - reviewing and revoking application signers
 - granting restricted delegated authority
@@ -54,11 +54,11 @@ User runs a wallet or trading command
 → Bot reports the public transaction result
 ```
 
-The initial release requires explicit user authorization. Delegated execution will only be added after CDP policy enforcement, user-controlled revocation, and the complete exit path have been tested.
+Transfers require explicit Discord approval and an active, time-limited, account-scoped CDP delegation. Users can revoke that delegation independently without deleting their wallet or moving funds.
 
 ## Custody and identity
 
-The target is a standards-based EVM smart account controlled by a user-owned, exportable or replaceable signer. Coinbase Developer Platform (CDP) is the provisional wallet provider, but provider-specific behavior must remain behind an internal adapter.
+Each Discord user receives a distinct wallet profile and Base Sepolia smart account controlled by that user’s exportable signer EOA. A blockchain address cannot be deleted and may still receive funds, but deleting its provider identity or ejecting its signer could remove the supported way to operate it and strand those funds. CryptoWallet therefore exposes neither action. Coinbase Developer Platform (CDP) is the provisional wallet provider, but provider-specific behavior must remain behind an internal adapter.
 
 SickGaming maintains its own wallet-profile identifier. External identities are verified links rather than primary keys:
 
@@ -368,10 +368,13 @@ idempotency keys, and spend permissions disabled. The client uses Red's compatib
 version instead of installing Coinbase's Python SDK, whose dependency requirements conflict with
 Red-DiscordBot 3.5. It stores only the resulting CDP user ID and public smart-account address.
 
-Not implemented:
+Intentionally excluded:
 
-- wallet recovery or export
-- signer replacement and broader policy enforcement
+- wallet deletion, provider-account deletion, signer ejection, and automatic full-balance migration
+
+Remaining work includes:
+
+- broader high-risk policy/2FA enforcement
 - reconciliation of local usage estimates with an authoritative CDP billing-usage API, if Coinbase exposes one
 - mainnet support
 
@@ -384,7 +387,7 @@ cryptowallet/
 ├── commands/
 │   ├── __init__.py
 │   ├── user.py         # Small user-command composition layer
-│   ├── account.py      # Recovery and account-exit commands
+│   ├── account.py      # Protected signer-backup command
 │   ├── core.py         # Wallet summary, balance, settings, and cooldowns
 │   ├── authorization.py # Signing authorization lifecycle
 │   ├── transactions.py # Send intents, approval, and intent status
@@ -437,16 +440,12 @@ Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci && npm run buil
 `cryptowallet/web/` whenever the pinned frontend dependencies or `src/cdp-wallet.js` change.
 Deploy the generated `cdp-wallet.js` with the other public assets. Never deploy `node_modules/`.
 
-1. Deploy the rebuilt authorization assets and exported `jwks.json`, then test the Base Sepolia authorization path.
-2. Add bot-side authoritative delegation status and independent revocation.
-3. Add one-time handoff consumption if the static site gains trusted server-side state; until then,
-   rely on the three-minute expiry and do not describe the link as single-use.
-4. Convert verified identity into recovery and account-security operations.
-5. Connect unsigned intents to policy-limited delegated signing and explicit Discord approval.
-6. Verify key export, signer replacement, recovery, and migration away from CDP.
-7. Test expired/replayed links, compromised Discord, provider outages, lost
-   factors, linked identities, signing-key failure, and mismatched CDP users/addresses.
-8. Complete security, threat-model, and jurisdiction-specific legal review before mainnet.
+1. Finish and test fail-closed handling for CDP/RPC outages, uncertain submissions, and bot restarts.
+2. Define compromised-Discord behavior and optional higher-risk policy/2FA hooks.
+3. Test malformed, expired, replayed, wrong-purpose, wrong-user, wrong-project, wrong-profile, and wrong-account handoffs.
+4. Add server-enforced one-time handoff consumption only with a complete private relay deployment.
+5. Complete the Base Sepolia threat model, adversarial tests, and combined acceptance test.
+6. Complete security and jurisdiction-specific legal review before considering any mainnet path.
 
 ## Security boundary
 
@@ -457,6 +456,8 @@ Until those milestones are complete:
 - Never expose CDP credentials or authorization signing keys to the browser.
 - Never grant the bot unrestricted withdrawal authority.
 - Do not pool user funds.
+- Do not expose wallet deletion, provider-account deletion, signer ejection, or automatic full-balance migration commands.
+- Keep each user’s wallet profile and public deposit address intact even if authorization is revoked or the user stops using the bot.
 - Do not treat Discord commands or OAuth identity verification as blockchain signatures.
 - Keep trading logic separate from wallet ownership and signing logic.
 - Do not enable Base mainnet, Ethereum mainnet, or Solana.
