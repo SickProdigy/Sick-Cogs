@@ -29,6 +29,7 @@ from .base_rpc import (
     get_erc20_asset,
     get_native_balance as get_rpc_native_balance,
     get_solana_native_balance,
+    get_solana_transaction_history,
     get_user_operation_receipt,
 )
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
@@ -88,7 +89,7 @@ class CdpWalletProvider(WalletProvider):
         ARBITRUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
         POLYGON_AMOY.key: frozenset({NetworkCapability.BALANCE}),
         AVALANCHE_FUJI.key: frozenset({NetworkCapability.BALANCE}),
-        SOLANA_DEVNET.key: frozenset({NetworkCapability.BALANCE}),
+        SOLANA_DEVNET.key: frozenset({NetworkCapability.BALANCE, NetworkCapability.HISTORY}),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -333,7 +334,17 @@ class CdpWalletProvider(WalletProvider):
         page_token: str | None = None,
         limit: int = 10,
     ) -> dict:
-        """Return indexed public activity for one capability-approved EVM network."""
+        """Return bounded public activity for one capability-approved network."""
+        if network == SOLANA_DEVNET.key:
+            if page_token is not None:
+                raise WalletProviderError("Solana Devnet history does not support pagination.")
+            try:
+                normalized_address = normalize_solana_address(address)
+                return await get_solana_transaction_history(normalized_address, limit)
+            except (BaseRpcError, ValueError) as exc:
+                raise WalletProviderError(
+                    "Solana Devnet activity is temporarily unavailable."
+                ) from exc
         configured_network = KNOWN_NETWORKS.get(network)
         if (
             configured_network is None

@@ -5,6 +5,7 @@ from .networks import ChainFamily, Network
 
 EVM_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 SOLANA_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}")
+SOLANA_SIGNATURE_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{64,88}")
 BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ETH_AMOUNT_RE = re.compile(r"^(?P<whole>[0-9]+)(?:\.(?P<fraction>[0-9]+))?$")
 WEI_PER_ETH = 10**18
@@ -39,6 +40,20 @@ def normalize_solana_address(value: str) -> str:
     if len(b"\x00" * leading_zeroes + decoded) != 32:
         raise ValueError("Solana addresses must decode to a 32-byte public key.")
     return address
+
+def normalize_solana_signature(value: str) -> str:
+    """Validate base58 text that decodes to one 64-byte Ed25519 signature."""
+    signature = value.strip()
+    if not SOLANA_SIGNATURE_RE.fullmatch(signature):
+        raise ValueError("Solana transaction signatures must be 64 to 88 base58 characters.")
+    number = 0
+    for character in signature:
+        number = number * 58 + BASE58_ALPHABET.index(character)
+    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    leading_zeroes = len(signature) - len(signature.lstrip("1"))
+    if len(b"\x00" * leading_zeroes + decoded) != 64:
+        raise ValueError("Solana transaction signatures must decode to 64 bytes.")
+    return signature
 
 
 def normalize_address_for_network(value: str, network: Network) -> str:
