@@ -235,10 +235,7 @@ is inactive; it does not delete the wallet or move funds. When authorization is 
 Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
 user deliberately completes that browser approval.
 
-`wallet recovery` DMs a three-minute, purpose-bound link for enrolling and verifying an independent
-recovery email directly with CDP. The browser validates the expected CDP user and smart-account
-address before requesting the email OTP. Neither the email nor OTP is sent to Discord, the bot, or
-the optional companion relay. This enrollment does not export a key or move funds.
+`wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
 
 `wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
 Because CDP sponsors Base Sepolia smart-account user operations, the displayed user gas fee is

@@ -12,7 +12,7 @@ class WalletAccountCommands:
 
     @WalletCoreCommands.wallet.command(name="recovery", aliases=("backup",))
     async def wallet_recovery(self, ctx: commands.Context):
-        """DM a protected link for enrolling an independent recovery email."""
+        """DM a protected link for backing up the smart-account wallet signer key."""
         if not await self._wallet_read_allowed(
             ctx, "recovery", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):
@@ -37,15 +37,16 @@ class WalletAccountCommands:
                 ctx.author.id, profile
             )
             link = f"{approval_base_url}/recovery.html#handoff={quote(token, safe='')}"
-            if len(link) > 2000:
+            link_message = f"🛟 [Open protected recovery page]({link})"
+            if len(link_message) > 2000:
                 raise RuntimeError(
                     "The protected wallet link is too long for Discord delivery."
                 )
             embed = discord.Embed(
-                title="Set Up Wallet Recovery",
+                title="Back Up Your Wallet Signer",
                 description=(
-                    "Link and verify an email directly with Coinbase as an independent "
-                    "way to access this wallet."
+                    "Securely export the wallet signer private key "
+                    "without exposing it to Discord or the bot."
                 ),
                 color=discord.Color.blurple(),
             )
@@ -56,11 +57,11 @@ class WalletAccountCommands:
                 name="Wallet", value=f"`{account['address']}`", inline=False
             )
             embed.add_field(
-                name="Privacy",
-                value="Your email and verification code are never sent to Discord or the bot.",
+                name="Private-key safety",
+                value="Coinbase displays the key only inside its isolated secure export frame.",
                 inline=False,
             )
-            await ctx.author.send(content=link, embed=embed)
+            await ctx.author.send(content=link_message, embed=embed)
         except discord.HTTPException:
             await ctx.send(
                 "Discord could not deliver the protected wallet link. "

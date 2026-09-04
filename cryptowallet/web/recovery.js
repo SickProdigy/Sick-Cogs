@@ -2,13 +2,12 @@
 
 const statusElement = document.querySelector("#recovery-status");
 const detailsElement = document.querySelector("#recovery-details");
-const emailForm = document.querySelector("#recovery-email-form");
-const emailInput = document.querySelector("#recovery-email");
-const codeForm = document.querySelector("#recovery-code-form");
-const codeInput = document.querySelector("#recovery-code");
+const controlsElement = document.querySelector("#recovery-controls");
+const confirmInput = document.querySelector("#recovery-confirm");
+const exportButton = document.querySelector("#prepare-export");
+const exportContainer = document.querySelector("#key-export-container");
 let handoffToken = null;
 let recoverySession = null;
-let flowId = null;
 
 function addDetail(label, value) {
   const term = document.createElement("dt");
@@ -41,58 +40,54 @@ function decodeRecoveryHandoff() {
   };
 }
 
-emailForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = emailForm.querySelector("button");
-  button.disabled = true;
-  statusElement.textContent = "Authenticating your wallet and requesting a verification code…";
+confirmInput.addEventListener("change", () => {
+  exportButton.disabled = !confirmInput.checked;
+});
+
+exportButton.addEventListener("click", async () => {
+  exportButton.disabled = true;
+  confirmInput.disabled = true;
+  statusElement.textContent = "Verifying your wallet signer with Coinbase…";
   try {
-    const { beginRecoveryEnrollment } = await import("./cdp-wallet.js");
-    const result = await beginRecoveryEnrollment(
+    const { prepareRecoveryExport } = await import("./cdp-wallet.js");
+    const result = await prepareRecoveryExport(
       recoverySession.projectId,
       recoverySession.userId,
       recoverySession.address,
       handoffToken,
-      emailInput.value.trim()
+      exportContainer
     );
     handoffToken = null;
-    flowId = result.flowId;
-    emailForm.hidden = true;
-    codeForm.hidden = false;
-    codeInput.focus();
-    statusElement.textContent = "Coinbase sent a verification code. Enter it below.";
+    addDetail("Wallet signer address", result.ownerAddress);
+    exportButton.hidden = true;
+    statusElement.textContent = "Verified. Use the secure Coinbase control below to copy the wallet signer key.";
   } catch (error) {
-    statusElement.textContent = error instanceof Error ? error.message : "Recovery enrollment could not start.";
-    button.disabled = false;
+    statusElement.textContent = error instanceof Error ? error.message : "Secure wallet export could not start.";
+    confirmInput.disabled = false;
+    exportButton.disabled = !confirmInput.checked;
   }
 });
 
-codeForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const button = codeForm.querySelector("button");
-  button.disabled = true;
-  statusElement.textContent = "Verifying the recovery email…";
-  try {
-    const { completeRecoveryEnrollment } = await import("./cdp-wallet.js");
-    await completeRecoveryEnrollment(flowId, codeInput.value.trim(), recoverySession.userId);
-    codeInput.value = "";
-    flowId = null;
-    codeForm.hidden = true;
-    statusElement.textContent = "Recovery email verified. You can now use it as an independent sign-in method for this Coinbase wallet.";
-  } catch (error) {
-    statusElement.textContent = error instanceof Error ? error.message : "The recovery code could not be verified.";
-    button.disabled = false;
+window.addEventListener("sickwallet-export-status", (event) => {
+  const { status, message } = event.detail || {};
+  if (status === "success") {
+    statusElement.textContent = "Wallet signer key copied. Store it securely and clear your clipboard when finished.";
+  } else if (status === "expired") {
+    statusElement.textContent = "The secure export session expired. Request a new link from Discord.";
+  } else if (status === "error") {
+    statusElement.textContent = message || "Coinbase could not export this wallet signer key.";
   }
 });
 
 Promise.resolve().then(decodeRecoveryHandoff)
   .then((session) => {
     recoverySession = session;
-    statusElement.textContent = "Protected recovery handoff loaded.";
-    addDetail("Wallet", session.address);
+    statusElement.textContent = "Protected wallet signer handoff loaded.";
+    addDetail("Smart account", session.address);
+    addDetail("Network", "Base Sepolia testnet");
     addDetail("Expires", new Date(session.expiresAt * 1000).toLocaleString());
     detailsElement.hidden = false;
-    emailForm.hidden = false;
+    controlsElement.hidden = false;
   })
   .catch((error) => {
     statusElement.textContent = error instanceof Error ? error.message : "Wallet recovery is unavailable.";

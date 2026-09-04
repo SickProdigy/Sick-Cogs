@@ -70,7 +70,10 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         sent = user.send.await_args.kwargs
         self.assertEqual(expires_at, 1_800_000_000)
-        self.assertIn(f"#handoff={token}", sent["content"])
+        self.assertEqual(
+            sent["content"],
+            f"🔐 [Open protected authorization page](https://wallet.example.test/cryptowallet/session.html#handoff={token})",
+        )
         self.assertNotIn("view", sent)
 
     async def test_recovery_handoff_is_sent_as_message_content(self):
@@ -90,7 +93,10 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         await WalletAccountCommands.wallet_recovery.callback(cog, ctx)
         sent = author.send.await_args.kwargs
-        self.assertIn(f"#handoff={token}", sent["content"])
+        self.assertEqual(
+            sent["content"],
+            f"🛟 [Open protected recovery page](https://wallet.example.test/cryptowallet/recovery.html#handoff={token})",
+        )
         self.assertNotIn("view", sent)
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
 
