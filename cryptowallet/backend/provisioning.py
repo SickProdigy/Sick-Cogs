@@ -22,15 +22,22 @@ class WalletProvisioningMixin:
     async def get_or_create_wallet_profile(self, user) -> dict:
         existing = await self.config.user(user).profile()
         if existing is not None:
-            return existing
+            reconciled = await self.wallet_provider.ensure_network_accounts(existing)
+            if reconciled != existing:
+                await self.config.user(user).profile.set(reconciled)
+            return reconciled
 
         lock = self.provisioning_locks.setdefault(user.id, asyncio.Lock())
         async with lock:
             existing = await self.config.user(user).profile()
             if existing is not None:
-                return existing
+                reconciled = await self.wallet_provider.ensure_network_accounts(existing)
+                if reconciled != existing:
+                    await self.config.user(user).profile.set(reconciled)
+                return reconciled
             profile_id = await self.wallet_profile_id(user.id)
             profile = await self.wallet_provider.create_wallet(profile_id, user.id)
             stored = profile.to_dict()
+            stored = await self.wallet_provider.ensure_network_accounts(stored)
             await self.config.user(user).profile.set(stored)
             return stored

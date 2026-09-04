@@ -17,6 +17,7 @@ EVM_RPC_URLS = {
     "avalanche-fuji": ("https://api.avax-test.network/ext/bc/C/rpc",),
 }
 BASE_SEPOLIA_RPC_URLS = EVM_RPC_URLS["base-sepolia"]
+SOLANA_DEVNET_RPC_URLS = ("https://api.devnet.solana.com",)
 ENTRY_POINT_V06 = "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"
 USER_OPERATION_EVENT_TOPIC = (
     "0x49628fd1471006c1482da88028e9ce4dbb080b815c9b0344d39e5a8e6ec1419f"
@@ -27,6 +28,20 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 
 class BaseRpcError(RuntimeError):
     pass
+
+
+async def get_solana_native_balance(address: str) -> int:
+    """Return a Solana devnet balance in lamports."""
+    result = await _rpc_with_urls(
+        SOLANA_DEVNET_RPC_URLS, "getBalance", [address, {"commitment": "confirmed"}], "Solana Devnet"
+    )
+    try:
+        value = result["value"]
+        if isinstance(value, bool) or int(value) < 0:
+            raise ValueError("Invalid lamport balance")
+        return int(value)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BaseRpcError("Solana Devnet returned an invalid balance.") from exc
 
 
 async def get_native_balance(address: str, network: str) -> int:

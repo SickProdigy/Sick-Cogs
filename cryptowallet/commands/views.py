@@ -22,7 +22,7 @@ class WalletHistoryView(discord.ui.View):
             discord.ui.Button(
                 label="View complete history",
                 style=discord.ButtonStyle.link,
-                url=f"{network.explorer_url}/address/{address}",
+                url=network.explorer_address_url(address),
             )
         )
 

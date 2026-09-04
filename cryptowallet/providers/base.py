@@ -27,6 +27,10 @@ class WalletProvider(ABC):
     async def get_profile(self, profile_id: str) -> WalletProfile:
         """Return public wallet profile information."""
 
+    async def ensure_network_accounts(self, profile: dict) -> dict:
+        """Provision newly supported account families without replacing existing accounts."""
+        return profile
+
     @abstractmethod
     async def get_native_balance(self, address: str, network: str) -> int:
         """Return the native network balance in its smallest unit."""

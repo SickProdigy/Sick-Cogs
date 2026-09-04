@@ -78,6 +78,14 @@ class Network:
     def reference_label(self) -> str:
         return "chain ID" if self.family is ChainFamily.EVM else "cluster"
 
+    def explorer_address_url(self, address: str) -> str:
+        url = f"{self.explorer_url}/address/{address}"
+        return f"{url}?cluster={self.cluster}" if self.family is ChainFamily.SOLANA else url
+
+    def explorer_transaction_url(self, transaction_id: str) -> str:
+        url = f"{self.explorer_url}/tx/{transaction_id}"
+        return f"{url}?cluster={self.cluster}" if self.family is ChainFamily.SOLANA else url
+
     def supports(self, capability: NetworkCapability) -> bool:
         return self.enabled and self.capabilities.supports(capability)
 
@@ -144,6 +152,19 @@ AVALANCHE_FUJI = Network(
     capabilities=NetworkCapabilities(balance=True, transaction_lookup=True),
 )
 
+SOLANA_DEVNET = Network(
+    key="solana-devnet",
+    name="Solana Devnet",
+    family=ChainFamily.SOLANA,
+    cluster="devnet",
+    native_symbol="SOL",
+    native_decimals=9,
+    explorer_url="https://explorer.solana.com",
+    testnet=True,
+    enabled=True,
+    capabilities=NetworkCapabilities(balance=True),
+)
+
 ETHEREUM_SEPOLIA = Network(
     key="ethereum-sepolia",
     name="Ethereum Sepolia",
@@ -171,11 +192,12 @@ KNOWN_NETWORKS = {
         ARBITRUM_SEPOLIA,
         POLYGON_AMOY,
         AVALANCHE_FUJI,
+        SOLANA_DEVNET,
     )
 }
 
 # Only reviewed networks belong in NETWORKS. Ethereum Sepolia is read-only, and
-# Solana devnet remains undefined until its milestone satisfies issue #39.
+# Solana devnet begins with independently reviewed read-only balance support.
 NETWORKS = {
     key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
 }

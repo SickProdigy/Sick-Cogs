@@ -5,6 +5,7 @@ from typing import Any
 
 class AccountType(str, Enum):
     EOA = "eoa"
+    SOLANA_ACCOUNT = "solana_account"
     SMART_ACCOUNT = "smart_account"
 
 

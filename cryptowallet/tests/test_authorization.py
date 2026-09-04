@@ -27,6 +27,7 @@ from ..core.networks import (
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
+    SOLANA_DEVNET,
     KNOWN_NETWORKS,
     NETWORKS,
     ChainFamily,
@@ -37,6 +38,7 @@ from ..core.networks import (
 from ..core.validation import (
     format_atomic_amount,
     normalize_address_for_network,
+    normalize_solana_address,
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
@@ -494,6 +496,7 @@ class NetworkArchitectureTests(unittest.TestCase):
                 ARBITRUM_SEPOLIA.key,
                 POLYGON_AMOY.key,
                 AVALANCHE_FUJI.key,
+                SOLANA_DEVNET.key,
             },
         )
         self.assertEqual(
@@ -605,6 +608,45 @@ class NetworkArchitectureTests(unittest.TestCase):
             )
         self.assertEqual(parse_native_amount("1.25", solana), 1_250_000_000)
         self.assertEqual(format_atomic_amount(1_250_000_000, solana), "1.25")
+
+    def test_solana_devnet_is_read_only_and_uses_cluster_links(self):
+        address = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        provider = CdpWalletProvider(SimpleNamespace())
+        self.assertEqual(normalize_solana_address(address), address)
+        self.assertIs(SOLANA_DEVNET.family, ChainFamily.SOLANA)
+        self.assertEqual(SOLANA_DEVNET.reference, "devnet")
+        self.assertEqual(SOLANA_DEVNET.native_decimals, 9)
+        self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.BALANCE))
+        self.assertFalse(SOLANA_DEVNET.supports(NetworkCapability.SEND))
+        self.assertFalse(SOLANA_DEVNET.supports(NetworkCapability.HISTORY))
+        self.assertTrue(provider.supports(SOLANA_DEVNET.key, NetworkCapability.BALANCE))
+        self.assertFalse(provider.supports(SOLANA_DEVNET.key, NetworkCapability.SEND))
+        self.assertEqual(
+            SOLANA_DEVNET.explorer_address_url(address),
+            f"https://explorer.solana.com/address/{address}?cluster=devnet",
+        )
+        with self.assertRaises(ValueError):
+            normalize_solana_address("0OIl" * 8)
+
+    def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
+        evm_address = _profile()["accounts"][0]["address"]
+        solana_address = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        profile = CdpWalletProvider._profile_from_end_user(
+            {
+                "userId": "profile-7",
+                "evmSmartAccountObjects": [{"address": evm_address}],
+                "solanaAccountObjects": [{"address": solana_address}],
+            },
+            "profile-7",
+            7,
+        ).to_dict()
+        self.assertEqual(
+            [(item["network"], item["address"]) for item in profile["accounts"]],
+            [
+                (BASE_SEPOLIA.key, evm_address),
+                (SOLANA_DEVNET.key, solana_address),
+            ],
+        )
 
     def test_intent_reads_legacy_wei_and_writes_neutral_atomic_amount(self):
         legacy = {
