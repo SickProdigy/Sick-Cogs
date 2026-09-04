@@ -36,6 +36,7 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
+from ..providers.base_rpc import _decode_abi_text
 
 
 class _Value:
@@ -550,6 +551,46 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertEqual(stored["value_atomic"], 7)
         self.assertEqual(stored["estimated_fee_atomic"], 3)
         self.assertEqual(stored["value_wei"], 7)
+
+
+class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
+    def test_erc20_text_decoder_accepts_dynamic_and_bytes32_metadata(self):
+        text = b"SGST"
+        dynamic = (32).to_bytes(32, "big") + len(text).to_bytes(32, "big") + text.ljust(32, b"\x00")
+        self.assertEqual(_decode_abi_text("0x" + dynamic.hex()), "SGST")
+        self.assertEqual(_decode_abi_text("0x" + text.ljust(32, b"\x00").hex()), "SGST")
+
+    async def test_token_discovery_excludes_native_and_preserves_contract(self):
+        address = _profile()["accounts"][0]["address"]
+        token_contract = "0x1111111111111111111111111111111111111111"
+        client = SimpleNamespace(
+            list_token_balances=AsyncMock(return_value={
+                "balances": [
+                    {
+                        "token": {
+                            "contractAddress": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                            "symbol": "ETH",
+                        },
+                        "amount": {"amount": "9", "decimals": 18},
+                    },
+                    {
+                        "token": {"contractAddress": token_contract, "symbol": "TEST"},
+                        "amount": {"amount": "1250000", "decimals": 6},
+                    },
+                ]
+            })
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(return_value=object())
+        provider._api_client = lambda credentials: client
+        assets = await provider.get_token_balances(address, ETHEREUM_SEPOLIA.key)
+        self.assertEqual(assets, [{
+            "symbol": "TEST",
+            "contract_address": token_contract,
+            "amount_atomic": 1_250_000,
+            "decimals": 6,
+        }])
+        self.assertEqual(format_atomic_amount(1_250_000, ETHEREUM_SEPOLIA, decimals=6), "1.25")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from ..core.networks import (
     NetworkCapability,
 )
 from ..providers import WalletProviderError
-from ..core.validation import format_wei_as_eth
+from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
 
 
@@ -69,31 +69,82 @@ class WalletCoreCommands:
     async def _wallet_embed(
         self, ctx: commands.Context, profile: dict, user=None, network=None
     ) -> discord.Embed:
-        network = network or NETWORKS.get(
-            await self.config.user(user or ctx.author).selected_network(), BASE_SEPOLIA
-        )
+        target = user or ctx.author
+        display_name = discord.utils.escape_markdown(target.display_name)
         embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
-        embed.add_field(name="Network", value=f"{network.name} (testnet)", inline=False)
-        display_name = discord.utils.escape_markdown((user or ctx.author).display_name)
-        embed.description = f"{display_name}’s public wallet and balance."
-        account = self._account_for_network(profile, network.key)
-        if account is not None:
-            address = str(account.get("address") or "Unavailable")
-            embed.add_field(
-                name="Wallet Address",
-                value=f"[{address}]({network.explorer_url}/address/{address})",
-                inline=False,
-            )
-        if account is not None and network.supports(NetworkCapability.BALANCE):
-            try:
-                balance_atomic = await self.wallet_provider.get_native_balance(
-                    str(account.get("address") or ""), network.key
-                )
-                balance = f"{format_wei_as_eth(balance_atomic)} {network.native_symbol}"
-            except (ValueError, WalletProviderError):
-                balance = "Temporarily unavailable"
-            embed.add_field(name="Balance", value=balance, inline=False)
-        embed.set_footer(text="Prototype only — do not use with real funds")
+        embed.description = f"{display_name}’s public testnet wallet portfolio."
+        registry = await self.config.token_registry()
+        networks = [network] if network is not None else [
+            item for item in NETWORKS.values() if item.testnet
+        ]
+        for item in networks:
+            account = self._account_for_network(profile, item.key)
+            if account is None:
+                continue
+            address = str(account.get("address") or "")
+            explorer_address = f"{item.explorer_url}/address/{address}"
+            lines = [f"Wallet: [{address}]({explorer_address})"]
+            if item.supports(NetworkCapability.BALANCE):
+                try:
+                    native_balance = await self.wallet_provider.get_native_balance(
+                        address, item.key
+                    )
+                    lines.append(
+                        f"{item.native_symbol}: **{format_atomic_amount(native_balance, item)}**"
+                    )
+                except (ValueError, WalletProviderError):
+                    lines.append(f"{item.native_symbol}: Temporarily unavailable")
+                try:
+                    tokens = await self.wallet_provider.get_token_balances(address, item.key)
+                except (ValueError, WalletProviderError):
+                    tokens = None
+                discovery_unavailable = tokens is None
+                merged = {
+                    str(token["contract_address"]).lower(): dict(token, status="indexed")
+                    for token in (tokens or [])
+                }
+                for contract, registered in (registry.get(item.key) or {}).items():
+                    status = str(registered.get("status") or "community")
+                    if status not in {"community", "recognized"}:
+                        continue
+                    try:
+                        asset = await self.wallet_provider.get_registered_token_asset(
+                            address, item.key, contract
+                        )
+                    except WalletProviderError:
+                        continue
+                    merged[contract.lower()] = {
+                        **asset,
+                        "symbol": str(registered.get("symbol") or "TOKEN"),
+                        "decimals": int(registered.get("decimals", 0)),
+                        "status": status,
+                    }
+                tokens = list(merged.values())
+                if tokens:
+                    lines.append("Tokens (contract shown for safety):")
+                    for token in tokens[:6]:
+                        amount = format_atomic_amount(
+                            int(token["amount_atomic"]),
+                            item,
+                            decimals=int(token["decimals"]),
+                        )
+                        contract = str(token["contract_address"])
+                        short_contract = f"{contract[:8]}…{contract[-6:]}"
+                        marker = " ✅" if token.get("status") == "recognized" else ""
+                        lines.append(
+                            f"• {token['symbol']}{marker}: **{amount}** "
+                            f"([{short_contract}]({item.explorer_url}/token/{contract}))"
+                        )
+                    if len(tokens) > 6:
+                        lines.append(f"• {len(tokens) - 6} more indexed token(s)")
+                elif discovery_unavailable:
+                    lines.append("Automatic token discovery: Temporarily unavailable")
+            embed.add_field(name=item.name, value="\n".join(lines)[:1024], inline=False)
+        if not embed.fields:
+            embed.description += " No enabled testnet accounts are available."
+        embed.set_footer(
+            text="Testnet assets only · Token names may be spoofed; verify contract addresses"
+        )
         return embed
 
     @commands.group(
@@ -125,8 +176,8 @@ class WalletCoreCommands:
         await ctx.send(embed=await self._wallet_embed(ctx, profile, target))
 
     @wallet.command(name="balance", aliases=("funds",))
-    async def wallet_balance(self, ctx: commands.Context):
-        """Show your selected testnet address and native balance."""
+    async def wallet_balance(self, ctx: commands.Context, network_key: str = None):
+        """Show all testnet assets or details for one enabled testnet."""
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -134,7 +185,139 @@ class WalletCoreCommands:
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        await ctx.send(embed=await self._wallet_embed(ctx, profile))
+        network = None
+        if network_key is not None:
+            network = NETWORKS.get(network_key.strip().lower())
+            if network is None or not network.testnet:
+                await ctx.send(
+                    f"That testnet is unavailable. Use `{ctx.clean_prefix}wallet networks` "
+                    "to see enabled networks."
+                )
+                return
+        await ctx.send(embed=await self._wallet_embed(ctx, profile, network=network))
+
+    @wallet.command(name="mode", aliases=("environment",))
+    async def wallet_mode(self, ctx: commands.Context, environment: str = None):
+        """Show or select the wallet environment; live chains remain disabled."""
+        user_config = self.config.user(ctx.author)
+        current = await user_config.selected_environment()
+        if environment is None:
+            await ctx.send(f"Wallet environment: **{current}**")
+            return
+        requested = environment.strip().lower()
+        if requested in {"live", "mainnet"}:
+            await ctx.send(
+                "Live wallet networks are not enabled in this CryptoWallet prototype yet. This restriction is enforced by the cog, not CDP. "
+                "Continue using **testnet** mode until mainnet support is separately reviewed and enabled."
+            )
+            return
+        if requested not in {"testnet", "test"}:
+            await ctx.send("Choose `testnet` or `live`. Live chains are not available yet.")
+            return
+        await user_config.selected_environment.set("testnet")
+        await ctx.send("Wallet environment set to **testnet**.")
+
+    @wallet.group(name="token", aliases=("tokens",), invoke_without_command=True)
+    async def wallet_token(self, ctx: commands.Context):
+        """Add or list tokens shared by this bot installation."""
+        await ctx.invoke(self.wallet_token_list)
+
+    @wallet_token.command(name="add")
+    async def wallet_token_add(
+        self, ctx: commands.Context, network_key: str, contract_address: str
+    ):
+        """Validate and add an ERC-20 token for every wallet user."""
+        if not await self._wallet_read_allowed(ctx, "token_submission", 30):
+            return
+        network = NETWORKS.get(network_key.strip().lower())
+        if (
+            network is None
+            or network.family is not ChainFamily.EVM
+            or not network.testnet
+            or not network.supports(NetworkCapability.BALANCE)
+        ):
+            await ctx.send("Choose an enabled EVM testnet from `!wallet networks`.")
+            return
+        try:
+            from ..core.validation import normalize_evm_address
+            contract = normalize_evm_address(contract_address).lower()
+        except ValueError:
+            await ctx.send("Enter a valid EVM token contract address.")
+            return
+        registry = await self.config.token_registry()
+        existing = (registry.get(network.key) or {}).get(contract)
+        if existing is not None:
+            state = str(existing.get("status") or "community")
+            message = (
+                "That token contract is banned from this bot installation."
+                if state == "banned"
+                else f"That token is already registered as **{state}**."
+            )
+            await ctx.send(message)
+            return
+        active = sum(
+            entry.get("status") in {"community", "recognized"}
+            for entry in (registry.get(network.key) or {}).values()
+        )
+        if active >= 25:
+            await ctx.send("This network already has the maximum 25 visible shared tokens.")
+            return
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        account = self._account_for_network(profile, network.key)
+        if account is None:
+            await ctx.send(f"Your wallet has no account compatible with {network.name}.")
+            return
+        try:
+            asset = await self.wallet_provider.get_registered_token_asset(
+                str(account.get("address") or ""), network.key, contract, include_metadata=True
+            )
+        except WalletProviderError as exc:
+            await ctx.send(f"Token validation failed: {exc}")
+            return
+        entry = {
+            "contract_address": contract,
+            "symbol": str(asset["symbol"]),
+            "name": str(asset["name"]),
+            "decimals": int(asset["decimals"]),
+            "status": "community",
+            "submitted_by": ctx.author.id,
+            "submitted_at": int(time.time()),
+        }
+        async with self.config.token_registry() as stored:
+            entries = stored.setdefault(network.key, {})
+            if contract in entries:
+                await ctx.send("That token was registered while your request was processing.")
+                return
+            entries[contract] = entry
+        await ctx.send(
+            f"Added **{entry['symbol']}** as a community token on {network.name}. "
+            "It can now appear in every user’s portfolio. Verify the contract address; "
+            "token names and symbols can be spoofed."
+        )
+
+    @wallet_token.command(name="list", aliases=("tokens",))
+    async def wallet_token_list(self, ctx: commands.Context):
+        """List visible shared tokens."""
+        registry = await self.config.token_registry()
+        lines = []
+        for network_key, entries in registry.items():
+            network = NETWORKS.get(network_key)
+            if network is None:
+                continue
+            for contract, entry in entries.items():
+                state = str(entry.get("status") or "community")
+                if state not in {"community", "recognized"}:
+                    continue
+                marker = "✅ recognized" if state == "recognized" else "community"
+                lines.append(
+                    f"- **{entry.get('symbol', 'TOKEN')}** · {network.name} · {marker}\n  `{contract}`"
+                )
+        await ctx.send(
+            "**Shared wallet tokens**\n" + "\n".join(lines)
+            if lines else "No shared tokens are registered yet."
+        )
 
     @wallet.command(name="notifications", aliases=("notify",))
     async def wallet_notifications(
@@ -234,13 +417,13 @@ class WalletCoreCommands:
 
     @wallet.command(name="network")
     async def wallet_network(self, ctx: commands.Context, network_key: str = None):
-        """Show or select the network used by wallet summary and balance commands."""
+        """Show or select the preferred network for network-specific commands."""
         user_config = self.config.user(ctx.author)
         current_key = await user_config.selected_network()
         if network_key is None:
             current = NETWORKS.get(current_key, BASE_SEPOLIA)
             await ctx.send(
-                f"Your wallet display network is **{current.name}** (`{current.key}`). "
+                f"Your preferred wallet network is **{current.name}** (`{current.key}`). "
                 f"Use `{ctx.clean_prefix}wallet networks` to see available networks."
             )
             return
@@ -253,7 +436,7 @@ class WalletCoreCommands:
             return
         await user_config.selected_network.set(network.key)
         await ctx.send(
-            f"Wallet summary and balance commands now use **{network.name}**. "
+            f"Network-specific wallet commands now use **{network.name}**. "
             "Transaction sending remains unavailable unless that network separately supports it."
         )
 
