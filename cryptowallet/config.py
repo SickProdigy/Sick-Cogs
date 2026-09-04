@@ -25,6 +25,7 @@ def create_config(cog) -> Config:
         paired_at=0,
         companion_nonces={},
         provider_paused=False,
+        provider_usage={},
     )
     config.register_user(
         profile=None,

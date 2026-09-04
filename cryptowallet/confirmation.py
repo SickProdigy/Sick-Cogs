@@ -140,7 +140,11 @@ class ConfirmationProcessorMixin:
                 return
             attempts = int(stored.get("confirmation_attempts", 0) or 0) + 1
             stored["confirmation_attempts"] = attempts
-            delay = 120 + secrets.randbelow(31) if failed else self._confirmation_backoff(attempts)
+            delay = (
+                120 + secrets.randbelow(31)
+                if failed
+                else self._confirmation_backoff(attempts)
+            )
             stored["confirmation_next_check_at"] = int(time.time()) + delay
 
     async def _deliver_confirmation(

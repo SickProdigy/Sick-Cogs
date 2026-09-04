@@ -26,7 +26,9 @@ Provider-backed wallet summaries are limited to one request per user every 10 se
 transaction-history cards to one every 15 seconds. Bot owners and server administrators bypass
 these limits. History remains compact at 10 entries per page, protects new page requests from
 rapid repeat clicks, and includes a permanent BaseScan address link for complete public history.
-The plural `wallets` command is accepted as an alias for `wallet`.
+The plural `wallets` command is accepted as an alias for `wallet`. Other CDP-backed commands
+and public RPC lookups have separate per-user guards; local notification and network commands do
+not. CDP traffic is also globally limited to half the published rolling read/write ceilings.
 
 The browser interface is not an enrollment requirement. It is an independent account-control surface for sensitive operations:
 
@@ -210,6 +212,17 @@ Owner commands:
 [p]walletset companion stop
 ```
 
+`[p]walletset usage` reports UTC-month CDP reads and writes, Onchain Data reads, recent request
+traffic, pending confirmation workload, conservative Embedded Wallet operation estimates, and
+CDP Node billing-unit estimates. The wallet-operation safety target is 4,500 (90% of the published
+5,000-operation free allowance), and the Node target is 7.5 million BU (75% of the published
+10-million-BU allowance). Current public Base Sepolia RPC fallbacks add no CDP Node BU estimate.
+Counters begin when this instrumentation is installed and remain estimates. Browser-direct CDP
+authorization/delegation activity is not visible to the bot, so the CDP billing portal
+is authoritative. Crossing 80%, 90%, or 100% of an internal target warns configured bot owners but
+does not automatically stop operations. `walletset pause` and `walletset resume` provide deliberate
+owner control.
+
 The first `wallet`, `wallet authorize`, or `wallet send` command provisions the user's CDP end
 user and Base Sepolia smart account if no stored profile exists. `wallet authorize` sends a three-minute
 handoff URL by DM. The URL token stays in the fragment, is removed from browser history immediately,
@@ -352,8 +365,8 @@ Red-DiscordBot 3.5. It stores only the resulting CDP user ID and public smart-ac
 Not implemented:
 
 - wallet recovery or export
-- independent delegation revocation and broader policy enforcement
-- authoritative monthly CDP usage accounting and owner threshold warnings (the usage command currently reports processor workload only)
+- signer replacement and broader policy enforcement
+- reconciliation of local usage estimates with an authoritative CDP billing-usage API, if Coinbase exposes one
 - mainnet support
 
 ## Module layout
@@ -363,6 +376,7 @@ cryptowallet/
 ├── __init__.py
 ├── cryptowallet.py       # Thin Red cog and lifecycle
 ├── confirmation.py     # Persistent global confirmation scheduler
+├── usage.py            # CDP traffic limits, accounting, and owner warnings
 ├── commands.py           # User wallet commands
 ├── admin.py              # Owner configuration commands
 ├── config.py             # Config registration and stored-data helpers
