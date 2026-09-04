@@ -779,12 +779,43 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         provider = CdpWalletProvider(SimpleNamespace())
         with patch(
             "cryptowallet.providers.cdp.get_solana_transaction",
-            AsyncMock(return_value={"success": True, "slot": 456}),
+            AsyncMock(return_value={
+                "success": True,
+                "slot": 456,
+                "native_transfers": [{
+                    "from_address": sender,
+                    "to_address": "11111111111111111111111111111111",
+                    "value_atomic": 1,
+                }],
+            }),
         ):
             result = await provider.get_transaction_status(profile, intent)
         self.assertEqual(result["provider_status"], "complete")
         self.assertEqual(result["transaction_hash"], signature)
         self.assertEqual(result["block_number"], 456)
+
+    async def test_solana_confirmation_rejects_a_mismatched_transfer(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        signature = "1" * 64
+        profile = {
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}]
+        }
+        intent = TransactionIntent(
+            intent_id="sol-mismatch", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address="11111111111111111111111111111111",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.SUBMITTED, transaction_hash=signature,
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        with patch(
+            "cryptowallet.providers.cdp.get_solana_transaction",
+            AsyncMock(return_value={
+                "success": True, "slot": 456, "native_transfers": [],
+            }),
+        ):
+            with self.assertRaisesRegex(Exception, "does not match"):
+                await provider.get_transaction_status(profile, intent)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]
@@ -885,6 +916,67 @@ class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(harness.usage_pending["cdp_writes"], 1)
         self.assertEqual(harness.usage_pending["wallet_operations_estimated"], 3)
+
+
+class ProviderCooldownTests(unittest.IsolatedAsyncioTestCase):
+    async def test_non_admin_is_rate_limited_per_user_and_operation(self):
+        harness = SimpleNamespace(
+            bot=SimpleNamespace(is_owner=AsyncMock(return_value=False)),
+            wallet_read_cooldowns={},
+        )
+        author = SimpleNamespace(
+            id=100,
+            guild_permissions=SimpleNamespace(administrator=False),
+        )
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        self.assertTrue(
+            await WalletCoreCommands._wallet_read_allowed(harness, ctx, "wallet", 10)
+        )
+        self.assertFalse(
+            await WalletCoreCommands._wallet_read_allowed(harness, ctx, "wallet", 10)
+        )
+        self.assertIn("Please wait", ctx.send.await_args.args[0])
+        other = SimpleNamespace(
+            author=SimpleNamespace(
+                id=101,
+                guild_permissions=SimpleNamespace(administrator=False),
+            ),
+            send=AsyncMock(),
+        )
+        self.assertTrue(
+            await WalletCoreCommands._wallet_read_allowed(harness, other, "wallet", 10)
+        )
+
+    async def test_owner_and_server_admin_are_exempt(self):
+        owner_harness = SimpleNamespace(
+            bot=SimpleNamespace(is_owner=AsyncMock(return_value=True)),
+            wallet_read_cooldowns={},
+        )
+        owner_ctx = SimpleNamespace(
+            author=SimpleNamespace(id=100, guild_permissions=None),
+            send=AsyncMock(),
+        )
+        self.assertTrue(
+            await WalletCoreCommands._wallet_read_allowed(
+                owner_harness, owner_ctx, "wallet", 10
+            )
+        )
+        admin_harness = SimpleNamespace(
+            bot=SimpleNamespace(is_owner=AsyncMock(return_value=False)),
+            wallet_read_cooldowns={},
+        )
+        admin_ctx = SimpleNamespace(
+            author=SimpleNamespace(
+                id=101,
+                guild_permissions=SimpleNamespace(administrator=True),
+            ),
+            send=AsyncMock(),
+        )
+        self.assertTrue(
+            await WalletCoreCommands._wallet_read_allowed(
+                admin_harness, admin_ctx, "wallet", 10
+            )
+        )
 
 
 if __name__ == "__main__":

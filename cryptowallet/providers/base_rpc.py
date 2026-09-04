@@ -141,6 +141,7 @@ async def get_solana_transaction(signature: str) -> dict | None:
         signatures = transaction["signatures"]
         meta = result["meta"]
         raw_keys = message["accountKeys"]
+        raw_instructions = message.get("instructions") or []
         pre_balances = meta["preBalances"]
         post_balances = meta["postBalances"]
         if (
@@ -152,6 +153,8 @@ async def get_solana_transaction(signature: str) -> dict | None:
             or len(raw_keys) != len(pre_balances)
             or len(raw_keys) != len(post_balances)
             or len(raw_keys) > 256
+            or not isinstance(raw_instructions, list)
+            or len(raw_instructions) > 256
         ):
             raise ValueError("Invalid Solana transaction arrays")
         account_changes = []
@@ -164,6 +167,24 @@ async def get_solana_transaction(signature: str) -> dict | None:
             if before != after:
                 account_changes.append({"address": address, "change_atomic": after - before})
         fee = int(meta["fee"] or 0)
+        native_transfers = []
+        for instruction in raw_instructions:
+            if not isinstance(instruction, dict) or instruction.get("program") != "system":
+                continue
+            parsed = instruction.get("parsed") or {}
+            info = parsed.get("info") or {}
+            if parsed.get("type") != "transfer" or not isinstance(info, dict):
+                continue
+            source = normalize_solana_address(str(info.get("source") or ""))
+            destination = normalize_solana_address(str(info.get("destination") or ""))
+            lamports = int(info.get("lamports", 0))
+            if lamports <= 0:
+                raise ValueError("Invalid Solana transfer amount")
+            native_transfers.append({
+                "from_address": source,
+                "to_address": destination,
+                "value_atomic": lamports,
+            })
         slot = int(result["slot"] or 0)
         block_time = int(result.get("blockTime") or 0)
         if fee < 0 or slot <= 0 or block_time < 0:
@@ -175,6 +196,7 @@ async def get_solana_transaction(signature: str) -> dict | None:
             "success": meta.get("err") is None,
             "fee_atomic": fee,
             "account_changes": account_changes,
+            "native_transfers": native_transfers,
         }
     except (KeyError, TypeError, ValueError) as exc:
         raise BaseRpcError("Solana Devnet returned malformed transaction data.") from exc

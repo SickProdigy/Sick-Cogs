@@ -665,6 +665,16 @@ class CdpWalletProvider(WalletProvider):
         if transaction is None:
             return {"provider_status": "broadcast", "transaction_hash": signature,
                     "block_number": None}
+        transfers = transaction.get("native_transfers") or []
+        if not any(
+            item.get("from_address") == sender
+            and item.get("to_address") == normalize_solana_address(intent.to_address)
+            and int(item.get("value_atomic", 0)) == intent.value_wei
+            for item in transfers
+        ):
+            raise WalletProviderError(
+                "The confirmed Solana transaction does not match this transfer intent."
+            )
         return {"provider_status": "complete" if transaction["success"] else "failed",
                 "transaction_hash": signature, "block_number": int(transaction["slot"])}
 
