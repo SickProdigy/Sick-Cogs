@@ -112,7 +112,11 @@ ETHEREUM_SEPOLIA = Network(
     explorer_url="https://sepolia.etherscan.io",
     testnet=True,
     enabled=True,
-    capabilities=NetworkCapabilities(balance=True),
+    capabilities=NetworkCapabilities(
+        balance=True,
+        history=True,
+        transaction_lookup=True,
+    ),
 )
 
 # KNOWN_NETWORKS includes planned entries for diagnostics and documentation. Only

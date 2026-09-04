@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.sessions import ApprovalSessionMixin
 from ..commands.account import WalletAccountCommands
+from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
 from ..commands.views import WalletAuthorizationView, WalletRevocationView
 from ..commands.transactions import WalletTransactionCommands
@@ -489,7 +490,11 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(
-            ETHEREUM_SEPOLIA.capabilities.enabled(), (NetworkCapability.BALANCE,)
+            ETHEREUM_SEPOLIA.capabilities.enabled(), (
+                NetworkCapability.BALANCE,
+                NetworkCapability.HISTORY,
+                NetworkCapability.TRANSACTION_LOOKUP,
+            )
         )
         self.assertIs(BASE_SEPOLIA.family, ChainFamily.EVM)
         self.assertEqual(BASE_SEPOLIA.reference_label, "chain ID")
@@ -499,6 +504,9 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertTrue(provider.supports(BASE_SEPOLIA.key, NetworkCapability.SEND))
         self.assertTrue(
             provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.BALANCE)
+        )
+        self.assertTrue(
+            provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.HISTORY)
         )
         self.assertFalse(
             provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.SEND)
@@ -511,6 +519,34 @@ class NetworkArchitectureTests(unittest.TestCase):
             ),
             profile["accounts"][0],
         )
+
+    def test_activity_network_aliases_are_explicit(self):
+        self.assertIs(WalletActivityCommands._activity_network("base"), BASE_SEPOLIA)
+        self.assertIs(
+            WalletActivityCommands._activity_network("eth"), ETHEREUM_SEPOLIA
+        )
+        self.assertIsNone(WalletActivityCommands._activity_network("unknown"))
+
+    def test_activity_embed_uses_selected_network_explorer(self):
+        address = _profile()["accounts"][0]["address"]
+        tx_hash = "0x" + "a" * 64
+        page = {
+            "transactions": [{
+                "transaction_hash": tx_hash,
+                "content": {
+                    "from": address,
+                    "to": "0x1111111111111111111111111111111111111111",
+                    "value": "0x1",
+                },
+            }],
+            "has_more": False,
+            "next_page": "",
+        }
+        embed = WalletActivityCommands._activity_embed(
+            address, page, 0, 0, ETHEREUM_SEPOLIA
+        )
+        self.assertIn(ETHEREUM_SEPOLIA.explorer_url, embed.fields[0].value)
+        self.assertNotIn(BASE_SEPOLIA.explorer_url, embed.fields[0].value)
 
     def test_disabled_solana_metadata_cannot_enable_capabilities(self):
         solana = Network(

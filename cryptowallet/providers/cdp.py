@@ -73,7 +73,10 @@ class CdpWalletProvider(WalletProvider):
             NetworkCapability.DELEGATION,
             NetworkCapability.SPONSORSHIP,
         }),
-        ETHEREUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
+        ETHEREUM_SEPOLIA.key: frozenset({
+            NetworkCapability.BALANCE,
+            NetworkCapability.HISTORY,
+        }),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -264,9 +267,14 @@ class CdpWalletProvider(WalletProvider):
         page_token: str | None = None,
         limit: int = 10,
     ) -> dict:
-        """Return indexed public activity for one Base Sepolia address."""
-        if network != BASE_SEPOLIA.key:
-            raise WalletProviderError("Transaction history is restricted to Base Sepolia.")
+        """Return indexed public activity for one capability-approved EVM network."""
+        configured_network = KNOWN_NETWORKS.get(network)
+        if (
+            configured_network is None
+            or not configured_network.supports(NetworkCapability.HISTORY)
+            or not self.supports(network, NetworkCapability.HISTORY)
+        ):
+            raise WalletProviderError("Transaction history is unavailable for this network.")
         if limit < 1 or limit > 100 or page_token is not None and len(page_token) > 5_000:
             raise WalletProviderError("The transaction history request is invalid.")
         try:
@@ -299,7 +307,7 @@ class CdpWalletProvider(WalletProvider):
             }
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
-                "CDP could not retrieve this wallet's Base Sepolia activity."
+                f"CDP could not retrieve this wallet's {configured_network.name} activity."
             ) from exc
 
     async def validate_wallet_claim(self, access_token: str, profile: dict) -> dict:

@@ -4,7 +4,7 @@ import discord
 from redbot.core import commands
 
 from ..core.models import TransactionIntent
-from ..core.networks import BASE_SEPOLIA
+from ..core.networks import BASE_SEPOLIA, NETWORKS, NetworkCapability
 from ..providers import WalletProviderError
 from ..providers.base_rpc import BaseRpcError, get_transaction
 from ..core.validation import format_wei_as_eth, normalize_evm_address
@@ -20,8 +20,20 @@ from .views import WalletHistoryView
 class WalletActivityCommands:
     """Public transaction lookup and wallet activity commands."""
 
+    NETWORK_ALIASES = {
+        "base": "base-sepolia",
+        "base-sepolia": "base-sepolia",
+        "eth": "ethereum-sepolia",
+        "ethereum": "ethereum-sepolia",
+        "ethereum-sepolia": "ethereum-sepolia",
+    }
+
+    @classmethod
+    def _activity_network(cls, value: str):
+        return NETWORKS.get(cls.NETWORK_ALIASES.get(value.strip().lower(), ""))
+
     @staticmethod
-    def _activity_embed(address: str, page: dict, page_index: int, color) -> discord.Embed:
+    def _activity_embed(address: str, page: dict, page_index: int, color, network=BASE_SEPOLIA) -> discord.Embed:
         """Render one CDP-indexed page of public address activity."""
         embed = discord.Embed(title="Your Wallet Activity", color=color)
         normalized_address = address.lower()
@@ -85,14 +97,14 @@ class WalletActivityCommands:
             else:
                 direction = "⚪ Contract activity"
             amount = (
-                f" · {format_wei_as_eth(value_wei)} {BASE_SEPOLIA.native_symbol}"
+                f" · {format_wei_as_eth(value_wei)} {network.native_symbol}"
                 if value_wei > 0
                 else ""
             )
             details = [
                 f"From: `{from_address or 'Unavailable'}`",
                 f"To: `{to_address or 'Contract creation'}`",
-                f"TXID: [{tx_hash}]({BASE_SEPOLIA.explorer_url}/tx/{tx_hash})",
+                f"TXID: [{tx_hash}]({network.explorer_url}/tx/{tx_hash})",
             ]
             timestamp = str(content.get("block_timestamp") or "")
             try:
@@ -109,12 +121,22 @@ class WalletActivityCommands:
                 inline=False,
             )
         if not embed.fields:
-            embed.description = "No indexed Base Sepolia activity was found for this wallet."
-        embed.set_footer(text=f"Page {page_index + 1} · 10 transactions per page")
+            embed.description = f"No indexed {network.name} activity was found for this wallet."
+        embed.set_footer(text="Latest 10 indexed transactions · Use the explorer for complete history")
         return embed
+
     @WalletCoreCommands.wallet.command(name="txid")
-    async def wallet_txid(self, ctx: commands.Context, txid: str):
-        """Look up a public Base Sepolia transaction by transaction hash."""
+    async def wallet_txid(
+        self, ctx: commands.Context, network_key: str, txid: str
+    ):
+        """Look up a public transaction on an explicitly selected testnet."""
+        network = self._activity_network(network_key)
+        if network is None or not network.supports(NetworkCapability.TRANSACTION_LOOKUP):
+            await ctx.send(
+                f"Choose `base` or `eth`, for example: "
+                f"`{ctx.clean_prefix}wallet txid base 0x...`"
+            )
+            return
         lookup = txid.strip().lower()
         if len(lookup) != 66 or not lookup.startswith("0x"):
             await ctx.send("Enter a complete transaction hash beginning with `0x`.")
@@ -129,16 +151,19 @@ class WalletActivityCommands:
         ):
             return
         try:
-            transaction = await get_transaction(lookup)
+            transaction = await get_transaction(lookup, network.key)
         except BaseRpcError as exc:
-            await ctx.send(f"Base Sepolia transaction lookup is unavailable: {exc}")
+            await ctx.send(f"{network.name} transaction lookup is unavailable: {exc}")
             return
         if transaction is None:
-            await ctx.send("No Base Sepolia transaction was found with that TXID.")
+            await ctx.send(f"No {network.name} transaction was found with that TXID.")
             return
         stored_intent = None
         for data in (await self.expire_and_trim_intents(ctx.author)).values():
-            if str(data.get("transaction_hash") or "").lower() != lookup:
+            if (
+                str(data.get("transaction_hash") or "").lower() != lookup
+                or str(data.get("network") or "") != network.key
+            ):
                 continue
             try:
                 stored_intent = TransactionIntent.from_dict(data)
@@ -161,7 +186,7 @@ class WalletActivityCommands:
             else discord.Color.green() if success
             else discord.Color.red()
         )
-        embed = discord.Embed(title=f"{status} Base Sepolia transaction", color=color)
+        embed = discord.Embed(title=f"{status} {network.name} transaction", color=color)
         if (
             str(transaction["to_address"] or "").lower()
             == "0x5ff137d4b0fdcd49dca30c7cf57e578a026d2789"
@@ -173,7 +198,7 @@ class WalletActivityCommands:
         embed.add_field(name="Status", value=status, inline=True)
         embed.add_field(
             name="Network",
-            value=f"{BASE_SEPOLIA.name} (`{BASE_SEPOLIA.chain_id}`)",
+            value=f"{network.name} (`{network.chain_id}`)",
             inline=True,
         )
         if transaction["block_number"] is not None:
@@ -182,7 +207,7 @@ class WalletActivityCommands:
             )
         embed.add_field(
             name="TXID",
-            value=f"[{lookup}]({BASE_SEPOLIA.explorer_url}/tx/{lookup})",
+            value=f"[{lookup}]({network.explorer_url}/tx/{lookup})",
             inline=False,
         )
         if wallet_transfers:
@@ -202,7 +227,7 @@ class WalletActivityCommands:
                     name=f"Value{suffix}",
                     value=(
                         f"{format_wei_as_eth(transfer['value_wei'])} "
-                        f"{BASE_SEPOLIA.native_symbol}"
+                        f"{network.native_symbol}"
                     ),
                     inline=True,
                 )
@@ -227,7 +252,7 @@ class WalletActivityCommands:
                 name="Value",
                 value=(
                     f"{format_wei_as_eth(transaction['value_wei'])} "
-                    f"{BASE_SEPOLIA.native_symbol}"
+                    f"{network.native_symbol}"
                 ),
                 inline=True,
             )
@@ -235,24 +260,53 @@ class WalletActivityCommands:
         await ctx.send(embed=embed)
 
     @WalletCoreCommands.wallet.command(name="transactions", aliases=("tx", "trans", "history"))
-    async def wallet_transactions(self, ctx: commands.Context):
+    async def wallet_transactions(self, ctx: commands.Context, network_key: str = None):
         """Browse your wallet's indexed incoming and outgoing blockchain activity."""
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        if network_key is None:
+            embed = discord.Embed(
+                title="Recent Wallet Transactions",
+                description=(
+                    "Choose a network below to view this wallet directly in its public "
+                    f"block explorer. Use `{ctx.clean_prefix}wallet transactions base` or "
+                    f"`{ctx.clean_prefix}wallet transactions eth` to load 10 indexed transactions in Discord."
+                ),
+                color=discord.Color.blurple(),
+            )
+            for network in NETWORKS.values():
+                if not network.testnet:
+                    continue
+                account = self._account_for_network(profile, network.key)
+                if account is None:
+                    continue
+                address = str(account.get("address") or "")
+                embed.add_field(
+                    name=network.name,
+                    value=f"[View complete activity]({network.explorer_url}/address/{address})",
+                    inline=False,
+                )
+            embed.set_footer(text="Explorer links do not use CDP history requests")
+            await ctx.send(embed=embed)
+            return
+        network = self._activity_network(network_key)
+        if network is None or not network.supports(NetworkCapability.HISTORY):
+            await ctx.send("Choose `base` or `eth` for indexed transaction history.")
+            return
         if not await self._wallet_read_allowed(
             ctx, "history", WALLET_HISTORY_COOLDOWN_SECONDS
         ):
             return
-        profile = await self._wallet_profile_or_error(ctx)
-        if profile is None:
-            return
-        account = self._account_for_network(profile, BASE_SEPOLIA.key)
+        account = self._account_for_network(profile, network.key)
         if account is None:
-            await ctx.send("Your wallet profile has no Base Sepolia account.")
+            await ctx.send(f"Your wallet profile has no account for {network.name}.")
             return
         try:
             address = normalize_evm_address(str(account.get("address") or ""))
             page = await self.wallet_provider.get_transaction_history(
                 address,
-                BASE_SEPOLIA.key,
+                network.key,
                 limit=HISTORY_PAGE_SIZE,
             )
         except (ValueError, WalletProviderError) as exc:
@@ -264,5 +318,6 @@ class WalletActivityCommands:
             address,
             page,
             discord.Color.blurple(),
+            network,
         )
         await ctx.send(embed=view.embed(), view=view)
