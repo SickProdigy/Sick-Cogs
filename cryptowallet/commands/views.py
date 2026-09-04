@@ -91,7 +91,7 @@ class WalletIntentView(discord.ui.View):
 
 
 class WalletRevocationView(discord.ui.View):
-    """Owner-bound confirmation for account-scoped delegation revocation."""
+    """Owner-bound confirmation for wallet-profile delegation revocation."""
 
     def __init__(self, cog, user_id: int, profile: dict, *, allow_renew: bool = False):
         super().__init__(timeout=180 if allow_renew else 60)

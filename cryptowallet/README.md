@@ -10,7 +10,7 @@ CryptoWallet models each blockchain with an explicit chain family, network refer
 
 A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network, including independent 32-byte base58 validation for Solana addresses; a Solana address is never interpreted as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-Base Sepolia remains the only send-enabled network. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with read-only native SOL balance, recent activity, transaction-signature lookup, and explorer support. Solana sending, history, tokens, authorization, recovery, and export remain disabled, and no mainnet is registered.
+Base Sepolia remains the only send-enabled network. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with read-only native SOL balance, recent activity, transaction-signature lookup, and explorer support. Solana signing, submission, tokens, recovery, and export remain disabled; the profile-wide authorization includes its Solana account for future testnet sending, and no mainnet is registered.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
@@ -64,7 +64,7 @@ User runs a wallet or trading command
 → Bot reports the public transaction result
 ```
 
-Transfers require explicit Discord approval and an active, time-limited, account-scoped CDP delegation. Users can revoke that delegation independently without deleting their wallet or moving funds.
+Transfers require explicit Discord approval and an active, time-limited, user-scoped CDP delegation. Users can revoke that delegation independently without deleting their wallet or moving funds.
 
 ## Custody and identity
 
@@ -240,17 +240,19 @@ does not automatically stop operations. `walletset pause` and `walletset resume`
 owner control.
 
 The first `wallet`, `wallet authorize`, or `wallet send` command provisions the user's CDP end
-user and Base Sepolia smart account if no stored profile exists. `wallet authorize` sends a three-minute
-handoff URL by DM. The URL token stays in the fragment, is removed from browser history immediately,
-and is validated by CDP custom authentication before the browser can grant a 24-hour delegation for
-the exact provisioned Base Sepolia smart account. `wallet revoke` requires an owner-bound
-Discord confirmation, revokes only that account-scoped delegation, and verifies with CDP that it
-is inactive; it does not delete the wallet or move funds. When authorization is already active,
+user and its EVM and Solana accounts if no stored profile exists. Wallet creation, receiving, balances, and
+other read-only commands require no signing authorization. The first approved send automatically requests
+a protected authorization link when needed; `wallet authorize` provides the same flow for deliberate
+reauthorization after revocation or expiry. Authorization handoff URLs expire after three minutes. The URL token stays in the fragment, is removed from browser history immediately,
+and is validated by CDP custom authentication before the browser can grant one-year delegation for
+the exact signed set of provisioned EVM and Solana accounts. `wallet revoke` requires an owner-bound
+Discord confirmation, revokes the user-scoped delegation across every account in the wallet profile,
+and verifies with CDP that it is inactive; it does not delete the wallet or move funds. When authorization is already active,
 `wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
 Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
 user deliberately completes that browser approval.
 
-`wallet security lock` immediately persists an emergency lock, rejects pending send intents, and attempts to revoke the current bot signing delegation. While locked, receiving funds, balances, history, public transaction lookup, and authorization revocation remain available; new sends, approval clicks, authorization/renewal links, and signer export are blocked. Only the configured Red bot owner can remove the lock with `walletset unlock <mention-or-user-id>` after an independent identity review. An already-issued signed handoff can remain usable until its three-minute expiry, so the owner should retry delegation revocation if CDP was unavailable during locking. This is the current compromised-Discord response; a Discord-only PIN would not be an independent factor, and optional external 2FA remains future work.
+`wallet security lock` immediately persists an emergency lock, rejects pending send intents, and attempts to revoke the profile-wide bot signing delegation. While locked, receiving funds, balances, history, public transaction lookup, and authorization revocation remain available; new sends, approval clicks, authorization/renewal links, and signer export are blocked. Only the configured Red bot owner can remove the lock with `walletset unlock <mention-or-user-id>` after an independent identity review. An already-issued signed handoff can remain usable until its three-minute expiry, so the owner should retry delegation revocation if CDP was unavailable during locking. This is the current compromised-Discord response; a Discord-only PIN would not be an independent factor, and optional external 2FA remains future work.
 
 `wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
 
@@ -306,8 +308,8 @@ Completed:
 22. Three-minute, issuer-, audience-, deployment-, application-, purpose-, user-, and address-bound
     authorization handoff JWTs delivered only by DM and carried in the URL fragment.
 23. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
-24. Exact CDP user and smart-account matching before account-scoped delegation.
-25. Explicit browser creation of a 24-hour delegation for only the provisioned account.
+24. Exact CDP user and signed account-set matching before user-scoped delegation.
+25. Explicit browser creation of a one-year delegation for all provisioned accounts.
 26. Atomic, idempotent Base Sepolia smart-account submission checkpoint in version `0.16.0`.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
@@ -372,8 +374,7 @@ credential. Add the exact website origin to the CDP Client API Key domain allowl
 
 Authorization handoffs expire after three minutes. They are sent by DM, carried after `#handoff=` so they
 are not sent to the web server, and removed from browser history as soon as the page loads. The
-static page authenticates the handoff directly with CDP and grants an account-scoped delegation
-only after the user presses the confirmation button. No website-to-bot listener is required.
+static page authenticates the handoff directly with CDP and grants one user-scoped delegation across all wallet accounts only after the user presses the confirmation button. No website-to-bot listener is required.
 
 The provider reads these values from Red's shared API-token namespace `cryptowallet_cdp`.
 Provision them only through Red's bot-owner API-token modal or another approved server-side
@@ -453,7 +454,7 @@ cryptowallet/
 
 ## Base Sepolia threat model
 
-Protected assets are user testnet funds, signer ownership, the immutable Discord-to-CDP wallet mapping, CDP and Discord OAuth credentials, the deployment JWT key, limited signing delegations, and short-lived handoff tokens. The bot host and server-side secret stores are trusted; Discord accounts, Discord channels and DMs, browser assets, public RPC endpoints, explorer data, and all user input are treated as potentially compromised. CDP is currently trusted to preserve embedded-wallet identities, secure signer material, and enforce account-scoped delegation.
+Protected assets are user testnet funds, signer ownership, the immutable Discord-to-CDP wallet mapping, CDP and Discord OAuth credentials, the deployment JWT key, limited signing delegations, and short-lived handoff tokens. The bot host and server-side secret stores are trusted; Discord accounts, Discord channels and DMs, browser assets, public RPC endpoints, explorer data, and all user input are treated as potentially compromised. CDP is currently trusted to preserve embedded-wallet identities, secure signer material, and enforce time-limited user-scoped delegation.
 
 | Threat | Enforced control | Residual risk and response |
 | --- | --- | --- |
@@ -463,7 +464,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 | Bot restart during submission | Persist processing before the provider call and convert interrupted processing to uncertain on restart | Manual reconciliation is required when no operation hash was returned |
 | Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Direct stateless handoffs are expiry-bounded, not server-consumed |
 | Browser or public website compromise | No CDP secret, JWT private key, signer key, or raw private key is available to site JavaScript; export uses the Coinbase isolated iframe | A malicious page could mislead users, so deployment integrity and HTTPS remain operational requirements |
-| Bot-host or CDP credential compromise | Account-scoped 24-hour delegation, owner pause, per-wallet lock, usage warnings, and Base Sepolia-only restriction | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
+| Bot-host or CDP credential compromise | Profile-wide one-year testnet delegation, owner pause, per-wallet lock, usage warnings, and Base Sepolia-only restriction | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
 | Destructive account action | No wallet deletion, provider-account deletion, signer ejection, or automatic balance migration command exists | Users deliberately transfer funds and may separately export their signer or revoke bot authorization |
 
 ### Adversarial acceptance checklist

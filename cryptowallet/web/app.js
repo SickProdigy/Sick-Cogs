@@ -29,13 +29,13 @@ function decodeHandoff() {
   if (claims.sickwallet_purpose !== "authorize" || !claims.sub || !claims.aud) {
     throw new Error("This handoff is not valid for wallet authorization.");
   }
-  if (!claims.sickwallet_address || Number(claims.exp) * 1000 <= Date.now()) {
+  if (!Array.isArray(claims.sickwallet_accounts) || !claims.sickwallet_accounts.length || Number(claims.exp) * 1000 <= Date.now()) {
     throw new Error("This wallet authorization link has expired or is incomplete.");
   }
   return {
     purpose: claims.sickwallet_purpose,
     expires_at: Number(claims.exp),
-    wallet: { address: claims.sickwallet_address },
+    wallet: { accounts: claims.sickwallet_accounts },
     cdp: { project_id: claims.aud, user_id: claims.sub },
   };
 }
@@ -48,7 +48,7 @@ function configureAuthorization(session) {
     !authorizationStatus
   ) return;
   authorizationControls.hidden = false;
-  if (!session.wallet?.address || !session.cdp?.project_id) {
+  if (!session.wallet?.accounts?.length || !session.cdp?.project_id) {
     authorizationButton.disabled = true;
     authorizationStatus.textContent = "Wallet authorization is not completely configured.";
     return;
@@ -61,7 +61,7 @@ function configureAuthorization(session) {
       const result = await authorizeWallet(
         session.cdp.project_id,
         session.cdp.user_id,
-        session.wallet.address,
+        session.wallet.accounts,
         handoffToken
       );
       handoffToken = null;
@@ -81,9 +81,11 @@ if (statusElement && detailsElement) {
       statusElement.textContent = "Protected wallet handoff loaded.";
       addDetail("Purpose", session.purpose);
       addDetail("Expires", new Date(session.expires_at * 1000).toLocaleString());
-      if (session.wallet?.address) {
-        addDetail("Wallet", session.wallet.address);
-        addDetail("Delegation", "Not granted yet");
+      if (session.wallet?.accounts?.length) {
+        for (const account of session.wallet.accounts) {
+          addDetail(account.family === "solana" ? "Solana account" : "EVM smart account", account.address);
+        }
+        addDetail("Authorization scope", "All wallet accounts");
       }
       if (session.transaction) {
         addDetail("Network", `${session.transaction.network_name} (${session.transaction.chain_id})`);

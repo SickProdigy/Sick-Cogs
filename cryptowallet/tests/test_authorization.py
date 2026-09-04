@@ -267,8 +267,13 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_handoff_is_signed_and_bound_to_wallet_identity(self):
         harness = _JwtHarness(self.configuration)
+        profile = _profile()
+        profile["accounts"].append({
+            "network": "solana-devnet",
+            "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        })
         before = int(time.time())
-        token, expires_at = await harness.create_authorization_handoff(7, _profile())
+        token, expires_at = await harness.create_authorization_handoff(7, profile)
         claims = jwt.decode(
             token,
             self.key.public_key(),
@@ -281,6 +286,10 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["sickwallet_application"], "42")
         self.assertEqual(claims["sickwallet_deployment"], "deployment")
         self.assertEqual(claims["sickwallet_purpose"], "authorize")
+        self.assertEqual(claims["sickwallet_accounts"], [
+            {"family": "evm", "address": "0x7930fB6E9853B3835Cf047f36855993cb82d4387"},
+            {"family": "solana", "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"},
+        ])
         self.assertEqual(
             claims["sickwallet_address"],
             "0x7930fB6E9853B3835Cf047f36855993cb82d4387",

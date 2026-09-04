@@ -8,7 +8,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from ..core.validation import normalize_evm_address
+from ..core.validation import normalize_evm_address, normalize_solana_address
 
 
 JWT_TOKEN_NAMESPACE = "cryptowallet_jwt"
@@ -179,7 +179,7 @@ class JwtAuthMixin:
         profile_id = str(profile.get("profile_id") or "")
         provider_user_id = str(profile.get("provider_user_id") or "")
         stored_discord_user_id = int(profile.get("discord_user_id", 0) or 0)
-        address = next(
+        base_address = next(
             (
                 str(account.get("address") or "")
                 for account in profile.get("accounts") or []
@@ -187,17 +187,31 @@ class JwtAuthMixin:
             ),
             "",
         )
+        solana_address = next(
+            (
+                str(account.get("address") or "")
+                for account in profile.get("accounts") or []
+                if account.get("network") == "solana-devnet"
+            ),
+            "",
+        )
         try:
-            address = normalize_evm_address(address)
+            base_address = normalize_evm_address(base_address)
+            expected_accounts = [{"family": "evm", "address": base_address}]
+            if solana_address:
+                expected_accounts.append({
+                    "family": "solana",
+                    "address": normalize_solana_address(solana_address),
+                })
         except ValueError as exc:
-            raise RuntimeError("The provisioned wallet address is invalid") from exc
+            raise RuntimeError("A provisioned wallet address is invalid") from exc
         deployment_id = str(await self.config.deployment_id() or "")
         application_id = getattr(self.bot.user, "id", None)
         if (
             not profile_id
             or provider_user_id != profile_id
             or stored_discord_user_id != discord_user_id
-            or not address
+            or not base_address
             or not deployment_id
             or application_id is None
         ):
@@ -215,7 +229,12 @@ class JwtAuthMixin:
             "sickwallet_deployment": deployment_id,
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
-            "sickwallet_address": address,
+            "sickwallet_address": base_address,
+            "sickwallet_accounts": (
+                expected_accounts
+                if purpose == "authorize"
+                else [{"family": "evm", "address": base_address}]
+            ),
             "sickwallet_purpose": purpose,
         }
         token = jwt.encode(
