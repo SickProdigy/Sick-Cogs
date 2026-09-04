@@ -1,11 +1,10 @@
 import {
   authenticateWithJWT,
   createDelegationForAccount,
+  createEvmKeyExportIframe,
   initialize,
   isSignedIn,
-  linkEmail,
   signOut,
-  verifyEmailOTP,
 } from "@coinbase/cdp-core";
 
 async function authenticateWallet(projectId, expectedUserId, expectedAddress, handoffToken) {
@@ -45,27 +44,50 @@ export async function authorizeWallet(projectId, expectedUserId, expectedAddress
   }
 }
 
-export async function beginRecoveryEnrollment(
-  projectId, expectedUserId, expectedAddress, handoffToken, email
+export function resolveSmartAccountOwner(user, expectedAddress) {
+  const smartAccount = (user.evmSmartAccountObjects || []).find(
+    (account) => account.address.toLowerCase() === expectedAddress.toLowerCase()
+  );
+  const ownerAddresses = new Set(
+    (smartAccount?.ownerAddresses || []).map((address) => address.toLowerCase())
+  );
+  const owner = (user.evmAccountObjects || []).find((account) =>
+    ownerAddresses.has(account.address.toLowerCase())
+  );
+  if (!owner) {
+    throw new Error("Coinbase did not return an exportable owner for this smart account.");
+  }
+  return owner.address;
+}
+
+export async function prepareRecoveryExport(
+  projectId, expectedUserId, expectedAddress, handoffToken, target
 ) {
   try {
-    await authenticateWallet(projectId, expectedUserId, expectedAddress, handoffToken);
-    const result = await linkEmail(email);
-    return { flowId: result.flowId };
+    const user = await authenticateWallet(
+      projectId, expectedUserId, expectedAddress, handoffToken
+    );
+    const ownerAddress = resolveSmartAccountOwner(user, expectedAddress);
+    await createEvmKeyExportIframe({
+      address: ownerAddress,
+      target,
+      projectId,
+      label: "Copy wallet signer private key",
+      copiedLabel: "Wallet signer private key copied",
+      fullWidth: true,
+      onStatusUpdate: (status, message) => {
+        const event = new CustomEvent("sickwallet-export-status", {
+          detail: { status, message: message || "" },
+        });
+        window.dispatchEvent(event);
+        if (["success", "error", "expired"].includes(status)) {
+          void signOut().catch(() => undefined);
+        }
+      },
+    });
+    return { ownerAddress };
   } catch (error) {
     await signOut().catch(() => undefined);
     throw error;
-  }
-}
-
-export async function completeRecoveryEnrollment(flowId, otp, expectedUserId) {
-  try {
-    const { user } = await verifyEmailOTP({ flowId, otp });
-    if (user.userId !== expectedUserId) {
-      throw new Error("Coinbase verified a different wallet user than requested.");
-    }
-    return { userId: user.userId };
-  } finally {
-    await signOut().catch(() => undefined);
   }
 }

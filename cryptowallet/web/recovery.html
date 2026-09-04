@@ -9,20 +9,22 @@
 <body>
   <main class="card">
     <p class="eyebrow">SickGaming Crypto Wallet</p>
-    <h1>Set up wallet recovery</h1>
+    <h1>Back up your wallet signer</h1>
     <p id="recovery-status" role="status">Open the protected link sent by the Discord bot.</p>
     <dl id="recovery-details" hidden></dl>
-    <form id="recovery-email-form" hidden>
-      <label for="recovery-email">Recovery email</label>
-      <input id="recovery-email" name="email" type="email" autocomplete="email" required>
-      <button type="submit">Send verification code</button>
-    </form>
-    <form id="recovery-code-form" hidden>
-      <label for="recovery-code">Six-digit verification code</label>
-      <input id="recovery-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
-      <button type="submit">Verify recovery email</button>
-    </form>
-    <p class="notice">Your email and verification code go directly to Coinbase. They are never sent to Discord or the bot. This does not export a private key or move funds.</p>
+    <section id="recovery-controls" hidden>
+      <div class="notice danger">
+        <strong>Private-key safety</strong>
+        <p>This exports the EOA key that owns your smart account. Anyone with that key may control the wallet. Never paste it into Discord, send it to another person, or store it as a screenshot.</p>
+      </div>
+      <label class="acknowledgement">
+        <input id="recovery-confirm" type="checkbox">
+        I understand that I must store this private key securely and privately.
+      </label>
+      <button id="prepare-export" type="button" disabled>Continue to secure export</button>
+      <div id="key-export-container" aria-live="polite"></div>
+    </section>
+    <p class="notice">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds or delete your provider account. Your smart-account balance may not appear automatically after importing the signer into another wallet. Move funds to an external address before leaving CDP unless the destination explicitly supports this smart account.</p>
     <a href="./">Return to wallet home</a>
   </main>
   <script src="recovery.js" type="module"></script>
