@@ -664,6 +664,10 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             SOLANA_DEVNET.explorer_address_url(address),
             f"https://explorer.solana.com/address/{address}?cluster=devnet",
         )
+        self.assertEqual(
+            SOLANA_DEVNET.explorer_transaction_url("1" * 64),
+            f"https://explorer.solana.com/tx/{'1' * 64}?cluster=devnet",
+        )
         with self.assertRaises(ValueError):
             normalize_solana_address("0OIl" * 8)
         self.assertEqual(normalize_solana_signature("1" * 64), "1" * 64)

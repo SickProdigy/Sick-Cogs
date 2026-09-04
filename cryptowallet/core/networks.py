@@ -198,8 +198,8 @@ KNOWN_NETWORKS = {
     )
 }
 
-# Only reviewed networks belong in NETWORKS. Ethereum Sepolia is read-only, and
-# Solana devnet begins with independently reviewed read-only balance support.
+# Only reviewed networks belong in NETWORKS. Capabilities remain independently
+# limited per network; every registered network is a testnet.
 NETWORKS = {
     key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
 }

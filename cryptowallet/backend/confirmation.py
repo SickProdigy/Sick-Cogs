@@ -186,7 +186,9 @@ class ConfirmationProcessorMixin:
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
                 if intent.status is IntentStatus.CONFIRMED and intent.transaction_hash:
-                    explorer_url = f"{network.explorer_url}/tx/{intent.transaction_hash}"
+                    explorer_url = network.explorer_transaction_url(
+                        intent.transaction_hash
+                    )
                     await user.send(
                         f"Transaction confirmed on {network.name}.\n"
                         f"**TXID:** [{intent.transaction_hash}]({explorer_url})\n"
