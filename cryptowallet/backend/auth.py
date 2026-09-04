@@ -154,6 +154,23 @@ class JwtAuthMixin:
         self, discord_user_id: int, profile: dict
     ) -> tuple[str, int]:
         """Create a short-lived CDP custom-auth token for wallet authorization."""
+        return await self._create_wallet_handoff(
+            discord_user_id, profile, purpose="authorize"
+        )
+
+    async def create_recovery_handoff(
+        self, discord_user_id: int, profile: dict
+    ) -> tuple[str, int]:
+        """Create a short-lived token for protected recovery-method enrollment."""
+        return await self._create_wallet_handoff(
+            discord_user_id, profile, purpose="recovery"
+        )
+
+    async def _create_wallet_handoff(
+        self, discord_user_id: int, profile: dict, *, purpose: str
+    ) -> tuple[str, int]:
+        if purpose not in {"authorize", "recovery"}:
+            raise ValueError("Unsupported wallet handoff purpose")
         configuration = await self.jwt_configuration()
         if configuration is None:
             raise RuntimeError("CryptoWallet custom authentication is not configured")
@@ -193,7 +210,7 @@ class JwtAuthMixin:
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
             "sickwallet_address": address,
-            "sickwallet_purpose": "authorize",
+            "sickwallet_purpose": purpose,
         }
         token = jwt.encode(
             claims,

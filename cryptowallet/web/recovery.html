@@ -3,16 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wallet Recovery</title>
+  <title>Wallet Recovery · SickGaming</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <main class="card">
     <p class="eyebrow">SickGaming Crypto Wallet</p>
-    <h1>Recovery and backup</h1>
-    <p>Recovery setup, signer export, and provider migration will appear here after CDP integration.</p>
-    <p>This page will never ask you to post a password, private key, recovery phrase, or one-time code in Discord.</p>
+    <h1>Set up wallet recovery</h1>
+    <p id="recovery-status" role="status">Open the protected link sent by the Discord bot.</p>
+    <dl id="recovery-details" hidden></dl>
+    <form id="recovery-email-form" hidden>
+      <label for="recovery-email">Recovery email</label>
+      <input id="recovery-email" name="email" type="email" autocomplete="email" required>
+      <button type="submit">Send verification code</button>
+    </form>
+    <form id="recovery-code-form" hidden>
+      <label for="recovery-code">Six-digit verification code</label>
+      <input id="recovery-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+      <button type="submit">Verify recovery email</button>
+    </form>
+    <p class="notice">Your email and verification code go directly to Coinbase. They are never sent to Discord or the bot. This does not export a private key or move funds.</p>
     <a href="./">Return to wallet home</a>
   </main>
+  <script src="recovery.js" type="module"></script>
 </body>
 </html>

@@ -57,6 +57,32 @@ a {
   color: #8ab4ff;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+form {
+  display: grid;
+  gap: .75rem;
+  margin: 1.5rem 0;
+}
+
+label {
+  color: #c9d1d9;
+  font-weight: 700;
+}
+
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: .75rem;
+  border: 1px solid #475569;
+  border-radius: .5rem;
+  background: #0d1117;
+  color: #e6edf3;
+  font: inherit;
+}
+
 button {
   margin-top: 1rem;
   padding: .75rem 1rem;

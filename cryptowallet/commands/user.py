@@ -1,3 +1,4 @@
+from .account import WalletAccountCommands
 from .activity import WalletActivityCommands
 from .authorization import WalletAuthorizationCommands
 from .core import WalletCoreCommands
@@ -5,6 +6,7 @@ from .transactions import WalletTransactionCommands
 
 
 class WalletCommands(
+    WalletAccountCommands,
     WalletAuthorizationCommands,
     WalletActivityCommands,
     WalletTransactionCommands,
