@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.sessions import ApprovalSessionMixin
+from ..backend.usage import ProviderUsageMixin
 from ..commands.account import WalletAccountCommands
 from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
@@ -861,6 +862,29 @@ class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
             "decimals": 6,
         }])
         self.assertEqual(format_atomic_amount(1_250_000, ETHEREUM_SEPOLIA, decimals=6), "1.25")
+
+
+class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):
+    async def test_solana_send_is_counted_conservatively(self):
+        harness = SimpleNamespace(
+            cdp_retry_until=0.0,
+            cdp_recent_requests=[],
+            usage_pending={
+                "cdp_reads": 0,
+                "cdp_writes": 0,
+                "onchain_data_reads": 0,
+                "wallet_operations_estimated": 0,
+                "node_billing_units_estimated": 0,
+            },
+        )
+        await ProviderUsageMixin.record_cdp_request(
+            harness,
+            "POST",
+            "/v2/embedded-wallet-api/end-users/profile/solana/send/transaction",
+            200,
+        )
+        self.assertEqual(harness.usage_pending["cdp_writes"], 1)
+        self.assertEqual(harness.usage_pending["wallet_operations_estimated"], 3)
 
 
 if __name__ == "__main__":
