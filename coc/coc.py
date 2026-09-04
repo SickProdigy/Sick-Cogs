@@ -59,6 +59,25 @@ WAR_NOTIFICATION_EVENT_ALIASES = {
 }
 
 
+def coc_manager():
+    """Allow bot owners, Discord moderators, or the configured CoC manager role."""
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if await ctx.bot.is_owner(ctx.author) or await ctx.bot.is_mod(ctx.author):
+            return True
+        permissions = ctx.author.guild_permissions
+        if permissions.administrator or permissions.manage_channels:
+            return True
+        role_id = await ctx.cog.config.guild(ctx.guild).COC_MANAGER_ROLE()
+        try:
+            manager_role_id = int(role_id)
+        except (TypeError, ValueError):
+            return False
+        return any(role.id == manager_role_id for role in ctx.author.roles)
+
+    return commands.check(predicate)
+
+
 class Coc(commands.Cog):
     """Clash of Clans War Updates"""
 
@@ -75,6 +94,7 @@ class Coc(commands.Cog):
             "COC_WAR_NOTIFICATIONS": False,
             "COC_TIMEZONE": "America/New_York",
             "COC_WAR_MENTION_ROLE": None,
+            "COC_MANAGER_ROLE": None,
             "WAR_NOTIFY_PREP": True,
             "WAR_NOTIFY_PREP_MENTION": True,
             "WAR_NOTIFY_PREP_SOON": True,
@@ -126,9 +146,6 @@ class Coc(commands.Cog):
     async def _get_clan_tag(self, ctx: commands.Context) -> str:
         return await self.config.guild(ctx.guild).COC_CLAN_KEY()
 
-    async def _get_war_channel_id(self, ctx: commands.Context) -> str:
-        return await self.config.guild(ctx.guild).COC_WAR_CHANNEL()
-
     @staticmethod
     def _missing_api_key_message(ctx: commands.Context) -> str:
         return (
@@ -141,8 +158,49 @@ class Coc(commands.Cog):
     def _missing_clan_key_message(ctx: commands.Context) -> str:
         return (
             "No clan tag set for Clash of Clans. Copy the clan tag from the "
-            f"clan profile, then use `{ctx.clean_prefix}coc setclan <clan_tag>`."
+            f"clan profile, then use `{ctx.clean_prefix}coc set clan <clan_tag>`."
         )
+
+    async def _require_server_setup(
+        self, ctx: commands.Context
+    ) -> tuple[str, str, str | None] | None:
+        """Return required server settings or send one actionable setup card."""
+
+        api_key = await self.config.COC_API_KEY()
+        guild_config = self.config.guild(ctx.guild)
+        clan_key = await guild_config.COC_CLAN_KEY()
+        channel_id = await guild_config.COC_WAR_CHANNEL()
+        missing = []
+
+        if not api_key:
+            missing.append((
+                "⚠️ Clash of Clans API access",
+                "The bot owner must configure the shared API key with "
+                f"`{ctx.clean_prefix}coc setapi <api_key>`."
+            ))
+        if not clan_key:
+            missing.append((
+                "⚠️ Server clan",
+                "Set this server's clan with "
+                f"`{ctx.clean_prefix}coc set clan <clan_tag>`."
+            ))
+
+        if missing:
+            embed = discord.Embed(
+                title="⚠️ Clash of Clans Setup Needed",
+                description=(
+                    "This server is missing required configuration. Complete the items below, "
+                    f"then try the command again. Use `{ctx.clean_prefix}help coc set` for all settings."
+                ),
+                color=0xF1C40F,
+            )
+            for name, value in missing:
+                embed.add_field(name=name, value=value, inline=False)
+            embed.set_footer(text="Server administrators and the configured CoC manager role can manage server settings.")
+            await ctx.send(embed=embed)
+            return None
+
+        return str(api_key), str(clan_key), str(channel_id) if channel_id else None
 
     @staticmethod
     async def _response_detail(response: aiohttp.ClientResponse) -> str:
@@ -406,6 +464,10 @@ class Coc(commands.Cog):
         cls, war_data: dict, clan_tag: str, previous_attack_keys: list[str]
     ) -> list[str]:
         new_attacks = cls._new_war_attacks(war_data, clan_tag, previous_attack_keys)
+        try:
+            manager_role = ctx.guild.get_role(int(manager_role_id)) if manager_role_id else None
+        except (TypeError, ValueError):
+            manager_role = None
         lines = []
         for attack in new_attacks[:6]:
             stars = attack["stars"]
@@ -1134,23 +1196,27 @@ class Coc(commands.Cog):
         Show Clash of Clans clan information and war results.
 
         Setup:
-        [p]coc setapi <api_key>
-        [p]coc setclan <clan_tag>
-        [p]coc setwarchannel [channel]  (also turns notifications on)
+        [p]coc setapi <api_key>  (bot owner only)
+        [p]coc set clan <clan_tag>
+        [p]coc set warchannel [channel]
+        [p]coc set notificationrole @War
+        [p]coc set timezone America/New_York
+        [p]coc set managerrole @CoC Manager
+        [p]coc set prepwarning 5
+        [p]coc set endwarning 60
 
         Examples:
         [p]coc
         [p]coc war
         [p]coc notifications
-        [p]coc setwarchannel
+        [p]help coc set
+        [p]help coc notifications
         """
 
-        api_key = await self.config.COC_API_KEY()
-        if not api_key:
-            return await ctx.send(self._missing_api_key_message(ctx))
-        clan_key = await self._get_clan_tag(ctx)
-        if not clan_key:
-            return await ctx.send(self._missing_clan_key_message(ctx))
+        setup = await self._require_server_setup(ctx)
+        if setup is None:
+            return
+        api_key, clan_key, _ = setup
         clan_tag_encoded = self._clean_clan_tag(clan_key)
         headers = self._api_headers(api_key)
 
@@ -1259,9 +1325,14 @@ class Coc(commands.Cog):
         embed = self._build_war_attacks_embed(war_data, clan_key, timezone_name)
         await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
         
-    @commands.guild_only()
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc.command(name="timezone", aliases=["settimezone", "tz"])
+    @coc_manager()
+    @command_coc.group(name="set", invoke_without_command=True)
+    async def command_coc_set(self, ctx):
+        """Configure this server's Clash of Clans integration."""
+
+        await ctx.send_help(ctx.command)
+
+    @command_coc_set.command(name="timezone")
     async def command_coc_timezone(self, ctx, timezone_name: str = None):
         """Set the timezone used for this server's war schedules."""
 
@@ -1270,7 +1341,7 @@ class Coc(commands.Cog):
             current = str(await guild_config.COC_TIMEZONE() or "America/New_York")
             return await ctx.send(
                 f"War schedule timezone: **{current}**\n"
-                f"Change it with `{ctx.clean_prefix}coc timezone America/New_York`."
+                f"Change it with `{ctx.clean_prefix}coc set timezone America/New_York`."
             )
 
         try:
@@ -1295,14 +1366,33 @@ class Coc(commands.Cog):
         await guild_config.LAST_WAR_ID.set(None)
         await guild_config.WAR_NOTIFICATION_EVENTS.set({})
 
-    @checks.mod_or_permissions(manage_channels=True)
+    @coc_manager()
     @command_coc.group(
         name="notifications",
-        aliases=["notify", "warnotification"],
         invoke_without_command=True,
     )
     async def command_coc_warnotification(self, ctx):
-        """Toggle Clash of Clans war notifications for this server."""
+        """
+        Toggle Clash of Clans war notifications for this server.
+
+        Run this command again to switch all war notifications ON or OFF.
+        The current channel is saved automatically the first time notifications are enabled.
+        Use `[p]coc notifications status` to review the current setup.
+
+        Configure notifications with:
+        `[p]coc set clan <clan tag>`
+        `[p]coc set warchannel [channel]`
+        `[p]coc set notificationrole [role|clear]`
+        `[p]coc set managerrole [role|clear]`
+        `[p]coc set attack [card|compact]`
+        `[p]coc set event <event> <on|off>`
+        `[p]coc set mention <event> <on|off>`
+        `[p]coc set prepwarning <minutes>`
+        `[p]coc set endwarning <minutes>`
+        `[p]coc set timezone <IANA timezone>`
+
+        Use `[p]help coc set` for every server setting.
+        """
 
         guild_config = self.config.guild(ctx.guild)
         enabled = await guild_config.COC_WAR_NOTIFICATIONS()
@@ -1313,29 +1403,23 @@ class Coc(commands.Cog):
                 f"Turn them back on with `{ctx.clean_prefix}coc notifications`."
             )
 
-        api_key = await self.config.COC_API_KEY()
-        if not api_key:
-            return await ctx.send(self._missing_api_key_message(ctx))
+        setup = await self._require_server_setup(ctx)
+        if setup is None:
+            return
+        _, clan_key, coc_war_channel = setup
         
-        clan_key = await self._get_clan_tag(ctx)
-        if not clan_key:
-            return await ctx.send(self._missing_clan_key_message(ctx))
-        
-        coc_war_channel = await self._get_war_channel_id(ctx)
-        if not coc_war_channel:
-            return await ctx.send(
-                "No war update channel is set yet. Use "
-                f"`{ctx.clean_prefix}coc setwarchannel` to use this channel, or "
-                f"`{ctx.clean_prefix}coc setwarchannel #channel` to choose one."
-            )
-        
-        await guild_config.COC_WAR_NOTIFICATIONS.set(True)
-        await self._reset_war_notification_state(guild_config)
         try:
-            channel = ctx.guild.get_channel(int(coc_war_channel))
+            channel = ctx.guild.get_channel(int(coc_war_channel)) if coc_war_channel else None
         except (TypeError, ValueError):
             channel = None
-        channel_name = channel.mention if channel else f"`{coc_war_channel}`"
+        if channel is None:
+            channel = ctx.channel
+            coc_war_channel = str(channel.id)
+            await guild_config.COC_WAR_CHANNEL.set(channel.id)
+
+        await guild_config.COC_WAR_NOTIFICATIONS.set(True)
+        await self._reset_war_notification_state(guild_config)
+        channel_name = channel.mention
         await ctx.send(
             "Clash of Clans war notifications are now **ON**.\n"
             f"Clan: `{self._normalize_tag(clan_key)}`\n"
@@ -1343,7 +1427,7 @@ class Coc(commands.Cog):
             "I will check for war updates about every 5 minutes."
         )
 
-    @checks.mod_or_permissions(manage_channels=True)
+    @coc_manager()
     @command_coc_warnotification.command(name="status")
     async def command_coc_warnotification_status(self, ctx):
         """Show Clash of Clans war notification settings."""
@@ -1351,6 +1435,7 @@ class Coc(commands.Cog):
         settings = await self.config.guild(ctx.guild).all()
         channel_id = settings.get("COC_WAR_CHANNEL")
         role_id = settings.get("COC_WAR_MENTION_ROLE")
+        manager_role_id = settings.get("COC_MANAGER_ROLE")
         try:
             channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
         except (TypeError, ValueError):
@@ -1359,10 +1444,15 @@ class Coc(commands.Cog):
             role = ctx.guild.get_role(int(role_id)) if role_id else None
         except (TypeError, ValueError):
             role = None
+        try:
+            manager_role = ctx.guild.get_role(int(manager_role_id)) if manager_role_id else None
+        except (TypeError, ValueError):
+            manager_role = None
         lines = [
             f"Global notifications: **{'ON' if settings.get('COC_WAR_NOTIFICATIONS') else 'OFF'}**",
             f"Channel: {channel.mention if channel else ('`' + str(channel_id) + '`' if channel_id else '**not set**')}",
             f"Mention role: {role.mention if role else ('`' + str(role_id) + '`' if role_id else '**not set**')}",
+            f"Manager role: {manager_role.mention if manager_role else ('`' + str(manager_role_id) + '`' if manager_role_id else '**not set**')}",
             f"Timezone: **{settings.get('COC_TIMEZONE') or 'America/New_York'}**",
             f"Preparation ending soon: **{settings.get('WAR_PREP_SOON_MINUTES', 5)} minutes** before battle day",
             f"War ending soon: **{settings.get('WAR_END_SOON_MINUTES', 60)} minutes** before war end",
@@ -1377,17 +1467,17 @@ class Coc(commands.Cog):
 
         await ctx.send("\n".join(lines))
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(
-        name="attackstyle", aliases=["attack", "attackformat", "logstyle"]
-    )
-    async def command_coc_attackstyle(self, ctx, style: str = None):
-        """Choose compact one-line attack updates or detailed cards."""
+    @coc_manager()
+    @command_coc_set.command(name="attack")
+    async def command_coc_notification_attack(self, ctx, style: str = None):
+        """Toggle the attack-log format, or explicitly choose card or compact."""
 
         guild_config = self.config.guild(ctx.guild)
         if style is None:
-            current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "card").upper()
-            return await ctx.send(f"War attack log format is **{current}**.")
+            current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "card").lower()
+            selected = "compact" if current == "card" else "card"
+            await guild_config.WAR_ATTACK_LOG_STYLE.set(selected)
+            return await ctx.send(f"War attack log format is now **{selected.upper()}**.")
         normalized = style.strip().lower()
         aliases = {
             "card": "card",
@@ -1403,24 +1493,69 @@ class Coc(commands.Cog):
         await guild_config.WAR_ATTACK_LOG_STYLE.set(selected)
         await ctx.send(f"War attack log format is now **{selected.upper()}**.")
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="role")
-    async def command_coc_warnotification_role(self, ctx, role: discord.Role):
-        """Set the role used by war notification mentions."""
+    @checks.admin_or_permissions(manage_guild=True)
+    @command_coc_set.command(name="managerrole")
+    async def command_coc_set_managerrole(self, ctx, *, role_name: str = None):
+        """Show, set, or clear the role allowed to manage CoC settings."""
 
-        await self.config.guild(ctx.guild).COC_WAR_MENTION_ROLE.set(role.id)
+        guild_config = self.config.guild(ctx.guild)
+        if role_name is None:
+            role_id = await guild_config.COC_MANAGER_ROLE()
+            try:
+                role = ctx.guild.get_role(int(role_id)) if role_id else None
+            except (TypeError, ValueError):
+                role = None
+            current = role.mention if role else "**not set**"
+            return await ctx.send(
+                f"CoC manager role: {current}\n"
+                f"Set one with `{ctx.clean_prefix}coc set managerrole @CoC Manager`, or clear it with "
+                f"`{ctx.clean_prefix}coc set managerrole clear`."
+            )
+
+        if role_name.strip().lower() in {"clear", "none", "off"}:
+            await guild_config.COC_MANAGER_ROLE.set(None)
+            return await ctx.send("CoC manager role cleared.")
+
+        try:
+            role = await commands.RoleConverter().convert(ctx, role_name)
+        except commands.BadArgument:
+            return await ctx.send("I could not find that role. Mention it or enter its exact name or ID.")
+
+        await guild_config.COC_MANAGER_ROLE.set(role.id)
+        await ctx.send(f"CoC manager role set to {role.mention}.")
+
+    @command_coc_set.command(name="notificationrole")
+    async def command_coc_set_notificationrole(self, ctx, *, role_name: str = None):
+        """Show, set, or clear the role used for war notification mentions."""
+
+        guild_config = self.config.guild(ctx.guild)
+        if role_name is None:
+            role_id = await guild_config.COC_WAR_MENTION_ROLE()
+            try:
+                role = ctx.guild.get_role(int(role_id)) if role_id else None
+            except (TypeError, ValueError):
+                role = None
+            current = role.mention if role else "**not set**"
+            return await ctx.send(
+                f"War notification role: {current}\n"
+                f"Set one with `{ctx.clean_prefix}coc set notificationrole @War`, or clear it with "
+                f"`{ctx.clean_prefix}coc set notificationrole clear`."
+            )
+
+        if role_name.strip().lower() in {"clear", "none", "off"}:
+            await guild_config.COC_WAR_MENTION_ROLE.set(None)
+            return await ctx.send("War notification mention role cleared.")
+
+        try:
+            role = await commands.RoleConverter().convert(ctx, role_name)
+        except commands.BadArgument:
+            return await ctx.send("I could not find that role. Mention it or enter its exact name or ID.")
+
+        await guild_config.COC_WAR_MENTION_ROLE.set(role.id)
         await ctx.send(f"War notification mention role set to {role.mention}.")
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="clearrole")
-    async def command_coc_warnotification_clearrole(self, ctx):
-        """Clear the war notification mention role."""
-
-        await self.config.guild(ctx.guild).COC_WAR_MENTION_ROLE.set(None)
-        await ctx.send("War notification mention role cleared.")
-
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="event")
+    @coc_manager()
+    @command_coc_set.command(name="event")
     async def command_coc_warnotification_event(self, ctx, event: str, enabled: bool):
         """Toggle one war notification event."""
 
@@ -1439,8 +1574,8 @@ class Coc(commands.Cog):
             f"**{'ON' if enabled else 'OFF'}**."
         )
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="mention")
+    @coc_manager()
+    @command_coc_set.command(name="mention")
     async def command_coc_warnotification_mention(self, ctx, event: str, enabled: bool):
         """Toggle role mentions for one war notification event."""
 
@@ -1458,9 +1593,9 @@ class Coc(commands.Cog):
             f"**{'ON' if enabled else 'OFF'}**."
         )
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="prepsoonminutes")
-    async def command_coc_warnotification_prepsoonminutes(self, ctx, minutes: int):
+    @coc_manager()
+    @command_coc_set.command(name="prepwarning")
+    async def command_coc_set_prepwarning(self, ctx, minutes: int):
         """Set how soon before battle day the preparation warning sends."""
 
         if minutes < 1:
@@ -1471,9 +1606,9 @@ class Coc(commands.Cog):
         await self._reset_war_notification_state(guild_config)
         await ctx.send(f"Preparation ending soon notifications will send {minutes} minutes before battle day.")
 
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc_warnotification.command(name="endsoonminutes")
-    async def command_coc_warnotification_endsoonminutes(self, ctx, minutes: int):
+    @coc_manager()
+    @command_coc_set.command(name="endwarning")
+    async def command_coc_set_endwarning(self, ctx, minutes: int):
         """Set how soon before war end the ending warning sends."""
 
         if minutes < 1:
@@ -1485,7 +1620,7 @@ class Coc(commands.Cog):
         await ctx.send(f"War ending soon notifications will send {minutes} minutes before war end.")
 
     @checks.is_owner()
-    @command_coc.command(name="setapi", aliases=["setcocapi", "setcoc"])
+    @command_coc.command(name="setapi")
     async def command_coc_setcocapi(self, ctx, key: str):
         """Set the global Clash of Clans API key."""
 
@@ -1493,10 +1628,8 @@ class Coc(commands.Cog):
             await self.config.COC_API_KEY.set(key)
             await ctx.send("Key set.")
 
-    @commands.guild_only()
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc.command(name="setclan", aliases=["setcocclankey", "setcocclan"])
-    async def command_coc_setcocclankey(self, ctx, key: str):
+    @command_coc_set.command(name="clan")
+    async def command_coc_set_clan(self, ctx, key: str):
         """Set this server's Clash of Clans clan tag."""
 
         if key:
@@ -1505,10 +1638,8 @@ class Coc(commands.Cog):
             await self._reset_war_notification_state(guild_config)
             await ctx.send("Key set.")
 
-    @commands.guild_only()
-    @checks.mod_or_permissions(manage_channels=True)
-    @command_coc.command(name="setwarchannel", aliases=["setcocwarchannel"])
-    async def command_coc_setcocwarchannel(self, ctx, channel: discord.TextChannel = None):
+    @command_coc_set.command(name="warchannel")
+    async def command_coc_set_warchannel(self, ctx, channel: discord.TextChannel = None):
         """
         Set this server's Clash of Clans war update channel.
         
