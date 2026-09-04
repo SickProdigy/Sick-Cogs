@@ -1,5 +1,10 @@
 # Companion Website Server Setup
 
+This is optional, unfinished infrastructure for future recovery, export, and other protected
+account-management features. It is not required for current wallet provisioning, authorization,
+balances, activity, or sends. Do not start or expose a listener merely to make routine wallet
+commands work.
+
 Deploy this directory outside the public document root. It contains server-only pairing credentials
 and request-signing code; only the static files in the parent `web/` directory are public assets.
 
@@ -31,8 +36,8 @@ freshly signed server-to-cog request. The installation credential never enters t
 
 Custom authentication and claiming add three public website endpoints:
 
-- `web/api/jwks.php` publishes only the ES256 public key after retrieving it through a signed
-  server-to-cog request. Configure its public HTTPS URL in CDP.
+- `web/api/jwks.php` publishes only the ES256 public key from the static `web/jwks.json` file.
+  Configure its public HTTPS URL in CDP; it does not require companion pairing.
 - `web/api/auth-token.php` accepts POST only, requires the verified HttpOnly browser-session
   cookie, and returns a short-lived user-bound CDP JWT. It never receives the signing key.
 - `web/api/claim.php` forwards the short-lived CDP access token through a signed request. The

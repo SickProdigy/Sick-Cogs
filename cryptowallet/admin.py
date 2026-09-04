@@ -25,7 +25,7 @@ class WalletAdminCommands:
     @commands.group(name="walletset", invoke_without_command=True)
     @commands.is_owner()
     async def walletset(self, ctx: commands.Context):
-        """Configure the global wallet companion integration."""
+        """Configure CryptoWallet and inspect optional companion infrastructure."""
 
         await ctx.send_help()
 
@@ -105,19 +105,23 @@ class WalletAdminCommands:
         pairing = await self.companion_pairing_status()
         cdp = await self.wallet_provider.readiness()
         jwt_auth = await self.jwt_public_status()
+        authorization_ready = bool(cdp["configured"] and jwt_auth["configured"])
         await ctx.send(
             "**Wallet integration**\n"
             f"Provider: `{provider}`\n"
             f"Network: `{network.name}` (`{network.chain_id}`)\n"
-            f"Companion URL: `{approval_base_url or 'not configured'}`\n"
-            f"Companion listener: `{'running' if self.companion.running else 'stopped'}`\n"
-            f"Discord OAuth: `{'configured' if oauth_ready else 'not configured'}`\n"
+            f"Approval website: `{approval_base_url or 'not configured'}`\n"
             f"Deployment: `{deployment_id or 'not initialized'}`\n"
             f"Discord application: `{application_id or 'unavailable'}`\n"
-            f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
             f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
             f"Custom authentication: `{'configured' if jwt_auth['configured'] else 'not configured'}`\n"
-            "Mainnet: `disabled`"
+            f"Current authorization flow: `{'ready' if authorization_ready else 'not ready'}`\n"
+            "Mainnet: `disabled`\n\n"
+            "**Optional future recovery relay**\n"
+            f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
+            f"Discord OAuth: `{'configured' if oauth_ready else 'not configured'}`\n"
+            f"Companion listener: `{'running' if self.companion.running else 'stopped'}`\n"
+            "Pairing and the listener are not required for current wallet authorization or sends."
         )
 
     @walletset.command(name="cdpstatus")
@@ -186,7 +190,8 @@ class WalletAdminCommands:
             f"Audience: `{status['audience']}`\n"
             f"JWKS URL: `{status['jwks_url']}`\n"
             f"Key ID: `{status['kid']}`\n"
-            "Algorithm: `ES256`"
+            "Algorithm: `ES256`\n"
+            "Website pairing and the companion listener are not required for this flow."
         )
 
     @walletset.command(name="jwksfile")
@@ -200,17 +205,19 @@ class WalletAdminCommands:
         payload = json.dumps(jwks, indent=2).encode("utf-8")
         await ctx.send(
             "Upload this public-key file as `jwks.json` beside the wallet web files. "
-            "It contains no private key or provider credential.",
+            "It contains no private key or provider credential. This is normally a one-time "
+            "custom-auth setup step; upload it again only if the bot's JWT signing identity "
+            "changes.",
             file=discord.File(io.BytesIO(payload), filename="jwks.json"),
         )
 
     @walletset.command(name="pair")
     @commands.is_owner()
     async def walletset_pair(self, ctx: commands.Context):
-        """Create a one-time code for pairing the companion website server."""
+        """Pair the optional future recovery relay; not needed for current sends."""
         code, expires_at = await self.begin_companion_pairing()
         message = (
-            "Companion website pairing code (single use):\n"
+            "Optional recovery-relay pairing code (single use):\n"
             f"`{code}`\nExpires <t:{expires_at}:R>. Enter it only in the private website setup."
         )
         try:
@@ -219,7 +226,10 @@ class WalletAdminCommands:
             await self.cancel_companion_pairing()
             await ctx.send("I could not DM you, so no pairing code was left active.")
             return
-        await ctx.send("I sent the one-time companion pairing code to your DMs.")
+        await ctx.send(
+            "I sent the optional recovery-relay pairing code to your DMs. Pairing is not "
+            "required for current wallet authorization, balances, activity, or sends."
+        )
 
     @walletset.command(name="paircancel")
     @commands.is_owner()
@@ -233,11 +243,17 @@ class WalletAdminCommands:
     async def walletset_pair_status(self, ctx: commands.Context):
         """Show non-secret companion website pairing status."""
         status = await self.companion_pairing_status()
-        await ctx.send(
+        message = (
             f"Website pairing: `{'paired' if status['paired'] else 'not paired'}`\n"
             f"Installation: `{status['installation_id'] or 'none'}`\n"
             f"Paired at: `{status['paired_at'] or 'never'}`"
         )
+        if not status["paired"]:
+            message += (
+                "\nThis optional recovery relay is not configured. Current wallet "
+                "authorization, balances, activity, and sends are unaffected."
+            )
+        await ctx.send(message)
 
     @walletset.command(name="unpair")
     @commands.is_owner()
@@ -249,14 +265,14 @@ class WalletAdminCommands:
     @walletset.group(name="companion", invoke_without_command=True)
     @commands.is_owner()
     async def walletset_companion(self, ctx: commands.Context):
-        """Start or stop the loopback companion listener."""
+        """Manage the optional loopback listener for future protected account tools."""
 
         await ctx.send_help()
 
     @walletset_companion.command(name="start")
     @commands.is_owner()
     async def walletset_companion_start(self, ctx: commands.Context, port: int = 8787):
-        """Start the loopback listener behind your HTTPS reverse proxy."""
+        """Enable the optional loopback listener behind an HTTPS reverse proxy."""
 
         if self.companion.running:
             await ctx.send("The wallet companion is already running; stop it before changing ports.")
@@ -276,7 +292,10 @@ class WalletAdminCommands:
         await self.config.companion_host.set("127.0.0.1")
         await self.config.companion_port.set(port)
         await self.config.companion_enabled.set(True)
-        await ctx.send(f"Companion listening on `127.0.0.1:{port}` for the HTTPS proxy.")
+        await ctx.send(
+            f"Optional companion listening on `127.0.0.1:{port}` for the HTTPS proxy. "
+            "It will start automatically on future cog loads until disabled."
+        )
 
     @walletset_companion.command(name="stop")
     @commands.is_owner()
