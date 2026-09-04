@@ -1,3 +1,4 @@
+import base64
 import copy
 import time
 import unittest
@@ -43,7 +44,11 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
-from ..providers.base_rpc import _decode_abi_text
+from ..providers.base_rpc import (
+    _decode_abi_text,
+    build_solana_transfer_message,
+    serialize_unsigned_solana_transfer,
+)
 
 
 class _Value:
@@ -649,6 +654,21 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertIn("Received", embed.fields[0].name)
         self.assertIn("1.25 SOL net", embed.fields[0].name)
         self.assertIn("cluster=devnet", embed.fields[0].value)
+
+    def test_unsigned_solana_transfer_has_one_signer_and_system_instruction(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        recipient = "11111111111111111111111111111111"
+        message = build_solana_transfer_message(sender, recipient, 1250, sender)
+        self.assertEqual(message[:3], bytes((1, 0, 1)))
+        self.assertEqual(message[3], 3)
+        self.assertEqual(message[-18:-12], bytes((1, 2, 2, 0, 1, 12)))
+        self.assertEqual(message[-12:], bytes.fromhex("02000000e204000000000000"))
+        wire = base64.b64decode(serialize_unsigned_solana_transfer(message))
+        self.assertEqual(wire[0], 1)
+        self.assertEqual(wire[1:65], b"\x00" * 64)
+        self.assertEqual(wire[65:], message)
+        with self.assertRaises(ValueError):
+            build_solana_transfer_message(sender, recipient, 0, sender)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]

@@ -1,8 +1,14 @@
+import base64
 import json
+import struct
 
 import aiohttp
 
-from ..core.validation import normalize_solana_signature
+from ..core.validation import (
+    BASE58_ALPHABET,
+    normalize_solana_address,
+    normalize_solana_signature,
+)
 
 
 EVM_RPC_URLS = {
@@ -30,6 +36,79 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 
 class BaseRpcError(RuntimeError):
     pass
+
+
+def _decode_solana_public_key(value: str) -> bytes:
+    value = normalize_solana_address(value)
+    number = 0
+    for character in value:
+        number = number * 58 + BASE58_ALPHABET.index(character)
+    decoded = number.to_bytes((number.bit_length() + 7) // 8, "big") if number else b""
+    return b"\x00" * (len(value) - len(value.lstrip("1"))) + decoded
+
+
+def build_solana_transfer_message(
+    from_address: str, to_address: str, lamports: int, recent_blockhash: str
+) -> bytes:
+    """Build one unsigned legacy System Program transfer message."""
+    if lamports <= 0 or lamports > 2**64 - 1:
+        raise ValueError("The SOL transfer amount is outside the supported range.")
+    sender = _decode_solana_public_key(from_address)
+    recipient = _decode_solana_public_key(to_address)
+    blockhash = _decode_solana_public_key(recent_blockhash)
+    system_program = b"\x00" * 32
+    header = bytes((1, 0, 1))
+    account_keys = bytes((3,)) + sender + recipient + system_program
+    instruction_data = struct.pack("<IQ", 2, lamports)
+    instruction = bytes((1, 2, 2, 0, 1, len(instruction_data))) + instruction_data
+    return header + account_keys + blockhash + instruction
+
+
+def serialize_unsigned_solana_transfer(message: bytes) -> str:
+    """Serialize a one-signer message with an empty signature for CDP signing."""
+    if not message or len(message) > 1232 - 65:
+        raise ValueError("The Solana transaction message is invalid or too large.")
+    return base64.b64encode(bytes((1,)) + b"\x00" * 64 + message).decode("ascii")
+
+
+async def quote_solana_transfer(
+    from_address: str, to_address: str, lamports: int
+) -> dict:
+    """Build a native devnet transfer and retrieve its current network fee."""
+    latest = await _rpc_with_urls(
+        SOLANA_DEVNET_RPC_URLS,
+        "getLatestBlockhash",
+        [{"commitment": "confirmed"}],
+        "Solana Devnet",
+    )
+    try:
+        value = latest["value"]
+        blockhash = normalize_solana_address(str(value["blockhash"]))
+        last_valid_block_height = int(value["lastValidBlockHeight"])
+        if last_valid_block_height <= 0:
+            raise ValueError("Invalid block height")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BaseRpcError("Solana Devnet returned an invalid recent blockhash.") from exc
+    message = build_solana_transfer_message(
+        from_address, to_address, lamports, blockhash
+    )
+    fee_result = await _rpc_with_urls(
+        SOLANA_DEVNET_RPC_URLS,
+        "getFeeForMessage",
+        [base64.b64encode(message).decode("ascii"), {"commitment": "confirmed"}],
+        "Solana Devnet",
+    )
+    try:
+        fee = int(fee_result["value"])
+        if fee < 0:
+            raise ValueError("Invalid fee")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BaseRpcError("Solana Devnet returned an invalid transaction fee.") from exc
+    return {
+        "transaction": serialize_unsigned_solana_transfer(message),
+        "fee_atomic": fee,
+        "last_valid_block_height": last_valid_block_height,
+    }
 
 
 async def get_solana_native_balance(address: str) -> int:
