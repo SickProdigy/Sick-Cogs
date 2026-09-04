@@ -170,6 +170,13 @@ class WalletTransactionCommands:
         self, interaction: discord.Interaction, view: WalletIntentView
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
+        if await self.config.user_from_id(view.user_id).security_locked():
+            await interaction.followup.send(
+                "This wallet is emergency-locked. Nothing was submitted; only the bot "
+                "owner can unlock it after identity review.",
+                ephemeral=True,
+            )
+            return
         if await self.config.provider_paused():
             await interaction.followup.send(
                 "CryptoWallet provider processing is paused by the bot owner. "
@@ -379,6 +386,8 @@ class WalletTransactionCommands:
     @WalletCoreCommands.wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
         """Prepare an unsigned Base Sepolia ETH transfer intent."""
+        if not await self._wallet_sensitive_allowed(ctx):
+            return
         if not await self._wallet_read_allowed(
             ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):

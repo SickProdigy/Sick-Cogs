@@ -10,8 +10,12 @@
   <main class="card">
     <p class="eyebrow">SickGaming Crypto Wallet</p>
     <h1>Security and permissions</h1>
-    <p>Use this area to review linked identities, application signers, delegated limits, and revocation controls.</p>
-    <p>No bot signer or mainnet permission is enabled in this prototype.</p>
+    <p>Wallet security controls are managed from Discord so the bot can enforce them before any provider operation.</p>
+    <div class="notice info">
+      <strong>If your Discord account may be compromised</strong>
+      <p>Run <code>!wallet security lock</code> as soon as possible or ask the bot owner to run <code>!walletset lock @username</code> or use your numeric Discord user ID. A lock blocks new sends, authorization, renewal, and signer export while leaving deposits and read-only wallet information available. Only the bot owner can unlock it after identity review.</p>
+    </div>
+    <p>Authorization revocation remains available while locked. Independent 2FA is not enabled yet, and mainnet remains disabled.</p>
     <a href="./">Return to wallet home</a>
   </main>
 </body>

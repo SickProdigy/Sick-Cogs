@@ -8,6 +8,8 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
+from ..core.validation import normalize_evm_address
+
 
 JWT_TOKEN_NAMESPACE = "cryptowallet_jwt"
 JWT_LIFETIME_SECONDS = 5 * 60
@@ -185,6 +187,10 @@ class JwtAuthMixin:
             ),
             "",
         )
+        try:
+            address = normalize_evm_address(address)
+        except ValueError as exc:
+            raise RuntimeError("The provisioned wallet address is invalid") from exc
         deployment_id = str(await self.config.deployment_id() or "")
         application_id = getattr(self.bot.user, "id", None)
         if (

@@ -8,11 +8,13 @@ from .core import WalletCoreCommands
 
 
 class WalletAccountCommands:
-    """Protected wallet recovery and account-exit commands."""
+    """Protected wallet signer-backup commands."""
 
     @WalletCoreCommands.wallet.command(name="recovery", aliases=("backup",))
     async def wallet_recovery(self, ctx: commands.Context):
         """DM a protected link for backing up the smart-account wallet signer key."""
+        if not await self._wallet_sensitive_allowed(ctx):
+            return
         if not await self._wallet_read_allowed(
             ctx, "recovery", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):
