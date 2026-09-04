@@ -22,6 +22,8 @@ from ..core.models import (
 )
 from ..core.networks import (
     BASE_SEPOLIA,
+    ETHEREUM_SEPOLIA,
+    KNOWN_NETWORKS,
     NETWORKS,
     ChainFamily,
     Network,
@@ -480,6 +482,12 @@ class FailClosedTransactionTests(unittest.TestCase):
 class NetworkArchitectureTests(unittest.TestCase):
     def test_base_capabilities_are_explicit_and_provider_declared(self):
         self.assertEqual(set(NETWORKS), {BASE_SEPOLIA.key})
+        self.assertEqual(
+            set(KNOWN_NETWORKS), {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key}
+        )
+        self.assertFalse(ETHEREUM_SEPOLIA.enabled)
+        self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
+        self.assertEqual(ETHEREUM_SEPOLIA.capabilities.enabled(), ())
         self.assertIs(BASE_SEPOLIA.family, ChainFamily.EVM)
         self.assertEqual(BASE_SEPOLIA.reference_label, "chain ID")
         self.assertEqual(BASE_SEPOLIA.reference, "84532")

@@ -102,7 +102,28 @@ BASE_SEPOLIA = Network(
     ),
 )
 
-# Only reviewed networks belong in NETWORKS. Planned Ethereum and Solana testnets
-# remain absent until their provider behavior and tests satisfy issue #39.
-NETWORKS = {network.key: network for network in (BASE_SEPOLIA,) if network.enabled}
+ETHEREUM_SEPOLIA = Network(
+    key="ethereum-sepolia",
+    name="Ethereum Sepolia",
+    family=ChainFamily.EVM,
+    chain_id=11155111,
+    native_symbol="ETH",
+    native_decimals=18,
+    explorer_url="https://sepolia.etherscan.io",
+    testnet=True,
+    enabled=False,
+    capabilities=NetworkCapabilities(),
+)
+
+# KNOWN_NETWORKS includes planned entries for diagnostics and documentation. Only
+# independently reviewed, enabled entries are exposed through NETWORKS.
+KNOWN_NETWORKS = {
+    network.key: network for network in (BASE_SEPOLIA, ETHEREUM_SEPOLIA)
+}
+
+# Only reviewed networks belong in NETWORKS. Ethereum Sepolia remains disabled, and
+# Solana devnet remains undefined until their milestones satisfy issue #39.
+NETWORKS = {
+    key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
+}
 DEFAULT_NETWORK = BASE_SEPOLIA.key
