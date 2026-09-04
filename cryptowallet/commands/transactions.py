@@ -5,7 +5,9 @@ import discord
 from redbot.core import commands
 
 from ..core.models import IntentStatus, TransactionIntent
-from ..core.networks import NETWORKS, NetworkCapability
+from ..core.networks import (
+    BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability
+)
 from ..providers import WalletProviderError
 from ..core.validation import (
     format_atomic_amount,
@@ -26,8 +28,8 @@ class WalletTransactionCommands:
         return (
             intent.profile_id,
             intent.network,
-            intent.from_address.lower(),
-            intent.to_address.lower(),
+            intent.from_address,
+            intent.to_address,
             intent.value_wei,
             intent.estimated_gas_fee_wei,
             intent.gas_sponsored,
@@ -89,7 +91,7 @@ class WalletTransactionCommands:
                 name="Transaction",
                 value=(
                     f"[{intent.transaction_hash}]"
-                    f"({network.explorer_url}/tx/{intent.transaction_hash})"
+                    f"({network.explorer_transaction_url(intent.transaction_hash)})"
                 ),
                 inline=False,
             )
@@ -100,7 +102,11 @@ class WalletTransactionCommands:
                 inline=False,
             )
         if intent.block_number is not None:
-            embed.add_field(name="Block", value=f"`{intent.block_number}`", inline=True)
+            embed.add_field(
+                name="Slot" if network.family is ChainFamily.SOLANA else "Block",
+                value=f"`{intent.block_number}`",
+                inline=True,
+            )
         if intent.status in {IntentStatus.PENDING, IntentStatus.PROCESSING}:
             footer = "Unsigned testnet intent — no transaction has been sent"
         elif intent.status is IntentStatus.UNCERTAIN:
@@ -388,7 +394,10 @@ class WalletTransactionCommands:
             )
 
     @WalletCoreCommands.wallet.command(name="send")
-    async def wallet_send(self, ctx: commands.Context, to_address: str, amount: str):
+    async def wallet_send(
+        self, ctx: commands.Context, network_or_address: str,
+        address_or_amount: str, amount: str = None
+    ):
         """Prepare an unsigned native-token transfer on the enabled test network."""
         if not await self._wallet_sensitive_allowed(ctx):
             return
@@ -399,7 +408,17 @@ class WalletTransactionCommands:
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        network = NETWORKS.get(await self.config.default_network())
+        if amount is None:
+            network = NETWORKS.get(await self.config.default_network())
+            to_address, amount = network_or_address, address_or_amount
+        else:
+            aliases = {
+                "base": BASE_SEPOLIA.key, "base-sepolia": BASE_SEPOLIA.key,
+                "sol": SOLANA_DEVNET.key, "solana": SOLANA_DEVNET.key,
+                "solana-devnet": SOLANA_DEVNET.key,
+            }
+            network = NETWORKS.get(aliases.get(network_or_address.lower(), ""))
+            to_address = address_or_amount
         if (
             network is None
             or not network.testnet
@@ -443,10 +462,18 @@ class WalletTransactionCommands:
             created_at=now,
             expires_at=now + INTENT_LIFETIME_SECONDS,
             estimated_gas_fee_wei=0,
-            gas_sponsored=True,
+            gas_sponsored=network.supports(NetworkCapability.SPONSORSHIP),
         )
         if not intent.profile_id:
             await ctx.send("Your wallet profile is incomplete and must be linked again.")
+            return
+        try:
+            intent = await self.wallet_provider.prepare_transaction(intent)
+        except WalletProviderError as exc:
+            await ctx.send(f"The transaction preview is unavailable: {exc}")
+            return
+        if value_wei + intent.estimated_gas_fee_wei > balance_wei:
+            await ctx.send(f"Insufficient {network.name} balance for the amount and network fee.")
             return
         async with self.config.user(ctx.author).intents() as intents:
             intents[intent.intent_id] = intent.to_dict()

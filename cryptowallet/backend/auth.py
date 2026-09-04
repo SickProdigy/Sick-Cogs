@@ -230,11 +230,7 @@ class JwtAuthMixin:
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
             "sickwallet_address": base_address,
-            "sickwallet_accounts": (
-                expected_accounts
-                if purpose == "authorize"
-                else [{"family": "evm", "address": base_address}]
-            ),
+            "sickwallet_accounts": expected_accounts,
             "sickwallet_purpose": purpose,
         }
         token = jwt.encode(

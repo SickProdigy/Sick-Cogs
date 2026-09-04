@@ -4,7 +4,7 @@ import time
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import jwt
 from jwt import DecodeError, ExpiredSignatureError, InvalidAudienceError
@@ -299,7 +299,12 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_handoff_has_a_distinct_bound_purpose(self):
         harness = _JwtHarness(self.configuration)
-        token, _ = await harness.create_recovery_handoff(7, _profile())
+        profile = _profile()
+        profile["accounts"].append({
+            "network": "solana-devnet",
+            "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        })
+        token, _ = await harness.create_recovery_handoff(7, profile)
         claims = jwt.decode(
             token,
             self.key.public_key(),
@@ -314,6 +319,10 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             claims["sickwallet_address"],
             "0x7930fB6E9853B3835Cf047f36855993cb82d4387",
         )
+        self.assertEqual(claims["sickwallet_accounts"], [
+            {"family": "evm", "address": "0x7930fB6E9853B3835Cf047f36855993cb82d4387"},
+            {"family": "solana", "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"},
+        ])
 
     async def test_malformed_handoff_is_rejected_by_jwt_decoder(self):
         with self.assertRaises(DecodeError):
@@ -501,7 +510,7 @@ class FailClosedTransactionTests(unittest.TestCase):
         self.assertIn("do not send a replacement", embed.footer.text)
 
 
-class NetworkArchitectureTests(unittest.TestCase):
+class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
     def test_base_capabilities_are_explicit_and_provider_declared(self):
         self.assertEqual(
             set(NETWORKS),
@@ -625,7 +634,7 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertEqual(parse_native_amount("1.25", solana), 1_250_000_000)
         self.assertEqual(format_atomic_amount(1_250_000_000, solana), "1.25")
 
-    def test_solana_devnet_is_read_only_and_uses_cluster_links(self):
+    def test_solana_devnet_send_capabilities_and_cluster_links(self):
         address = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
         provider = CdpWalletProvider(SimpleNamespace())
         self.assertEqual(normalize_solana_address(address), address)
@@ -633,11 +642,11 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertEqual(SOLANA_DEVNET.reference, "devnet")
         self.assertEqual(SOLANA_DEVNET.native_decimals, 9)
         self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.BALANCE))
-        self.assertFalse(SOLANA_DEVNET.supports(NetworkCapability.SEND))
+        self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.SEND))
         self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.HISTORY))
         self.assertTrue(SOLANA_DEVNET.supports(NetworkCapability.TRANSACTION_LOOKUP))
         self.assertTrue(provider.supports(SOLANA_DEVNET.key, NetworkCapability.BALANCE))
-        self.assertFalse(provider.supports(SOLANA_DEVNET.key, NetworkCapability.SEND))
+        self.assertTrue(provider.supports(SOLANA_DEVNET.key, NetworkCapability.SEND))
         self.assertEqual(
             SOLANA_DEVNET.explorer_address_url(address),
             f"https://explorer.solana.com/address/{address}?cluster=devnet",
@@ -678,6 +687,29 @@ class NetworkArchitectureTests(unittest.TestCase):
         self.assertEqual(wire[65:], message)
         with self.assertRaises(ValueError):
             build_solana_transfer_message(sender, recipient, 0, sender)
+
+    async def test_solana_intent_quote_preserves_addresses_and_adds_fee(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        recipient = "11111111111111111111111111111111"
+        intent = TransactionIntent(
+            intent_id="sol-intent", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address=recipient, value_wei=1_000_000,
+            created_at=1, expires_at=9999999999, gas_sponsored=False,
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        with patch(
+            "cryptowallet.providers.cdp.quote_solana_transfer",
+            AsyncMock(return_value={
+                "transaction": "unsigned", "fee_atomic": 5000,
+                "last_valid_block_height": 123,
+            }),
+        ):
+            quoted = await provider.prepare_transaction(intent)
+        self.assertEqual(quoted.from_address, sender)
+        self.assertEqual(quoted.to_address, recipient)
+        self.assertEqual(quoted.estimated_gas_fee_wei, 5000)
+        self.assertFalse(quoted.gas_sponsored)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]

@@ -22,7 +22,11 @@ from ..core.networks import (
     KNOWN_NETWORKS,
     NetworkCapability,
 )
-from ..core.validation import normalize_evm_address, normalize_solana_address
+from ..core.validation import (
+    normalize_evm_address,
+    normalize_solana_address,
+    normalize_solana_signature,
+)
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import (
     BaseRpcError,
@@ -30,6 +34,8 @@ from .base_rpc import (
     get_native_balance as get_rpc_native_balance,
     get_solana_native_balance,
     get_solana_transaction_history,
+    get_solana_transaction,
+    quote_solana_transfer,
     get_user_operation_receipt,
 )
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
@@ -89,7 +95,10 @@ class CdpWalletProvider(WalletProvider):
         ARBITRUM_SEPOLIA.key: frozenset({NetworkCapability.BALANCE}),
         POLYGON_AMOY.key: frozenset({NetworkCapability.BALANCE}),
         AVALANCHE_FUJI.key: frozenset({NetworkCapability.BALANCE}),
-        SOLANA_DEVNET.key: frozenset({NetworkCapability.BALANCE, NetworkCapability.HISTORY}),
+        SOLANA_DEVNET.key: frozenset({
+            NetworkCapability.BALANCE, NetworkCapability.HISTORY,
+            NetworkCapability.SEND, NetworkCapability.DELEGATION,
+        }),
     }
 
     def __init__(self, bot, *, request_limiter=None, request_observer=None):
@@ -426,7 +435,7 @@ class CdpWalletProvider(WalletProvider):
 
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
         """Read the user-scoped delegation shared by every wallet account."""
-        if network != BASE_SEPOLIA.key:
+        if network not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
             raise WalletProviderError("Delegation lookup uses the wallet profile scope.")
         provider_user_id = str(profile.get("provider_user_id") or "")
         if not provider_user_id:
@@ -453,6 +462,8 @@ class CdpWalletProvider(WalletProvider):
 
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
         """Submit one sponsored Base Sepolia transfer through delegated signing."""
+        if intent.network == SOLANA_DEVNET.key:
+            return await self._submit_solana_transaction(profile, intent)
         if intent.network != BASE_SEPOLIA.key or not intent.gas_sponsored:
             raise WalletProviderError(
                 "Transaction submission is restricted to sponsored Base Sepolia."
@@ -536,10 +547,51 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not safely complete the sponsored Base Sepolia submission."
             ) from exc
 
+    async def _submit_solana_transaction(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == SOLANA_DEVNET.key), None)
+        try:
+            sender = normalize_solana_address(str((account or {}).get("address") or ""))
+            recipient = normalize_solana_address(intent.to_address)
+            intent_sender = normalize_solana_address(intent.from_address)
+        except ValueError as exc:
+            raise WalletProviderError("The Solana transaction contains an invalid address.") from exc
+        if (not provider_user_id or intent.profile_id != profile_id
+                or sender != intent_sender or intent.value_wei <= 0 or intent.gas_sponsored):
+            raise WalletProviderError("The Solana transaction does not match this wallet profile.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            quote_data = await quote_solana_transfer(sender, recipient, intent.value_wei)
+            if int(quote_data["fee_atomic"]) != intent.estimated_gas_fee_wei:
+                raise WalletProviderError("The Solana network fee changed; create a new preview.")
+            result = await self._api_client(credentials).send_solana_transaction(
+                provider_user_id, sender, credentials.project_id, SOLANA_DEVNET.key,
+                str(quote_data["transaction"]),
+                str(uuid.uuid5(uuid.NAMESPACE_URL,
+                    f"sick-cogs:cdp:send:{profile_id}:{intent.intent_id}")),
+            )
+            signature = normalize_solana_signature(str(
+                result.get("signature") or result.get("transactionSignature") or ""
+            ))
+            return {"provider_status": "broadcast", "user_operation_hash": None,
+                    "transaction_hash": signature, "block_number": None}
+        except WalletProviderError:
+            raise
+        except (CdpApiError, BaseRpcError, KeyError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not safely submit the Solana Devnet transfer.") from exc
+
     async def get_transaction_status(
         self, profile: dict, intent: TransactionIntent
     ) -> dict:
         """Retrieve and validate current CDP state for a submitted user operation."""
+        if intent.network == SOLANA_DEVNET.key:
+            return await self._get_solana_transaction_status(profile, intent)
         if intent.network != BASE_SEPOLIA.key or not intent.user_operation_hash:
             raise WalletProviderError("Only submitted Base Sepolia operations can be refreshed.")
         provider_user_id = str(profile.get("provider_user_id") or "")
@@ -599,6 +651,23 @@ class CdpWalletProvider(WalletProvider):
         except (AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not retrieve the submitted operation status.") from exc
 
+    async def _get_solana_transaction_status(self, profile: dict, intent: TransactionIntent) -> dict:
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == SOLANA_DEVNET.key), None)
+        try:
+            sender = normalize_solana_address(str((account or {}).get("address") or ""))
+            signature = normalize_solana_signature(intent.transaction_hash or "")
+            if sender != normalize_solana_address(intent.from_address):
+                raise ValueError("sender mismatch")
+            transaction = await get_solana_transaction(signature)
+        except (BaseRpcError, ValueError) as exc:
+            raise WalletProviderError("Solana Devnet could not retrieve this transaction status.") from exc
+        if transaction is None:
+            return {"provider_status": "broadcast", "transaction_hash": signature,
+                    "block_number": None}
+        return {"provider_status": "complete" if transaction["success"] else "failed",
+                "transaction_hash": signature, "block_number": int(transaction["slot"])}
+
     @staticmethod
     def _not_connected() -> WalletProviderError:
         return WalletProviderError(
@@ -628,6 +697,21 @@ class CdpWalletProvider(WalletProvider):
 
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Rebuild the current Base Sepolia quote without signing or submitting."""
+        if intent.network == SOLANA_DEVNET.key:
+            if (intent.status is not IntentStatus.PENDING or intent.value_wei <= 0
+                    or intent.gas_sponsored or intent.provider_status is not None
+                    or intent.user_operation_hash is not None
+                    or intent.transaction_hash is not None or intent.block_number is not None):
+                raise WalletProviderError("Only a clean pending Solana Devnet intent can be quoted.")
+            try:
+                sender = normalize_solana_address(intent.from_address)
+                recipient = normalize_solana_address(intent.to_address)
+                quote_data = await quote_solana_transfer(sender, recipient, intent.value_wei)
+            except (BaseRpcError, ValueError) as exc:
+                raise WalletProviderError("The Solana Devnet fee quote is unavailable.") from exc
+            return replace(intent, from_address=sender, to_address=recipient,
+                           estimated_gas_fee_wei=int(quote_data["fee_atomic"]),
+                           gas_sponsored=False)
         if (
             intent.status is not IntentStatus.PENDING
             or intent.network != BASE_SEPOLIA.key
@@ -662,7 +746,7 @@ class CdpWalletProvider(WalletProvider):
 
     async def revoke_authorization(self, profile: dict, network: str) -> None:
         """Revoke signing authority for every account in this wallet profile."""
-        if network != BASE_SEPOLIA.key:
+        if network not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
             raise WalletProviderError("Delegation revocation uses the wallet profile scope.")
         provider_user_id = str(profile.get("provider_user_id") or "")
         if not provider_user_id:
