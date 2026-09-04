@@ -10,7 +10,9 @@ CryptoWallet models each blockchain with an explicit chain family, network refer
 
 A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network; unsupported Solana validation fails closed instead of interpreting the address as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-This architecture does not enable Ethereum Sepolia, Solana devnet, or any mainnet. Those networks require their own provider implementation, validation, transaction, history, recovery, and test milestones before being added to the enabled registry.
+Ethereum Sepolia is registered as a known, disabled test network using CDP identifier `ethereum-sepolia` and chain ID `11155111`. It has no enabled capabilities and cannot be selected or used. Solana devnet remains undefined, and no mainnet is registered. Each requires its own provider implementation, validation, transaction, history, recovery, and test milestones before entering the enabled registry.
+
+Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
 ## Intended experience
 

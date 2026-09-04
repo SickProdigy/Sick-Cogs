@@ -3,7 +3,7 @@ import time
 import discord
 from redbot.core import commands
 
-from ..core.networks import BASE_SEPOLIA, NETWORKS
+from ..core.networks import BASE_SEPOLIA, KNOWN_NETWORKS, NETWORKS
 from ..providers import WalletProviderError
 from ..core.validation import format_wei_as_eth
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
@@ -213,7 +213,16 @@ class WalletCoreCommands:
                 f"({network.family.value.upper()}, {network.native_symbol}, testnet)\n"
                 f"  Capabilities: {capabilities}"
             )
-        await ctx.send("**Enabled wallet networks**\n" + "\n".join(lines))
+        planned = [
+            f"- **{network.name}** — {network.reference_label} `{network.reference}` "
+            f"({network.native_symbol}, unavailable until reviewed)"
+            for network in KNOWN_NETWORKS.values()
+            if not network.enabled
+        ]
+        message = "**Enabled wallet networks**\n" + "\n".join(lines)
+        if planned:
+            message += "\n\n**Planned test networks (disabled)**\n" + "\n".join(planned)
+        await ctx.send(message)
 
 
     @staticmethod
