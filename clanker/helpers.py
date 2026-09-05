@@ -340,5 +340,3 @@ def normalize_seconds(value: str, default: int, minimum: int = 0) -> int:
     if seconds < minimum:
         raise ValueError(f"Duration must be at least {minimum} seconds.")
     return seconds
-
-

@@ -16,7 +16,8 @@ This first milestone deliberately keeps custody outside the cog:
 ## Setup
 
 ```text
-[p]clankerset apiurl <api-base-url>
+[p]clankerset apiurl https://partner.example/api
+[p]clankerset apipath tokens
 [p]clankerset apitoken <token>
 [p]clankerset treasury <0x...>
 [p]clankerset platformbps 2000
@@ -90,6 +91,7 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset enabled <true|false>` - enable or disable the cog.
 - `[p]clankerset submit <true|false>` - enable or disable live API submissions.
 - `[p]clankerset apiurl <url>` - set the Clanker API base URL.
+- `[p]clankerset apipath <relative_path>` - set the relative live-submit endpoint path under the API URL; defaults to `tokens`.
 - `[p]clankerset apitoken <token>` - store the Clanker API bearer token.
 - `[p]clankerset treasury <0x...>` - set the bot-owner/SickGaming platform treasury address.
 - `[p]clankerset platformbps <0-10000>` - set the bot-owner reward cut, default 2000 bps / 20%.

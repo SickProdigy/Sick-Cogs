@@ -44,6 +44,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     default_guild = {
         "enabled": False,
         "api_base_url": None,
+        "api_submit_path": "tokens",
         "submit_enabled": False,
         "treasury_address": None,
         "platform_bps": 2000,
@@ -156,8 +157,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 payload["airdrop"]["admin"] = airdrop_admin
         return payload
 
-    async def submit_payload(self, api_base_url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        endpoint = urljoin(api_base_url.rstrip("/") + "/", "tokens")
+    async def submit_payload(
+        self,
+        api_base_url: str,
+        api_submit_path: str,
+        token: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        endpoint = urljoin(api_base_url.rstrip("/") + "/", (api_submit_path or "tokens").lstrip("/"))
         session = await self.get_session()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -396,7 +403,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         payload = record.get("payload")
         if not isinstance(payload, dict):
             raise RuntimeError("This launch record does not have a stored payload to submit.")
-        response = await self.submit_payload(settings["api_base_url"], token, payload)
+        response = await self.submit_payload(settings["api_base_url"], settings.get("api_submit_path") or "tokens", token, payload)
         return {
             "status": "submitted",
             "approved_at": utc_now(),
@@ -419,6 +426,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
         embed.add_field(name="Submit mode", value=str(settings["submit_enabled"]), inline=True)
         embed.add_field(name="API URL", value="Set" if settings["api_base_url"] else "Not set", inline=True)
+        embed.add_field(name="Submit path", value=settings.get("api_submit_path") or "tokens", inline=True)
         embed.add_field(name="API token", value="Set" if token else "Not set", inline=True)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)

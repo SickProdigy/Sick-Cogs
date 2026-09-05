@@ -430,5 +430,3 @@ class ClankerDraftView(discord.ui.View):
         self.disable_controls()
         await interaction.response.edit_message(embed=self.embed(), view=self)
         await interaction.followup.send("Clanker launch draft canceled.", ephemeral=True)
-
-

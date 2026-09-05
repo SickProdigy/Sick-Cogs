@@ -61,6 +61,16 @@ class ClankerAdminMixin:
             )
         await ctx.send(f"Clanker API URL saved.{warning}")
 
+    @clankerset.command(name="apipath")
+    async def clankerset_apipath(self, ctx: commands.Context, *, api_submit_path: str):
+        """Set the relative live-submit path under the configured Clanker API URL."""
+        api_submit_path = api_submit_path.strip().lstrip("/")
+        if not api_submit_path or api_submit_path.startswith(("http://", "https://")) or ".." in api_submit_path:
+            await ctx.send("API submit path must be a relative path such as `tokens` or `deployments/clanker`.")
+            return
+        await self.config.guild(ctx.guild).api_submit_path.set(api_submit_path)
+        await ctx.send(f"Clanker API submit path saved as `{api_submit_path}`.")
+
     @clankerset.command(name="apitoken")
     async def clankerset_apitoken(self, ctx: commands.Context, *, api_token: str):
         """Set the Clanker API bearer token in shared API token storage."""
