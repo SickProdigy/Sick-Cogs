@@ -38,6 +38,10 @@ class Clanker(commands.Cog):
         "submit_enabled": False,
         "treasury_address": None,
         "platform_bps": 1000,
+        "vault_enabled": False,
+        "vault_percentage": 0,
+        "vault_lockup_seconds": 604800,
+        "vault_vesting_seconds": 0,
         "audit_log": [],
     }
 
@@ -82,11 +86,15 @@ class Clanker(commands.Cog):
         primary_beneficiary: str,
         platform_address: str,
         platform_bps: int,
+        vault_enabled: bool,
+        vault_percentage: int,
+        vault_lockup_seconds: int,
+        vault_vesting_seconds: int,
         requester_id: int,
         image_url: Optional[str] = None,
         description: Optional[str] = None,
     ) -> Dict[str, Any]:
-        return {
+        payload = {
             "chainId": BASE_CHAIN_ID,
             "chain": "base",
             "symbol": symbol,
@@ -113,6 +121,15 @@ class Clanker(commands.Cog):
                 ]
             },
         }
+        if vault_enabled and vault_percentage > 0:
+            payload["vault"] = {
+                "percentage": vault_percentage,
+                "recipient": primary_beneficiary,
+                "lockupDuration": vault_lockup_seconds,
+            }
+            if vault_vesting_seconds > 0:
+                payload["vault"]["vestingDuration"] = vault_vesting_seconds
+        return payload
 
     async def submit_payload(self, api_base_url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         endpoint = urljoin(api_base_url.rstrip("/") + "/", "tokens")
@@ -150,6 +167,15 @@ class Clanker(commands.Cog):
         embed.add_field(name="API token", value="Set" if token else "Not set", inline=True)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
+        embed.add_field(
+            name="Creator vault",
+            value=(
+                f"{settings['vault_percentage']}% · lock {settings['vault_lockup_seconds']}s"
+                if settings["vault_enabled"] and settings["vault_percentage"]
+                else "Disabled"
+            ),
+            inline=True,
+        )
         embed.set_footer(text="Base chain only · no private keys are stored by this cog")
         await ctx.send(embed=embed)
 
@@ -198,6 +224,10 @@ class Clanker(commands.Cog):
             primary_beneficiary,
             settings["treasury_address"],
             int(settings["platform_bps"]),
+            bool(settings["vault_enabled"]),
+            int(settings["vault_percentage"]),
+            int(settings["vault_lockup_seconds"]),
+            int(settings["vault_vesting_seconds"]),
             ctx.author.id,
             image_url,
             description,
@@ -249,6 +279,15 @@ class Clanker(commands.Cog):
         )
         if image_url:
             embed.set_thumbnail(url=image_url)
+        if payload.get("vault"):
+            embed.add_field(
+                name="Creator vault",
+                value=(
+                    f"{payload['vault']['percentage']}% to creator · "
+                    f"lock {payload['vault']['lockupDuration']}s"
+                ),
+                inline=False,
+            )
         if submitted and record["api_response"]:
             embed.add_field(name="API response", value=box(str(record["api_response"])[:900]), inline=False)
         await ctx.send(embed=embed)
@@ -326,6 +365,35 @@ class Clanker(commands.Cog):
         """Set the bot-owner platform reward basis points for launch requests."""
         await self.config.guild(ctx.guild).platform_bps.set(basis_points)
         await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
+
+    @clankerset.group(name="vault")
+    async def clankerset_vault(self, ctx: commands.Context):
+        """Manage optional creator token vault defaults."""
+        pass
+
+    @clankerset_vault.command(name="enabled")
+    async def clankerset_vault_enabled(self, ctx: commands.Context, enabled: bool):
+        """Enable or disable creator vault allocation for launch requests."""
+        await self.config.guild(ctx.guild).vault_enabled.set(enabled)
+        await ctx.send(f"Creator vault defaults are now {'enabled' if enabled else 'disabled'}.")
+
+    @clankerset_vault.command(name="percentage")
+    async def clankerset_vault_percentage(self, ctx: commands.Context, percentage: commands.Range[int, 0, 90]):
+        """Set percent of total supply vaulted for the creator, max 90%."""
+        await self.config.guild(ctx.guild).vault_percentage.set(percentage)
+        await ctx.send(f"Creator vault allocation set to {percentage}% of total supply.")
+
+    @clankerset_vault.command(name="lockup")
+    async def clankerset_vault_lockup(self, ctx: commands.Context, seconds: commands.Range[int, 604800, 315360000]):
+        """Set creator vault lockup in seconds; Clanker minimum is 7 days."""
+        await self.config.guild(ctx.guild).vault_lockup_seconds.set(seconds)
+        await ctx.send(f"Creator vault lockup set to {seconds} seconds.")
+
+    @clankerset_vault.command(name="vesting")
+    async def clankerset_vault_vesting(self, ctx: commands.Context, seconds: commands.Range[int, 0, 315360000]):
+        """Set optional creator vault vesting duration in seconds; 0 disables vesting."""
+        await self.config.guild(ctx.guild).vault_vesting_seconds.set(seconds)
+        await ctx.send(f"Creator vault vesting set to {seconds} seconds.")
 
     @clankerset.group(name="audit")
     async def clankerset_audit(self, ctx: commands.Context):
