@@ -231,8 +231,14 @@ class WalletTransactionCommands:
         intent = await self._stored_intent(user_id, intent_id)
         if intent is None:
             raise RuntimeError("The stored transaction intent is unavailable.")
-        if intent.status is not IntentStatus.SUBMITTED:
+        if intent.status not in {IntentStatus.SUBMITTED, IntentStatus.UNCERTAIN}:
             return intent
+        was_uncertain = intent.status is IntentStatus.UNCERTAIN
+        if was_uncertain and not (intent.transaction_hash or intent.user_operation_hash):
+            raise RuntimeError(
+                "This uncertain intent has no provider transaction identifier and cannot "
+                "be reconciled automatically."
+            )
         profile = await self.config.user_from_id(user_id).profile()
         if profile is None or intent.profile_id != str(profile.get("profile_id") or ""):
             raise RuntimeError("The wallet profile no longer matches this intent.")
@@ -241,16 +247,24 @@ class WalletTransactionCommands:
         final_status = (
             IntentStatus.CONFIRMED if provider_status == "complete"
             else IntentStatus.FAILED if provider_status in {"dropped", "failed"}
+            else IntentStatus.UNCERTAIN if was_uncertain
             else IntentStatus.SUBMITTED
         )
         async with self.config.user_from_id(user_id).intents() as intents:
             stored = intents.get(intent_id)
-            if not stored or stored.get("user_operation_hash") != intent.user_operation_hash:
+            if (
+                not stored
+                or stored.get("status") != intent.status.value
+                or stored.get("user_operation_hash") != intent.user_operation_hash
+                or stored.get("transaction_hash") != intent.transaction_hash
+            ):
                 raise RuntimeError("The stored operation changed while its status was checked.")
             stored["status"] = final_status.value
             stored["provider_status"] = provider_status
             stored["transaction_hash"] = result["transaction_hash"]
             stored["block_number"] = result["block_number"]
+            if final_status in {IntentStatus.CONFIRMED, IntentStatus.FAILED}:
+                stored["confirmation_delivered"] = False
             return TransactionIntent.from_dict(stored)
 
     async def _stored_intent(self, user_id: int, intent_id: str) -> TransactionIntent | None:
@@ -618,7 +632,10 @@ class WalletTransactionCommands:
             await ctx.send("That stored transaction intent is invalid and cannot be displayed.")
             return
         if (
-            intent.status is IntentStatus.SUBMITTED
+            (intent.status is IntentStatus.SUBMITTED or (
+                intent.status is IntentStatus.UNCERTAIN
+                and bool(intent.transaction_hash or intent.user_operation_hash)
+            ))
             and not await self.config.provider_paused()
         ):
             if not await self._wallet_read_allowed(

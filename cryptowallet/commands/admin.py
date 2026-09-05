@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import discord
 from redbot.core import commands
 
+from ..core.models import IntentStatus
 from ..core.networks import BASE_SEPOLIA, NETWORKS, NetworkCapability
 from ..core.validation import (
     format_atomic_amount,
@@ -202,6 +203,55 @@ class WalletAdminCommands:
         await self.config.provider_paused.set(False)
         self.confirmation_wakeup.set()
         await ctx.send("CryptoWallet provider processing resumed.")
+
+    @walletset.command(name="reconcile")
+    @commands.is_owner()
+    async def walletset_reconcile(
+        self, ctx: commands.Context, target: str, intent_id: str
+    ):
+        """Recheck one uncertain intent using its stored provider identifier."""
+        user_id = self._wallet_user_id(target)
+        if user_id is None:
+            await ctx.send("Provide a Discord user mention or numeric Discord user ID.")
+            return
+        intent = await self._stored_intent(user_id, intent_id.strip())
+        if intent is None:
+            await ctx.send("No stored transaction intent matches that user and reference.")
+            return
+        if intent.status is not IntentStatus.UNCERTAIN:
+            await ctx.send(
+                f"That intent is `{intent.status.value}`, not uncertain; no reconciliation "
+                "was performed."
+            )
+            return
+        if not (intent.transaction_hash or intent.user_operation_hash):
+            await ctx.send(
+                "That uncertain intent has no TXID or provider operation hash. It cannot be "
+                "resolved automatically; retain it and reconcile the provider and chain records."
+            )
+            return
+        if await self.config.provider_paused():
+            await ctx.send("Provider processing is paused; reconciliation was not performed.")
+            return
+        try:
+            intent = await self._refresh_submitted_intent(user_id, intent.intent_id)
+        except (RuntimeError, WalletProviderError) as exc:
+            await ctx.send(f"Transaction reconciliation is unavailable: {exc}")
+            return
+        network = NETWORKS.get(intent.network)
+        if network is None:
+            await ctx.send("That intent references an unsupported network.")
+            return
+        if intent.status is IntentStatus.CONFIRMED:
+            outcome = "The transaction is confirmed."
+        elif intent.status is IntentStatus.FAILED:
+            outcome = "The provider or chain reports that the transaction failed."
+        else:
+            outcome = (
+                "The transaction is still unresolved and remains uncertain. Do not submit "
+                "a replacement."
+            )
+        await ctx.send(outcome, embed=self._intent_embed(intent, network, await ctx.embed_color()))
 
     @walletset.command(name="sendlimit")
     @commands.is_owner()

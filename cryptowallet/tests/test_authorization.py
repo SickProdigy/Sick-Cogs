@@ -118,6 +118,9 @@ class _ApprovalStore:
     async def __aexit__(self, exc_type, exc, traceback):
         return False
 
+    async def get_raw(self, key, default=None):
+        return self.data.get(key, default)
+
 
 class _SessionConfig:
     def __init__(self, deployment_id="deployment"):
@@ -684,6 +687,88 @@ class FailClosedTransactionTests(unittest.TestCase):
             view.children[0].url,
             SOLANA_DEVNET.explorer_transaction_url(signature),
         )
+
+
+class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_uncertain_intent_with_txid_reconciles_without_resubmission(self):
+        signature = "1" * 64
+        intent = TransactionIntent(
+            intent_id="uncertain-sol", profile_id="profile-7",
+            network=SOLANA_DEVNET.key,
+            from_address="HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+            to_address="11111111111111111111111111111111",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.UNCERTAIN, provider_status="confirmation_timeout",
+            transaction_hash=signature,
+        )
+        store = _ApprovalStore()
+        store.data[intent.intent_id] = intent.to_dict()
+        profile = _profile()
+        config = SimpleNamespace(user_from_id=lambda user_id: SimpleNamespace(
+            intents=store, profile=_Value(profile)
+        ))
+        provider = SimpleNamespace(get_transaction_status=AsyncMock(return_value={
+            "provider_status": "complete", "transaction_hash": signature,
+            "block_number": 456,
+        }))
+        harness = SimpleNamespace(config=config, wallet_provider=provider)
+        harness._stored_intent = lambda user_id, intent_id: (
+            WalletTransactionCommands._stored_intent(harness, user_id, intent_id)
+        )
+        reconciled = await WalletTransactionCommands._refresh_submitted_intent(
+            harness, 7, intent.intent_id
+        )
+        self.assertIs(reconciled.status, IntentStatus.CONFIRMED)
+        self.assertEqual(reconciled.block_number, 456)
+        self.assertFalse(store.data[intent.intent_id]["confirmation_delivered"])
+        provider.get_transaction_status.assert_awaited_once()
+
+    async def test_uncertain_intent_without_provider_id_refuses_to_guess(self):
+        address = _profile()["accounts"][0]["address"]
+        intent = TransactionIntent(
+            intent_id="uncertain-no-id", profile_id="profile-7",
+            network=BASE_SEPOLIA.key, from_address=address, to_address=address,
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.UNCERTAIN,
+        )
+        store = _ApprovalStore()
+        store.data[intent.intent_id] = intent.to_dict()
+        config = SimpleNamespace(user_from_id=lambda user_id: SimpleNamespace(
+            intents=store, profile=_Value(_profile())
+        ))
+        provider = SimpleNamespace(get_transaction_status=AsyncMock())
+        harness = SimpleNamespace(config=config, wallet_provider=provider)
+        harness._stored_intent = lambda user_id, intent_id: (
+            WalletTransactionCommands._stored_intent(harness, user_id, intent_id)
+        )
+        with self.assertRaisesRegex(RuntimeError, "no provider transaction identifier"):
+            await WalletTransactionCommands._refresh_submitted_intent(
+                harness, 7, intent.intent_id
+            )
+        provider.get_transaction_status.assert_not_awaited()
+
+
+    async def test_owner_reconcile_refuses_identifierless_intent(self):
+        address = _profile()["accounts"][0]["address"]
+        intent = TransactionIntent(
+            intent_id="uncertain-no-id", profile_id="profile-7",
+            network=BASE_SEPOLIA.key, from_address=address, to_address=address,
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.UNCERTAIN,
+        )
+        ctx = SimpleNamespace(send=AsyncMock())
+        cog = SimpleNamespace(
+            _wallet_user_id=lambda target: 7,
+            _stored_intent=AsyncMock(return_value=intent),
+            _refresh_submitted_intent=AsyncMock(),
+        )
+        await WalletAdminCommands.walletset_reconcile.callback(
+            cog, ctx, "7", intent.intent_id
+        )
+        self.assertIn(
+            "no TXID or provider operation hash", ctx.send.await_args.args[0]
+        )
+        cog._refresh_submitted_intent.assert_not_awaited()
 
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
