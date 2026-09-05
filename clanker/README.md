@@ -8,6 +8,8 @@ This first milestone deliberately keeps custody outside the cog:
 - API tokens are stored through Red's shared API token storage;
 - launches are dry-run/review-first by default;
 - optional submit mode requires bot-owner configuration;
+- the token creator/submitter is the primary reward recipient by default;
+- the bot owner/platform takes a modest configurable cut, defaulting to 10%;
 - each launch request is recorded in a bounded guild audit log.
 
 ## Setup
@@ -34,14 +36,14 @@ When the endpoint and wallet/custody flow have been reviewed, a bot owner can en
 ## User flow
 
 ```text
-[p]clanker launch TICKER "Token Name" 1000000 0xBeneficiary... optional image URL and description
+[p]clanker launch TICKER "Token Name" 1000000 0xCreatorAddress... optional image URL and description
 ```
 
-The command validates basic metadata and beneficiary addresses, builds a Base-chain launch payload, displays it for review, records the request, and only POSTs it to the configured API when submit mode is enabled.
+The command validates basic metadata and the creator's primary reward address, builds a Base-chain launch payload, displays it for review, records the request, and only POSTs it to the configured API when submit mode is enabled. The payload uses Clanker v4-style `rewards.recipients` entries so the creator receives the majority reward split and the configured bot-owner treasury receives the platform cut.
 
 ## Commands
 
-- `[p]clanker launch <symbol> <name> <supply> <beneficiary> [image_url] [description]` - create a launch request.
+- `[p]clanker launch <symbol> <name> <supply> <creator_address> [image_url] [description]` - create a launch request.
 - `[p]clanker status` - show whether the cog is enabled and whether submit mode is active.
 - `[p]clanker audit [limit]` - view recent launch request records.
 - `[p]clankerset view` - show configuration without secrets.
@@ -49,6 +51,6 @@ The command validates basic metadata and beneficiary addresses, builds a Base-ch
 - `[p]clankerset submit <true|false>` - enable or disable live API submissions.
 - `[p]clankerset apiurl <url>` - set the Clanker API base URL.
 - `[p]clankerset apitoken <token>` - store the Clanker API bearer token.
-- `[p]clankerset treasury <0x...>` - set the primary SickGaming beneficiary/treasury address.
-- `[p]clankerset secondarybps <0-10000>` - set default secondary beneficiary basis points.
+- `[p]clankerset treasury <0x...>` - set the bot-owner/SickGaming platform treasury address.
+- `[p]clankerset platformbps <0-10000>` - set the bot-owner reward cut, default 1000 bps / 10%.
 - `[p]clankerset audit clear` - clear the guild audit log.
