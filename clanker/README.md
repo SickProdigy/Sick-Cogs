@@ -126,6 +126,7 @@ Completed in the first milestone:
 9. Final confirmation summary before live API submission from the launch card.
 10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
 11. Guild controls for launch channels, review/log channels, owner approval before live submission, allowed/blocked roles, configurable cooldowns, and per-user daily launch limits.
+12. Module split: constants, shared helpers/airdrop logic, Discord views/modals, owner/admin settings, and the main cog command/API/audit layer.
 
 Remaining work before calling the cog complete:
 
@@ -133,7 +134,7 @@ Remaining work before calling the cog complete:
 2. Verify generated airdrop schema against Clanker's exact claim tooling/contract before relying on it for production claims.
 3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
 4. Decide whether launch approval can safely be delegated to trusted moderators or should stay bot-owner only.
-5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
+5. Continue the module split as the cog grows, especially separating user commands, config/migrations, models, and the Clanker API client.
 6. Add tests for validation, amount parsing, airdrop caps, payload construction, submit-mode blockers, and bad Discord modal input.
 7. Validate richer metadata/media fields such as image type/size, website/social links, and any Clanker-supported Farcaster fields.
 8. Track NFT/image minting as a separate feature path unless the Clanker token-launch API grows to cover it directly.
