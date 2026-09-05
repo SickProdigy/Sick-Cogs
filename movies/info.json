@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy", "chatgpt-codex"],
+    "description": "Post configurable new movie release announcements from TMDb to a Discord channel.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild movie release announcement settings and posted movie IDs. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Set your TMDb API key with `[p]movieset apikey`, choose a channel with `[p]movieset channel`, optionally set a notification role with `[p]movieset role`, then enable announcements with `[p]movieset enabled true`.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links"],
+    "name": "MovieReleases",
+    "requirements": [],
+    "short": "New movie release announcements",
+    "tags": ["movies", "tmdb", "releases", "notifications"],
+    "type": "COG",
+    "version": "1.0.0"
+}
