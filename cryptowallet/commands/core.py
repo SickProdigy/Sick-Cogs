@@ -52,14 +52,22 @@ class WalletCoreCommands:
         return False
 
     async def _wallet_profile_or_error(self, ctx: commands.Context) -> dict | None:
+        return await self._wallet_profile_for_user_or_error(ctx, ctx.author)
+
+    async def _wallet_profile_for_user_or_error(
+        self, ctx: commands.Context, user
+    ) -> dict | None:
         if await self.config.provider_paused():
             await ctx.send(
                 "CryptoWallet provider processing is paused by the bot owner. "
                 "Local wallet settings remain available."
             )
             return None
+        if getattr(user, "bot", False):
+            await ctx.send("Wallet profiles cannot be provisioned for bot accounts.")
+            return None
         try:
-            return await self.get_or_create_wallet_profile(ctx.author)
+            return await self.get_or_create_wallet_profile(user)
         except WalletProviderError as exc:
             await ctx.send(f"Wallet provisioning is unavailable: {exc}")
         except RuntimeError as exc:
@@ -170,9 +178,9 @@ class WalletCoreCommands:
         else:
             profile = await self.config.user(target).profile()
             if profile is None:
-                display_name = discord.utils.escape_markdown(target.display_name)
-                await ctx.send(f"{display_name} does not have a public wallet profile yet.")
-                return
+                profile = await self._wallet_profile_for_user_or_error(ctx, target)
+                if profile is None:
+                    return
         await ctx.send(embed=await self._wallet_embed(ctx, profile, target))
 
     @wallet.error

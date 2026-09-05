@@ -137,6 +137,64 @@ class _SessionHarness(ApprovalSessionMixin):
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_member_wallet_lookup_lazily_provisions_missing_profile(self):
+        target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
+        author = SimpleNamespace(id=7)
+        profile = _profile()
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        cog = SimpleNamespace(
+            _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_profile_for_user_or_error=AsyncMock(return_value=profile),
+            _wallet_embed=AsyncMock(return_value="portfolio"),
+            config=SimpleNamespace(
+                provider_paused=_Value(False),
+                user=lambda user: SimpleNamespace(profile=_Value(None)),
+            ),
+        )
+
+        await WalletCoreCommands.wallet.callback(cog, ctx, target)
+
+        cog._wallet_profile_for_user_or_error.assert_awaited_once_with(ctx, target)
+        cog._wallet_embed.assert_awaited_once_with(ctx, profile, target)
+        ctx.send.assert_awaited_once_with(embed="portfolio")
+
+    async def test_member_send_recipient_lazily_provisions_network_account(self):
+        target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
+        recipient = "0x1111111111111111111111111111111111111111"
+        profile = {"accounts": [{"network": BASE_SEPOLIA.key, "address": recipient}]}
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(get_member=lambda user_id: None),
+            message=SimpleNamespace(mentions=[target]),
+            send=AsyncMock(),
+        )
+        cog = SimpleNamespace(
+            _wallet_profile_for_user_or_error=AsyncMock(return_value=profile),
+            _account_for_network=lambda stored, network: stored["accounts"][0],
+        )
+
+        address = await WalletTransactionCommands._send_recipient_address(
+            cog, ctx, "<@8>", BASE_SEPOLIA
+        )
+
+        self.assertEqual(address, recipient)
+        cog._wallet_profile_for_user_or_error.assert_awaited_once_with(ctx, target)
+        ctx.send.assert_not_awaited()
+
+    async def test_member_send_rejects_bot_recipient(self):
+        target = SimpleNamespace(id=8, bot=True, display_name="Bot")
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(get_member=lambda user_id: target),
+            send=AsyncMock(),
+        )
+        cog = SimpleNamespace()
+
+        address = await WalletTransactionCommands._send_recipient_address(
+            cog, ctx, "<@8>", BASE_SEPOLIA
+        )
+
+        self.assertIsNone(address)
+        self.assertIn("bot accounts", ctx.send.await_args.args[0])
+
     async def test_unknown_wallet_word_shows_help_instead_of_member_error(self):
         ctx = SimpleNamespace(
             clean_prefix="!",
