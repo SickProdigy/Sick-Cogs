@@ -46,7 +46,7 @@ The recommended flow is the interactive Discord launch card:
 [p]clanker card
 ```
 
-The card lets the requester fill token basics in Discord modals, add optional details, add or clear an optional airdrop, preview the payload, and click **Submit Launch**. The card is bound to the user who opened it so other members cannot edit or submit that draft. When live submit mode is enabled, the first submit click arms a final confirmation summary and the requester must click **Submit Launch** a second time before any API call is made.
+The card lets the requester fill token basics in Discord modals, add optional details, add or clear an optional airdrop, preview the payload, and click **Submit Launch**. The card is bound to the user who opened it so other members cannot edit or submit that draft. When recipient rows are entered for an airdrop, the cog deterministically generates a Merkle root and proof export using the documented export schema. When live submit mode is enabled, the first submit click arms a final confirmation summary and the requester must click **Submit Launch** a second time before any API call is made.
 
 Airdrop entries can be entered as fixed token amounts or percentages of the draft supply:
 
@@ -56,7 +56,13 @@ Airdrop entries can be entered as fixed token amounts or percentages of the draf
 0x3333333333333333333333333333333333333333 0.25%
 ```
 
-Percentages are converted to whole token amounts using the draft supply, the total airdrop allocation is capped at 90% of supply to match Clanker extension limits, and lockup is enforced at Clanker's documented 7-day minimum. Recipient-list airdrops are preview-only until a matching Merkle root and proofs are generated. If a prebuilt Merkle root is available, the card can include the Clanker v4 `airdrop` object with total amount, Merkle root, lockup, optional vesting, and optional configured admin.
+Percentages are converted to whole token amounts using the draft supply, the total airdrop allocation is capped at 90% of supply to match Clanker extension limits, and lockup is enforced at Clanker's documented 7-day minimum. Recipient-list airdrops generate a root/proof export with this schema:
+
+```text
+keccak256(abi.encode(uint256 index,address account,uint256 amount)); sorted-pair Merkle tree
+```
+
+The launch record stores the generated proof metadata so moderators can export it later. If a prebuilt Merkle root is supplied manually, the card verifies it against the entered recipient rows before accepting it. If only a total amount and prebuilt Merkle root are provided, the cog can include the Clanker v4 `airdrop` object but cannot export recipient proofs.
 
 The legacy command flow remains available:
 
@@ -74,6 +80,7 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clanker audit [limit]` - view recent launch request records.
 - `[p]clanker launches [limit]` - list recent launch records with launch IDs.
 - `[p]clanker launchinfo <launch_id>` - show one launch record with token, reward, airdrop, and API reference details.
+- `[p]clanker airdropproofs <launch_id>` - export generated airdrop proof metadata for a launch record.
 - `[p]clanker approve <launch_id>` - bot-owner only: approve and live-submit a pending launch record.
 - `[p]clanker reject <launch_id> [reason]` - bot-owner only: reject a pending launch record without submitting it.
 - `[p]clankerset view` - show configuration without secrets.
@@ -95,6 +102,8 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset cooldown <seconds>` - set a per-user launch cooldown; 0 disables it.
 - `[p]clankerset dailymax <number>` - set a per-user rolling 24-hour launch limit; 0 disables it.
 - `[p]clankerset airdrop enabled <true|false>` - enable or disable configured airdrop payloads.
+- `[p]clankerset airdrop build <supply> <recipient rows>` - generate and store a default airdrop Merkle root/proof export from recipient rows.
+- `[p]clankerset airdrop export` - export the currently stored configured airdrop proof metadata.
 - `[p]clankerset airdrop root <0x...>` - set the 32-byte Merkle root for the prepared airdrop list.
 - `[p]clankerset airdrop amount <tokens>` - set total token amount reserved for the airdrop.
 - `[p]clankerset airdrop lockup <seconds>` - set airdrop lockup; minimum 604800 seconds / 7 days.
@@ -111,8 +120,8 @@ Completed in the first milestone:
 3. Review-first dry-run launch records with bounded guild audit storage.
 4. Legacy command launch flow for direct token payload preparation.
 5. Interactive Discord launch card with requester-bound modals/buttons.
-6. Optional fixed-amount or percentage airdrop entry parsing for preview.
-7. Merkle-root-gated live airdrop payload construction.
+6. Optional fixed-amount or percentage airdrop entry parsing.
+7. Deterministic Merkle-root/proof generation and proof export for recipient-list airdrops.
 8. Clanker 7-day airdrop lockup minimum enforcement.
 9. Final confirmation summary before live API submission from the launch card.
 10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
@@ -121,7 +130,7 @@ Completed in the first milestone:
 Remaining work before calling the cog complete:
 
 1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
-2. Add deterministic Merkle tree/proof generation and recipient-proof export for airdrops.
+2. Verify generated airdrop schema against Clanker's exact claim tooling/contract before relying on it for production claims.
 3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
 4. Decide whether launch approval can safely be delegated to trusted moderators or should stay bot-owner only.
 5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
