@@ -18,6 +18,7 @@ from ..backend.confirmation import (
 )
 from ..backend.sessions import ApprovalSessionMixin
 from ..backend.usage import ProviderUsageMixin
+from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
 from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
@@ -634,6 +635,50 @@ class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
         token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
         harness.application_id = 99
         self.assertIsNone(await harness.resolve_approval_session(token))
+
+
+class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deletion_revokes_profile_before_clearing_local_data(self):
+        events = []
+        user_config = SimpleNamespace(
+            profile=AsyncMock(return_value=_profile()),
+            clear=AsyncMock(side_effect=lambda: events.append("clear")),
+        )
+        provider = SimpleNamespace(revoke_authorization=AsyncMock(
+            side_effect=lambda profile, network: events.append("revoke")
+        ))
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda user_id: user_config),
+            wallet_provider=provider,
+        )
+        await CryptoWallet.red_delete_data_for_user(
+            cog, requester="discord_deleted_user", user_id=7
+        )
+        self.assertEqual(events, ["revoke", "clear"])
+        provider.revoke_authorization.assert_awaited_once_with(
+            _profile(), BASE_SEPOLIA.key
+        )
+        user_config.clear.assert_awaited_once()
+
+    async def test_deletion_still_clears_when_provider_revocation_fails(self):
+        user_config = SimpleNamespace(
+            profile=AsyncMock(return_value=_profile()), clear=AsyncMock()
+        )
+        provider = SimpleNamespace(revoke_authorization=AsyncMock(
+            side_effect=RuntimeError("secret provider detail must not be logged")
+        ))
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda user_id: user_config),
+            wallet_provider=provider,
+        )
+        with self.assertLogs("red.Sick-Cogs.CryptoWallet", level="WARNING") as logs:
+            await CryptoWallet.red_delete_data_for_user(
+                cog, requester="discord_deleted_user", user_id=7
+            )
+        user_config.clear.assert_awaited_once()
+        output = "\n".join(logs.output)
+        self.assertIn("error_class=RuntimeError", output)
+        self.assertNotIn("secret provider detail", output)
 
 
 class FailClosedTransactionTests(unittest.TestCase):
