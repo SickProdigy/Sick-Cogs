@@ -1,10 +1,10 @@
 {
     "author": ["SickProdigy", "chatgpt-codex"],
-    "description": "Prepare and optionally submit Clanker token launch requests from Discord with explicit safety controls.",
+    "description": "Prepare Clanker token launch drafts with an interactive Discord card, optional airdrops, and explicit safety controls.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild Clanker API settings and token launch audit records. It does not store private keys, seed phrases, or user wallet credentials.",
     "hidden": false,
-    "install_msg": "Configure with `[p]clankerset apiurl`, `[p]clankerset apitoken`, `[p]clankerset treasury`, and `[p]clankerset enabled true`. Launch requests default to review/dry-run and assign the creator 80% of rewards with a configurable 20% bot-owner platform cut until changed. Optional airdrop settings can reserve token supply for a prepared Merkle airdrop list.",
+    "install_msg": "Configure with `[p]clankerset apiurl`, `[p]clankerset apitoken`, `[p]clankerset treasury`, and `[p]clankerset enabled true`. Use `[p]clanker card` for the button/modal launch flow. Launch requests default to review/dry-run and assign the creator 80% of rewards with a configurable 20% bot-owner platform cut until changed. Optional airdrop entries support fixed token amounts or percentages for preview; live airdrop submission requires a matching Clanker Merkle root.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links", "attach_files"],
     "name": "Clanker",
