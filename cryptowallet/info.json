@@ -11,5 +11,5 @@
   "short": "Provider-backed multichain testnet wallet integration",
   "tags": ["wallet", "crypto", "base", "ethereum", "solana", "smart-wallet", "testnet"],
   "type": "COG",
-  "version": "0.36.0"
+  "version": "0.37.0"
 }
