@@ -105,6 +105,36 @@ class WalletTransactionCommands:
             await ctx.send("The mentioned member's stored wallet address is invalid.")
             return None
 
+    async def _send_value_allowed(self, ctx, network, value_atomic: int) -> bool:
+        """Enforce configured ceilings and require explicit limits for production."""
+        limits = await self.config.send_limits_atomic()
+        raw_limit = limits.get(network.key)
+        if raw_limit is None:
+            if network.testnet:
+                return True
+            await ctx.send(
+                f"Sending on {network.name} is blocked because no owner-approved "
+                "transaction limit is configured."
+            )
+            return False
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            limit = 0
+        if limit <= 0:
+            await ctx.send(
+                f"Sending on {network.name} is blocked because its transaction "
+                "limit configuration is invalid."
+            )
+            return False
+        if value_atomic > limit:
+            await ctx.send(
+                f"This transfer exceeds the {network.name} per-transaction limit of "
+                f"`{format_atomic_amount(limit, network)} {network.native_symbol}`."
+            )
+            return False
+        return True
+
     @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
         titles = {
@@ -507,6 +537,8 @@ class WalletTransactionCommands:
             value_wei = parse_native_amount(amount, network)
         except ValueError as exc:
             await ctx.send(str(exc))
+            return
+        if not await self._send_value_allowed(ctx, network, value_wei):
             return
         try:
             balance_wei = await self.wallet_provider.get_native_balance(

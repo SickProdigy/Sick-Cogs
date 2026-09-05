@@ -32,11 +32,20 @@ function decodeHandoff() {
   if (!Array.isArray(claims.sickwallet_accounts) || !claims.sickwallet_accounts.length || Number(claims.exp) * 1000 <= Date.now()) {
     throw new Error("This wallet authorization link has expired or is incomplete.");
   }
+  const delegationExpiresAt = Number(claims.sickwallet_delegation_expires_at);
+  if (
+    !Number.isSafeInteger(delegationExpiresAt) ||
+    delegationExpiresAt * 1000 <= Date.now() ||
+    delegationExpiresAt * 1000 > Date.now() + 365 * 24 * 60 * 60 * 1000
+  ) {
+    throw new Error("This wallet authorization link has an invalid delegation policy.");
+  }
   return {
     purpose: claims.sickwallet_purpose,
     expires_at: Number(claims.exp),
     wallet: { accounts: claims.sickwallet_accounts },
     cdp: { project_id: claims.aud, user_id: claims.sub },
+    delegation_expires_at: delegationExpiresAt,
   };
 }
 
@@ -62,7 +71,8 @@ function configureAuthorization(session) {
         session.cdp.project_id,
         session.cdp.user_id,
         session.wallet.accounts,
-        handoffToken
+        handoffToken,
+        session.delegation_expires_at
       );
       handoffToken = null;
       authorizationStatus.textContent = `Wallet delegated until ${new Date(result.expiresAt).toLocaleString()}.`;

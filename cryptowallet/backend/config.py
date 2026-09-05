@@ -27,6 +27,8 @@ def create_config(cog) -> Config:
         provider_paused=False,
         provider_usage={},
         token_registry={},
+        send_limits_atomic={},
+        delegation_duration_days=365,
     )
     config.register_user(
         profile=None,

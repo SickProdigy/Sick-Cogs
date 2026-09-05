@@ -69,7 +69,10 @@ class _MutableValue(_Value):
 class _JwtHarness(JwtAuthMixin):
     def __init__(self, configuration, *, deployment_id="deployment", application_id=42):
         self._configuration = configuration
-        self.config = SimpleNamespace(deployment_id=_Value(deployment_id))
+        self.config = SimpleNamespace(
+            deployment_id=_Value(deployment_id),
+            delegation_duration_days=_Value(365),
+        )
         self.bot = SimpleNamespace(user=SimpleNamespace(id=application_id))
 
     async def jwt_configuration(self):
@@ -194,6 +197,34 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(address)
         self.assertIn("bot accounts", ctx.send.await_args.args[0])
+
+    async def test_configured_send_limit_blocks_excess_value(self):
+        ctx = SimpleNamespace(send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                send_limits_atomic=_Value({BASE_SEPOLIA.key: str(10**15)})
+            )
+        )
+
+        allowed = await WalletTransactionCommands._send_value_allowed(
+            cog, ctx, BASE_SEPOLIA, 10**15 + 1
+        )
+
+        self.assertFalse(allowed)
+        self.assertIn("per-transaction limit", ctx.send.await_args.args[0])
+
+    async def test_unconfigured_testnet_send_limit_remains_available(self):
+        ctx = SimpleNamespace(send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(send_limits_atomic=_Value({}))
+        )
+
+        allowed = await WalletTransactionCommands._send_value_allowed(
+            cog, ctx, SOLANA_DEVNET, 1
+        )
+
+        self.assertTrue(allowed)
+        ctx.send.assert_not_awaited()
 
     async def test_unknown_wallet_word_shows_help_instead_of_member_error(self):
         ctx = SimpleNamespace(
@@ -360,6 +391,13 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["sickwallet_application"], "42")
         self.assertEqual(claims["sickwallet_deployment"], "deployment")
         self.assertEqual(claims["sickwallet_purpose"], "authorize")
+        self.assertGreater(
+            claims["sickwallet_delegation_expires_at"], claims["exp"]
+        )
+        self.assertLessEqual(
+            claims["sickwallet_delegation_expires_at"],
+            before + 365 * 24 * 60 * 60,
+        )
         self.assertEqual(claims["sickwallet_accounts"], [
             {"family": "evm", "address": "0x7930fB6E9853B3835Cf047f36855993cb82d4387"},
             {"family": "solana", "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"},
@@ -387,6 +425,7 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             issuer="https://wallet.example.test",
         )
         self.assertEqual(claims["sickwallet_purpose"], "recovery")
+        self.assertNotIn("sickwallet_delegation_expires_at", claims)
         self.assertEqual(claims["sub"], "profile-7")
         self.assertEqual(claims["sickwallet_discord_user"], "7")
         self.assertEqual(

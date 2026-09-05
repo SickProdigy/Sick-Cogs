@@ -8,8 +8,6 @@ import {
   signOut,
 } from "@coinbase/cdp-core";
 
-const DELEGATION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
-
 async function authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken) {
   if (!projectId || !expectedUserId || !Array.isArray(expectedAccounts) || !expectedAccounts.length || !handoffToken) {
     throw new Error("Wallet authentication configuration is incomplete.");
@@ -44,11 +42,21 @@ async function authenticateWallet(projectId, expectedUserId, expectedAccounts, h
   return user;
 }
 
-export async function authorizeWallet(projectId, expectedUserId, expectedAccounts, handoffToken) {
+export async function authorizeWallet(
+  projectId, expectedUserId, expectedAccounts, handoffToken, delegationExpiresAt
+) {
+  const expiresAt = new Date(Number(delegationExpiresAt) * 1000);
+  if (
+    !Number.isSafeInteger(Number(delegationExpiresAt)) ||
+    expiresAt.getTime() <= Date.now() ||
+    expiresAt.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000
+  ) {
+    throw new Error("Wallet delegation policy is invalid.");
+  }
   try {
     await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
     const delegation = await createDelegation({
-      expiresAt: new Date(Date.now() + DELEGATION_DURATION_MS).toISOString(),
+      expiresAt: expiresAt.toISOString(),
     });
     return { expiresAt: delegation.expiresAt };
   } finally {

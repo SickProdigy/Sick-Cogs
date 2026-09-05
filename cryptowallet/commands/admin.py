@@ -8,8 +8,12 @@ from urllib.parse import urlparse
 import discord
 from redbot.core import commands
 
-from ..core.networks import BASE_SEPOLIA, NETWORKS
-from ..core.validation import normalize_evm_address
+from ..core.networks import BASE_SEPOLIA, NETWORKS, NetworkCapability
+from ..core.validation import (
+    format_atomic_amount,
+    normalize_evm_address,
+    parse_native_amount,
+)
 from ..providers import WalletProviderError
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
@@ -198,6 +202,98 @@ class WalletAdminCommands:
         await self.config.provider_paused.set(False)
         self.confirmation_wakeup.set()
         await ctx.send("CryptoWallet provider processing resumed.")
+
+    @walletset.command(name="sendlimit")
+    @commands.is_owner()
+    async def walletset_send_limit(
+        self, ctx: commands.Context, network_key: str = None, amount: str = None
+    ):
+        """Show or set the maximum native amount for one transaction."""
+        limits = await self.config.send_limits_atomic()
+        if network_key is None:
+            lines = []
+            for network in NETWORKS.values():
+                if not network.supports(NetworkCapability.SEND):
+                    continue
+                raw = limits.get(network.key)
+                try:
+                    limit = int(raw) if raw is not None else 0
+                except (TypeError, ValueError):
+                    limit = 0
+                if raw is None:
+                    value = "not set (testnet unrestricted)"
+                elif limit > 0:
+                    value = (
+                        f"{format_atomic_amount(limit, network)} "
+                        f"{network.native_symbol}"
+                    )
+                else:
+                    value = "invalid (sends blocked)"
+                lines.append(f"{network.name}: `{value}`")
+            await ctx.send("**Per-transaction send limits**\n" + "\n".join(lines))
+            return
+        network = self._send_network(network_key)
+        if network is None or not network.supports(NetworkCapability.SEND):
+            await ctx.send("Choose a send-enabled testnet from `wallet networks`.")
+            return
+        if amount is None:
+            raw = limits.get(network.key)
+            if raw is None:
+                await ctx.send(f"{network.name} has no additional testnet send limit.")
+            else:
+                try:
+                    limit = int(raw)
+                except (TypeError, ValueError):
+                    limit = 0
+                if limit <= 0:
+                    await ctx.send(
+                        f"{network.name} has an invalid limit; sends are blocked."
+                    )
+                else:
+                    await ctx.send(
+                        f"{network.name} send limit: "
+                        f"`{format_atomic_amount(limit, network)} "
+                        f"{network.native_symbol}`."
+                    )
+            return
+        if amount.strip().lower() in {"clear", "none", "off"}:
+            if not network.testnet:
+                await ctx.send("Production-network send limits cannot be cleared.")
+                return
+            async with self.config.send_limits_atomic() as stored:
+                stored.pop(network.key, None)
+            await ctx.send(f"{network.name} testnet send limit cleared.")
+            return
+        try:
+            value_atomic = parse_native_amount(amount, network)
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
+        async with self.config.send_limits_atomic() as stored:
+            stored[network.key] = str(value_atomic)
+        await ctx.send(
+            f"{network.name} per-transaction send limit set to "
+            f"`{format_atomic_amount(value_atomic, network)} {network.native_symbol}`."
+        )
+
+    @walletset.command(name="delegationdays")
+    @commands.is_owner()
+    async def walletset_delegation_days(
+        self, ctx: commands.Context, days: int = None
+    ):
+        """Show or set the signed authorization lifetime policy."""
+        current = int(await self.config.delegation_duration_days() or 0)
+        if days is None:
+            await ctx.send(f"Wallet delegation lifetime: `{current} day(s)`.")
+            return
+        if not 1 <= days <= 365:
+            await ctx.send("Choose a delegation lifetime from 1 through 365 days.")
+            return
+        await self.config.delegation_duration_days.set(days)
+        await ctx.send(
+            f"New wallet authorizations will expire after `{days} day(s)`. "
+            "Existing authorizations are unchanged."
+        )
 
     @walletset.command(name="usage")
     @commands.is_owner()
