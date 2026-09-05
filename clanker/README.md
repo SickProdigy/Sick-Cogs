@@ -43,7 +43,7 @@ The recommended flow is the interactive Discord launch card:
 [p]clanker card
 ```
 
-The card lets the requester fill token basics in Discord modals, add optional details, add or clear an optional airdrop, preview the payload, and click **Submit Launch**. The card is bound to the user who opened it so other members cannot edit or submit that draft.
+The card lets the requester fill token basics in Discord modals, add optional details, add or clear an optional airdrop, preview the payload, and click **Submit Launch**. The card is bound to the user who opened it so other members cannot edit or submit that draft. When live submit mode is enabled, the first submit click arms a final confirmation summary and the requester must click **Submit Launch** a second time before any API call is made.
 
 Airdrop entries can be entered as fixed token amounts or percentages of the draft supply:
 
@@ -83,3 +83,38 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset airdrop vesting <seconds>` - set optional airdrop vesting; 0 disables vesting.
 - `[p]clankerset airdrop admin [0x...]` - set or clear the optional airdrop admin address.
 - `[p]clankerset audit clear` - clear the guild audit log.
+
+## Current implementation status
+
+Completed in the first milestone:
+
+1. Non-custodial Clanker launch-helper foundation.
+2. Owner-managed API URL, bearer token, treasury, reward split, submit mode, and airdrop defaults.
+3. Review-first dry-run launch records with bounded guild audit storage.
+4. Legacy command launch flow for direct token payload preparation.
+5. Interactive Discord launch card with requester-bound modals/buttons.
+6. Optional fixed-amount or percentage airdrop entry parsing for preview.
+7. Merkle-root-gated live airdrop payload construction.
+8. Clanker 7-day airdrop lockup minimum enforcement.
+9. Final confirmation summary before live API submission from the launch card.
+
+Remaining work before calling the cog complete:
+
+1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
+2. Add deterministic Merkle tree/proof generation and recipient-proof export for airdrops.
+3. Store request IDs, transaction hashes, token addresses, pool links, and post-submit status updates.
+4. Add per-guild launch channel restrictions, approval channels, allowed roles, blocked roles, cooldown controls, and daily launch limits.
+5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
+6. Add tests for validation, amount parsing, airdrop caps, payload construction, submit-mode blockers, and bad Discord modal input.
+7. Validate richer metadata/media fields such as image type/size, website/social links, and any Clanker-supported Farcaster fields.
+8. Track NFT/image minting as a separate feature path unless the Clanker token-launch API grows to cover it directly.
+
+## Production boundary
+
+Until the live API contract and airdrop proof workflow are verified:
+
+- keep submit mode disabled except during controlled review;
+- never store private keys, seed phrases, or wallet-export material in Discord bot config;
+- do not treat Discord identity as blockchain signing authority;
+- do not describe creator rewards as token supply ownership;
+- require an explicit review/confirmation step before irreversible mainnet actions.

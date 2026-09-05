@@ -289,6 +289,7 @@ class ClankerDraftView(discord.ui.View):
         self.settings = settings
         self.user_id = ctx.author.id
         self.processing = False
+        self.live_confirmed = False
         self.draft: Dict[str, Any] = {
             "name": None,
             "symbol": None,
@@ -371,14 +372,47 @@ class ClankerDraftView(discord.ui.View):
         else:
             embed.add_field(name="Airdrop", value="Disabled / optional", inline=False)
         embed.add_field(name="Status", value="Ready" if self.is_ready() else "Needs basics", inline=True)
+        if self.settings.get("submit_enabled"):
+            embed.add_field(
+                name="Live submit confirmation",
+                value="Armed for next submit click" if self.live_confirmed else "Required before live API call",
+                inline=True,
+            )
         embed.set_footer(text="Base chain only · no private keys stored · airdrops allocate supply, rewards split LP/creator fees")
         if self.draft.get("image_url"):
             embed.set_thumbnail(url=self.draft["image_url"])
         return embed
 
     async def refresh(self, interaction: discord.Interaction, message: str):
+        self.live_confirmed = False
         await interaction.response.edit_message(embed=self.embed(), view=self)
         await interaction.followup.send(message, ephemeral=True)
+
+    def live_confirmation_summary(self) -> str:
+        airdrop = self.draft.get("airdrop") or {}
+        lines = [
+            "Live Clanker API submission is enabled for this server.",
+            "Review this summary, then click **Submit Launch** again to send it.",
+            "",
+            f"Token: {self.draft.get('name')} (${self.draft.get('symbol')})",
+            f"Supply: {format_tokens(int(self.draft.get('supply') or 0))}",
+            f"Creator/token admin: {self.draft.get('primary_beneficiary')}",
+            f"Creator rewards: {10000 - int(self.settings['platform_bps'])} bps creator / {int(self.settings['platform_bps'])} bps platform",
+            f"Platform treasury: {self.settings.get('treasury_address')}",
+            f"API URL: {self.settings.get('api_base_url') or 'Not configured'}",
+        ]
+        if airdrop:
+            lines.extend(
+                [
+                    f"Airdrop amount: {format_tokens(int(airdrop.get('amount') or 0))}",
+                    f"Airdrop lockup: {int(airdrop.get('lockupDuration') or MIN_AIRDROP_LOCKUP_SECONDS)} seconds",
+                    f"Airdrop vesting: {int(airdrop.get('vestingDuration') or 0)} seconds",
+                    f"Airdrop Merkle root: {airdrop.get('merkleRoot') or 'Missing'}",
+                ]
+            )
+        else:
+            lines.append("Airdrop: disabled")
+        return "\n".join(lines)
 
     def disable_controls(self) -> None:
         for item in self.children:
@@ -418,6 +452,11 @@ class ClankerDraftView(discord.ui.View):
         blocker = self.airdrop_submit_blocker()
         if blocker:
             await interaction.response.send_message(blocker, ephemeral=True)
+            return
+        if self.settings.get("submit_enabled") and not self.live_confirmed:
+            self.live_confirmed = True
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+            await interaction.followup.send(self.live_confirmation_summary(), ephemeral=True)
             return
         self.processing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
