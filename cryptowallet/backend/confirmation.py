@@ -198,7 +198,10 @@ class ConfirmationProcessorMixin:
                     channel_id
                 )
                 message = await channel.fetch_message(message_id)
-                await message.edit(embed=self._intent_embed(intent, network, None), view=None)
+                await message.edit(
+                    embed=self._intent_embed(intent, network, None),
+                    view=self._intent_result_view(intent, network),
+                )
             except (discord.HTTPException, AttributeError):
                 pass
         if await self.config.user_from_id(user_id).notifications_enabled():
