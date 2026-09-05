@@ -16,6 +16,7 @@ BASE_CHAIN_ID = 8453
 MAX_AUDIT_RECORDS = 100
 ETH_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,12}$")
+MERKLE_ROOT_RE = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
 
 def utc_now() -> str:
@@ -37,11 +38,13 @@ class Clanker(commands.Cog):
         "api_base_url": None,
         "submit_enabled": False,
         "treasury_address": None,
-        "platform_bps": 1000,
-        "vault_enabled": False,
-        "vault_percentage": 0,
-        "vault_lockup_seconds": 604800,
-        "vault_vesting_seconds": 0,
+        "platform_bps": 2000,
+        "airdrop_enabled": False,
+        "airdrop_merkle_root": None,
+        "airdrop_amount": 0,
+        "airdrop_lockup_seconds": 86400,
+        "airdrop_vesting_seconds": 0,
+        "airdrop_admin": None,
         "audit_log": [],
     }
 
@@ -86,10 +89,12 @@ class Clanker(commands.Cog):
         primary_beneficiary: str,
         platform_address: str,
         platform_bps: int,
-        vault_enabled: bool,
-        vault_percentage: int,
-        vault_lockup_seconds: int,
-        vault_vesting_seconds: int,
+        airdrop_enabled: bool,
+        airdrop_merkle_root: Optional[str],
+        airdrop_amount: int,
+        airdrop_lockup_seconds: int,
+        airdrop_vesting_seconds: int,
+        airdrop_admin: Optional[str],
         requester_id: int,
         image_url: Optional[str] = None,
         description: Optional[str] = None,
@@ -121,14 +126,16 @@ class Clanker(commands.Cog):
                 ]
             },
         }
-        if vault_enabled and vault_percentage > 0:
-            payload["vault"] = {
-                "percentage": vault_percentage,
-                "recipient": primary_beneficiary,
-                "lockupDuration": vault_lockup_seconds,
+        if airdrop_enabled and airdrop_merkle_root and airdrop_amount > 0:
+            payload["airdrop"] = {
+                "merkleRoot": airdrop_merkle_root,
+                "amount": airdrop_amount,
+                "lockupDuration": airdrop_lockup_seconds,
             }
-            if vault_vesting_seconds > 0:
-                payload["vault"]["vestingDuration"] = vault_vesting_seconds
+            if airdrop_vesting_seconds > 0:
+                payload["airdrop"]["vestingDuration"] = airdrop_vesting_seconds
+            if airdrop_admin:
+                payload["airdrop"]["admin"] = airdrop_admin
         return payload
 
     async def submit_payload(self, api_base_url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -168,10 +175,10 @@ class Clanker(commands.Cog):
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
         embed.add_field(
-            name="Creator vault",
+            name="Airdrop",
             value=(
-                f"{settings['vault_percentage']}% · lock {settings['vault_lockup_seconds']}s"
-                if settings["vault_enabled"] and settings["vault_percentage"]
+                f"{settings['airdrop_amount']} tokens · lock {settings['airdrop_lockup_seconds']}s"
+                if settings["airdrop_enabled"] and settings["airdrop_amount"]
                 else "Disabled"
             ),
             inline=True,
@@ -216,6 +223,18 @@ class Clanker(commands.Cog):
         if description and len(description) > 500:
             await ctx.send("Description must be 500 characters or less.")
             return
+        if settings["airdrop_enabled"]:
+            merkle_root = settings["airdrop_merkle_root"]
+            if not merkle_root or not MERKLE_ROOT_RE.fullmatch(merkle_root):
+                await ctx.send("Airdrop is enabled but no valid 32-byte Merkle root is configured.")
+                return
+            if int(settings["airdrop_amount"]) <= 0:
+                await ctx.send("Airdrop is enabled but the airdrop amount is not configured.")
+                return
+            airdrop_admin = settings["airdrop_admin"]
+            if airdrop_admin and not is_eth_address(airdrop_admin):
+                await ctx.send("Configured airdrop admin must be a valid EVM address.")
+                return
 
         payload = self.build_payload(
             symbol,
@@ -224,10 +243,12 @@ class Clanker(commands.Cog):
             primary_beneficiary,
             settings["treasury_address"],
             int(settings["platform_bps"]),
-            bool(settings["vault_enabled"]),
-            int(settings["vault_percentage"]),
-            int(settings["vault_lockup_seconds"]),
-            int(settings["vault_vesting_seconds"]),
+            bool(settings["airdrop_enabled"]),
+            settings["airdrop_merkle_root"],
+            int(settings["airdrop_amount"]),
+            int(settings["airdrop_lockup_seconds"]),
+            int(settings["airdrop_vesting_seconds"]),
+            settings["airdrop_admin"],
             ctx.author.id,
             image_url,
             description,
@@ -279,12 +300,12 @@ class Clanker(commands.Cog):
         )
         if image_url:
             embed.set_thumbnail(url=image_url)
-        if payload.get("vault"):
+        if payload.get("airdrop"):
             embed.add_field(
-                name="Creator vault",
+                name="Airdrop",
                 value=(
-                    f"{payload['vault']['percentage']}% to creator · "
-                    f"lock {payload['vault']['lockupDuration']}s"
+                    f"{payload['airdrop']['amount']} tokens · "
+                    f"lock {payload['airdrop']['lockupDuration']}s"
                 ),
                 inline=False,
             )
@@ -366,34 +387,58 @@ class Clanker(commands.Cog):
         await self.config.guild(ctx.guild).platform_bps.set(basis_points)
         await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
 
-    @clankerset.group(name="vault")
-    async def clankerset_vault(self, ctx: commands.Context):
-        """Manage optional creator token vault defaults."""
+    @clankerset.group(name="airdrop")
+    async def clankerset_airdrop(self, ctx: commands.Context):
+        """Manage optional airdrop defaults for launch requests."""
         pass
 
-    @clankerset_vault.command(name="enabled")
-    async def clankerset_vault_enabled(self, ctx: commands.Context, enabled: bool):
-        """Enable or disable creator vault allocation for launch requests."""
-        await self.config.guild(ctx.guild).vault_enabled.set(enabled)
-        await ctx.send(f"Creator vault defaults are now {'enabled' if enabled else 'disabled'}.")
+    @clankerset_airdrop.command(name="enabled")
+    async def clankerset_airdrop_enabled(self, ctx: commands.Context, enabled: bool):
+        """Enable or disable a configured Clanker airdrop."""
+        await self.config.guild(ctx.guild).airdrop_enabled.set(enabled)
+        await ctx.send(f"Airdrop defaults are now {'enabled' if enabled else 'disabled'}.")
 
-    @clankerset_vault.command(name="percentage")
-    async def clankerset_vault_percentage(self, ctx: commands.Context, percentage: commands.Range[int, 0, 90]):
-        """Set percent of total supply vaulted for the creator, max 90%."""
-        await self.config.guild(ctx.guild).vault_percentage.set(percentage)
-        await ctx.send(f"Creator vault allocation set to {percentage}% of total supply.")
+    @clankerset_airdrop.command(name="root")
+    async def clankerset_airdrop_root(self, ctx: commands.Context, merkle_root: str):
+        """Set the Merkle root for a prepared airdrop recipient list."""
+        merkle_root = merkle_root.strip()
+        if not MERKLE_ROOT_RE.fullmatch(merkle_root):
+            await ctx.send("Merkle root must be a 32-byte hex string, like 0x plus 64 hex characters.")
+            return
+        await self.config.guild(ctx.guild).airdrop_merkle_root.set(merkle_root)
+        await ctx.send("Airdrop Merkle root saved.")
 
-    @clankerset_vault.command(name="lockup")
-    async def clankerset_vault_lockup(self, ctx: commands.Context, seconds: commands.Range[int, 604800, 315360000]):
-        """Set creator vault lockup in seconds; Clanker minimum is 7 days."""
-        await self.config.guild(ctx.guild).vault_lockup_seconds.set(seconds)
-        await ctx.send(f"Creator vault lockup set to {seconds} seconds.")
+    @clankerset_airdrop.command(name="amount")
+    async def clankerset_airdrop_amount(self, ctx: commands.Context, amount: commands.Range[int, 0, 10**18]):
+        """Set total token amount reserved for the configured airdrop."""
+        await self.config.guild(ctx.guild).airdrop_amount.set(amount)
+        await ctx.send(f"Airdrop amount set to {amount} tokens.")
 
-    @clankerset_vault.command(name="vesting")
-    async def clankerset_vault_vesting(self, ctx: commands.Context, seconds: commands.Range[int, 0, 315360000]):
-        """Set optional creator vault vesting duration in seconds; 0 disables vesting."""
-        await self.config.guild(ctx.guild).vault_vesting_seconds.set(seconds)
-        await ctx.send(f"Creator vault vesting set to {seconds} seconds.")
+    @clankerset_airdrop.command(name="lockup")
+    async def clankerset_airdrop_lockup(self, ctx: commands.Context, seconds: commands.Range[int, 86400, 315360000]):
+        """Set airdrop lockup in seconds; Clanker minimum is 1 day."""
+        await self.config.guild(ctx.guild).airdrop_lockup_seconds.set(seconds)
+        await ctx.send(f"Airdrop lockup set to {seconds} seconds.")
+
+    @clankerset_airdrop.command(name="vesting")
+    async def clankerset_airdrop_vesting(self, ctx: commands.Context, seconds: commands.Range[int, 0, 315360000]):
+        """Set optional airdrop vesting duration in seconds; 0 disables vesting."""
+        await self.config.guild(ctx.guild).airdrop_vesting_seconds.set(seconds)
+        await ctx.send(f"Airdrop vesting set to {seconds} seconds.")
+
+    @clankerset_airdrop.command(name="admin")
+    async def clankerset_airdrop_admin(self, ctx: commands.Context, admin_address: Optional[str] = None):
+        """Set an optional airdrop admin address; omit to clear it."""
+        if not admin_address:
+            await self.config.guild(ctx.guild).airdrop_admin.set(None)
+            await ctx.send("Airdrop admin cleared; Clanker will use its default.")
+            return
+        admin_address = admin_address.strip()
+        if not is_eth_address(admin_address):
+            await ctx.send("Airdrop admin must be a valid EVM address.")
+            return
+        await self.config.guild(ctx.guild).airdrop_admin.set(admin_address)
+        await ctx.send("Airdrop admin saved.")
 
     @clankerset.group(name="audit")
     async def clankerset_audit(self, ctx: commands.Context):
