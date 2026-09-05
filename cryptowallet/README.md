@@ -219,6 +219,7 @@ Owner commands:
 [p]walletset unlock <mention-or-user-id>    # Alias: unfreeze
 [p]walletset pause
 [p]walletset resume
+[p]walletset reconcile <mention-or-user-id> <bot-reference>
 [p]walletset sendlimit [network] [amount|clear]
 [p]walletset delegationdays [1-365]
 [p]walletset cdpstatus
@@ -286,7 +287,10 @@ applies jittered backoff, survives reloads, and never resubmits merely because s
 `wallet intent <bot-reference>` displays private bot-operation state. An operation that remains
 unconfirmed for 24 hours is escalated to **uncertain**, not failed; automatic polling stops and the
 user is warned not to submit a replacement until its transaction ID and chain state are manually
-reconciled.
+reconciled. `wallet intent <bot-reference>` rechecks an uncertain operation when a stored TXID or
+provider operation hash exists; owners can perform the same evidence-based check with
+`walletset reconcile <mention-or-user-id> <bot-reference>`. A missing provider identifier remains
+uncertain and cannot be overridden or guessed as failed.
 
 `wallet transactions` without a network returns lightweight explorer links. Supplying `base`,
 `eth`, or `sol` retrieves at most the latest ten supported activity records and links to complete
