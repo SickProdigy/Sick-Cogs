@@ -175,6 +175,18 @@ class WalletCoreCommands:
                 return
         await ctx.send(embed=await self._wallet_embed(ctx, profile, target))
 
+    @wallet.error
+    async def wallet_error(self, ctx: commands.Context, error: commands.CommandError):
+        """Turn unknown wallet words into useful command guidance."""
+        if isinstance(error, commands.MemberNotFound):
+            await ctx.send(
+                f"I couldn't find that wallet command. To view another member's public "
+                f"wallet, mention them after `{ctx.clean_prefix}wallet`."
+            )
+            await ctx.send_help(ctx.command)
+            return
+        raise error
+
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context, network_key: str = None):
         """Show all testnet assets or details for one enabled testnet."""

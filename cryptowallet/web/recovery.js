@@ -4,11 +4,11 @@ const statusElement = document.querySelector("#recovery-status");
 const detailsElement = document.querySelector("#recovery-details");
 const controlsElement = document.querySelector("#recovery-controls");
 const confirmInput = document.querySelector("#recovery-confirm");
-const accountSelect = document.querySelector("#recovery-account");
-const exportButton = document.querySelector("#prepare-export");
+const accountsElement = document.querySelector("#recovery-accounts");
 const exportContainer = document.querySelector("#key-export-container");
 let handoffToken = null;
 let recoverySession = null;
+let activeFamily = null;
 
 function addDetail(label, value) {
   const term = document.createElement("dt");
@@ -47,62 +47,81 @@ function decodeRecoveryHandoff() {
 }
 
 confirmInput.addEventListener("change", () => {
-  exportButton.disabled = !confirmInput.checked;
+  setExportButtonsDisabled(!confirmInput.checked);
 });
 
-exportButton.addEventListener("click", async () => {
-  exportButton.disabled = true;
+function setExportButtonsDisabled(disabled) {
+  accountsElement.querySelectorAll("button").forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
+function accountLabel(account) {
+  return account.family === "evm" ? "EVM signer" : "Solana account";
+}
+
+async function prepareAccountExport(account) {
+  setExportButtonsDisabled(true);
   confirmInput.disabled = true;
-  statusElement.textContent = "Verifying your wallet signer with Coinbase…";
+  activeFamily = account.family;
+  exportContainer.replaceChildren();
+  statusElement.textContent = `Verifying your ${accountLabel(account)} with Coinbase…`;
   try {
     const { prepareRecoveryExport } = await import("./cdp-wallet.js");
-    const selectedAccount = recoverySession.accounts[Number(accountSelect.value)];
-    if (!selectedAccount) throw new Error("Select a wallet account to export.");
-    const result = await prepareRecoveryExport(
+    await prepareRecoveryExport(
       recoverySession.projectId,
       recoverySession.userId,
       recoverySession.accounts,
-      selectedAccount,
+      account,
       handoffToken,
       exportContainer
     );
-    handoffToken = null;
-    addDetail(
-      result.family === "evm" ? "Wallet signer address" : "Solana wallet address",
-      result.exportAddress
-    );
-    exportButton.hidden = true;
-    statusElement.textContent = "Verified. Use the secure Coinbase control below to copy the wallet signer key.";
+    statusElement.textContent = `Verified. Use the secure Coinbase control below to copy the ${accountLabel(account)} key.`;
   } catch (error) {
     statusElement.textContent = error instanceof Error ? error.message : "Secure wallet export could not start.";
     confirmInput.disabled = false;
-    exportButton.disabled = !confirmInput.checked;
+    setExportButtonsDisabled(!confirmInput.checked);
   }
-});
+}
+
+function addAccountControl(account) {
+  const card = document.createElement("section");
+  card.className = "recovery-account";
+  const heading = document.createElement("strong");
+  heading.textContent = account.family === "evm" ? "Base Sepolia EVM signer" : "Solana Devnet account";
+  const address = document.createElement("code");
+  address.textContent = account.address;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.disabled = true;
+  button.textContent = account.family === "evm" ? "Export EVM signer key" : "Export Solana account key";
+  button.addEventListener("click", () => void prepareAccountExport(account));
+  card.append(heading, address, button);
+  accountsElement.append(card);
+}
 
 window.addEventListener("sickwallet-export-status", (event) => {
   const { status, message } = event.detail || {};
   if (status === "success") {
-    statusElement.textContent = "Wallet signer key copied. Store it securely and clear your clipboard when finished.";
+    statusElement.textContent = `${accountLabel({ family: activeFamily })} key copied. Store it securely and clear your clipboard when finished.`;
+    confirmInput.disabled = false;
+    setExportButtonsDisabled(!confirmInput.checked);
   } else if (status === "expired") {
     statusElement.textContent = "The secure export session expired. Request a new link from Discord.";
+    confirmInput.disabled = true;
+    setExportButtonsDisabled(true);
   } else if (status === "error") {
     statusElement.textContent = message || "Coinbase could not export this wallet signer key.";
+    confirmInput.disabled = false;
+    setExportButtonsDisabled(!confirmInput.checked);
   }
 });
 
 Promise.resolve().then(decodeRecoveryHandoff)
   .then((session) => {
     recoverySession = session;
-    statusElement.textContent = "Protected wallet signer handoff loaded.";
-    session.accounts.forEach((account, index) => {
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.textContent = account.family === "evm"
-        ? `Base Sepolia smart account — ${account.address}`
-        : `Solana Devnet account — ${account.address}`;
-      accountSelect.append(option);
-    });
+    statusElement.textContent = "Protected wallet recovery handoff loaded. Choose each account you want to back up.";
+    session.accounts.forEach(addAccountControl);
     addDetail("Accounts available", String(session.accounts.length));
     addDetail("Expires", new Date(session.expiresAt * 1000).toLocaleString());
     detailsElement.hidden = false;

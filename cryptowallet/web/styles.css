@@ -141,3 +141,23 @@ button:disabled {
 #key-export-container {
   margin: 1rem 0;
 }
+
+.recovery-accounts {
+  display: grid;
+  gap: .75rem;
+  margin: 1rem 0;
+}
+
+.recovery-account {
+  display: grid;
+  gap: .65rem;
+  padding: 1rem;
+  border: 1px solid #334155;
+  border-radius: .5rem;
+  background: #101827;
+}
+
+.recovery-account code {
+  overflow-wrap: anywhere;
+  color: #bfdbfe;
+}

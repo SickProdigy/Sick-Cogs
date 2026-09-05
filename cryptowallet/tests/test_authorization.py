@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 import jwt
 from jwt import DecodeError, ExpiredSignatureError, InvalidAudienceError
 from cryptography.hazmat.primitives.asymmetric import ec
+from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.sessions import ApprovalSessionMixin
@@ -136,6 +137,20 @@ class _SessionHarness(ApprovalSessionMixin):
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unknown_wallet_word_shows_help_instead_of_member_error(self):
+        ctx = SimpleNamespace(
+            clean_prefix="!",
+            command=object(),
+            send=AsyncMock(),
+            send_help=AsyncMock(),
+        )
+        error = commands.MemberNotFound("recoverr")
+
+        await WalletCoreCommands.wallet_error(WalletCoreCommands(), ctx, error)
+
+        self.assertIn("wallet command", ctx.send.await_args.args[0])
+        ctx.send_help.assert_awaited_once_with(ctx.command)
+
     async def test_authorization_handoff_is_sent_as_message_content(self):
         token = "x" * 600
         user = SimpleNamespace(id=7, send=AsyncMock())
@@ -161,7 +176,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("view", sent)
 
-    async def test_recovery_handoff_is_sent_as_message_content(self):
+    async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
         author = SimpleNamespace(id=7, send=AsyncMock())
         ctx = SimpleNamespace(author=author, send=AsyncMock())
@@ -179,11 +194,11 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         await WalletAccountCommands.wallet_recovery.callback(cog, ctx)
         sent = author.send.await_args.kwargs
-        self.assertEqual(
-            sent["content"],
-            f"🛟 [Open protected recovery page](https://wallet.example.test/cryptowallet/recovery.html#handoff={token})",
+        self.assertNotIn("content", sent)
+        self.assertIn(
+            f"🛟 **[Open protected recovery page](https://wallet.example.test/cryptowallet/recovery.html#handoff={token})**",
+            sent["embed"].description,
         )
-        self.assertNotIn("view", sent)
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
 
     async def test_emergency_lock_blocks_new_authorization_link(self):
