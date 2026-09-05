@@ -210,7 +210,7 @@ class WalletTransactionCommands:
             )
         if intent.block_number is not None:
             embed.add_field(
-                name="Confirmation slot" if network.family is ChainFamily.SOLANA else "Block",
+                name="Slot" if network.family is ChainFamily.SOLANA else "Block",
                 value=f"`{intent.block_number}`",
                 inline=True,
             )

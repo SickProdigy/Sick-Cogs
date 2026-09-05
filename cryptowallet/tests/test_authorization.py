@@ -674,7 +674,7 @@ class FailClosedTransactionTests(unittest.TestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["TXID"], f"```text\n{signature}\n```")
         self.assertNotIn("Transaction", fields)
-        self.assertEqual(fields["Confirmation slot"], "`456`")
+        self.assertEqual(fields["Slot"], "`456`")
         view = WalletTransactionCommands._intent_result_view(
             intent, SOLANA_DEVNET
         )
