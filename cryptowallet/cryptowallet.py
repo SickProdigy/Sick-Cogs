@@ -15,6 +15,7 @@ from .backend.config import WalletConfigMixin, create_config
 from .backend.provisioning import WalletProvisioningMixin
 from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
+from .core.networks import BASE_SEPOLIA
 from .providers import CdpWalletProvider
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -73,8 +74,22 @@ class CryptoWallet(
         self.bot.loop.create_task(self.companion.stop())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
-        """Delete the Discord-side wallet profile metadata for a user."""
-        await self.config.user_from_id(user_id).clear()
+        """Revoke bot signing authority, then delete all Discord-side user data."""
+        user_config = self.config.user_from_id(user_id)
+        try:
+            profile = await user_config.profile()
+            if isinstance(profile, dict) and profile:
+                await self.wallet_provider.revoke_authorization(
+                    profile, BASE_SEPOLIA.key
+                )
+        except Exception as exc:
+            log.warning(
+                "Wallet delegation revocation failed during user-data deletion; "
+                "local deletion will continue: error_class=%s",
+                type(exc).__name__,
+            )
+        finally:
+            await user_config.clear()
 
     async def discord_oauth_config(self) -> dict | None:
         """Return complete OAuth configuration without storing its secret in cog config."""

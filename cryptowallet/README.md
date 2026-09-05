@@ -70,6 +70,12 @@ Transfers require explicit Discord approval and an active, time-limited, user-sc
 
 Each Discord user receives a distinct wallet profile, a Base Sepolia smart account controlled by that user’s exportable signer EOA, and a separate Solana account provisioned by CDP for devnet testing. A blockchain address cannot be deleted and may still receive funds, but deleting its provider identity or ejecting its signer could remove the supported way to operate it and strand those funds. CryptoWallet therefore exposes neither action. Coinbase Developer Platform (CDP) is the provisional wallet provider, but provider-specific behavior must remain behind an internal adapter.
 
+Red user-data deletion first attempts to revoke the profile-wide bot signing delegation and then
+unconditionally removes the Discord-side profile, intent, session, notification, and security metadata.
+A provider outage cannot block the local privacy deletion, and no retry tombstone is retained. The CDP
+wallet identity and public blockchain history are not deleted; users should export or transfer test assets
+before requesting deletion if they need continued access.
+
 SickGaming maintains its own wallet-profile identifier. External identities are verified links rather than primary keys:
 
 ```text
