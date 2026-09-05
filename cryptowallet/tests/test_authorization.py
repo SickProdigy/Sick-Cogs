@@ -842,7 +842,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         message = build_solana_transfer_message(sender, recipient, 1250, sender)
         self.assertEqual(message[:3], bytes((1, 0, 1)))
         self.assertEqual(message[3], 3)
-        self.assertEqual(message[-18:-12], bytes((1, 2, 2, 0, 1, 12)))
+        self.assertEqual(message[-17:-12], bytes((2, 2, 0, 1, 12)))
         self.assertEqual(message[-12:], bytes.fromhex("02000000e204000000000000"))
         wire = base64.b64decode(serialize_unsigned_solana_transfer(message))
         self.assertEqual(wire[0], 1)
@@ -850,6 +850,17 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(wire[65:], message)
         with self.assertRaises(ValueError):
             build_solana_transfer_message(sender, recipient, 0, sender)
+
+    def test_unsigned_solana_self_transfer_deduplicates_account_keys(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        message = build_solana_transfer_message(sender, sender, 1250, sender)
+        self.assertEqual(message[:3], bytes((1, 0, 1)))
+        self.assertEqual(message[3], 2)
+        self.assertEqual(message[-17:-12], bytes((1, 2, 0, 0, 12)))
+        self.assertEqual(message[-12:], bytes.fromhex("02000000e204000000000000"))
+        wire = base64.b64decode(serialize_unsigned_solana_transfer(message))
+        self.assertEqual(wire[0], 1)
+        self.assertEqual(wire[65:], message)
 
     async def test_solana_intent_quote_preserves_addresses_and_adds_fee(self):
         sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
@@ -954,6 +965,40 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("correlation_id=corr-123", output)
         self.assertNotIn(sender, output)
         self.assertNotIn(serialized_transaction, output)
+
+    async def test_malformed_solana_transaction_is_a_definite_failure(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="sol-send", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender, to_address=sender,
+            value_wei=10_000_000, created_at=1, expires_at=9999999999,
+            estimated_gas_fee_wei=5000, gas_sponsored=False,
+        )
+        client = SimpleNamespace(send_solana_transaction=AsyncMock(
+            side_effect=CdpApiError(
+                "safe provider summary", status=400,
+                error_type="malformed_transaction", correlation_id="corr-123",
+            )
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+        with patch(
+            "cryptowallet.providers.cdp.quote_solana_transfer",
+            AsyncMock(return_value={
+                "transaction": "unsigned", "fee_atomic": 5000,
+                "last_valid_block_height": 123,
+            }),
+        ), self.assertLogs("red.sickcogs.cryptowallet", level="WARNING"):
+            result = await provider.submit_transaction(profile, intent)
+        self.assertEqual(result["provider_status"], "failed")
+        self.assertIsNone(result["transaction_hash"])
 
     async def test_solana_confirmation_uses_public_signature_status(self):
         sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"

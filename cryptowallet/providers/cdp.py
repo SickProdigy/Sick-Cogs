@@ -593,6 +593,11 @@ class CdpWalletProvider(WalletProvider):
                 exc.error_type or "unavailable",
                 exc.correlation_id or "unavailable",
             )
+            if exc.status == 400 and exc.error_type == "malformed_transaction":
+                return {
+                    "provider_status": "failed", "user_operation_hash": None,
+                    "transaction_hash": None, "block_number": None,
+                }
             raise WalletProviderError(
                 "CDP could not safely submit the Solana Devnet transfer."
             ) from exc
