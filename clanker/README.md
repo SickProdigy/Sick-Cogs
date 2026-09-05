@@ -22,6 +22,7 @@ This first milestone deliberately keeps custody outside the cog:
 [p]clankerset platformbps 2000
 [p]clankerset channel #token-launches
 [p]clankerset approvalchannel #token-launch-log
+[p]clankerset requireapproval true
 [p]clankerset enabled true
 ```
 
@@ -73,6 +74,8 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clanker audit [limit]` - view recent launch request records.
 - `[p]clanker launches [limit]` - list recent launch records with launch IDs.
 - `[p]clanker launchinfo <launch_id>` - show one launch record with token, reward, airdrop, and API reference details.
+- `[p]clanker approve <launch_id>` - bot-owner only: approve and live-submit a pending launch record.
+- `[p]clanker reject <launch_id> [reason]` - bot-owner only: reject a pending launch record without submitting it.
 - `[p]clankerset view` - show configuration without secrets.
 - `[p]clankerset enabled <true|false>` - enable or disable the cog.
 - `[p]clankerset submit <true|false>` - enable or disable live API submissions.
@@ -84,6 +87,7 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset clearchannel` - allow launch creation in any channel.
 - `[p]clankerset approvalchannel [#channel]` - post launch record summaries to a review/log channel; omit the channel to use the current channel.
 - `[p]clankerset clearapprovalchannel` - stop posting launch record summaries to a review/log channel.
+- `[p]clankerset requireapproval <true|false>` - require bot-owner approval before live API submission.
 - `[p]clankerset allowedrole <@role>` - require a role before members can create launch requests.
 - `[p]clankerset clearallowedrole` - clear the launch-request role requirement.
 - `[p]clankerset blockedrole <@role>` - block a role from creating launch requests.
@@ -112,14 +116,14 @@ Completed in the first milestone:
 8. Clanker 7-day airdrop lockup minimum enforcement.
 9. Final confirmation summary before live API submission from the launch card.
 10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
-11. Guild controls for launch channels, review/log channels, allowed/blocked roles, configurable cooldowns, and per-user daily launch limits.
+11. Guild controls for launch channels, review/log channels, owner approval before live submission, allowed/blocked roles, configurable cooldowns, and per-user daily launch limits.
 
 Remaining work before calling the cog complete:
 
 1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
 2. Add deterministic Merkle tree/proof generation and recipient-proof export for airdrops.
 3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
-4. Decide whether configured approval/log channels should become a hard approval workflow before live submissions.
+4. Decide whether launch approval can safely be delegated to trusted moderators or should stay bot-owner only.
 5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
 6. Add tests for validation, amount parsing, airdrop caps, payload construction, submit-mode blockers, and bad Discord modal input.
 7. Validate richer metadata/media fields such as image type/size, website/social links, and any Clanker-supported Farcaster fields.
