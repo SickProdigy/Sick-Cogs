@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy", "chatgpt-codex"],
+    "description": "Prepare and optionally submit Clanker token launch requests from Discord with explicit safety controls.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild Clanker API settings and token launch audit records. It does not store private keys, seed phrases, or user wallet credentials.",
+    "hidden": false,
+    "install_msg": "Configure with `[p]clankerset apiurl`, `[p]clankerset apitoken`, `[p]clankerset treasury`, and `[p]clankerset enabled true`. Launch requests default to review/dry-run until submit mode is enabled.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links", "attach_files"],
+    "name": "Clanker",
+    "requirements": [],
+    "short": "Clanker token launch helper",
+    "tags": ["clanker", "base", "tokens", "crypto", "nft", "memes"],
+    "type": "COG",
+    "version": "0.1.0"
+}
