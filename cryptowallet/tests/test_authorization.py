@@ -656,6 +656,35 @@ class FailClosedTransactionTests(unittest.TestCase):
         self.assertEqual(embed.title, "Transaction outcome uncertain")
         self.assertIn("do not send a replacement", embed.footer.text)
 
+    def test_confirmed_solana_card_has_copyable_txid_and_explorer_button(self):
+        signature = "1" * 64
+        intent = TransactionIntent(
+            intent_id="sol-confirmed", profile_id="profile-7",
+            network=SOLANA_DEVNET.key,
+            from_address="HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+            to_address="11111111111111111111111111111111",
+            value_wei=10_000_000, created_at=1, expires_at=2,
+            estimated_gas_fee_wei=5000, status=IntentStatus.CONFIRMED,
+            provider_status="complete", transaction_hash=signature,
+            block_number=456,
+        )
+        embed = WalletTransactionCommands._intent_embed(
+            intent, SOLANA_DEVNET, None
+        )
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["TXID"], f"```text\n{signature}\n```")
+        self.assertNotIn("Transaction", fields)
+        self.assertEqual(fields["Confirmation slot"], "`456`")
+        view = WalletTransactionCommands._intent_result_view(
+            intent, SOLANA_DEVNET
+        )
+        self.assertEqual(len(view.children), 1)
+        self.assertEqual(view.children[0].label, "View transaction")
+        self.assertEqual(
+            view.children[0].url,
+            SOLANA_DEVNET.explorer_transaction_url(signature),
+        )
+
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
     def test_base_capabilities_are_explicit_and_provider_declared(self):

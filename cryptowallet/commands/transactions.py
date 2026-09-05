@@ -136,6 +136,18 @@ class WalletTransactionCommands:
         return True
 
     @staticmethod
+    def _intent_result_view(intent: TransactionIntent, network):
+        if not intent.transaction_hash:
+            return None
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(
+            label="View transaction",
+            style=discord.ButtonStyle.link,
+            url=network.explorer_transaction_url(intent.transaction_hash),
+        ))
+        return view
+
+    @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
         titles = {
             IntentStatus.UNCERTAIN: "Transaction outcome uncertain",
@@ -186,11 +198,8 @@ class WalletTransactionCommands:
             )
         if intent.transaction_hash:
             embed.add_field(
-                name="Transaction",
-                value=(
-                    f"[{intent.transaction_hash}]"
-                    f"({network.explorer_transaction_url(intent.transaction_hash)})"
-                ),
+                name="TXID",
+                value=f"```text\n{intent.transaction_hash}\n```",
                 inline=False,
             )
         if intent.user_operation_hash:
@@ -201,7 +210,7 @@ class WalletTransactionCommands:
             )
         if intent.block_number is not None:
             embed.add_field(
-                name="Slot" if network.family is ChainFamily.SOLANA else "Block",
+                name="Confirmation slot" if network.family is ChainFamily.SOLANA else "Block",
                 value=f"`{intent.block_number}`",
                 inline=True,
             )
@@ -475,7 +484,11 @@ class WalletTransactionCommands:
             stored["block_number"] = result["block_number"]
             intent = TransactionIntent.from_dict(stored)
         await interaction.message.edit(
-            embed=self._intent_embed(intent, network, color), view=view
+            embed=self._intent_embed(intent, network, color),
+            view=(
+                self._intent_result_view(intent, network)
+                if intent.transaction_hash else view
+            ),
         )
         if final_status is IntentStatus.CONFIRMED:
             message = f"Transaction confirmed on {network.name}."
