@@ -99,10 +99,11 @@ The packaged browser assets live in [`web/`](web/) and are intended to be publis
 https://sickgaming.net/cryptowallet
 ```
 
-The supported authorization and key-export pages authenticate the bot's short-lived, signed
-handoff directly with CDP. They do not require the optional cog listener, website pairing, or a
-downloaded pairing credential. Ordinary provisioning and read-only commands do not require the
-website at all.
+Authorization authenticates the bot's short-lived signed handoff directly with CDP. Recovery
+instead requires the server-side one-time relay described in `web/server/README.md`: Discord
+receives only an opaque handle, and the browser consumes that handle once to obtain the protected
+CDP handoff. Neither flow requires the legacy cog listener or website pairing. Ordinary
+provisioning and read-only commands do not require the website at all.
 
 `backend/companion.py`, the pairing commands, and the signed PHP relay remain packaged as dormant
 infrastructure for a future server-consumed workflow. They are not part of routine deployment.
@@ -274,7 +275,7 @@ user deliberately completes that browser approval.
 
 `wallet security lock` immediately persists an emergency lock, rejects pending send intents, and attempts to revoke the profile-wide bot signing delegation. While locked, receiving funds, balances, history, public transaction lookup, and authorization revocation remain available; new sends, approval clicks, authorization/renewal links, and signer export are blocked. Only the configured Red bot owner can remove the lock with `walletset unlock <mention-or-user-id>` after an independent identity review. An already-issued signed handoff can remain usable until its three-minute expiry, so the owner should retry delegation revocation if CDP was unavailable during locking. This is the current compromised-Discord response; a Discord-only PIN would not be an independent factor, and optional external 2FA remains future work.
 
-`wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
+`wallet recovery` DMs a three-minute, purpose-bound, single-use link for backing up the user’s wallet signer. The URL contains only a random opaque handle. The public relay atomically consumes it and releases the encrypted-at-rest CDP handoff to the browser, where it is removed from browser history immediately. The browser validates the expected CDP user and account addresses and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, or the bot. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account.
 
 `wallet send` accepts either a network-valid address or a current non-bot server-member mention,
 then creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons. Mentioned
@@ -488,7 +489,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 | Duplicate clicks or delayed provider response | Atomic intent claim, deterministic idempotency key, explicit uncertain state, and no automatic resubmission | Bot owner must reconcile an uncertain intent before permitting a replacement |
 | CDP or RPC outage | Fail closed before submission; persist submitted or uncertain state and use jittered confirmation backoff | Status and revocation may remain temporarily unconfirmed |
 | Bot restart during submission | Persist processing before the provider call and convert interrupted processing to uncertain on restart | Manual reconciliation is required when no operation hash was returned |
-| Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Direct stateless handoffs are expiry-bounded, not server-consumed |
+| Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Authorization remains expiry-bounded; recovery adds atomic one-time relay consumption |
 | Browser or public website compromise | No CDP secret, JWT private key, signer key, or raw private key is available to site JavaScript; export uses the Coinbase isolated iframe | A malicious page could mislead users, so deployment integrity and HTTPS remain operational requirements |
 | Bot-host or CDP credential compromise | Profile-wide policy-limited testnet delegation, owner pause, per-wallet lock, usage warnings, capability allowlists, configurable transaction ceilings, and testnet-only enforcement | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
 | Destructive account action | No wallet deletion, provider-account deletion, signer ejection, or automatic balance migration command exists | Users deliberately transfer funds and may separately export their signer or revoke bot authorization |
@@ -507,7 +508,11 @@ Automated coverage verifies malformed and expired JWTs, wrong project audience, 
 
 ### One-time handoff boundary
 
-The current direct custom-auth handoff is signed, purpose-bound, identity-bound, account-bound, and limited to three minutes, but it is not server-consumed and must not be described as single-use. The existing private session layer rejects replay after OAuth consumption, but it remains deferred infrastructure. Enabling it requires a complete authenticated two-server relay with durable credential rotation and deployment instructions; normal wallet provisioning, reads, and sends must not depend on manual listener or pairing steps.
+Recovery handoffs are registered by the bot over authenticated outbound HTTPS and stored encrypted
+at rest by the public relay. The DM URL carries an opaque random handle that is consumed atomically
+once; replay, expiry, and unknown handles return the same unavailable response. Authorization still
+uses a direct three-minute signed handoff and must not be described as single-use. Normal wallet
+provisioning, reads, and sends do not depend on the relay, listener, or pairing workflow.
 
 ## Remaining work
 

@@ -1,9 +1,35 @@
 # Companion Website Server Setup
 
-This is optional, unfinished infrastructure for future recovery, export, and other protected
-account-management features. It is not required for current wallet provisioning, authorization,
-balances, activity, or sends. Do not start or expose a listener merely to make routine wallet
-commands work.
+The recovery page requires a small public PHP/MySQL relay. It accepts authenticated outbound
+registration from the bot and atomically consumes opaque browser handles once. It is not required
+for wallet provisioning, authorization, balances, activity, or sends. The legacy inbound cog
+listener and pairing tools below remain optional and must not be publicly exposed.
+
+## One-time recovery relay
+
+Requirements: PHP 8.0+, PDO MySQL, OpenSSL, MySQL/MariaDB, and HTTPS. Apply
+`recovery-schema.sql`, publish `web/api/recovery-handoff.php` with the other public website assets,
+and configure the web runtime:
+
+```text
+SICKWALLET_RECOVERY_RELAY_SECRET=<random secret of at least 32 characters>
+SICKWALLET_DATABASE_DSN=mysql:host=127.0.0.1;dbname=sickwallet;charset=utf8mb4
+SICKWALLET_DATABASE_USER=<least-privilege database user>
+SICKWALLET_DATABASE_PASSWORD=<database password>
+```
+
+Store the same relay secret only in Red's shared API-token store:
+
+```text
+[p]set api cryptowallet_relay secret <same random secret>
+```
+
+`[p]walletset view` reports whether the relay and HTTPS approval URL are configured without
+displaying secrets. Recovery fails closed until both sides are configured. Rotate the relay secret
+by changing both server-side stores together; existing unconsumed links become unusable. Do not
+put the secret in Git, Discord messages, URLs, browser assets, or logs.
+
+## Legacy private companion infrastructure
 
 Deploy this directory outside the public document root. It contains server-only pairing credentials
 and request-signing code; only the static files in the parent `web/` directory are public assets.

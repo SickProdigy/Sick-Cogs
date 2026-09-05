@@ -18,18 +18,36 @@ function addDetail(label, value) {
   detailsElement.append(term, detail);
 }
 
-function decodeRecoveryHandoff() {
-  const fragment = new URLSearchParams(window.location.hash.slice(1));
-  handoffToken = fragment.get("handoff");
-  history.replaceState(null, "", window.location.pathname + window.location.search);
-  if (!handoffToken) throw new Error("This recovery link is missing its protected handoff.");
-  const parts = handoffToken.split(".");
-  if (parts.length !== 3) throw new Error("This recovery link is malformed.");
+function decodeRecoveryToken(token) {
+  const parts = token.split(".");
+  if (parts.length !== 3) throw new Error("This recovery handoff is malformed.");
   const encoded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
   const claims = JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=")));
   if (claims.sickwallet_purpose !== "recovery" || !claims.sub || !claims.aud) {
     throw new Error("This handoff is not valid for wallet recovery.");
   }
+  return claims;
+}
+
+async function consumeRecoveryHandoff() {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const handle = fragment.get("handoff");
+  history.replaceState(null, "", window.location.pathname + window.location.search);
+  if (!handle || !/^[A-Za-z0-9_-]{32,128}$/.test(handle)) {
+    throw new Error("This recovery link is invalid, expired, or already used.");
+  }
+  const response = await fetch("./api/recovery-handoff.php", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ operation: "consume", handoff: handle }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.status !== "consumed" || typeof result.jwt !== "string") {
+    throw new Error(result?.error?.message || "This recovery link is invalid, expired, or already used.");
+  }
+  handoffToken = result.jwt;
+  const claims = decodeRecoveryToken(handoffToken);
   const accounts = Array.isArray(claims.sickwallet_accounts)
     ? claims.sickwallet_accounts.filter(({ family, address }) =>
         (family === "evm" || family === "solana") && typeof address === "string" && address
@@ -117,7 +135,7 @@ window.addEventListener("sickwallet-export-status", (event) => {
   }
 });
 
-Promise.resolve().then(decodeRecoveryHandoff)
+Promise.resolve().then(consumeRecoveryHandoff)
   .then((session) => {
     recoverySession = session;
     statusElement.textContent = "Protected wallet recovery handoff loaded. Choose each account you want to back up.";

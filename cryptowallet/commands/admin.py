@@ -397,6 +397,7 @@ class WalletAdminCommands:
         pairing = await self.companion_pairing_status()
         cdp = await self.wallet_provider.readiness()
         jwt_auth = await self.jwt_public_status()
+        recovery_relay = await self.recovery_relay_status()
         authorization_ready = bool(cdp["configured"] and jwt_auth["configured"])
         await ctx.send(
             "**Wallet integration**\n"
@@ -408,8 +409,9 @@ class WalletAdminCommands:
             f"CDP credentials: `{'configured' if cdp['configured'] else 'not configured'}`\n"
             f"Custom authentication: `{'configured' if jwt_auth['configured'] else 'not configured'}`\n"
             f"Current authorization flow: `{'ready' if authorization_ready else 'not ready'}`\n"
+            f"One-time recovery relay: `{'configured' if recovery_relay['configured'] else 'not configured'}`\n"
             "Mainnet: `disabled`\n\n"
-            "**Optional future recovery relay**\n"
+            "**Legacy optional companion**\n"
             f"Website pairing: `{'paired' if pairing['paired'] else 'not paired'}`\n"
             f"Discord OAuth: `{'configured' if oauth_ready else 'not configured'}`\n"
             f"Companion listener: `{'running' if self.companion.running else 'stopped'}`\n"
