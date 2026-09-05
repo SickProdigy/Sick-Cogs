@@ -20,6 +20,8 @@ This first milestone deliberately keeps custody outside the cog:
 [p]clankerset apitoken <token>
 [p]clankerset treasury <0x...>
 [p]clankerset platformbps 2000
+[p]clankerset channel #token-launches
+[p]clankerset approvalchannel #token-launch-log
 [p]clankerset enabled true
 ```
 
@@ -78,6 +80,16 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset apitoken <token>` - store the Clanker API bearer token.
 - `[p]clankerset treasury <0x...>` - set the bot-owner/SickGaming platform treasury address.
 - `[p]clankerset platformbps <0-10000>` - set the bot-owner reward cut, default 2000 bps / 20%.
+- `[p]clankerset channel [#channel]` - restrict launch creation to one channel; omit the channel to use the current channel.
+- `[p]clankerset clearchannel` - allow launch creation in any channel.
+- `[p]clankerset approvalchannel [#channel]` - post launch record summaries to a review/log channel; omit the channel to use the current channel.
+- `[p]clankerset clearapprovalchannel` - stop posting launch record summaries to a review/log channel.
+- `[p]clankerset allowedrole <@role>` - require a role before members can create launch requests.
+- `[p]clankerset clearallowedrole` - clear the launch-request role requirement.
+- `[p]clankerset blockedrole <@role>` - block a role from creating launch requests.
+- `[p]clankerset clearblockedrole` - clear the blocked role.
+- `[p]clankerset cooldown <seconds>` - set a per-user launch cooldown; 0 disables it.
+- `[p]clankerset dailymax <number>` - set a per-user rolling 24-hour launch limit; 0 disables it.
 - `[p]clankerset airdrop enabled <true|false>` - enable or disable configured airdrop payloads.
 - `[p]clankerset airdrop root <0x...>` - set the 32-byte Merkle root for the prepared airdrop list.
 - `[p]clankerset airdrop amount <tokens>` - set total token amount reserved for the airdrop.
@@ -100,13 +112,14 @@ Completed in the first milestone:
 8. Clanker 7-day airdrop lockup minimum enforcement.
 9. Final confirmation summary before live API submission from the launch card.
 10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
+11. Guild controls for launch channels, review/log channels, allowed/blocked roles, configurable cooldowns, and per-user daily launch limits.
 
 Remaining work before calling the cog complete:
 
 1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
 2. Add deterministic Merkle tree/proof generation and recipient-proof export for airdrops.
 3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
-4. Add per-guild launch channel restrictions, approval channels, allowed roles, blocked roles, cooldown controls, and daily launch limits.
+4. Decide whether configured approval/log channels should become a hard approval workflow before live submissions.
 5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
 6. Add tests for validation, amount parsing, airdrop caps, payload construction, submit-mode blockers, and bad Discord modal input.
 7. Validate richer metadata/media fields such as image type/size, website/social links, and any Clanker-supported Farcaster fields.

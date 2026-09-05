@@ -479,9 +479,11 @@ class ClankerDraftView(discord.ui.View):
                 except RuntimeError as exc:
                     record["status"] = "failed"
                     await self.cog.add_audit_record(self.ctx.guild, record)
+                    await self.cog.notify_approval_channel(self.ctx.guild, self.settings, record)
                     await interaction.followup.send(str(exc), ephemeral=True)
                     return
             await self.cog.add_audit_record(self.ctx.guild, record)
+            await self.cog.notify_approval_channel(self.ctx.guild, self.settings, record)
             self.disable_controls()
             await interaction.message.edit(embed=self.embed(), view=self)
             await interaction.followup.send(
@@ -515,6 +517,12 @@ class Clanker(commands.Cog):
         "submit_enabled": False,
         "treasury_address": None,
         "platform_bps": 2000,
+        "launch_channel_id": None,
+        "approval_channel_id": None,
+        "allowed_role_id": None,
+        "blocked_role_id": None,
+        "launch_cooldown_seconds": 60,
+        "daily_max_per_user": 0,
         "airdrop_enabled": False,
         "airdrop_merkle_root": None,
         "airdrop_amount": 0,
@@ -529,6 +537,7 @@ class Clanker(commands.Cog):
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
+        self.user_cooldowns: Dict[Tuple[int, int], datetime.datetime] = {}
 
     async def red_delete_data_for_user(self, **kwargs):
         """This cog stores no per-user profile data."""
@@ -703,10 +712,76 @@ class Clanker(commands.Cog):
         suffix = f" · token {token_address}" if token_address else ""
         return f"{launch_id} · {created} · {status} · ${symbol} by {requester}{suffix}"
 
+    async def check_launch_controls(self, ctx: commands.Context, settings: Dict[str, Any]) -> bool:
+        launch_channel_id = settings.get("launch_channel_id")
+        if launch_channel_id and ctx.channel.id != launch_channel_id:
+            channel = ctx.guild.get_channel(launch_channel_id)
+            destination = channel.mention if channel else f"channel ID {launch_channel_id}"
+            await ctx.send(f"Clanker launches must be started in {destination}.")
+            return False
+
+        author_roles = {role.id for role in getattr(ctx.author, "roles", [])}
+        blocked_role_id = settings.get("blocked_role_id")
+        if blocked_role_id and blocked_role_id in author_roles:
+            await ctx.send("Your role is blocked from creating Clanker launch requests in this server.")
+            return False
+
+        allowed_role_id = settings.get("allowed_role_id")
+        if allowed_role_id and allowed_role_id not in author_roles:
+            role = ctx.guild.get_role(allowed_role_id)
+            role_name = role.mention if role else f"role ID {allowed_role_id}"
+            await ctx.send(f"You need {role_name} to create Clanker launch requests in this server.")
+            return False
+
+        daily_max = int(settings.get("daily_max_per_user") or 0)
+        if daily_max > 0:
+            audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+            cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+            recent_count = 0
+            for record in audit_log:
+                if record.get("requester_id") != ctx.author.id:
+                    continue
+                try:
+                    created = datetime.datetime.fromisoformat(str(record.get("created_at")))
+                except ValueError:
+                    continue
+                if created >= cutoff:
+                    recent_count += 1
+            if recent_count >= daily_max:
+                await ctx.send(f"You have reached the Clanker launch limit of {daily_max} per 24 hours.")
+                return False
+
+        cooldown_seconds = int(settings.get("launch_cooldown_seconds") or 0)
+        if cooldown_seconds > 0:
+            key = (ctx.guild.id, ctx.author.id)
+            now = datetime.datetime.now(datetime.timezone.utc)
+            previous = self.user_cooldowns.get(key)
+            if previous:
+                remaining = cooldown_seconds - int((now - previous).total_seconds())
+                if remaining > 0:
+                    await ctx.send(f"Please wait {remaining} seconds before creating another Clanker launch request.")
+                    return False
+            self.user_cooldowns[key] = now
+
+        return True
+
     async def add_audit_record(self, guild: discord.Guild, record: Dict[str, Any]):
         async with self.config.guild(guild).audit_log() as audit_log:
             audit_log.append(record)
             del audit_log[:-MAX_AUDIT_RECORDS]
+
+    async def notify_approval_channel(self, guild: discord.Guild, settings: Dict[str, Any], record: Dict[str, Any]) -> None:
+        channel_id = settings.get("approval_channel_id")
+        if not channel_id:
+            return
+        channel = guild.get_channel(channel_id) or self.bot.get_channel(channel_id)
+        if not channel:
+            log.warning("Configured Clanker approval/log channel %s was not found in guild %s", channel_id, guild.id)
+            return
+        try:
+            await channel.send("Clanker launch record created.", embed=self.launch_record_embed(record))
+        except discord.HTTPException:
+            log.exception("Failed to send Clanker launch record to channel %s", channel_id)
 
     @staticmethod
     def launch_record_embed(record: Dict[str, Any]) -> discord.Embed:
@@ -770,6 +845,17 @@ class Clanker(commands.Cog):
         embed.add_field(name="API token", value="Set" if token else "Not set", inline=True)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
+        launch_channel = ctx.guild.get_channel(settings.get("launch_channel_id") or 0)
+        approval_channel = ctx.guild.get_channel(settings.get("approval_channel_id") or 0)
+        allowed_role = ctx.guild.get_role(settings.get("allowed_role_id") or 0)
+        blocked_role = ctx.guild.get_role(settings.get("blocked_role_id") or 0)
+        embed.add_field(name="Launch channel", value=launch_channel.mention if launch_channel else "Any", inline=True)
+        embed.add_field(name="Approval/log channel", value=approval_channel.mention if approval_channel else "Not set", inline=True)
+        embed.add_field(name="Allowed role", value=allowed_role.mention if allowed_role else "Any", inline=True)
+        embed.add_field(name="Blocked role", value=blocked_role.mention if blocked_role else "None", inline=True)
+        embed.add_field(name="Launch cooldown", value=f"{int(settings.get('launch_cooldown_seconds') or 0)}s", inline=True)
+        daily_max = int(settings.get("daily_max_per_user") or 0)
+        embed.add_field(name="Daily max", value=str(daily_max) if daily_max else "Unlimited", inline=True)
         embed.add_field(
             name="Airdrop",
             value=(
@@ -783,7 +869,6 @@ class Clanker(commands.Cog):
         await ctx.send(embed=embed)
 
     @clanker.command(name="card", aliases=("create", "draft"))
-    @commands.cooldown(1, 60, commands.BucketType.user)
     async def clanker_card(self, ctx: commands.Context):
         """Open an interactive launch-card draft with optional airdrops."""
         settings = await self.config.guild(ctx.guild).all()
@@ -793,11 +878,12 @@ class Clanker(commands.Cog):
         if not settings["treasury_address"]:
             await ctx.send("A bot owner must configure the SickGaming treasury address first.")
             return
+        if not await self.check_launch_controls(ctx, settings):
+            return
         view = ClankerDraftView(self, ctx, settings)
         await ctx.send(embed=view.embed(), view=view)
 
     @clanker.command(name="launch")
-    @commands.cooldown(1, 60, commands.BucketType.user)
     async def clanker_launch(
         self,
         ctx: commands.Context,
@@ -816,6 +902,8 @@ class Clanker(commands.Cog):
             return
         if not settings["treasury_address"]:
             await ctx.send("A bot owner must configure the SickGaming treasury address first.")
+            return
+        if not await self.check_launch_controls(ctx, settings):
             return
         symbol = symbol.strip().upper().lstrip("$")
         if not SYMBOL_RE.fullmatch(symbol):
@@ -880,9 +968,11 @@ class Clanker(commands.Cog):
                 except RuntimeError as exc:
                     record["status"] = "failed"
                     await self.add_audit_record(ctx.guild, record)
+                    await self.notify_approval_channel(ctx.guild, settings, record)
                     await ctx.send(str(exc))
                     return
         await self.add_audit_record(ctx.guild, record)
+        await self.notify_approval_channel(ctx.guild, settings, record)
 
         submitted = record["status"] == "submitted"
         embed = discord.Embed(
@@ -1007,6 +1097,74 @@ class Clanker(commands.Cog):
         """Set the bot-owner platform reward basis points for launch requests."""
         await self.config.guild(ctx.guild).platform_bps.set(basis_points)
         await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
+
+    @clankerset.command(name="channel")
+    async def clankerset_channel(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
+        """Restrict Clanker launch creation to one channel; omit to use this channel."""
+        channel = channel or ctx.channel
+        await self.config.guild(ctx.guild).launch_channel_id.set(channel.id)
+        await ctx.send(f"Clanker launches must now be started in {channel.mention}.")
+
+    @clankerset.command(name="clearchannel")
+    async def clankerset_clearchannel(self, ctx: commands.Context):
+        """Allow Clanker launch creation in any channel."""
+        await self.config.guild(ctx.guild).launch_channel_id.set(None)
+        await ctx.send("Clanker launch channel restriction cleared.")
+
+    @clankerset.command(name="approvalchannel")
+    async def clankerset_approvalchannel(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
+        """Set the channel that receives Clanker launch record summaries; omit to use this channel."""
+        channel = channel or ctx.channel
+        await self.config.guild(ctx.guild).approval_channel_id.set(channel.id)
+        await ctx.send(f"Clanker launch records will be posted to {channel.mention}.")
+
+    @clankerset.command(name="clearapprovalchannel")
+    async def clankerset_clearapprovalchannel(self, ctx: commands.Context):
+        """Stop posting Clanker launch records to a configured channel."""
+        await self.config.guild(ctx.guild).approval_channel_id.set(None)
+        await ctx.send("Clanker approval/log channel cleared.")
+
+    @clankerset.command(name="allowedrole")
+    async def clankerset_allowedrole(self, ctx: commands.Context, role: discord.Role):
+        """Require a role before users can create Clanker launch requests."""
+        await self.config.guild(ctx.guild).allowed_role_id.set(role.id)
+        await ctx.send(f"Only members with {role.mention} can create Clanker launch requests.")
+
+    @clankerset.command(name="clearallowedrole")
+    async def clankerset_clearallowedrole(self, ctx: commands.Context):
+        """Clear the required role for Clanker launch requests."""
+        await self.config.guild(ctx.guild).allowed_role_id.set(None)
+        await ctx.send("Clanker allowed-role requirement cleared.")
+
+    @clankerset.command(name="blockedrole")
+    async def clankerset_blockedrole(self, ctx: commands.Context, role: discord.Role):
+        """Block a role from creating Clanker launch requests."""
+        await self.config.guild(ctx.guild).blocked_role_id.set(role.id)
+        await ctx.send(f"Members with {role.mention} cannot create Clanker launch requests.")
+
+    @clankerset.command(name="clearblockedrole")
+    async def clankerset_clearblockedrole(self, ctx: commands.Context):
+        """Clear the blocked role for Clanker launch requests."""
+        await self.config.guild(ctx.guild).blocked_role_id.set(None)
+        await ctx.send("Clanker blocked-role restriction cleared.")
+
+    @clankerset.command(name="cooldown")
+    async def clankerset_cooldown(self, ctx: commands.Context, seconds: int):
+        """Set the per-user Clanker launch cooldown in seconds; 0 disables it."""
+        if seconds < 0 or seconds > 86400:
+            await ctx.send("Clanker launch cooldown must be between 0 and 86400 seconds.")
+            return
+        await self.config.guild(ctx.guild).launch_cooldown_seconds.set(seconds)
+        await ctx.send(f"Clanker launch cooldown set to {seconds} seconds.")
+
+    @clankerset.command(name="dailymax")
+    async def clankerset_dailymax(self, ctx: commands.Context, launches: int):
+        """Set the per-user 24-hour launch limit; 0 disables it."""
+        if launches < 0 or launches > 100:
+            await ctx.send("Clanker daily launch limit must be between 0 and 100 launches per user.")
+            return
+        await self.config.guild(ctx.guild).daily_max_per_user.set(launches)
+        await ctx.send("Clanker daily launch limit disabled." if launches == 0 else f"Clanker daily launch limit set to {launches} per user.")
 
     @clankerset.group(name="airdrop")
     async def clankerset_airdrop(self, ctx: commands.Context):
