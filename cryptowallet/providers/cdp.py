@@ -1,3 +1,4 @@
+import logging
 import re
 import uuid
 from dataclasses import dataclass, replace
@@ -45,6 +46,7 @@ CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
 HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
+log = logging.getLogger("red.sickcogs.cryptowallet")
 
 
 @dataclass(frozen=True, slots=True)
@@ -583,7 +585,30 @@ class CdpWalletProvider(WalletProvider):
                     "transaction_hash": signature, "block_number": None}
         except WalletProviderError:
             raise
-        except (CdpApiError, BaseRpcError, KeyError, TypeError, ValueError) as exc:
+        except CdpApiError as exc:
+            log.warning(
+                "Solana transaction submission failed: status=%s error_type=%s "
+                "correlation_id=%s",
+                exc.status if exc.status is not None else "unavailable",
+                exc.error_type or "unavailable",
+                exc.correlation_id or "unavailable",
+            )
+            raise WalletProviderError(
+                "CDP could not safely submit the Solana Devnet transfer."
+            ) from exc
+        except BaseRpcError as exc:
+            log.warning(
+                "Solana transaction submission failed before CDP: error_class=%s",
+                type(exc).__name__,
+            )
+            raise WalletProviderError(
+                "CDP could not safely submit the Solana Devnet transfer."
+            ) from exc
+        except (KeyError, TypeError, ValueError) as exc:
+            log.warning(
+                "Solana transaction submission returned invalid data: error_class=%s",
+                type(exc).__name__,
+            )
             raise WalletProviderError("CDP could not safely submit the Solana Devnet transfer.") from exc
 
     async def get_transaction_status(
