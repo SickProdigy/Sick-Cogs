@@ -58,9 +58,13 @@ def build_solana_transfer_message(
     blockhash = _decode_solana_public_key(recent_blockhash)
     system_program = b"\x00" * 32
     header = bytes((1, 0, 1))
-    account_keys = bytes((3,)) + sender + recipient + system_program
     instruction_data = struct.pack("<IQ", 2, lamports)
-    instruction = bytes((1, 2, 2, 0, 1, len(instruction_data))) + instruction_data
+    if sender == recipient:
+        account_keys = bytes((2,)) + sender + system_program
+        instruction = bytes((1, 2, 0, 0, len(instruction_data))) + instruction_data
+    else:
+        account_keys = bytes((3,)) + sender + recipient + system_program
+        instruction = bytes((2, 2, 0, 1, len(instruction_data))) + instruction_data
     return header + account_keys + blockhash + instruction
 
 
