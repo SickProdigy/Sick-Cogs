@@ -37,7 +37,7 @@ class Clanker(commands.Cog):
         "api_base_url": None,
         "submit_enabled": False,
         "treasury_address": None,
-        "secondary_bps": 2500,
+        "platform_bps": 1000,
         "audit_log": [],
     }
 
@@ -79,9 +79,9 @@ class Clanker(commands.Cog):
         symbol: str,
         name: str,
         supply: int,
-        treasury_address: str,
-        secondary_beneficiary: str,
-        secondary_bps: int,
+        primary_beneficiary: str,
+        platform_address: str,
+        platform_bps: int,
         requester_id: int,
         image_url: Optional[str] = None,
         description: Optional[str] = None,
@@ -95,10 +95,23 @@ class Clanker(commands.Cog):
             "description": description or "",
             "imageUrl": image_url or "",
             "requesterDiscordId": str(requester_id),
-            "beneficiaries": [
-                {"address": treasury_address, "basisPoints": 10000 - secondary_bps, "label": "sickgaming"},
-                {"address": secondary_beneficiary, "basisPoints": secondary_bps, "label": "secondary"},
-            ],
+            "tokenAdmin": primary_beneficiary,
+            "rewards": {
+                "recipients": [
+                    {
+                        "admin": primary_beneficiary,
+                        "recipient": primary_beneficiary,
+                        "bps": 10000 - platform_bps,
+                        "token": "Both",
+                    },
+                    {
+                        "admin": platform_address,
+                        "recipient": platform_address,
+                        "bps": platform_bps,
+                        "token": "Both",
+                    },
+                ]
+            },
         }
 
     async def submit_payload(self, api_base_url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,8 +148,8 @@ class Clanker(commands.Cog):
         embed.add_field(name="Submit mode", value=str(settings["submit_enabled"]), inline=True)
         embed.add_field(name="API URL", value="Set" if settings["api_base_url"] else "Not set", inline=True)
         embed.add_field(name="API token", value="Set" if token else "Not set", inline=True)
-        embed.add_field(name="Treasury", value=settings["treasury_address"] or "Not set", inline=False)
-        embed.add_field(name="Secondary split", value=f"{settings['secondary_bps']} bps", inline=True)
+        embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
+        embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
         embed.set_footer(text="Base chain only · no private keys are stored by this cog")
         await ctx.send(embed=embed)
 
@@ -148,7 +161,7 @@ class Clanker(commands.Cog):
         symbol: str,
         name: str,
         supply: commands.Range[int, 1, 10**18],
-        secondary_beneficiary: str,
+        primary_beneficiary: str,
         image_url: Optional[str] = None,
         *,
         description: Optional[str] = None,
@@ -168,8 +181,8 @@ class Clanker(commands.Cog):
         if not name.strip() or len(name.strip()) > 80:
             await ctx.send("Token names must be 1-80 characters.")
             return
-        if not is_eth_address(secondary_beneficiary):
-            await ctx.send("Secondary beneficiary must be a valid EVM address.")
+        if not is_eth_address(primary_beneficiary):
+            await ctx.send("Primary beneficiary must be a valid EVM address.")
             return
         if image_url and not self.validate_https_url(image_url):
             await ctx.send("Image URL must be an HTTPS URL. Upload the image somewhere stable first.")
@@ -182,9 +195,9 @@ class Clanker(commands.Cog):
             symbol,
             name,
             supply,
+            primary_beneficiary,
             settings["treasury_address"],
-            secondary_beneficiary,
-            int(settings["secondary_bps"]),
+            int(settings["platform_bps"]),
             ctx.author.id,
             image_url,
             description,
@@ -229,8 +242,8 @@ class Clanker(commands.Cog):
         embed.add_field(
             name="Beneficiaries",
             value=humanize_list([
-                f"SickGaming {payload['beneficiaries'][0]['basisPoints']} bps",
-                f"Secondary {payload['beneficiaries'][1]['basisPoints']} bps",
+                f"Creator {payload['rewards']['recipients'][0]['bps']} bps",
+                f"Bot owner {payload['rewards']['recipients'][1]['bps']} bps",
             ]),
             inline=False,
         )
@@ -300,7 +313,7 @@ class Clanker(commands.Cog):
 
     @clankerset.command(name="treasury")
     async def clankerset_treasury(self, ctx: commands.Context, treasury_address: str):
-        """Set the primary SickGaming treasury/beneficiary EVM address."""
+        """Set the bot-owner/SickGaming platform treasury EVM address."""
         treasury_address = treasury_address.strip()
         if not is_eth_address(treasury_address):
             await ctx.send("Treasury address must be a valid EVM address.")
@@ -308,11 +321,11 @@ class Clanker(commands.Cog):
         await self.config.guild(ctx.guild).treasury_address.set(treasury_address)
         await ctx.send("SickGaming treasury address saved.")
 
-    @clankerset.command(name="secondarybps")
-    async def clankerset_secondarybps(self, ctx: commands.Context, basis_points: commands.Range[int, 0, 10000]):
-        """Set default secondary beneficiary basis points for launch requests."""
-        await self.config.guild(ctx.guild).secondary_bps.set(basis_points)
-        await ctx.send(f"Default secondary beneficiary split set to {basis_points} bps.")
+    @clankerset.command(name="platformbps")
+    async def clankerset_platformbps(self, ctx: commands.Context, basis_points: commands.Range[int, 0, 10000]):
+        """Set the bot-owner platform reward basis points for launch requests."""
+        await self.config.guild(ctx.guild).platform_bps.set(basis_points)
+        await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
 
     @clankerset.group(name="audit")
     async def clankerset_audit(self, ctx: commands.Context):
