@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import re
+import secrets
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
@@ -462,15 +463,7 @@ class ClankerDraftView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             payload = self.build_current_payload()
-            record = {
-                "created_at": utc_now(),
-                "requester_id": interaction.user.id,
-                "requester_name": str(interaction.user),
-                "symbol": payload["symbol"],
-                "name": payload["name"],
-                "status": "dry_run",
-                "api_response": None,
-            }
+            record = self.cog.build_audit_record(interaction.user, payload)
             if self.settings.get("submit_enabled"):
                 if not self.settings.get("api_base_url"):
                     await interaction.followup.send("Submit mode is enabled but no Clanker API URL is configured.", ephemeral=True)
@@ -481,6 +474,7 @@ class ClankerDraftView(discord.ui.View):
                     return
                 try:
                     record["api_response"] = await self.cog.submit_payload(self.settings["api_base_url"], token, payload)
+                    record["api_refs"] = self.cog.extract_api_references(record["api_response"])
                     record["status"] = "submitted"
                 except RuntimeError as exc:
                     record["status"] = "failed"
@@ -633,10 +627,130 @@ class Clanker(commands.Cog):
             except aiohttp.ContentTypeError:
                 return {"raw": text}
 
+    @staticmethod
+    def new_launch_id(symbol: str) -> str:
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+        return f"{symbol.lower()}-{timestamp}-{secrets.token_hex(3)}"
+
+    @staticmethod
+    def extract_api_references(response: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Pull common launch references from a Clanker response without trusting one schema."""
+        if not isinstance(response, dict):
+            return {}
+        wanted = {
+            "id",
+            "requestId",
+            "launchId",
+            "tokenAddress",
+            "contractAddress",
+            "poolAddress",
+            "transactionHash",
+            "txHash",
+            "url",
+            "poolUrl",
+        }
+        found: Dict[str, Any] = {}
+
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key in wanted and key not in found and child not in (None, ""):
+                        found[key] = child
+                    visit(child)
+            elif isinstance(value, list):
+                for child in value[:20]:
+                    visit(child)
+
+        visit(response)
+        return found
+
+    @staticmethod
+    def build_audit_record(
+        requester: Any,
+        payload: Dict[str, Any],
+        status: str = "dry_run",
+    ) -> Dict[str, Any]:
+        airdrop = payload.get("airdrop") or {}
+        return {
+            "launch_id": Clanker.new_launch_id(payload["symbol"]),
+            "created_at": utc_now(),
+            "requester_id": requester.id,
+            "requester_name": str(requester),
+            "symbol": payload["symbol"],
+            "name": payload["name"],
+            "chain": payload.get("chain", "base"),
+            "supply": payload.get("supply"),
+            "token_admin": payload.get("tokenAdmin"),
+            "platform_treasury": payload["rewards"]["recipients"][1]["recipient"],
+            "creator_bps": payload["rewards"]["recipients"][0]["bps"],
+            "platform_bps": payload["rewards"]["recipients"][1]["bps"],
+            "airdrop_amount": airdrop.get("amount", 0),
+            "airdrop_merkle_root": airdrop.get("merkleRoot"),
+            "status": status,
+            "api_response": None,
+            "api_refs": {},
+        }
+
+    @staticmethod
+    def launch_record_line(record: Dict[str, Any]) -> str:
+        launch_id = record.get("launch_id", "legacy")
+        created = record.get("created_at", "unknown")
+        status = record.get("status", "unknown")
+        symbol = record.get("symbol", "?")
+        requester = record.get("requester_name", record.get("requester_id", "?"))
+        refs = record.get("api_refs") or {}
+        token_address = refs.get("tokenAddress") or refs.get("contractAddress")
+        suffix = f" · token {token_address}" if token_address else ""
+        return f"{launch_id} · {created} · {status} · ${symbol} by {requester}{suffix}"
+
     async def add_audit_record(self, guild: discord.Guild, record: Dict[str, Any]):
         async with self.config.guild(guild).audit_log() as audit_log:
             audit_log.append(record)
             del audit_log[:-MAX_AUDIT_RECORDS]
+
+    @staticmethod
+    def launch_record_embed(record: Dict[str, Any]) -> discord.Embed:
+        title = f"Clanker launch {record.get('launch_id', 'legacy')}"
+        embed = discord.Embed(title=title, color=discord.Color.blue())
+        embed.add_field(name="Status", value=record.get("status", "unknown"), inline=True)
+        embed.add_field(name="Token", value=f"{record.get('name', '?')} (${record.get('symbol', '?')})", inline=False)
+        embed.add_field(name="Created", value=record.get("created_at", "unknown"), inline=False)
+        embed.add_field(name="Requester", value=record.get("requester_name", record.get("requester_id", "?")), inline=True)
+        embed.add_field(name="Chain", value=record.get("chain", "base"), inline=True)
+        embed.add_field(name="Supply", value=str(record.get("supply", "unknown")), inline=True)
+        embed.add_field(name="Creator/token admin", value=record.get("token_admin") or "unknown", inline=False)
+        embed.add_field(
+            name="Creator rewards",
+            value=f"Creator {record.get('creator_bps', '?')} bps / platform {record.get('platform_bps', '?')} bps",
+            inline=False,
+        )
+        embed.add_field(name="Platform treasury", value=record.get("platform_treasury") or "unknown", inline=False)
+        if record.get("airdrop_amount"):
+            embed.add_field(
+                name="Airdrop",
+                value=(
+                    f"{record.get('airdrop_amount')} tokens · "
+                    f"root {record.get('airdrop_merkle_root') or 'missing'}"
+                ),
+                inline=False,
+            )
+        refs = record.get("api_refs") or {}
+        if refs:
+            reference_lines = [f"{key}: {value}" for key, value in refs.items()]
+            embed.add_field(name="API references", value=box("\n".join(reference_lines)[:900]), inline=False)
+        elif record.get("api_response"):
+            embed.add_field(name="API response", value=box(str(record["api_response"])[:900]), inline=False)
+        embed.set_footer(text="Audit records are bounded per guild and do not contain API tokens or wallet secrets")
+        return embed
+
+    async def get_launch_record(self, guild: discord.Guild, launch_id: str) -> Optional[Dict[str, Any]]:
+        audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
+        needle = launch_id.strip().lower()
+        for record in reversed(audit_log):
+            record_id = str(record.get("launch_id") or "").lower()
+            if record_id == needle or record_id.startswith(needle):
+                return record
+        return None
 
     @commands.guild_only()
     @commands.group(name="clanker", aliases=("clank",), invoke_without_command=True)
@@ -749,15 +863,7 @@ class Clanker(commands.Cog):
             image_url,
             description,
         )
-        record = {
-            "created_at": utc_now(),
-            "requester_id": ctx.author.id,
-            "requester_name": str(ctx.author),
-            "symbol": symbol,
-            "name": name.strip(),
-            "status": "dry_run",
-            "api_response": None,
-        }
+        record = self.build_audit_record(ctx.author, payload)
         if settings["submit_enabled"]:
             if not settings["api_base_url"]:
                 await ctx.send("Submit mode is enabled but no Clanker API URL is configured.")
@@ -769,6 +875,7 @@ class Clanker(commands.Cog):
             async with ctx.typing():
                 try:
                     record["api_response"] = await self.submit_payload(settings["api_base_url"], token, payload)
+                    record["api_refs"] = self.extract_api_references(record["api_response"])
                     record["status"] = "submitted"
                 except RuntimeError as exc:
                     record["status"] = "failed"
@@ -817,11 +924,29 @@ class Clanker(commands.Cog):
         if not audit_log:
             await ctx.send("No Clanker launch requests have been recorded.")
             return
-        lines = [
-            f"{r.get('created_at', 'unknown')} · {r.get('status', 'unknown')} · ${r.get('symbol', '?')} by {r.get('requester_name', r.get('requester_id', '?'))}"
-            for r in reversed(audit_log[-limit:])
-        ]
+        lines = [self.launch_record_line(r) for r in reversed(audit_log[-limit:])]
         await ctx.send(box("\n".join(lines)))
+
+    @clanker.command(name="launches", aliases=("history", "records"))
+    @checks.mod_or_permissions(manage_guild=True)
+    async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
+        """List recent Clanker launch records with their launch IDs."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        if not audit_log:
+            await ctx.send("No Clanker launch requests have been recorded.")
+            return
+        lines = [self.launch_record_line(r) for r in reversed(audit_log[-limit:])]
+        await ctx.send(box("\n".join(lines)))
+
+    @clanker.command(name="launchinfo", aliases=("record", "info"))
+    @checks.mod_or_permissions(manage_guild=True)
+    async def clanker_launchinfo(self, ctx: commands.Context, launch_id: str):
+        """Show details for one Clanker launch audit record."""
+        record = await self.get_launch_record(ctx.guild, launch_id)
+        if not record:
+            await ctx.send("No Clanker launch record matched that ID.")
+            return
+        await ctx.send(embed=self.launch_record_embed(record))
 
     @commands.guild_only()
     @commands.group(name="clankerset")

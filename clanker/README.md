@@ -69,6 +69,8 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clanker launch <symbol> <name> <supply> <creator_address> [image_url] [description]` - create a launch request with the legacy command flow.
 - `[p]clanker status` - show whether the cog is enabled and whether submit mode is active.
 - `[p]clanker audit [limit]` - view recent launch request records.
+- `[p]clanker launches [limit]` - list recent launch records with launch IDs.
+- `[p]clanker launchinfo <launch_id>` - show one launch record with token, reward, airdrop, and API reference details.
 - `[p]clankerset view` - show configuration without secrets.
 - `[p]clankerset enabled <true|false>` - enable or disable the cog.
 - `[p]clankerset submit <true|false>` - enable or disable live API submissions.
@@ -97,12 +99,13 @@ Completed in the first milestone:
 7. Merkle-root-gated live airdrop payload construction.
 8. Clanker 7-day airdrop lockup minimum enforcement.
 9. Final confirmation summary before live API submission from the launch card.
+10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
 
 Remaining work before calling the cog complete:
 
 1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
 2. Add deterministic Merkle tree/proof generation and recipient-proof export for airdrops.
-3. Store request IDs, transaction hashes, token addresses, pool links, and post-submit status updates.
+3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
 4. Add per-guild launch channel restrictions, approval channels, allowed roles, blocked roles, cooldown controls, and daily launch limits.
 5. Split the cog into focused modules as it grows: commands, admin settings, config/migrations, models, validation, Clanker API client, airdrops, and Discord views.
 6. Add tests for validation, amount parsing, airdrop caps, payload construction, submit-mode blockers, and bad Discord modal input.
