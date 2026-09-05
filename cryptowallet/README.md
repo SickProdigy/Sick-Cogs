@@ -189,8 +189,11 @@ User commands:
 [p]wallet balance
 [p]wallet networks
 [p]wallet send <address> <amount>            # Base Sepolia default
+[p]wallet send @member <amount>              # Provision recipient if needed
 [p]wallet send base <address> <amount>
+[p]wallet send base @member <amount>
 [p]wallet send sol <address> <amount>
+[p]wallet send sol @member <amount>
 [p]wallet intent <bot-reference>
 [p]wallet txid <network> <txid-or-signature>
 [p]wallet transactions [network] # Aliases: tx, trans, history
@@ -203,7 +206,7 @@ User commands:
 [p]wallet authorize
 [p]wallet auth                  # Short alias
 [p]wallet authorization
-[p]wallet recovery             # Alias: backup
+[p]wallet recovery             # Aliases: recover, backup
 [p]wallet revoke
 ```
 
@@ -242,7 +245,10 @@ does not automatically stop operations. `walletset pause` and `walletset resume`
 owner control.
 
 The first `wallet`, `wallet authorize`, or `wallet send` command provisions the user's CDP end
-user and its EVM and Solana accounts if no stored profile exists. Wallet creation, receiving, balances, and
+user and its EVM and Solana accounts if no stored profile exists. Looking up a server member with
+`wallet @member`, or sending to `@member`, also provisions that non-bot recipient on demand when
+needed; it does not provision the server's member list in bulk or grant the recipient signing
+authorization. Wallet creation, receiving, balances, and
 other read-only commands require no signing authorization. The first approved send automatically requests
 a protected authorization link when needed; `wallet authorize` provides the same flow for deliberate
 reauthorization after revocation or expiry. Authorization handoff URLs expire after three minutes. The URL token stays in the fragment, is removed from browser history immediately,
@@ -258,7 +264,9 @@ user deliberately completes that browser approval.
 
 `wallet recovery` DMs a three-minute, purpose-bound link for backing up the user’s wallet signer. The browser validates the expected CDP user and smart-account address, resolves its recorded wallet signer EOA, and opens CDP’s isolated secure key-export iframe. The private key is copied within Coinbase’s iframe and is never exposed to the site JavaScript, Discord, the bot, or the optional companion relay. The smart account itself has no exportable private key; exporting its wallet signer EOA does not move funds or delete the provider account. Importing the signer elsewhere may not automatically expose the smart-account balance, so users should transfer funds to an external address before leaving CDP unless the destination supports the existing smart account.
 
-`wallet send` creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons.
+`wallet send` accepts either a network-valid address or a current non-bot server-member mention,
+then creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons. Mentioned
+recipients are resolved to the account family for the explicitly selected network.
 Base Sepolia sends use CDP-sponsored smart-account operations and display a zero user-paid gas
 fee. Solana devnet sends show the current network fee and submit a strict native System Program
 transfer. Before either transaction is accepted as confirmed, its public-chain result must match

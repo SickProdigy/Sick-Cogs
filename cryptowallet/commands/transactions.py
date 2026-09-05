@@ -1,3 +1,4 @@
+import re
 import secrets
 import time
 
@@ -59,6 +60,50 @@ class WalletTransactionCommands:
             intent.created_at,
             intent.expires_at,
         )
+
+    async def _send_recipient_address(self, ctx, value: str, network) -> str | None:
+        """Resolve a direct address or lazily provision a mentioned server member."""
+        mention = re.fullmatch(r"<@!?(\d+)>", value.strip())
+        if mention is None:
+            try:
+                return normalize_address_for_network(value, network)
+            except ValueError as exc:
+                await ctx.send(str(exc))
+                return None
+        if ctx.guild is None:
+            await ctx.send("Member wallet recipients must be mentioned from a server.")
+            return None
+        target_id = int(mention.group(1))
+        target = next(
+            (
+                member
+                for member in getattr(getattr(ctx, "message", None), "mentions", ())
+                if member.id == target_id
+            ),
+            None,
+        )
+        if target is None:
+            target = ctx.guild.get_member(target_id)
+        if target is None:
+            await ctx.send("Mention a current member of this server as the wallet recipient.")
+            return None
+        if target.bot:
+            await ctx.send("Wallet transfers cannot provision bot accounts.")
+            return None
+        target_profile = await self._wallet_profile_for_user_or_error(ctx, target)
+        if target_profile is None:
+            return None
+        target_account = self._account_for_network(target_profile, network.key)
+        if target_account is None:
+            await ctx.send(f"{target.display_name}'s wallet has no account for {network.name}.")
+            return None
+        try:
+            return normalize_address_for_network(
+                str(target_account.get("address") or ""), network
+            )
+        except ValueError:
+            await ctx.send("The mentioned member's stored wallet address is invalid.")
+            return None
 
     @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
@@ -459,7 +504,6 @@ class WalletTransactionCommands:
             return
         try:
             from_address = normalize_address_for_network(str(account.get("address") or ""), network)
-            recipient = normalize_address_for_network(to_address, network)
             value_wei = parse_native_amount(amount, network)
         except ValueError as exc:
             await ctx.send(str(exc))
@@ -476,6 +520,9 @@ class WalletTransactionCommands:
                 f"Insufficient {network.name} balance. Available: "
                 f"`{format_atomic_amount(balance_wei, network)} {network.native_symbol}`."
             )
+            return
+        recipient = await self._send_recipient_address(ctx, to_address, network)
+        if recipient is None:
             return
         now = int(time.time())
         intent = TransactionIntent(
