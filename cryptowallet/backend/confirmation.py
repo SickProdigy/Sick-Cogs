@@ -13,6 +13,7 @@ FIRST_CHECK_MIN_SECONDS = 20
 FIRST_CHECK_JITTER_SECONDS = 10
 PROCESSOR_MIN_INTERVAL_SECONDS = 1
 IDLE_SCAN_SECONDS = 5
+CONFIRMATION_STALE_SECONDS = 24 * 60 * 60
 
 
 class ConfirmationProcessorMixin:
@@ -36,6 +37,7 @@ class ConfirmationProcessorMixin:
             if not stored or stored.get("status") != IntentStatus.SUBMITTED.value:
                 return
             stored["confirmation_attempts"] = 0
+            stored["confirmation_started_at"] = now
             stored["confirmation_next_check_at"] = first_check
             stored["confirmation_channel_id"] = message.channel.id
             stored["confirmation_message_id"] = message.id
@@ -105,7 +107,11 @@ class ConfirmationProcessorMixin:
             for intent_id, data in (user_data.get("intents") or {}).items():
                 status = data.get("status")
                 undelivered_final = (
-                    status in {IntentStatus.CONFIRMED.value, IntentStatus.FAILED.value}
+                    status in {
+                        IntentStatus.CONFIRMED.value,
+                        IntentStatus.FAILED.value,
+                        IntentStatus.UNCERTAIN.value,
+                    }
                     and not data.get("confirmation_delivered", True)
                 )
                 if status != IntentStatus.SUBMITTED.value and not undelivered_final:
@@ -143,7 +149,11 @@ class ConfirmationProcessorMixin:
         if intent.status is IntentStatus.SUBMITTED:
             await self._reschedule_confirmation(user_id, intent_id)
             return
-        if intent.status in {IntentStatus.CONFIRMED, IntentStatus.FAILED}:
+        if intent.status in {
+            IntentStatus.CONFIRMED,
+            IntentStatus.FAILED,
+            IntentStatus.UNCERTAIN,
+        }:
             await self._deliver_confirmation(user_id, intent)
 
     async def _reschedule_confirmation(
@@ -155,6 +165,15 @@ class ConfirmationProcessorMixin:
                 return
             attempts = int(stored.get("confirmation_attempts", 0) or 0) + 1
             stored["confirmation_attempts"] = attempts
+            started_at = int(
+                stored.get("confirmation_started_at", stored.get("created_at", 0)) or 0
+            )
+            if started_at and int(time.time()) - started_at >= CONFIRMATION_STALE_SECONDS:
+                stored["status"] = IntentStatus.UNCERTAIN.value
+                stored["provider_status"] = "confirmation_timeout"
+                stored["confirmation_delivered"] = False
+                stored["confirmation_next_check_at"] = 0
+                return
             delay = (
                 120 + secrets.randbelow(31)
                 if failed
@@ -198,6 +217,12 @@ class ConfirmationProcessorMixin:
                 elif intent.status is IntentStatus.FAILED:
                     await user.send(
                         f"Transaction `{intent.intent_id}` failed or was dropped by CDP."
+                    )
+                elif intent.status is IntentStatus.UNCERTAIN:
+                    await user.send(
+                        f"Transaction `{intent.intent_id}` is still unconfirmed after "
+                        "24 hours. Do not submit a replacement until the transaction ID "
+                        "and chain state are manually reconciled."
                     )
             except discord.HTTPException:
                 pass

@@ -12,6 +12,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
+from ..backend.confirmation import (
+    CONFIRMATION_STALE_SECONDS,
+    ConfirmationProcessorMixin,
+)
 from ..backend.sessions import ApprovalSessionMixin
 from ..backend.usage import ProviderUsageMixin
 from ..commands.account import WalletAccountCommands
@@ -140,6 +144,35 @@ class _SessionHarness(ApprovalSessionMixin):
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stale_confirmation_becomes_uncertain_without_resubmission(self):
+        started_at = 1_700_000_000
+        store = _ApprovalStore()
+        store.data["stale"] = {
+            "status": IntentStatus.SUBMITTED.value,
+            "created_at": started_at,
+            "confirmation_started_at": started_at,
+            "confirmation_attempts": 4,
+        }
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                user_from_id=lambda user_id: SimpleNamespace(intents=store)
+            )
+        )
+
+        with patch(
+            "cryptowallet.backend.confirmation.time.time",
+            return_value=started_at + CONFIRMATION_STALE_SECONDS,
+        ):
+            await ConfirmationProcessorMixin._reschedule_confirmation(
+                cog, 7, "stale", failed=True
+            )
+
+        stored = store.data["stale"]
+        self.assertEqual(stored["status"], IntentStatus.UNCERTAIN.value)
+        self.assertEqual(stored["provider_status"], "confirmation_timeout")
+        self.assertFalse(stored["confirmation_delivered"])
+        self.assertEqual(stored["confirmation_attempts"], 5)
+
     async def test_member_wallet_lookup_lazily_provisions_missing_profile(self):
         target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
         author = SimpleNamespace(id=7)

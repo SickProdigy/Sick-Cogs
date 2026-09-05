@@ -283,7 +283,10 @@ the bot DMs a short-lived authorization link and leaves the intent pending for a
 An unchanged quote atomically moves the intent into processing and uses a stable provider
 idempotency key. The persistent global processor begins confirmation after roughly 20–30 seconds,
 applies jittered backoff, survives reloads, and never resubmits merely because status is delayed.
-`wallet intent <bot-reference>` displays private bot-operation state.
+`wallet intent <bot-reference>` displays private bot-operation state. An operation that remains
+unconfirmed for 24 hours is escalated to **uncertain**, not failed; automatic polling stops and the
+user is warned not to submit a replacement until its transaction ID and chain state are manually
+reconciled.
 
 `wallet transactions` without a network returns lightweight explorer links. Supplying `base`,
 `eth`, or `sol` retrieves at most the latest ten supported activity records and links to complete
