@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
+from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
@@ -83,6 +84,14 @@ class _JwtHarness(JwtAuthMixin):
 
     async def jwt_configuration(self):
         return self._configuration
+
+
+class _RecoveryRelayHarness(RecoveryRelayMixin):
+    def __init__(self, approval_base_url, secret):
+        self.config = SimpleNamespace(approval_base_url=_Value(approval_base_url))
+        self.bot = SimpleNamespace(
+            get_shared_api_tokens=AsyncMock(return_value={"secret": secret})
+        )
 
 
 def _profile():
@@ -305,6 +314,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
+        handle = "opaque_recovery_handle_abcdefghijklmnopqrstuvwxyz"
         author = SimpleNamespace(id=7, send=AsyncMock())
         ctx = SimpleNamespace(author=author, send=AsyncMock())
         cog = SimpleNamespace(
@@ -318,15 +328,39 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             create_recovery_handoff=AsyncMock(
                 return_value=(token, 1_800_000_000)
             ),
+            register_recovery_handoff=AsyncMock(return_value=handle),
         )
         await WalletAccountCommands.wallet_recovery.callback(cog, ctx)
         sent = author.send.await_args.kwargs
         self.assertNotIn("content", sent)
+        self.assertNotIn(token, sent["embed"].description)
+        self.assertIn(f"#handoff={handle}", sent["embed"].description)
+        cog.register_recovery_handoff.assert_awaited_once_with(token, 1_800_000_000)
         self.assertIn(
-            f"🛟 **[Open protected recovery page](https://wallet.example.test/cryptowallet/recovery.html#handoff={token})**",
+            f"🛟 **[Open protected recovery page](https://wallet.example.test/cryptowallet/recovery.html#handoff={handle})**",
             sent["embed"].description,
         )
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
+
+    def test_recovery_relay_signature_is_stable_and_body_bound(self):
+        signature = _relay_signature(
+            "s" * 32, 123, "nonce_value_123456789012", b'{"a":1}'
+        )
+        self.assertEqual(len(signature), 64)
+        self.assertNotEqual(
+            signature,
+            _relay_signature(
+                "s" * 32, 123, "nonce_value_123456789012", b'{"a":2}'
+            ),
+        )
+
+    async def test_recovery_relay_requires_https_and_strong_secret(self):
+        insecure = _RecoveryRelayHarness("http://wallet.example.test", "s" * 32)
+        weak = _RecoveryRelayHarness("https://wallet.example.test", "short")
+        ready = _RecoveryRelayHarness("https://wallet.example.test", "s" * 32)
+        self.assertFalse((await insecure.recovery_relay_status())["configured"])
+        self.assertFalse((await weak.recovery_relay_status())["configured"])
+        self.assertTrue((await ready.recovery_relay_status())["configured"])
 
     async def test_emergency_lock_blocks_new_authorization_link(self):
         locked_config = SimpleNamespace(security_locked=_Value(True))

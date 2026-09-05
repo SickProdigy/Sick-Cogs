@@ -35,10 +35,11 @@ class WalletAccountCommands:
             )
             return
         try:
-            token, expires_at = await self.create_recovery_handoff(
+            jwt_token, expires_at = await self.create_recovery_handoff(
                 ctx.author.id, profile
             )
-            link = f"{approval_base_url}/recovery.html#handoff={quote(token, safe='')}"
+            handoff = await self.register_recovery_handoff(jwt_token, expires_at)
+            link = f"{approval_base_url}/recovery.html#handoff={quote(handoff, safe='')}"
             description = (
                 "Securely export an EVM signer or Solana account private key "
                 "without exposing it to Discord or the bot.\n\n"

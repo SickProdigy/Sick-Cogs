@@ -9,6 +9,7 @@ from .backend import (
     CompanionPairingMixin,
     CompanionServer,
     JwtAuthMixin,
+    RecoveryRelayMixin,
 )
 from .backend.confirmation import ConfirmationProcessorMixin
 from .backend.config import WalletConfigMixin, create_config
@@ -31,6 +32,7 @@ class CryptoWallet(
     CompanionPairingMixin,
     WalletProvisioningMixin,
     JwtAuthMixin,
+    RecoveryRelayMixin,
     commands.Cog,
 ):
     """Manage public smart-wallet information through a secure companion service."""
