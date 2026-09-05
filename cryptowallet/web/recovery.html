@@ -15,17 +15,13 @@
     <section id="recovery-controls" hidden>
       <div class="notice danger">
         <strong>Private-key safety</strong>
-        <p>This exports the private key for the selected wallet account. Anyone with that key may control that account. Never paste it into Discord, send it to another person, or store it as a screenshot.</p>
+        <p>Each export reveals the private key for that wallet account. Anyone with a key may control that account. Never paste it into Discord, send it to another person, or store it as a screenshot.</p>
       </div>
-      <label>
-        Wallet account
-        <select id="recovery-account"></select>
-      </label>
       <label class="acknowledgement">
         <input id="recovery-confirm" type="checkbox">
-        I understand that I must store this private key securely and privately.
+        I understand that I must store each private key securely and privately.
       </label>
-      <button id="prepare-export" type="button" disabled>Continue to secure export</button>
+      <div id="recovery-accounts" class="recovery-accounts" aria-label="Wallet accounts"></div>
       <div id="key-export-container" aria-live="polite"></div>
     </section>
     <p class="notice info">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds, revoke bot access, or delete your provider account. An exported EVM signer controls the Base smart account through its owner relationship; an exported Solana key directly controls the displayed Solana account.</p>

@@ -10,7 +10,7 @@ from .core import WalletCoreCommands
 class WalletAccountCommands:
     """Protected wallet signer-backup commands."""
 
-    @WalletCoreCommands.wallet.command(name="recovery", aliases=("backup",))
+    @WalletCoreCommands.wallet.command(name="recovery", aliases=("recover", "backup"))
     async def wallet_recovery(self, ctx: commands.Context):
         """DM a protected link for backing up the wallet profile's account keys."""
         if not await self._wallet_sensitive_allowed(ctx):
@@ -39,17 +39,18 @@ class WalletAccountCommands:
                 ctx.author.id, profile
             )
             link = f"{approval_base_url}/recovery.html#handoff={quote(token, safe='')}"
-            link_message = f"🛟 [Open protected recovery page]({link})"
-            if len(link_message) > 2000:
+            description = (
+                "Securely export an EVM signer or Solana account private key "
+                "without exposing it to Discord or the bot.\n\n"
+                f"🛟 **[Open protected recovery page]({link})**"
+            )
+            if len(description) > 4096:
                 raise RuntimeError(
-                    "The protected wallet link is too long for Discord delivery."
+                    "The protected wallet link is too long for a Discord card."
                 )
             embed = discord.Embed(
                 title="Back Up Your Wallet Keys",
-                description=(
-                    "Securely export an EVM signer or Solana account private key "
-                    "without exposing it to Discord or the bot."
-                ),
+                description=description,
                 color=discord.Color.blurple(),
             )
             embed.add_field(
@@ -63,7 +64,7 @@ class WalletAccountCommands:
                 value="Choose the account on the protected page. Coinbase displays its key only inside the isolated secure export frame.",
                 inline=False,
             )
-            await ctx.author.send(content=link_message, embed=embed)
+            await ctx.author.send(embed=embed)
         except discord.HTTPException:
             await ctx.send(
                 "Discord could not deliver the protected wallet link. "
