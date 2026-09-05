@@ -281,8 +281,9 @@ user deliberately completes that browser approval.
 then creates a 15-minute preview with owner-bound **Approve** and **Reject** buttons. Mentioned
 recipients are resolved to the account family for the explicitly selected network.
 Base Sepolia sends use CDP-sponsored smart-account operations and display a zero user-paid gas
-fee. Solana devnet sends show the current network fee and submit a strict native System Program
-transfer. Before either transaction is accepted as confirmed, its public-chain result must match
+fee. Solana devnet sends label the current cost as a network fee (EVM cards retain the technically
+distinct gas-fee label) and submit a strict native System Program transfer. Before either
+transaction is accepted as confirmed, its public-chain result must match
 the stored sender, recipient, and exact atomic amount. Ethereum Sepolia and the additional EVM
 testnets remain read-only because no reviewed, complete pre-approval fee path is available.
 
