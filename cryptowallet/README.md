@@ -219,6 +219,8 @@ Owner commands:
 [p]walletset unlock <mention-or-user-id>    # Alias: unfreeze
 [p]walletset pause
 [p]walletset resume
+[p]walletset sendlimit [network] [amount|clear]
+[p]walletset delegationdays [1-365]
 [p]walletset cdpstatus
 [p]walletset cdpcheck
 [p]walletset jwtstatus
@@ -252,8 +254,11 @@ authorization. Wallet creation, receiving, balances, and
 other read-only commands require no signing authorization. The first approved send automatically requests
 a protected authorization link when needed; `wallet authorize` provides the same flow for deliberate
 reauthorization after revocation or expiry. Authorization handoff URLs expire after three minutes. The URL token stays in the fragment, is removed from browser history immediately,
-and is validated by CDP custom authentication before the browser can grant one-year delegation for
-the exact signed set of provisioned EVM and Solana accounts. `wallet revoke` requires an owner-bound
+and is validated by CDP custom authentication before the browser can grant a delegation for the
+owner-configured duration (1–365 days, default 365). The expiry is signed into the handoff and
+validated again by the browser before authorization. `walletset delegationdays` changes only new
+authorizations; existing grants retain their current expiry. The grant covers the exact signed set
+of provisioned EVM and Solana accounts. `wallet revoke` requires an owner-bound
 Discord confirmation, revokes the user-scoped delegation across every account in the wallet profile,
 and verifies with CDP that it is inactive; it does not delete the wallet or move funds. When authorization is already active,
 `wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
@@ -315,7 +320,7 @@ Completed:
     authorization handoff JWTs delivered only by DM and carried in the URL fragment.
 23. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
 24. Exact CDP user and signed account-set matching before user-scoped delegation.
-25. Explicit browser creation of a one-year delegation for all provisioned accounts.
+25. Explicit browser creation of a policy-limited delegation for all provisioned accounts.
 26. Atomic, idempotent Base Sepolia smart-account submission checkpoint in version `0.16.0`.
 27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
     the official Python SDK's incompatible networking dependency upgrades.
@@ -472,7 +477,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 | Bot restart during submission | Persist processing before the provider call and convert interrupted processing to uncertain on restart | Manual reconciliation is required when no operation hash was returned |
 | Wrong user, deployment, application, project, profile, purpose, or account | Signed bound claims, exact stored-profile checks, address normalization, CDP user and account verification, and owner-bound Discord controls | Direct stateless handoffs are expiry-bounded, not server-consumed |
 | Browser or public website compromise | No CDP secret, JWT private key, signer key, or raw private key is available to site JavaScript; export uses the Coinbase isolated iframe | A malicious page could mislead users, so deployment integrity and HTTPS remain operational requirements |
-| Bot-host or CDP credential compromise | Profile-wide one-year testnet delegation, owner pause, per-wallet lock, usage warnings, capability allowlists, and testnet-only enforcement | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
+| Bot-host or CDP credential compromise | Profile-wide policy-limited testnet delegation, owner pause, per-wallet lock, usage warnings, capability allowlists, configurable transaction ceilings, and testnet-only enforcement | A fully compromised trusted backend or provider remains outside what Discord confirmation alone can contain; rotate credentials, pause processing, lock wallets, and revoke delegations |
 | Destructive account action | No wallet deletion, provider-account deletion, signer ejection, or automatic balance migration command exists | Users deliberately transfer funds and may separately export their signer or revoke bot authorization |
 
 ### Adversarial acceptance checklist

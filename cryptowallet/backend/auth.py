@@ -233,6 +233,13 @@ class JwtAuthMixin:
             "sickwallet_accounts": expected_accounts,
             "sickwallet_purpose": purpose,
         }
+        if purpose == "authorize":
+            delegation_days = int(await self.config.delegation_duration_days() or 0)
+            if not 1 <= delegation_days <= 365:
+                raise RuntimeError("The wallet delegation policy is invalid")
+            claims["sickwallet_delegation_expires_at"] = (
+                now + delegation_days * 24 * 60 * 60
+            )
         token = jwt.encode(
             claims,
             configuration["private_key"],
