@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import re
 import secrets
 import time
 import uuid
@@ -17,15 +18,30 @@ CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform"
 CDP_API_HOST = "api.cdp.coinbase.com"
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1024 * 1024
+DIAGNOSTIC_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _diagnostic_value(value: object) -> str:
+    """Return an untrusted provider identifier only when it is safe to log."""
+    candidate = str(value or "").strip()
+    return candidate if DIAGNOSTIC_VALUE_PATTERN.fullmatch(candidate) else ""
 
 
 class CdpApiError(RuntimeError):
     """Raised when the direct CDP API client cannot complete a request."""
 
-    def __init__(self, message: str, *, status: int | None = None, error_type: str = ""):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        error_type: str = "",
+        correlation_id: str = "",
+    ):
         super().__init__(message)
         self.status = status
         self.error_type = error_type
+        self.correlation_id = correlation_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,8 +239,8 @@ class CdpApiClient:
                     error_type = ""
                     correlation_id = ""
                     if isinstance(payload, dict):
-                        error_type = str(payload.get("errorType") or "").strip()
-                        correlation_id = str(payload.get("correlationId") or "").strip()
+                        error_type = _diagnostic_value(payload.get("errorType"))
+                        correlation_id = _diagnostic_value(payload.get("correlationId"))
                     details = [f"HTTP {response.status}"]
                     if error_type:
                         details.append(error_type)
@@ -234,6 +250,7 @@ class CdpApiClient:
                         f"CDP returned {'; '.join(details)}.",
                         status=response.status,
                         error_type=error_type,
+                        correlation_id=correlation_id,
                     )
                 if not isinstance(payload, dict):
                     raise CdpApiError("CDP returned an unexpected response shape.")

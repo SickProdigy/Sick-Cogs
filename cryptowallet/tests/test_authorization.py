@@ -50,6 +50,7 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
+from ..providers.cdp_api import CdpApiError
 from ..providers.base_rpc import (
     _decode_abi_text,
     build_solana_transfer_message,
@@ -911,6 +912,48 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["transaction_hash"], signature)
         self.assertIsNone(result["user_operation_hash"])
         client.send_solana_transaction.assert_awaited_once()
+
+    async def test_solana_submission_logs_only_sanitized_cdp_diagnostics(self):
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        serialized_transaction = "sensitive-serialized-transaction"
+        profile = {
+            "profile_id": "profile-7",
+            "provider_user_id": "profile-7",
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="sol-send", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address=sender, value_wei=10_000_000,
+            created_at=1, expires_at=9999999999,
+            estimated_gas_fee_wei=5000, gas_sponsored=False,
+        )
+        client = SimpleNamespace(
+            send_solana_transaction=AsyncMock(side_effect=CdpApiError(
+                "safe provider summary", status=403,
+                error_type="unauthorized", correlation_id="corr-123",
+            ))
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+        with patch(
+            "cryptowallet.providers.cdp.quote_solana_transfer",
+            AsyncMock(return_value={
+                "transaction": serialized_transaction, "fee_atomic": 5000,
+                "last_valid_block_height": 123,
+            }),
+        ), self.assertLogs("red.sickcogs.cryptowallet", level="WARNING") as logs:
+            with self.assertRaisesRegex(Exception, "could not safely submit"):
+                await provider.submit_transaction(profile, intent)
+        output = "\n".join(logs.output)
+        self.assertIn("status=403", output)
+        self.assertIn("error_type=unauthorized", output)
+        self.assertIn("correlation_id=corr-123", output)
+        self.assertNotIn(sender, output)
+        self.assertNotIn(serialized_transaction, output)
 
     async def test_solana_confirmation_uses_public_signature_status(self):
         sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
