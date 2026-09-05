@@ -131,6 +131,12 @@ class _ApprovalStore:
     async def get_raw(self, key, default=None):
         return self.data.get(key, default)
 
+    async def set_raw(self, *keys, value):
+        target = self.data
+        for key in keys[:-1]:
+            target = target.setdefault(key, {})
+        target[keys[-1]] = value
+
 
 class _SessionConfig:
     def __init__(self, deployment_id="deployment"):
@@ -158,6 +164,43 @@ class _SessionHarness(ApprovalSessionMixin):
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restart_marks_processing_uncertain_and_resumes_submitted(self):
+        store = _ApprovalStore()
+        store.data.update({
+            "evm-processing": {
+                "network": BASE_SEPOLIA.key,
+                "status": IntentStatus.PROCESSING.value,
+            },
+            "sol-processing": {
+                "network": SOLANA_DEVNET.key,
+                "status": IntentStatus.PROCESSING.value,
+            },
+            "sol-submitted": {
+                "network": SOLANA_DEVNET.key,
+                "status": IntentStatus.SUBMITTED.value,
+                "confirmation_next_check_at": 0,
+            },
+        })
+        config = SimpleNamespace(
+            all_users=AsyncMock(return_value={7: {"intents": store.data}}),
+            user_from_id=lambda user_id: SimpleNamespace(intents=store),
+        )
+        cog = SimpleNamespace(config=config)
+
+        await ConfirmationProcessorMixin._recover_interrupted_submissions(cog)
+
+        for intent_id in ("evm-processing", "sol-processing"):
+            self.assertEqual(
+                store.data[intent_id]["status"], IntentStatus.UNCERTAIN.value
+            )
+            self.assertEqual(store.data[intent_id]["provider_status"], "unknown")
+        self.assertEqual(
+            store.data["sol-submitted"]["status"], IntentStatus.SUBMITTED.value
+        )
+        job, wait_seconds = await ConfirmationProcessorMixin._next_confirmation_job(cog)
+        self.assertEqual(job, (7, "sol-submitted"))
+        self.assertEqual(wait_seconds, 0)
+
     async def test_stale_confirmation_becomes_uncertain_without_resubmission(self):
         started_at = 1_700_000_000
         store = _ApprovalStore()
@@ -754,6 +797,8 @@ class FailClosedTransactionTests(unittest.TestCase):
             intent, SOLANA_DEVNET, None
         )
         fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["Estimated network fee"], "0.000005 SOL")
+        self.assertNotIn("Estimated gas fee", fields)
         self.assertEqual(fields["TXID"], f"```text\n{signature}\n```")
         self.assertNotIn("Transaction", fields)
         self.assertEqual(fields["Slot"], "`456`")

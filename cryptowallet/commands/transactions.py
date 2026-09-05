@@ -180,7 +180,12 @@ class WalletTransactionCommands:
         gas_value = f"{format_atomic_amount(intent.estimated_gas_fee_wei, network)} {network.native_symbol}"
         if intent.gas_sponsored:
             gas_value += " (sponsored by CDP)"
-        embed.add_field(name="Estimated gas fee", value=gas_value, inline=True)
+        fee_label = (
+            "Estimated network fee"
+            if network.family is ChainFamily.SOLANA
+            else "Estimated gas fee"
+        )
+        embed.add_field(name=fee_label, value=gas_value, inline=True)
         embed.add_field(
             name="Estimated total",
             value=(
