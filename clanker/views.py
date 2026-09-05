@@ -7,7 +7,6 @@ from redbot.core.utils.chat_formatting import box, humanize_list
 
 from .constants import (
     DEFAULT_CLANKER_SUPPLY,
-    MAX_EXTENSION_PERCENTAGE,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
     SYMBOL_RE,
@@ -19,6 +18,7 @@ from .helpers import (
     normalize_seconds,
     parse_airdrop_lines,
     parse_token_amount,
+    validate_airdrop_total,
 )
 
 if TYPE_CHECKING:
@@ -181,11 +181,7 @@ class ClankerAirdropModal(discord.ui.Modal):
                 MIN_AIRDROP_LOCKUP_SECONDS,
             )
             vesting = normalize_seconds(str(self.vesting_input.value), 0, 0)
-            max_amount = int((Decimal(supply) * Decimal(MAX_EXTENSION_PERCENTAGE)) / Decimal(100))
-            if total_amount <= 0:
-                raise ValueError("Provide recipient rows or a total airdrop amount, or use Clear Airdrop.")
-            if total_amount > max_amount:
-                raise ValueError("Airdrop allocation cannot exceed 90% of supply.")
+            validate_airdrop_total(total_amount, supply)
         except (ValueError, RuntimeError) as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return

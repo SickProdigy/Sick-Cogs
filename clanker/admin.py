@@ -1,14 +1,13 @@
 import datetime
 import io
 import json
-from decimal import Decimal
 from typing import Optional
 
 import discord
 from redbot.core import checks, commands
 
 from .constants import (
-    MAX_EXTENSION_PERCENTAGE,
+    DEFAULT_CLANKER_SUPPLY,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
 )
@@ -17,6 +16,7 @@ from .helpers import (
     format_tokens,
     is_eth_address,
     parse_airdrop_lines,
+    validate_airdrop_total,
 )
 
 
@@ -53,7 +53,13 @@ class ClankerAdminMixin:
             await ctx.send("API URL must be HTTPS.")
             return
         await self.config.guild(ctx.guild).api_base_url.set(api_base_url)
-        await ctx.send("Clanker API URL saved.")
+        warning = ""
+        if api_base_url.rstrip("/") == "https://www.clanker.world/api":
+            warning = (
+                " Note: the public Clanker `/api/tokens` endpoint is read-only; "
+                "live submit needs a verified partner deployment API base URL."
+            )
+        await ctx.send(f"Clanker API URL saved.{warning}")
 
     @clankerset.command(name="apitoken")
     async def clankerset_apitoken(self, ctx: commands.Context, *, api_token: str):
@@ -186,11 +192,9 @@ class ClankerAdminMixin:
             return
         try:
             recipients, total_amount = parse_airdrop_lines(recipient_rows, supply)
-            max_amount = int((Decimal(supply) * Decimal(MAX_EXTENSION_PERCENTAGE)) / Decimal(100))
             if not recipients:
                 raise ValueError("At least one recipient row is required.")
-            if total_amount > max_amount:
-                raise ValueError("Airdrop allocation cannot exceed 90% of supply.")
+            validate_airdrop_total(total_amount, supply)
             export = build_airdrop_merkle_tree(recipients)
         except (ValueError, RuntimeError) as exc:
             await ctx.send(str(exc))
@@ -222,15 +226,21 @@ class ClankerAdminMixin:
     @clankerset_airdrop.command(name="amount")
     async def clankerset_airdrop_amount(self, ctx: commands.Context, amount: commands.Range[int, 0, 10**18]):
         """Set total token amount reserved for the configured airdrop."""
+        if amount:
+            try:
+                validate_airdrop_total(amount, DEFAULT_CLANKER_SUPPLY)
+            except ValueError as exc:
+                await ctx.send(str(exc))
+                return
         await self.config.guild(ctx.guild).airdrop_amount.set(amount)
         await self.config.guild(ctx.guild).airdrop_proof_export.set(None)
         await ctx.send(f"Airdrop amount set to {amount} tokens. Any generated proof export was cleared because the amount was set manually.")
 
     @clankerset_airdrop.command(name="lockup")
     async def clankerset_airdrop_lockup(self, ctx: commands.Context, seconds: int):
-        """Set airdrop lockup in seconds; Clanker minimum is 7 days."""
+        """Set airdrop lockup in seconds; Clanker SDK minimum is 1 day."""
         if seconds < MIN_AIRDROP_LOCKUP_SECONDS or seconds > 315360000:
-            await ctx.send("Airdrop lockup must be between 604800 and 315360000 seconds.")
+            await ctx.send("Airdrop lockup must be between 86400 and 315360000 seconds.")
             return
         await self.config.guild(ctx.guild).airdrop_lockup_seconds.set(seconds)
         await ctx.send(f"Airdrop lockup set to {seconds} seconds.")

@@ -56,13 +56,16 @@ Airdrop entries can be entered as fixed token amounts or percentages of the draf
 0x3333333333333333333333333333333333333333 0.25%
 ```
 
-Percentages are converted to whole token amounts using the draft supply, the total airdrop allocation is capped at 90% of supply to match Clanker extension limits, and lockup is enforced at Clanker's documented 7-day minimum. Recipient-list airdrops generate a root/proof export with this schema:
+Percentages are converted to whole token amounts using the draft supply, the total airdrop allocation must be at least 25 bps and is capped at 90% of supply to match Clanker extension limits, and lockup is enforced at the current Clanker SDK airdrop minimum of 1 day / 86400 seconds. Recipient-list airdrops generate a root/proof export that matches the official `clanker-sdk@4.2.19` airdrop helper schema:
 
 ```text
-keccak256(abi.encode(uint256 index,address account,uint256 amount)); sorted-pair Merkle tree
+OpenZeppelin StandardMerkleTree.of(values, ["address", "uint256"])
+values = [account.lower(), amount * 10**18]
+leaf = keccak256(keccak256(abi.encode(address, uint256)))
+node = keccak256(sorted(left, right))
 ```
 
-The launch record stores the generated proof metadata so moderators can export it later. Keccak-256 is implemented in the cog so this feature does not add crypto package dependencies that could conflict with Red's pinned dependency set. If a prebuilt Merkle root is supplied manually, the card verifies it against the entered recipient rows before accepting it. If only a total amount and prebuilt Merkle root are provided, the cog can include the Clanker v4 `airdrop` object but cannot export recipient proofs.
+The launch record stores the generated proof metadata and the `standard-v1` tree dump shape so moderators can export it later or register it with compatible Clanker airdrop tooling. Keccak-256 is implemented in the cog so this feature does not add crypto package dependencies that could conflict with Red's pinned dependency set. If a prebuilt Merkle root is supplied manually, the card verifies it against the entered recipient rows before accepting it. If only a total amount and prebuilt Merkle root are provided, the cog can include the Clanker v4 `airdrop` object but cannot export recipient proofs.
 
 The legacy command flow remains available:
 
@@ -70,7 +73,7 @@ The legacy command flow remains available:
 [p]clanker launch TICKER "Token Name" 1000000 0xCreatorAddress... optional image URL and description
 ```
 
-Both flows validate basic metadata and the creator's primary reward address, build a Base-chain launch payload, display it for review, record the request, and only POST to the configured API when submit mode is enabled. The payload uses Clanker v4-style `rewards.recipients` entries so the creator receives the primary creator-reward share and the configured SickGaming treasury receives the platform creator-reward share. Airdrops are optional and separate from creator rewards: airdrops allocate token supply, while rewards split LP/creator fees.
+Both flows validate basic metadata and the creator's primary reward address, build a Base-chain launch payload, display it for review, record the request, and only POST to the configured partner deployment API when submit mode is enabled. The public `https://www.clanker.world/api/tokens` endpoint is read-only in current checks, while the official SDK deploy path is wallet/on-chain rather than this bot's REST submit path, so live REST submission must stay disabled until a real partner deployment endpoint is verified. The payload uses Clanker v4-style `rewards.recipients` entries so the creator receives the primary creator-reward share and the configured SickGaming treasury receives the platform creator-reward share. Airdrops are optional and separate from creator rewards: airdrops allocate token supply by Merkle root while rewards split creator fees.
 
 ## Commands
 
@@ -106,7 +109,7 @@ Both flows validate basic metadata and the creator's primary reward address, bui
 - `[p]clankerset airdrop export` - export the currently stored configured airdrop proof metadata.
 - `[p]clankerset airdrop root <0x...>` - set the 32-byte Merkle root for the prepared airdrop list.
 - `[p]clankerset airdrop amount <tokens>` - set total token amount reserved for the airdrop.
-- `[p]clankerset airdrop lockup <seconds>` - set airdrop lockup; minimum 604800 seconds / 7 days.
+- `[p]clankerset airdrop lockup <seconds>` - set airdrop lockup; minimum 86400 seconds / 1 day.
 - `[p]clankerset airdrop vesting <seconds>` - set optional airdrop vesting; 0 disables vesting.
 - `[p]clankerset airdrop admin [0x...]` - set or clear the optional airdrop admin address.
 - `[p]clankerset audit clear` - clear the guild audit log.
@@ -122,7 +125,7 @@ Completed in the first milestone:
 5. Interactive Discord launch card with requester-bound modals/buttons.
 6. Optional fixed-amount or percentage airdrop entry parsing.
 7. Deterministic Merkle-root/proof generation and proof export for recipient-list airdrops.
-8. Clanker 7-day airdrop lockup minimum enforcement.
+8. Clanker SDK 1-day airdrop lockup minimum enforcement.
 9. Final confirmation summary before live API submission from the launch card.
 10. Launch IDs, richer audit records, recent launch listing, and launch-record detail embeds.
 11. Guild controls for launch channels, review/log channels, owner approval before live submission, allowed/blocked roles, configurable cooldowns, and per-user daily launch limits.
@@ -130,8 +133,8 @@ Completed in the first milestone:
 
 Remaining work before calling the cog complete:
 
-1. Verify the exact live Clanker API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access.
-2. Verify generated airdrop schema against Clanker's exact claim tooling/contract before relying on it for production claims.
+1. Verify the exact live partner deployment API endpoint, auth headers, payload response shape, status polling, and failure recovery against production API access. Current public checks show `https://www.clanker.world/api/tokens` is read-only and the official SDK deploy path is wallet/on-chain.
+2. Run a controlled airdrop registration/claim test against a real deployed token before relying on the generated proof export for production claims.
 3. Add post-submit status polling once Clanker response IDs and status endpoints are confirmed.
 4. Decide whether launch approval can safely be delegated to trusted moderators or should stay bot-owner only.
 5. Continue the module split as the cog grows, especially separating user commands, config/migrations, models, and the Clanker API client.

@@ -27,6 +27,7 @@ from .helpers import (
     is_eth_address,
     parse_airdrop_lines,
     utc_now,
+    validate_airdrop_total,
 )
 from .admin import ClankerAdminMixin
 from .views import ClankerDraftView
@@ -143,6 +144,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             },
         }
         if airdrop_enabled and airdrop_merkle_root and airdrop_amount > 0:
+            validate_airdrop_total(airdrop_amount, supply)
             payload["airdrop"] = {
                 "merkleRoot": airdrop_merkle_root,
                 "amount": airdrop_amount,
@@ -157,7 +159,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def submit_payload(self, api_base_url: str, token: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         endpoint = urljoin(api_base_url.rstrip("/") + "/", "tokens")
         session = await self.get_session()
-        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
         async with session.post(endpoint, json=payload, headers=headers) as response:
             text = await response.text()
             if response.status >= 400:

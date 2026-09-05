@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Tuple
 from .constants import (
     ETH_ADDRESS_RE,
     MAX_EXTENSION_PERCENTAGE,
+    MIN_AIRDROP_BPS,
 )
 
 
@@ -79,6 +80,27 @@ def parse_airdrop_lines(lines: str, supply: int) -> Tuple[List[Dict[str, Any]], 
         recipients.append({"address": address, "amount": amount, "input": label})
     total = sum(row["amount"] for row in recipients)
     return recipients, total
+
+
+def minimum_airdrop_amount(supply: int) -> int:
+    return (int(supply) * MIN_AIRDROP_BPS + 9999) // 10000
+
+
+def maximum_airdrop_amount(supply: int) -> int:
+    return (int(supply) * MAX_EXTENSION_PERCENTAGE) // 100
+
+
+def validate_airdrop_total(total_amount: int, supply: int) -> None:
+    min_amount = minimum_airdrop_amount(supply)
+    max_amount = maximum_airdrop_amount(supply)
+    if total_amount <= 0:
+        raise ValueError("Provide recipient rows or a total airdrop amount, or use Clear Airdrop.")
+    if total_amount < min_amount:
+        raise ValueError(
+            f"Airdrop allocation must be at least 25 bps of supply ({format_tokens(min_amount)} tokens)."
+        )
+    if total_amount > max_amount:
+        raise ValueError("Airdrop allocation cannot exceed 90% of supply.")
 
 
 KECCAK_ROUNDS = 24
@@ -204,10 +226,25 @@ def encode_address(value: str) -> bytes:
     return int(value, 16).to_bytes(32, "big")
 
 
-def hash_airdrop_leaf(index: int, address: str, amount: int) -> bytes:
-    # Canonical local schema: keccak256(abi.encode(uint256 index, address account, uint256 amount)).
-    # The generated export records the schema so claim tooling can match it exactly.
-    return keccak256(encode_uint256(index) + encode_address(address) + encode_uint256(amount))
+TOKEN_DECIMALS = 18
+AIR_DROP_LEAF_ENCODING = ["address", "uint256"]
+AIR_DROP_TREE_FORMAT = "standard-v1"
+AIR_DROP_SCHEMA = (
+    "OpenZeppelin StandardMerkleTree.of(values, ['address', 'uint256']); "
+    "values=[account.lower(), amount * 10**18]"
+)
+
+
+def scale_token_amount(amount: int) -> int:
+    if amount < 0:
+        raise ValueError("Token amounts cannot be negative.")
+    return int(amount) * 10**TOKEN_DECIMALS
+
+
+def hash_airdrop_leaf(address: str, amount: int) -> bytes:
+    # Matches @openzeppelin/merkle-tree standardLeafHash: keccak256(keccak256(abi.encode(...))).
+    encoded = encode_address(address.lower()) + encode_uint256(scale_token_amount(amount))
+    return keccak256(keccak256(encoded))
 
 
 def hash_merkle_pair(left: bytes, right: bytes) -> bytes:
@@ -215,55 +252,80 @@ def hash_merkle_pair(left: bytes, right: bytes) -> bytes:
     return keccak256(first + second)
 
 
+def build_standard_merkle_tree(leaves: List[bytes]) -> List[bytes]:
+    if not leaves:
+        raise ValueError("Expected non-zero number of leaves.")
+    tree = [b""] * (2 * len(leaves) - 1)
+    for leaf_index, leaf in enumerate(leaves):
+        tree[len(tree) - 1 - leaf_index] = leaf
+    for index in range(len(tree) - len(leaves) - 1, -1, -1):
+        tree[index] = hash_merkle_pair(tree[2 * index + 1], tree[2 * index + 2])
+    return tree
+
+
+def merkle_proof(tree: List[bytes], tree_index: int) -> List[str]:
+    proof = []
+    while tree_index > 0:
+        sibling = tree_index - (-1) ** (tree_index % 2)
+        proof.append("0x" + tree[sibling].hex())
+        tree_index = (tree_index - 1) // 2
+    return proof
+
+
 def build_airdrop_merkle_tree(recipients: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not recipients:
         raise ValueError("At least one airdrop recipient is required to build a Merkle tree.")
-    leaves = []
+    hashed_values = []
     normalized = []
-    for index, recipient in enumerate(recipients):
-        address = str(recipient["address"]).strip()
+    for value_index, recipient in enumerate(recipients):
+        address = str(recipient["address"]).strip().lower()
         amount = int(recipient["amount"])
         if amount <= 0:
             raise ValueError("Airdrop amounts must be positive.")
-        leaf = hash_airdrop_leaf(index, address, amount)
-        leaves.append(leaf)
+        amount_with_decimals = scale_token_amount(amount)
+        leaf = hash_airdrop_leaf(address, amount)
+        hashed_values.append({"value_index": value_index, "hash": leaf})
         normalized.append({
-            "index": index,
+            "index": value_index,
+            "account": address,
             "address": address,
             "amount": amount,
+            "amount_with_decimals": str(amount_with_decimals),
             "input": recipient.get("input") or format_tokens(amount),
             "leaf": "0x" + leaf.hex(),
         })
 
-    layers = [leaves]
-    current = leaves
-    while len(current) > 1:
-        next_layer = []
-        for position in range(0, len(current), 2):
-            left = current[position]
-            right = current[position + 1] if position + 1 < len(current) else left
-            next_layer.append(hash_merkle_pair(left, right))
-        layers.append(next_layer)
-        current = next_layer
+    hashed_values.sort(key=lambda row: row["hash"])
+    tree = build_standard_merkle_tree([row["hash"] for row in hashed_values])
+    tree_indices = [0] * len(normalized)
+    for leaf_index, row in enumerate(hashed_values):
+        tree_indices[row["value_index"]] = len(tree) - leaf_index - 1
 
     proofs = []
-    for leaf_index, recipient in enumerate(normalized):
-        proof = []
-        position = leaf_index
-        for layer in layers[:-1]:
-            sibling = position ^ 1
-            if sibling >= len(layer):
-                sibling = position
-            proof.append("0x" + layer[sibling].hex())
-            position //= 2
-        proofs.append({**recipient, "proof": proof})
+    values = []
+    for value_index, recipient in enumerate(normalized):
+        tree_index = tree_indices[value_index]
+        proof = merkle_proof(tree, tree_index)
+        values.append({
+            "value": [recipient["account"], recipient["amount_with_decimals"]],
+            "treeIndex": tree_index,
+        })
+        proofs.append({**recipient, "tree_index": tree_index, "proof": proof})
 
-    root = layers[-1][0]
     return {
-        "schema": "keccak256(abi.encode(uint256 index,address account,uint256 amount)); sorted-pair Merkle tree",
-        "root": "0x" + root.hex(),
+        "schema": AIR_DROP_SCHEMA,
+        "format": AIR_DROP_TREE_FORMAT,
+        "leaf_encoding": AIR_DROP_LEAF_ENCODING,
+        "token_decimals": TOKEN_DECIMALS,
+        "root": "0x" + tree[0].hex(),
         "total_amount": sum(int(row["amount"]) for row in normalized),
         "recipient_count": len(normalized),
+        "tree": {
+            "format": AIR_DROP_TREE_FORMAT,
+            "leafEncoding": AIR_DROP_LEAF_ENCODING,
+            "tree": ["0x" + node.hex() for node in tree],
+            "values": values,
+        },
         "recipients": proofs,
     }
 
