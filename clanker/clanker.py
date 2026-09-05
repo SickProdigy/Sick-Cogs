@@ -14,11 +14,6 @@ from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
 from redbot.core.utils.chat_formatting import box, humanize_list
 
-try:
-    from eth_hash.auto import keccak as eth_keccak
-except ImportError:  # pragma: no cover - dependency is installed by Red from info.json requirements
-    eth_keccak = None
-
 log = logging.getLogger("red.Sick-Cogs.Clanker")
 CONFIG_IDENTIFIER = 1100110011
 BASE_CHAIN_ID = 8453
@@ -102,13 +97,115 @@ def parse_airdrop_lines(lines: str, supply: int) -> Tuple[List[Dict[str, Any]], 
         recipients.append({"address": address, "amount": amount, "input": label})
     total = sum(row["amount"] for row in recipients)
     return recipients, total
+KECCAK_ROUNDS = 24
+KECCAK_RATE_BYTES = 136
+KECCAK_ROTATION_OFFSETS = (
+    (0, 36, 3, 41, 18),
+    (1, 44, 10, 45, 2),
+    (62, 6, 43, 15, 61),
+    (28, 55, 25, 21, 56),
+    (27, 20, 39, 8, 14),
+)
+KECCAK_ROUND_CONSTANTS = (
+    0x0000000000000001,
+    0x0000000000008082,
+    0x800000000000808A,
+    0x8000000080008000,
+    0x000000000000808B,
+    0x0000000080000001,
+    0x8000000080008081,
+    0x8000000000008009,
+    0x000000000000008A,
+    0x0000000000000088,
+    0x0000000080008009,
+    0x000000008000000A,
+    0x000000008000808B,
+    0x800000000000008B,
+    0x8000000000008089,
+    0x8000000000008003,
+    0x8000000000008002,
+    0x8000000000000080,
+    0x000000000000800A,
+    0x800000008000000A,
+    0x8000000080008081,
+    0x8000000000008080,
+    0x0000000080000001,
+    0x8000000080008008,
+)
+UINT64_MASK = (1 << 64) - 1
 
+
+def rotate_left64(value: int, shift: int) -> int:
+    shift %= 64
+    if shift == 0:
+        return value & UINT64_MASK
+    return ((value << shift) | (value >> (64 - shift))) & UINT64_MASK
+
+
+def keccak_f1600(state: List[int]) -> None:
+    for round_constant in KECCAK_ROUND_CONSTANTS:
+        columns = [
+            state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20]
+            for x in range(5)
+        ]
+        deltas = [
+            columns[(x - 1) % 5] ^ rotate_left64(columns[(x + 1) % 5], 1)
+            for x in range(5)
+        ]
+        for x in range(5):
+            for y in range(5):
+                state[x + 5 * y] ^= deltas[x]
+
+        rotated = [0] * 25
+        for x in range(5):
+            for y in range(5):
+                rotated[y + 5 * ((2 * x + 3 * y) % 5)] = rotate_left64(
+                    state[x + 5 * y], KECCAK_ROTATION_OFFSETS[x][y]
+                )
+
+        for x in range(5):
+            for y in range(5):
+                state[x + 5 * y] = rotated[x + 5 * y] ^ (
+                    (~rotated[((x + 1) % 5) + 5 * y])
+                    & rotated[((x + 2) % 5) + 5 * y]
+                )
+                state[x + 5 * y] &= UINT64_MASK
+
+        state[0] ^= round_constant
 
 
 def keccak256(data: bytes) -> bytes:
-    if eth_keccak is None:
-        raise RuntimeError("Airdrop Merkle generation requires the eth-hash package from the cog requirements.")
-    return eth_keccak(data)
+    """Ethereum Keccak-256 without adding a third-party dependency.
+
+    This uses Keccak's original 0x01 padding, not hashlib.sha3_256's FIPS 202 0x06 padding.
+    """
+    state = [0] * 25
+    offset = 0
+    while offset + KECCAK_RATE_BYTES <= len(data):
+        block = data[offset : offset + KECCAK_RATE_BYTES]
+        for lane in range(KECCAK_RATE_BYTES // 8):
+            state[lane] ^= int.from_bytes(block[lane * 8 : (lane + 1) * 8], "little")
+        keccak_f1600(state)
+        offset += KECCAK_RATE_BYTES
+
+    block = bytearray(KECCAK_RATE_BYTES)
+    remaining = data[offset:]
+    block[: len(remaining)] = remaining
+    block[len(remaining)] ^= 0x01
+    block[-1] ^= 0x80
+    for lane in range(KECCAK_RATE_BYTES // 8):
+        state[lane] ^= int.from_bytes(block[lane * 8 : (lane + 1) * 8], "little")
+    keccak_f1600(state)
+
+    output = bytearray()
+    while len(output) < 32:
+        for lane in range(KECCAK_RATE_BYTES // 8):
+            output.extend(state[lane].to_bytes(8, "little"))
+            if len(output) >= 32:
+                break
+        if len(output) < 32:
+            keccak_f1600(state)
+    return bytes(output[:32])
 
 
 def encode_uint256(value: int) -> bytes:

@@ -62,7 +62,7 @@ Percentages are converted to whole token amounts using the draft supply, the tot
 keccak256(abi.encode(uint256 index,address account,uint256 amount)); sorted-pair Merkle tree
 ```
 
-The launch record stores the generated proof metadata so moderators can export it later. If a prebuilt Merkle root is supplied manually, the card verifies it against the entered recipient rows before accepting it. If only a total amount and prebuilt Merkle root are provided, the cog can include the Clanker v4 `airdrop` object but cannot export recipient proofs.
+The launch record stores the generated proof metadata so moderators can export it later. Keccak-256 is implemented in the cog so this feature does not add crypto package dependencies that could conflict with Red's pinned dependency set. If a prebuilt Merkle root is supplied manually, the card verifies it against the entered recipient rows before accepting it. If only a total amount and prebuilt Merkle root are provided, the cog can include the Clanker v4 `airdrop` object but cannot export recipient proofs.
 
 The legacy command flow remains available:
 
