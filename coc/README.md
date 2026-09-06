@@ -45,6 +45,32 @@ Look up another clan without changing the server's configured clan:
 [p]coc clan #CLANTAG
 ```
 
+Look up a player profile:
+
+```text
+[p]coc player #PLAYERTAG
+```
+
+Player cards include available Builder Hall, Builder Base trophy, and Builder Base league totals. The API does not expose individual Builder Battle history, so battle-by-battle notifications are not available.
+
+Show the configured clan's five most recent regular wars, or inspect another clan:
+
+```text
+[p]coc warlog
+[p]coc warlog #CLANTAG
+```
+
+The public API's war log contains regular clan wars only. It does not provide an archive of past CWL seasons.
+
+Show every available round for the currently active CWL group:
+
+```text
+[p]coc cwl
+[p]coc cwl #CLANTAG
+```
+
+This live view includes completed and active rounds returned by the current league group. It does not save snapshots after that group expires.
+
 Show current war details:
 
 ```text
@@ -93,6 +119,24 @@ The bare command shows the current format and explains both choices. Pass `card`
 ## War Notifications
 
 War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
+Clan War League notifications use the same event settings but can be muted independently. Regular war notifications are unaffected:
+
+```text
+[p]cocset cwl
+[p]cocset clanwarleague
+```
+
+Run either command again to toggle CWL notifications back on. CWL notifications are enabled by default.
+
+Clan Capital Raid Weekend start and end notifications are independently disabled by default. Enable or disable them with:
+
+```text
+[p]cocset raidweekend
+[p]cocset capitalraid
+[p]cocset raids
+```
+
+The start notification announces the live weekend. The ending summary includes the API's available attacks, Capital loot, completed raids, destroyed districts, and offensive/defensive medal values. These updates use the configured war channel but do not require regular clan-war notifications to be enabled.
 
 Available event names:
 
@@ -170,6 +214,12 @@ Attack-log notification embeds stay focused on the war type, matchup, and newly 
 
 ## Attack Status
 
+
+## Gold Pass and CWL history limits
+
+The Clash of Clans API Gold Pass resource provides the current season's start and end times; it is not an update, event, or reward feed, so this cog does not generate update notifications from it.
+
+The API exposes the active CWL league group and its war tags while that group is available, but it does not provide historical CWL season archives. `[p]coc warlog` therefore reports regular clan-war history only.
 Use `[p]coc attacks` or `[p]coc attack` to check the current war attack status for the configured clan.
 
 The command shows:

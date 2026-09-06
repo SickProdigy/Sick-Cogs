@@ -92,6 +92,10 @@ class Coc(commands.Cog):
             "COC_CLAN_KEY": None,
             "COC_WAR_CHANNEL": None,
             "COC_WAR_NOTIFICATIONS": False,
+            "COC_CWL_NOTIFICATIONS": True,
+            "COC_RAID_WEEKEND_NOTIFICATIONS": False,
+            "LAST_RAID_SEASON": None,
+            "LAST_RAID_STATE": None,
             "COC_TIMEZONE": "America/New_York",
             "COC_WAR_MENTION_ROLE": None,
             "COC_MANAGER_ROLE": None,
@@ -276,6 +280,256 @@ class Coc(commands.Cog):
         embed.add_field(name="War Frequency", value=clan.get("warFrequency", "Unknown"))
         embed.set_footer(text="Brought to you by SickGaming.net", icon_url="https://i.imgur.com/TFTXZvP.png")
         await self._send_embed_with_optional_image(ctx, embed, CLAN_BANNER_PATH, "clan-banner.png")
+
+    async def _fetch_api_json(self, ctx: commands.Context, api_key: str, path: str) -> dict | None:
+        """Fetch one API resource and report user-facing errors."""
+
+        try:
+            async with aiohttp.request(
+                "GET", f"{COC_API_BASE}{path}", headers=self._api_headers(api_key)
+            ) as response:
+                if response.status != 200:
+                    await self._send_api_error(ctx, response)
+                    return None
+                return await response.json()
+        except aiohttp.ClientConnectionError as exc:
+            await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {exc}")
+        except Exception as exc:
+            await ctx.send(f"An unexpected error occurred: {exc}")
+        return None
+
+    async def _send_player_info(self, ctx: commands.Context, api_key: str, player_tag: str) -> None:
+        player = await self._fetch_api_json(ctx, api_key, f"/players/{self._clean_clan_tag(player_tag)}")
+        if player is None:
+            return
+
+        league = player.get("league") or {}
+        clan = player.get("clan") or {}
+        embed = discord.Embed(color=0x3498DB, timestamp=None)
+        embed.set_author(
+            name=str(player.get("name", "Clash of Clans Player")),
+            icon_url=league.get("iconUrls", {}).get("small") or None,
+        )
+        embed.add_field(name="Player Tag", value=player.get("tag", "Unknown"), inline=True)
+        embed.add_field(name="Town Hall", value=player.get("townHallLevel", "Unknown"), inline=True)
+        embed.add_field(name="Experience", value=player.get("expLevel", "Unknown"), inline=True)
+        embed.add_field(name="Trophies", value=player.get("trophies", "Unknown"), inline=True)
+        embed.add_field(name="Best Trophies", value=player.get("bestTrophies", "Unknown"), inline=True)
+        embed.add_field(name="War Stars", value=player.get("warStars", "Unknown"), inline=True)
+        embed.add_field(name="Attack Wins", value=player.get("attackWins", "Unknown"), inline=True)
+        embed.add_field(name="Defense Wins", value=player.get("defenseWins", "Unknown"), inline=True)
+        embed.add_field(name="Donations", value=player.get("donations", "Unknown"), inline=True)
+        embed.add_field(name="League", value=league.get("name", "Unranked"), inline=True)
+        embed.add_field(name="Clan", value=clan.get("name", "No clan"), inline=True)
+        embed.add_field(name="Builder Hall", value=player.get("builderHallLevel", "Unknown"), inline=True)
+        embed.add_field(name="Builder Trophies", value=player.get("builderBaseTrophies", "Unknown"), inline=True)
+        embed.add_field(
+            name="Builder League", value=(player.get("builderBaseLeague") or {}).get("name", "Unranked"), inline=True
+        )
+        embed.add_field(
+            name="Role", value=str(player.get("role", "None")).replace("_", " ").title(), inline=True
+        )
+        badge_url = clan.get("badgeUrls", {}).get("large")
+        if badge_url:
+            embed.set_thumbnail(url=badge_url)
+        embed.set_footer(text="Brought to you by SickGaming.net")
+        await ctx.send(embed=embed)
+
+    async def _send_war_log(self, ctx: commands.Context, api_key: str, clan_tag: str) -> None:
+        payload = await self._fetch_api_json(
+            ctx, api_key, f"/clans/{self._clean_clan_tag(clan_tag)}/warlog?limit=5"
+        )
+        if payload is None:
+            return
+        wars = payload.get("items") or []
+        if not wars:
+            await ctx.send("No public regular-war history was available for that clan.")
+            return
+
+        embed = discord.Embed(
+            title="Recent Clan Wars",
+            description=(
+                f"Latest regular wars for `{self._normalize_tag(clan_tag)}`. "
+                "The API does not include historical CWL seasons here."
+            ),
+            color=0xF1C40F,
+            timestamp=None,
+        )
+        result_labels = {"win": "🟢 Win", "lose": "🔴 Loss", "tie": "🟡 Tie"}
+        for war in wars[:5]:
+            clan = war.get("clan") or {}
+            opponent = war.get("opponent") or {}
+            result = result_labels.get(str(war.get("result", "")).lower(), "⚪ Unknown")
+            ended = self._format_coc_time(war["endTime"], "UTC") if war.get("endTime") else "Unknown"
+            embed.add_field(
+                name=f"{result} vs {opponent.get('name', 'Unknown clan')}",
+                value=(
+                    f"Stars: **{clan.get('stars', 0)}–{opponent.get('stars', 0)}**\n"
+                    f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}–"
+                    f"{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
+                    f"Ended: **{ended}**"
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="Times shown in UTC · Brought to you by SickGaming.net")
+        await ctx.send(embed=embed)
+
+    async def _send_cwl_overview(self, ctx: commands.Context, api_key: str, clan_tag: str) -> None:
+        normalized_tag = self._normalize_tag(clan_tag)
+        group = await self._fetch_api_json(
+            ctx,
+            api_key,
+            f"/clans/{self._clean_clan_tag(clan_tag)}/currentwar/leaguegroup",
+        )
+        if group is None:
+            return
+        if group.get("state") == "notInWar":
+            await ctx.send("That clan is not currently in an active Clan War League group.")
+            return
+
+        headers = self._api_headers(api_key)
+        matching_rounds = []
+        for round_number, round_data in enumerate(group.get("rounds") or [], start=1):
+            for war_tag in round_data.get("warTags") or []:
+                if not war_tag or war_tag == "#0":
+                    continue
+                try:
+                    async with aiohttp.request(
+                        "GET",
+                        f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(war_tag)}",
+                        headers=headers,
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        war = await response.json()
+                except aiohttp.ClientConnectionError:
+                    continue
+                sides = {war.get("clan", {}).get("tag"), war.get("opponent", {}).get("tag")}
+                if normalized_tag in sides:
+                    war["_sickgaming_war_type"] = "cwl"
+                    matching_rounds.append((round_number, war))
+                    break
+
+        if not matching_rounds:
+            await ctx.send("The active CWL group was found, but no available round matched that clan.")
+            return
+
+        timezone_name = str(await self.config.guild(ctx.guild).COC_TIMEZONE() or "America/New_York")
+        embed = discord.Embed(
+            title="Clan War League Rounds",
+            description=(
+                f"Live API view for `{normalized_tag}`. Completed and active rounds remain "
+                "available only while this league group is active."
+            ),
+            color=0x5865F2,
+            timestamp=None,
+        )
+        for round_number, war in matching_rounds[:10]:
+            clan, opponent = self._configured_war_sides(war, clan_tag)
+            state = str(war.get("state", "unknown"))
+            if state == "warEnded":
+                result = self._war_result_label(clan, opponent)
+                marker = "🟢" if result.startswith("Victory") else "🔴" if result.startswith("Defeat") else "🟡"
+                status = f"{marker} {result}"
+            else:
+                status = self._war_state_label(state)
+            schedule_key = "endTime" if state in {"inWar", "warEnded"} else "startTime"
+            schedule_label = "Ends" if state == "inWar" else "Ended" if state == "warEnded" else "Starts"
+            schedule = (
+                self._format_coc_time(war[schedule_key], timezone_name)
+                if war.get(schedule_key)
+                else "Unknown"
+            )
+            embed.add_field(
+                name=f"Round {round_number} · {status}",
+                value=(
+                    f"vs **{opponent.get('name', 'Unknown clan')}**\n"
+                    f"Stars: **{clan.get('stars', 0)}–{opponent.get('stars', 0)}**\n"
+                    f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}–"
+                    f"{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
+                    f"{schedule_label}: **{schedule}**"
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="Live CWL data is not saved · Brought to you by SickGaming.net")
+        await ctx.send(embed=embed)
+
+    async def _check_raid_weekend_notifications(
+        self,
+        guild: discord.Guild,
+        channel: discord.TextChannel,
+        settings: dict,
+        api_key: str,
+        clan_tag: str,
+    ) -> None:
+        """Send start/end notices for the latest Clan Capital Raid Weekend."""
+
+        url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/capitalraidseasons?limit=1"
+        try:
+            async with aiohttp.request("GET", url, headers=self._api_headers(api_key)) as response:
+                if response.status != 200:
+                    log.debug("Raid Weekend API returned HTTP %s for guild %s.", response.status, guild.id)
+                    return
+                payload = await response.json()
+        except aiohttp.ClientConnectionError as exc:
+            log.warning("Could not fetch Raid Weekend data for guild %s: %s", guild.id, exc)
+            return
+        except Exception:
+            log.exception("Unexpected error while checking Raid Weekend for guild %s", guild.id)
+            return
+
+        seasons = payload.get("items") or []
+        if not seasons:
+            return
+        season = seasons[0]
+        season_key = season.get("startTime")
+        state = str(season.get("state") or "unknown").lower()
+        if not season_key:
+            return
+
+        previous_key = settings.get("LAST_RAID_SEASON")
+        previous_state = str(settings.get("LAST_RAID_STATE") or "").lower()
+        guild_config = self.config.guild(guild)
+        event = None
+        if previous_key is None:
+            event = "started" if state == "ongoing" else None
+        elif season_key != previous_key:
+            event = "started" if state == "ongoing" else None
+        elif previous_state != state and state == "ended":
+            event = "ended"
+
+        if event is None:
+            await guild_config.LAST_RAID_SEASON.set(season_key)
+            await guild_config.LAST_RAID_STATE.set(state)
+            return
+
+        timezone_name = str(settings.get("COC_TIMEZONE") or "America/New_York")
+        title = "Clan Capital Raid Weekend Started" if event == "started" else "Clan Capital Raid Weekend Ended"
+        description = (
+            "Raid Weekend is live. Clan members can begin their Capital attacks."
+            if event == "started"
+            else "Raid Weekend has ended. Here is the latest available clan summary."
+        )
+        embed = discord.Embed(title=title, description=description, color=0xE67E22, timestamp=None)
+        if season.get("startTime"):
+            embed.add_field(name="Started", value=self._format_coc_time(season["startTime"], timezone_name), inline=True)
+        if season.get("endTime"):
+            embed.add_field(name="Ends" if event == "started" else "Ended", value=self._format_coc_time(season["endTime"], timezone_name), inline=True)
+        embed.add_field(name="Total Attacks", value=season.get("totalAttacks", 0), inline=True)
+        embed.add_field(name="Capital Loot", value=f"{int(season.get('capitalTotalLoot', 0) or 0):,}", inline=True)
+        embed.add_field(name="Raids Completed", value=season.get("raidsCompleted", 0), inline=True)
+        embed.add_field(name="Districts Destroyed", value=season.get("enemyDistrictsDestroyed", 0), inline=True)
+        if event == "ended":
+            embed.add_field(name="Offensive Medals", value=season.get("offensiveReward", 0), inline=True)
+            embed.add_field(name="Defensive Medals", value=season.get("defensiveReward", 0), inline=True)
+        embed.set_footer(text="Brought to you by SickGaming.net")
+        try:
+            await channel.send(embed=embed)
+        except discord.HTTPException:
+            log.exception("Could not send Raid Weekend notification to channel %s in guild %s.", channel.id, guild.id)
+            return
+        await guild_config.LAST_RAID_SEASON.set(season_key)
+        await guild_config.LAST_RAID_STATE.set(state)
 
     async def _fetch_cwl_war(self, clan_tag: str, headers: dict) -> tuple[dict, str]:
         normalized_clan_tag = self._normalize_tag(clan_tag)
@@ -1013,7 +1267,9 @@ class Coc(commands.Cog):
         headers = self._api_headers(api_key)
         all_guilds = await self.config.all_guilds()
         for guild_id, settings in all_guilds.items():
-            if not settings.get("COC_WAR_NOTIFICATIONS"):
+            war_notifications_enabled = bool(settings.get("COC_WAR_NOTIFICATIONS"))
+            raid_notifications_enabled = bool(settings.get("COC_RAID_WEEKEND_NOTIFICATIONS"))
+            if not war_notifications_enabled and not raid_notifications_enabled:
                 continue
 
             guild_id = int(guild_id)
@@ -1034,6 +1290,13 @@ class Coc(commands.Cog):
                 log.warning("Configured CoC war channel %s was not found in guild %s.", channel_id, guild_id)
                 continue
 
+            if raid_notifications_enabled:
+                await self._check_raid_weekend_notifications(
+                    guild, channel, settings, api_key, clan_tag
+                )
+            if not war_notifications_enabled:
+                continue
+
             try:
                 war_data, notice = await self._fetch_current_war(clan_tag, headers)
             except aiohttp.ClientConnectionError as exc:
@@ -1047,6 +1310,11 @@ class Coc(commands.Cog):
                 log.debug("No CoC war notification sent for guild %s: %s", guild_id, notice)
                 continue
 
+            if (
+                war_data.get("_sickgaming_war_type") == "cwl"
+                and not settings.get("COC_CWL_NOTIFICATIONS", True)
+            ):
+                continue
             fingerprint = self._war_fingerprint(war_data)
             guild_config = self.config.guild(guild)
             war_id = self._war_id(war_data)
@@ -1200,7 +1468,9 @@ class Coc(commands.Cog):
 
         Use `[p]coc clan <clan tag>` to look up another clan, `[p]coc war`
         for the configured clan's current war, or `[p]coc attacks` for its
-        attack-status card.
+        attack-status card. Use `[p]coc player <player tag>` for a player profile,
+        or `[p]coc warlog [clan tag]` for recent regular wars. Use `[p]coc cwl [clan tag]`
+        to view rounds in the currently active Clan War League group.
         """
 
         setup = await self._require_server_setup(ctx)
@@ -1218,6 +1488,41 @@ class Coc(commands.Cog):
             return await ctx.send(self._missing_api_key_message(ctx))
         await self._send_clan_info(ctx, api_key, clan_tag)
         
+
+    @command_coc.command(name="player")
+    async def command_coc_player(self, ctx, player_tag: str):
+        """Look up a Clash of Clans player by tag."""
+
+        api_key = await self._get_api_key()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+        await self._send_player_info(ctx, api_key, player_tag)
+
+    @command_coc.command(name="warlog", aliases=["warhistory"])
+    async def command_coc_warlog(self, ctx, clan_tag: str = None):
+        """Show recent regular wars for a clan tag or the configured clan."""
+
+        api_key = await self._get_api_key()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+        if clan_tag is None:
+            clan_tag = await self._get_clan_tag(ctx)
+            if not clan_tag:
+                return await ctx.send(self._missing_clan_key_message(ctx))
+        await self._send_war_log(ctx, api_key, clan_tag)
+
+    @command_coc.command(name="cwl")
+    async def command_coc_cwl(self, ctx, clan_tag: str = None):
+        """Show available rounds from a clan's currently active CWL group."""
+
+        api_key = await self._get_api_key()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+        if clan_tag is None:
+            clan_tag = await self._get_clan_tag(ctx)
+            if not clan_tag:
+                return await ctx.send(self._missing_clan_key_message(ctx))
+        await self._send_cwl_overview(ctx, api_key, clan_tag)
     @command_coc.command(name="war")
     async def command_coc_war(self, ctx):
         """Show a quick Clash of Clans war update."""
@@ -1351,6 +1656,8 @@ class Coc(commands.Cog):
         `[p]cocset prepwarning <minutes>`
         `[p]cocset endwarning <minutes>`
         `[p]cocset timezone <IANA timezone>`
+        `[p]cocset cwl`
+        `[p]cocset raidweekend`
 
         Use `[p]help cocset` for every server setting.
         """
@@ -1418,6 +1725,8 @@ class Coc(commands.Cog):
             f"Preparation ending soon: **{settings.get('WAR_PREP_SOON_MINUTES', 5)} minutes** before battle day",
             f"War ending soon: **{settings.get('WAR_END_SOON_MINUTES', 60)} minutes** before war end",
             f"Attack log format: **{str(settings.get('WAR_ATTACK_LOG_STYLE') or 'card').upper()}**",
+            f"CWL notifications: **{'ON' if settings.get('COC_CWL_NOTIFICATIONS', True) else 'OFF'}**",
+            f"Raid Weekend notifications: **{'ON' if settings.get('COC_RAID_WEEKEND_NOTIFICATIONS') else 'OFF'}**",
             "",
             "Events:",
         ]
@@ -1427,6 +1736,49 @@ class Coc(commands.Cog):
             lines.append(f"- `{event}` {label}: **{enabled}**, {mention}")
 
         await ctx.send("\n".join(lines))
+
+    @command_coc_set.command(name="clanwarleague", aliases=["cwl"])
+    async def command_coc_set_cwl(self, ctx):
+        """Toggle all Clan War League notifications for this server."""
+
+        guild_config = self.config.guild(ctx.guild)
+        enabled = not await guild_config.COC_CWL_NOTIFICATIONS()
+        await guild_config.COC_CWL_NOTIFICATIONS.set(enabled)
+        await self._reset_war_notification_state(guild_config)
+        await ctx.send(
+            f"Clan War League notifications are now **{'ON' if enabled else 'OFF'}**. "
+            "Regular clan-war notifications are unchanged."
+        )
+
+    @command_coc_set.command(name="raidweekend", aliases=["capitalraid", "raids"])
+    async def command_coc_set_raid_weekend(self, ctx):
+        """Toggle Clan Capital Raid Weekend start and end notifications."""
+
+        guild_config = self.config.guild(ctx.guild)
+        enabled = not await guild_config.COC_RAID_WEEKEND_NOTIFICATIONS()
+        if enabled:
+            setup = await self._require_server_setup(ctx)
+            if setup is None:
+                return
+            _, _, channel_id = setup
+            try:
+                channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+            except (TypeError, ValueError):
+                channel = None
+            if channel is None:
+                channel = ctx.channel
+                await guild_config.COC_WAR_CHANNEL.set(channel.id)
+            await guild_config.LAST_RAID_SEASON.set(None)
+            await guild_config.LAST_RAID_STATE.set(None)
+        await guild_config.COC_RAID_WEEKEND_NOTIFICATIONS.set(enabled)
+        if enabled:
+            detail = f"Start and end updates will use {channel.mention}."
+        else:
+            detail = "Clan war notifications are unchanged."
+        await ctx.send(
+            f"Clan Capital Raid Weekend notifications are now **{'ON' if enabled else 'OFF'}**. "
+            f"{detail}"
+        )
 
     @coc_manager()
     @command_coc_set.command(name="warattacks")
