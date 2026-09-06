@@ -13,6 +13,7 @@ _ = Translator("Coc", __file__)
 log = getLogger("red.Sick-Cogs.Coc")
 COC_API_BASE = "https://api.clashofclans.com/v1"
 COC_DEVELOPER_URL = "https://developer.clashofclans.com/"
+COC_TOKEN_NAMESPACE = "clashofclans"
 CLAN_BANNER_PATH = Path(__file__).parent / "data" / "images" / "clan-banner.png"
 WAR_BANNER_PATH = Path(__file__).parent / "data" / "images" / "war-banner.png"
 WAR_NOTIFICATION_EVENTS = {
@@ -87,7 +88,6 @@ class Coc(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        default_global = {"COC_API_KEY": None}
         default_guild = {
             "COC_CLAN_KEY": None,
             "COC_WAR_CHANNEL": None,
@@ -121,7 +121,6 @@ class Coc(commands.Cog):
             "LAST_API_PULL": None,
         }
         self.config = Config.get_conf(self, identifier=5218831554, force_registration=True)
-        self.config.register_global(**default_global)
         self.config.register_guild(**default_guild)
         self.war_notification.start()
 
@@ -143,6 +142,12 @@ class Coc(commands.Cog):
             "authorization": "Bearer " + api_key,
         }
 
+    async def _get_api_key(self) -> str | None:
+        """Return the CoC API key from Red's shared API-token store."""
+        tokens = await self.bot.get_shared_api_tokens(COC_TOKEN_NAMESPACE)
+        api_key = str(tokens.get("api_key") or "").strip()
+        return api_key or None
+
     async def _get_clan_tag(self, ctx: commands.Context) -> str:
         return await self.config.guild(ctx.guild).COC_CLAN_KEY()
 
@@ -151,7 +156,7 @@ class Coc(commands.Cog):
         return (
             "No API key set for Clash of Clans. Bot owners can get one at "
             f"{COC_DEVELOPER_URL} and set it with "
-            f"`{ctx.clean_prefix}coc setapi <api_key>`."
+            f"`{ctx.clean_prefix}set api clashofclans api_key,YOUR_KEY`."
         )
 
     @staticmethod
@@ -166,7 +171,7 @@ class Coc(commands.Cog):
     ) -> tuple[str, str, str | None] | None:
         """Return required server settings or send one actionable setup card."""
 
-        api_key = await self.config.COC_API_KEY()
+        api_key = await self._get_api_key()
         guild_config = self.config.guild(ctx.guild)
         clan_key = await guild_config.COC_CLAN_KEY()
         channel_id = await guild_config.COC_WAR_CHANNEL()
@@ -176,7 +181,7 @@ class Coc(commands.Cog):
             missing.append((
                 "⚠️ Clash of Clans API access",
                 "The bot owner must configure the shared API key with "
-                f"`{ctx.clean_prefix}coc setapi <api_key>`."
+                f"`{ctx.clean_prefix}set api clashofclans api_key,YOUR_KEY`."
             ))
         if not clan_key:
             missing.append((
@@ -704,14 +709,12 @@ class Coc(commands.Cog):
         if style == "compact":
             lines = []
             for attack in new_attacks[:10]:
-                direction_marker = "🔵" if attack["is_friendly"] else "🔴"
-                attacker_marker = "🔵" if attack["is_friendly"] else "🟠"
-                defender_marker = "🟠" if attack["is_friendly"] else "🔵"
+                direction_marker = "🟢" if attack["is_friendly"] else "🔴"
                 attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
                 stars = "⭐" * int(attack["stars"] or 0) or "No stars"
                 lines.append(
-                    f"{direction_marker} **{attack_type}** · {attacker_marker} **{attack['attacker_name']}** → "
-                    f"{defender_marker} **{attack['defender_name']}** | {stars} | "
+                    f"{direction_marker} **{attack_type}** · **{attack['attacker_name']}** → "
+                    f"**{attack['defender_name']}** | {stars} | "
                     f"**{self._format_percent(attack['destruction'])}**"
                 )
             remaining = len(new_attacks) - len(lines)
@@ -723,61 +726,22 @@ class Coc(commands.Cog):
             embed.set_footer(text="Brought to you by SickGaming.net")
             return embed
 
-        badge_url = opponent.get("badgeUrls", {}).get("large") if enemy_attack else clan.get("badgeUrls", {}).get("large")
-        if badge_url:
-            embed.set_thumbnail(url=badge_url)
-
-        for attack in new_attacks[:6]:
-            stars = attack["stars"]
-            star_word = "star" if stars == 1 else "stars"
+        for attack in new_attacks[:20]:
+            marker = "🟢" if attack["is_friendly"] else "🔴"
             attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
-            field_name = attack_type
+            stars = "⭐" * int(attack["stars"] or 0) or "No stars"
             embed.add_field(
-                name=field_name,
+                name=f"{marker} {attack_type}",
                 value=(
-                    f"**{attack['attacker_name']}** attacked **{attack['defender_name']}**\n"
-                    f"Result: **{stars} {star_word}**, "
-                    f"**{self._format_percent(attack['destruction'])}** destruction"
+                    f"{attack['attacker_name']} → {attack['defender_name']} | "
+                    f"{stars} | {self._format_percent(attack['destruction'])}"
                 ),
                 inline=False,
             )
 
-        remaining = len(new_attacks) - 6
+        remaining = len(new_attacks) - 20
         if remaining > 0:
             embed.add_field(name="More Attacks", value=f"...and {remaining} more.", inline=False)
-
-        attack_total = war_data.get("teamSize", "Unknown")
-        attacks_per_member = self._positive_int(war_data.get("attacksPerMember"), 2)
-        if isinstance(attack_total, int):
-            attack_total *= attacks_per_member
-        else:
-            attack_total = "?"
-
-        embed.add_field(
-            name=clan.get("name", "Your Clan"),
-            value=(
-                f"Stars: **{self._format_war_stars(clan.get('stars', 0), war_data)}**\n"
-                f"Destruction: **{self._format_percent(clan.get('destructionPercentage', 0))}**\n"
-                f"Attacks: **{clan.get('attacks', 0)}/{attack_total}**"
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name=opponent.get("name", "Opponent"),
-            value=(
-                f"Stars: **{self._format_war_stars(opponent.get('stars', 0), war_data)}**\n"
-                f"Destruction: **{self._format_percent(opponent.get('destructionPercentage', 0))}**\n"
-                f"Attacks: **{opponent.get('attacks', 0)}/{attack_total}**"
-            ),
-            inline=True,
-        )
-
-        if war_data.get("endTime"):
-            embed.add_field(
-                name="War Ends",
-                value=f"**{self._format_coc_time(war_data['endTime'], timezone_name)}**",
-                inline=False,
-            )
 
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
@@ -1003,7 +967,7 @@ class Coc(commands.Cog):
     
     @tasks.loop(minutes=5)
     async def war_notification(self) -> None:
-        api_key = await self.config.COC_API_KEY()
+        api_key = await self._get_api_key()
         if not api_key:
             return
 
@@ -1196,7 +1160,7 @@ class Coc(commands.Cog):
         Show Clash of Clans clan information and war results.
 
         Setup:
-        [p]coc setapi <api_key>  (bot owner only)
+        [p]set api clashofclans api_key,YOUR_KEY  (bot owner only)
         [p]coc set clan <clan_tag>
         [p]coc set warchannel [channel]
         [p]coc set notificationrole @War
@@ -1262,7 +1226,7 @@ class Coc(commands.Cog):
     async def command_coc_war(self, ctx):
         """Show a quick Clash of Clans war update."""
 
-        api_key = await self.config.COC_API_KEY()
+        api_key = await self._get_api_key()
         if not api_key:
             return await ctx.send(self._missing_api_key_message(ctx))
         
@@ -1298,7 +1262,7 @@ class Coc(commands.Cog):
     async def command_coc_attacks(self, ctx):
         """Show who has and has not attacked in the current war."""
 
-        api_key = await self.config.COC_API_KEY()
+        api_key = await self._get_api_key()
         if not api_key:
             return await ctx.send(self._missing_api_key_message(ctx))
 
@@ -1618,15 +1582,6 @@ class Coc(commands.Cog):
         await guild_config.WAR_END_SOON_MINUTES.set(minutes)
         await self._reset_war_notification_state(guild_config)
         await ctx.send(f"War ending soon notifications will send {minutes} minutes before war end.")
-
-    @checks.is_owner()
-    @command_coc.command(name="setapi")
-    async def command_coc_setcocapi(self, ctx, key: str):
-        """Set the global Clash of Clans API key."""
-
-        if key:
-            await self.config.COC_API_KEY.set(key)
-            await ctx.send("Key set.")
 
     @command_coc_set.command(name="clan")
     async def command_coc_set_clan(self, ctx, key: str):
