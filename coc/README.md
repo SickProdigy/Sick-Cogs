@@ -19,17 +19,17 @@ Bot owners set the shared Clash of Clans API key:
 Server moderators or users with `Manage Channels` set the clan tag:
 
 ```text
-[p]coc set clan <clan_tag>
+[p]cocset clan <clan_tag>
 ```
 
 Set or change the war update channel explicitly. If no channel is passed, the current channel is used. This also turns war notifications on:
 
 ```text
-[p]coc set warchannel
-[p]coc set warchannel #war-updates
+[p]cocset warchannel
+[p]cocset warchannel #war-updates
 ```
 
-Use `[p]help coc set` for all server configuration. Use `[p]help coc notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
+Use `[p]help cocset` for all server configuration. Use `[p]help cocset notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
 
 ## Commands
 
@@ -38,6 +38,38 @@ Show configured clan information:
 ```text
 [p]coc
 ```
+
+Look up another clan without changing the server's configured clan:
+
+```text
+[p]coc clan #CLANTAG
+```
+
+Look up a player profile:
+
+```text
+[p]coc player #PLAYERTAG
+```
+
+Player cards include available Builder Hall, Builder Base trophy, and Builder Base league totals. The API does not expose individual Builder Battle history, so battle-by-battle notifications are not available.
+
+Show the configured clan's five most recent regular wars, or inspect another clan:
+
+```text
+[p]coc warlog
+[p]coc warlog #CLANTAG
+```
+
+The public API's war log contains regular clan wars only. It does not provide an archive of past CWL seasons.
+
+Show every available round for the currently active CWL group:
+
+```text
+[p]coc cwl
+[p]coc cwl #CLANTAG
+```
+
+This live view includes completed and active rounds returned by the current league group. It does not save snapshots after that group expires.
 
 Show current war details:
 
@@ -55,38 +87,56 @@ Show who has and has not attacked in the current war:
 Toggle all war notifications for the server. When enabling them without a configured destination, the current channel is saved automatically:
 
 ```text
-[p]coc notifications
+[p]cocset notifications
 ```
 
 Show the current notification setup:
 
 ```text
-[p]coc notifications status
+[p]cocset notifications status
 ```
 
 Set the timezone used by war schedules for this Discord server:
 
 ```text
-[p]coc set timezone America/New_York
-[p]coc set timezone Europe/London
-[p]coc set timezone UTC
+[p]cocset timezone America/New_York
+[p]cocset timezone Europe/London
+[p]cocset timezone UTC
 ```
 
-Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]coc set timezone` without a value to see the current setting.
+Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]cocset timezone` without a value to see the current setting.
 
-Toggle between detailed attack cards and compact one-line entries, or select a mode explicitly:
+Show or select the war attack-log notification format:
 
 ```text
-[p]coc set attack
-[p]coc set attack card
-[p]coc set attack compact
+[p]cocset warattacks
+[p]cocset warattacks card
+[p]cocset warattacks compact
 ```
 
-The bare command toggles the current format. Pass `card` or `compact` when you need to select one explicitly. Use `[p]coc notifications status` to view the current format.
+The bare command shows the current format and explains both choices. Pass `card` or `compact` to select one explicitly. Use `[p]cocset notifications status` to review the complete notification setup.
 
 ## War Notifications
 
 War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
+Clan War League notifications use the same event settings but can be muted independently. Regular war notifications are unaffected:
+
+```text
+[p]cocset cwl
+[p]cocset clanwarleague
+```
+
+Run either command again to toggle CWL notifications back on. CWL notifications are enabled by default.
+
+Clan Capital Raid Weekend start and end notifications are independently disabled by default. Enable or disable them with:
+
+```text
+[p]cocset raidweekend
+[p]cocset capitalraid
+[p]cocset raids
+```
+
+The start notification announces the live weekend. The ending summary includes the API's available attacks, Capital loot, completed raids, destroyed districts, and offensive/defensive medal values. These updates use the configured war channel but do not require regular clan-war notifications to be enabled.
 
 Available event names:
 
@@ -111,15 +161,15 @@ Default behavior:
 Toggle one event:
 
 ```text
-[p]coc set event prep on
-[p]coc set event attacklog off
+[p]cocset event prep on
+[p]cocset event attacklog off
 ```
 
 Change server warning times:
 
 ```text
-[p]coc set prepwarning 5
-[p]coc set endwarning 60
+[p]cocset prepwarning 5
+[p]cocset endwarning 60
 ```
 
 ## Management and Role Mentions
@@ -127,24 +177,24 @@ Change server warning times:
 Server administrators can optionally delegate CoC setup and notification management to one Discord role:
 
 ```text
-[p]coc set managerrole @CoC Manager
-[p]coc set managerrole clear
+[p]cocset managerrole @CoC Manager
+[p]cocset managerrole clear
 ```
 
-The configured role can use the commands under `[p]coc set` and `[p]coc notifications` without receiving broader Discord permissions. Only server administrators can change the manager role.
+The configured role can use `[p]cocset` and its notification controls without receiving broader Discord permissions. Only server administrators can change the manager role.
 
 ## Role Mentions
 
 Set one role for war notification mentions:
 
 ```text
-[p]coc set notificationrole @War
+[p]cocset notificationrole @War
 ```
 
 Clear the mention role:
 
 ```text
-[p]coc set notificationrole clear
+[p]cocset notificationrole clear
 ```
 
 Mention toggles are on by default for every event, but no ping is sent unless a mention role is configured.
@@ -152,8 +202,8 @@ Mention toggles are on by default for every event, but no ping is sent unless a 
 Toggle mentions for one event:
 
 ```text
-[p]coc set mention prepsoon on
-[p]coc set mention attacklog off
+[p]cocset mention prepsoon on
+[p]cocset mention attacklog off
 ```
 
 ## Attack Log Updates
@@ -164,6 +214,12 @@ Attack-log notification embeds stay focused on the war type, matchup, and newly 
 
 ## Attack Status
 
+
+## Gold Pass and CWL history limits
+
+The Clash of Clans API Gold Pass resource provides the current season's start and end times; it is not an update, event, or reward feed, so this cog does not generate update notifications from it.
+
+The API exposes the active CWL league group and its war tags while that group is available, but it does not provide historical CWL season archives. `[p]coc warlog` therefore reports regular clan-war history only.
 Use `[p]coc attacks` or `[p]coc attack` to check the current war attack status for the configured clan.
 
 The command shows:
