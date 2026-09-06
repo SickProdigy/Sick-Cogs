@@ -13,7 +13,7 @@ The `coc` cog provides Clash of Clans clan lookup, current war status, and confi
 Bot owners set the shared Clash of Clans API key:
 
 ```text
-[p]coc setapi <api_key>
+[p]set api clashofclans api_key,YOUR_KEY
 ```
 
 Server moderators or users with `Manage Channels` set the clan tag:
@@ -158,9 +158,9 @@ Toggle mentions for one event:
 
 ## Attack Log Updates
 
-When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `card` format labels each entry `Friendly Attack` or `Enemy Attack` without redundantly repeating the clan name, then shows the attacker, defender, stars, destruction, and current score summary. The optional `compact` format places up to ten attacks into short one-line entries with blue friendly, orange enemy-player, and red enemy-attack markers.
+When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `card` format shows each attack as a green friendly or red enemy entry with attacker, defender, stars, and destruction on one line. The optional `compact` format places up to ten attacks into short one-line entries with green friendly and red enemy markers.
 
-Attack-log notification embeds do not show the generic status or team size text. Once battle day is active, they only show the war end time instead of repeating preparation and start times.
+Attack-log notification embeds stay focused on the war type, matchup, and newly detected attacks; they omit generic status, team totals, schedules, and score summaries.
 
 ## Attack Status
 
@@ -193,5 +193,5 @@ The roundup includes:
 ## Notes
 
 - Notification setup commands are limited to moderators or users with `Manage Channels`.
-- `setapi` is bot-owner only because the API key is shared globally.
+- The bot owner configures the only active API key with `[p]set api clashofclans api_key,YOUR_KEY` in a DM or private channel.
 - Current war lookup supports regular wars and silently uses the matching CWL war when regular war data is blocked or unavailable. War, attack-log, attack-status, event, and roundup cards state `Clan War` or `Clan War League (CWL)` directly so the shared workflow remains clear. During preparation, the main war card is yellow. During battle day, it is orange and shows only the war end time; enemy attack updates remain red, and completed-war roundups use a neutral blue with a green victory, red defeat, or neutral tie marker.

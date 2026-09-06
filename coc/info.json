@@ -2,12 +2,12 @@
     "author": ["SickProdigy"],
     "description": "Grabs information from Clash of Clans API",
     "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
-    "install_msg": "Get updates on current wars and search other clans.",
+    "install_msg": "Set the bot-wide Clash of Clans key with `[p]set api clashofclans api_key,YOUR_KEY`, then use `[p]coc set clan <clan_tag>` for each server.",
     "min_bot_version": "3.5.0",
     "permissions": ["attach_files", "embed_links"],
     "requirements": ["aiohttp"],
     "short": "Clash of clans",
     "tags": ["clash", "coc", "clashofclans"],
     "type": "COG",
-    "version": "1.3.0"
+    "version": "1.4.0"
 }
