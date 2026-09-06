@@ -1,10 +1,16 @@
 {
-    "author": ["UltimatePancake"],
-    "description": "Gets a random dad joke from icanhazdadjoke.com",
-    "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
-    "install_msg": "Gets a random dad joke from icanhazdadjoke.com. Thanks for installing.",
+    "author": ["SickProdigy"],
+    "description": "Post configurable random dad jokes from icanhazdadjoke.com to a Discord channel.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild-level dad joke scheduler settings such as channel ID, interval, enablement, and next run time. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Use `[p]dadjoke` to get one dad joke, or configure scheduled posts with `[p]dadjokeset channel`, `[p]dadjokeset interval`, and `[p]dadjokeset enable`.",
     "min_bot_version": "3.5.0",
-    "short": "Random dad jokes",
-    "tags": ["jokes", "dad", "dadjokes"],
-    "type": "COG"
+    "permissions": [],
+    "name": "DadJokes",
+    "requirements": [],
+    "short": "Scheduled random dad jokes",
+    "tags": ["jokes", "dad", "dadjokes", "scheduler"],
+    "type": "COG",
+    "version": "1.1.0"
 }
