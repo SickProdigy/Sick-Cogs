@@ -28,7 +28,7 @@ def utc_today() -> datetime.date:
 class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
-    __author__ = ["SickProdigy", "chatgpt-codex"]
+    __author__ = ["SickProdigy"]
     __version__ = "1.0.0"
 
     default_guild = {

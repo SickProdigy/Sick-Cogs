@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy", "chatgpt-codex"],
+    "author": ["SickProdigy"],
     "description": "Post configurable new movie release announcements from TMDb to a Discord channel.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild movie release announcement settings and posted movie IDs. It does not persistently store user data or metadata.",
