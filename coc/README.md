@@ -19,17 +19,17 @@ Bot owners set the shared Clash of Clans API key:
 Server moderators or users with `Manage Channels` set the clan tag:
 
 ```text
-[p]coc set clan <clan_tag>
+[p]cocset clan <clan_tag>
 ```
 
 Set or change the war update channel explicitly. If no channel is passed, the current channel is used. This also turns war notifications on:
 
 ```text
-[p]coc set warchannel
-[p]coc set warchannel #war-updates
+[p]cocset warchannel
+[p]cocset warchannel #war-updates
 ```
 
-Use `[p]help coc set` for all server configuration. Use `[p]help coc notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
+Use `[p]help cocset` for all server configuration. Use `[p]help cocset notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
 
 ## Commands
 
@@ -37,6 +37,12 @@ Show configured clan information:
 
 ```text
 [p]coc
+```
+
+Look up another clan without changing the server's configured clan:
+
+```text
+[p]coc clan #CLANTAG
 ```
 
 Show current war details:
@@ -55,34 +61,34 @@ Show who has and has not attacked in the current war:
 Toggle all war notifications for the server. When enabling them without a configured destination, the current channel is saved automatically:
 
 ```text
-[p]coc notifications
+[p]cocset notifications
 ```
 
 Show the current notification setup:
 
 ```text
-[p]coc notifications status
+[p]cocset notifications status
 ```
 
 Set the timezone used by war schedules for this Discord server:
 
 ```text
-[p]coc set timezone America/New_York
-[p]coc set timezone Europe/London
-[p]coc set timezone UTC
+[p]cocset timezone America/New_York
+[p]cocset timezone Europe/London
+[p]cocset timezone UTC
 ```
 
-Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]coc set timezone` without a value to see the current setting.
+Use an IANA timezone name so daylight-saving changes are handled automatically. Run `[p]cocset timezone` without a value to see the current setting.
 
-Toggle between detailed attack cards and compact one-line entries, or select a mode explicitly:
+Show or select the war attack-log notification format:
 
 ```text
-[p]coc set attack
-[p]coc set attack card
-[p]coc set attack compact
+[p]cocset warattacks
+[p]cocset warattacks card
+[p]cocset warattacks compact
 ```
 
-The bare command toggles the current format. Pass `card` or `compact` when you need to select one explicitly. Use `[p]coc notifications status` to view the current format.
+The bare command shows the current format and explains both choices. Pass `card` or `compact` to select one explicitly. Use `[p]cocset notifications status` to review the complete notification setup.
 
 ## War Notifications
 
@@ -111,15 +117,15 @@ Default behavior:
 Toggle one event:
 
 ```text
-[p]coc set event prep on
-[p]coc set event attacklog off
+[p]cocset event prep on
+[p]cocset event attacklog off
 ```
 
 Change server warning times:
 
 ```text
-[p]coc set prepwarning 5
-[p]coc set endwarning 60
+[p]cocset prepwarning 5
+[p]cocset endwarning 60
 ```
 
 ## Management and Role Mentions
@@ -127,24 +133,24 @@ Change server warning times:
 Server administrators can optionally delegate CoC setup and notification management to one Discord role:
 
 ```text
-[p]coc set managerrole @CoC Manager
-[p]coc set managerrole clear
+[p]cocset managerrole @CoC Manager
+[p]cocset managerrole clear
 ```
 
-The configured role can use the commands under `[p]coc set` and `[p]coc notifications` without receiving broader Discord permissions. Only server administrators can change the manager role.
+The configured role can use `[p]cocset` and its notification controls without receiving broader Discord permissions. Only server administrators can change the manager role.
 
 ## Role Mentions
 
 Set one role for war notification mentions:
 
 ```text
-[p]coc set notificationrole @War
+[p]cocset notificationrole @War
 ```
 
 Clear the mention role:
 
 ```text
-[p]coc set notificationrole clear
+[p]cocset notificationrole clear
 ```
 
 Mention toggles are on by default for every event, but no ping is sent unless a mention role is configured.
@@ -152,8 +158,8 @@ Mention toggles are on by default for every event, but no ping is sent unless a 
 Toggle mentions for one event:
 
 ```text
-[p]coc set mention prepsoon on
-[p]coc set mention attacklog off
+[p]cocset mention prepsoon on
+[p]cocset mention attacklog off
 ```
 
 ## Attack Log Updates

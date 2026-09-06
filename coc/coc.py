@@ -163,7 +163,7 @@ class Coc(commands.Cog):
     def _missing_clan_key_message(ctx: commands.Context) -> str:
         return (
             "No clan tag set for Clash of Clans. Copy the clan tag from the "
-            f"clan profile, then use `{ctx.clean_prefix}coc set clan <clan_tag>`."
+            f"clan profile, then use `{ctx.clean_prefix}cocset clan <clan_tag>`."
         )
 
     async def _require_server_setup(
@@ -187,7 +187,7 @@ class Coc(commands.Cog):
             missing.append((
                 "⚠️ Server clan",
                 "Set this server's clan with "
-                f"`{ctx.clean_prefix}coc set clan <clan_tag>`."
+                f"`{ctx.clean_prefix}cocset clan <clan_tag>`."
             ))
 
         if missing:
@@ -195,7 +195,7 @@ class Coc(commands.Cog):
                 title="⚠️ Clash of Clans Setup Needed",
                 description=(
                     "This server is missing required configuration. Complete the items below, "
-                    f"then try the command again. Use `{ctx.clean_prefix}help coc set` for all settings."
+                    f"then try the command again. Use `{ctx.clean_prefix}help cocset` for all settings."
                 ),
                 color=0xF1C40F,
             )
@@ -237,6 +237,45 @@ class Coc(commands.Cog):
             "If this is 403, check the API key and allowed IP address. "
             "If this is 404, check the clan tag."
         )
+
+    async def _send_clan_info(self, ctx: commands.Context, api_key: str, clan_tag: str) -> None:
+        """Fetch and display one clan profile."""
+
+        headers = self._api_headers(api_key)
+        try:
+            async with aiohttp.request(
+                "GET",
+                f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}",
+                headers=headers,
+            ) as response:
+                if response.status != 200:
+                    await self._send_api_error(ctx, response)
+                    return
+                clan = await response.json()
+        except aiohttp.ClientConnectionError as exc:
+            await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {exc}")
+            return
+        except Exception as exc:
+            await ctx.send(f"An unexpected error occurred: {exc}")
+            return
+
+        clan_name = str(clan.get("name", "Clash of Clans"))
+        badge_url = clan.get("badgeUrls", {}).get("large")
+        embed = discord.Embed(
+            description=clan.get("description") or "No clan description set.",
+            color=0x2ECC71,
+            timestamp=None,
+        )
+        if badge_url:
+            embed.set_author(name=clan_name, icon_url=badge_url)
+            embed.set_thumbnail(url=badge_url)
+        else:
+            embed.set_author(name=clan_name)
+        embed.add_field(name="Join Tag", value=clan.get("tag", "Unknown"))
+        embed.add_field(name="Member Count", value=clan.get("members", "Unknown"))
+        embed.add_field(name="War Frequency", value=clan.get("warFrequency", "Unknown"))
+        embed.set_footer(text="Brought to you by SickGaming.net", icon_url="https://i.imgur.com/TFTXZvP.png")
+        await self._send_embed_with_optional_image(ctx, embed, CLAN_BANNER_PATH, "clan-banner.png")
 
     async def _fetch_cwl_war(self, clan_tag: str, headers: dict) -> tuple[dict, str]:
         normalized_clan_tag = self._normalize_tag(clan_tag)
@@ -1159,68 +1198,25 @@ class Coc(commands.Cog):
         """
         Show Clash of Clans clan information and war results.
 
-        Setup:
-        [p]set api clashofclans api_key,YOUR_KEY  (bot owner only)
-        [p]coc set clan <clan_tag>
-        [p]coc set warchannel [channel]
-        [p]coc set notificationrole @War
-        [p]coc set timezone America/New_York
-        [p]coc set managerrole @CoC Manager
-        [p]coc set prepwarning 5
-        [p]coc set endwarning 60
-
-        Examples:
-        [p]coc
-        [p]coc war
-        [p]coc notifications
-        [p]help coc set
-        [p]help coc notifications
+        Use `[p]coc clan <clan tag>` to look up another clan, `[p]coc war`
+        for the configured clan's current war, or `[p]coc attacks` for its
+        attack-status card.
         """
 
         setup = await self._require_server_setup(ctx)
         if setup is None:
             return
         api_key, clan_key, _ = setup
-        clan_tag_encoded = self._clean_clan_tag(clan_key)
-        headers = self._api_headers(api_key)
+        await self._send_clan_info(ctx, api_key, clan_key)
 
-        try:
-            async with aiohttp.request(
-                "GET", f"{COC_API_BASE}/clans/{clan_tag_encoded}", headers=headers
-            ) as response:
-                if response.status != 200:
-                    return await self._send_api_error(ctx, response)
-                user_json = await response.json()
-        except aiohttp.ClientConnectionError as e:
-            await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
-            return
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
-            return
-        
-        clan_name = str(user_json.get("name", "Clash of Clans"))
-        clan_tag = user_json.get("tag", "Unknown")
-        clan_description = user_json.get("description") or "No clan description set."
-        members_count = user_json.get("members", "Unknown")
-        war_frequency = user_json.get("warFrequency", "Unknown")
-        
-        embed = discord.Embed(
-            description=clan_description,
-            color=0x2ecc71,
-            timestamp=None
-        )
-        badge_url = user_json.get("badgeUrls", {}).get("large")
-        footer_icon_url = "https://i.imgur.com/TFTXZvP.png"
-        if badge_url:
-            embed.set_author(name=clan_name, icon_url=badge_url)
-            embed.set_thumbnail(url=badge_url)
-        
-        embed.add_field(name="Join Tag", value=clan_tag)
-        embed.add_field(name="Member Count", value=members_count)
-        embed.add_field(name="War Frequency", value=war_frequency)
-        embed.set_footer(text="Brought to you by SickGaming.net", icon_url=footer_icon_url)
-        
-        await self._send_embed_with_optional_image(ctx, embed, CLAN_BANNER_PATH, "clan-banner.png")
+    @command_coc.command(name="clan")
+    async def command_coc_clan(self, ctx, clan_tag: str):
+        """Look up a Clash of Clans clan by tag."""
+
+        api_key = await self._get_api_key()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+        await self._send_clan_info(ctx, api_key, clan_tag)
         
     @command_coc.command(name="war")
     async def command_coc_war(self, ctx):
@@ -1260,7 +1256,7 @@ class Coc(commands.Cog):
 
     @command_coc.command(name="attacks", aliases=["attack", "attackstatus", "hits"])
     async def command_coc_attacks(self, ctx):
-        """Show who has and has not attacked in the current war."""
+        """Show the current war attack-status card."""
 
         api_key = await self._get_api_key()
         if not api_key:
@@ -1289,8 +1285,9 @@ class Coc(commands.Cog):
         embed = self._build_war_attacks_embed(war_data, clan_key, timezone_name)
         await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
         
+    @commands.guild_only()
+    @commands.group(name="cocset", invoke_without_command=True)
     @coc_manager()
-    @command_coc.group(name="set", invoke_without_command=True)
     async def command_coc_set(self, ctx):
         """Configure this server's Clash of Clans integration."""
 
@@ -1305,7 +1302,7 @@ class Coc(commands.Cog):
             current = str(await guild_config.COC_TIMEZONE() or "America/New_York")
             return await ctx.send(
                 f"War schedule timezone: **{current}**\n"
-                f"Change it with `{ctx.clean_prefix}coc set timezone America/New_York`."
+                f"Change it with `{ctx.clean_prefix}cocset timezone America/New_York`."
             )
 
         try:
@@ -1331,7 +1328,7 @@ class Coc(commands.Cog):
         await guild_config.WAR_NOTIFICATION_EVENTS.set({})
 
     @coc_manager()
-    @command_coc.group(
+    @command_coc_set.group(
         name="notifications",
         invoke_without_command=True,
     )
@@ -1341,21 +1338,21 @@ class Coc(commands.Cog):
 
         Run this command again to switch all war notifications ON or OFF.
         The current channel is saved automatically the first time notifications are enabled.
-        Use `[p]coc notifications status` to review the current setup.
+        Use `[p]cocset notifications status` to review the current setup.
 
         Configure notifications with:
-        `[p]coc set clan <clan tag>`
-        `[p]coc set warchannel [channel]`
-        `[p]coc set notificationrole [role|clear]`
-        `[p]coc set managerrole [role|clear]`
-        `[p]coc set attack [card|compact]`
-        `[p]coc set event <event> <on|off>`
-        `[p]coc set mention <event> <on|off>`
-        `[p]coc set prepwarning <minutes>`
-        `[p]coc set endwarning <minutes>`
-        `[p]coc set timezone <IANA timezone>`
+        `[p]cocset clan <clan tag>`
+        `[p]cocset warchannel [channel]`
+        `[p]cocset notificationrole [role|clear]`
+        `[p]cocset managerrole [role|clear]`
+        `[p]cocset warattacks [card|compact]`
+        `[p]cocset event <event> <on|off>`
+        `[p]cocset mention <event> <on|off>`
+        `[p]cocset prepwarning <minutes>`
+        `[p]cocset endwarning <minutes>`
+        `[p]cocset timezone <IANA timezone>`
 
-        Use `[p]help coc set` for every server setting.
+        Use `[p]help cocset` for every server setting.
         """
 
         guild_config = self.config.guild(ctx.guild)
@@ -1364,7 +1361,7 @@ class Coc(commands.Cog):
             await guild_config.COC_WAR_NOTIFICATIONS.set(False)
             return await ctx.send(
                 "Clash of Clans war notifications are now **OFF** for this server. "
-                f"Turn them back on with `{ctx.clean_prefix}coc notifications`."
+                f"Turn them back on with `{ctx.clean_prefix}cocset notifications`."
             )
 
         setup = await self._require_server_setup(ctx)
@@ -1432,16 +1429,18 @@ class Coc(commands.Cog):
         await ctx.send("\n".join(lines))
 
     @coc_manager()
-    @command_coc_set.command(name="attack")
+    @command_coc_set.command(name="warattacks")
     async def command_coc_notification_attack(self, ctx, style: str = None):
-        """Toggle the attack-log format, or explicitly choose card or compact."""
+        """Set war attack-log notifications to card or compact format."""
 
         guild_config = self.config.guild(ctx.guild)
         if style is None:
             current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "card").lower()
-            selected = "compact" if current == "card" else "card"
-            await guild_config.WAR_ATTACK_LOG_STYLE.set(selected)
-            return await ctx.send(f"War attack log format is now **{selected.upper()}**.")
+            return await ctx.send(
+                f"War attack-log notifications currently use **{current.upper()}** format.\n"
+                f"Choose a format with `{ctx.clean_prefix}cocset warattacks card` or "
+                f"`{ctx.clean_prefix}cocset warattacks compact`."
+            )
         normalized = style.strip().lower()
         aliases = {
             "card": "card",
@@ -1472,8 +1471,8 @@ class Coc(commands.Cog):
             current = role.mention if role else "**not set**"
             return await ctx.send(
                 f"CoC manager role: {current}\n"
-                f"Set one with `{ctx.clean_prefix}coc set managerrole @CoC Manager`, or clear it with "
-                f"`{ctx.clean_prefix}coc set managerrole clear`."
+                f"Set one with `{ctx.clean_prefix}cocset managerrole @CoC Manager`, or clear it with "
+                f"`{ctx.clean_prefix}cocset managerrole clear`."
             )
 
         if role_name.strip().lower() in {"clear", "none", "off"}:
@@ -1502,8 +1501,8 @@ class Coc(commands.Cog):
             current = role.mention if role else "**not set**"
             return await ctx.send(
                 f"War notification role: {current}\n"
-                f"Set one with `{ctx.clean_prefix}coc set notificationrole @War`, or clear it with "
-                f"`{ctx.clean_prefix}coc set notificationrole clear`."
+                f"Set one with `{ctx.clean_prefix}cocset notificationrole @War`, or clear it with "
+                f"`{ctx.clean_prefix}cocset notificationrole clear`."
             )
 
         if role_name.strip().lower() in {"clear", "none", "off"}:
