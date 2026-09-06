@@ -12,5 +12,5 @@
     "short": "New movie release announcements",
     "tags": ["movies", "tmdb", "releases", "notifications"],
     "type": "COG",
-    "version": "1.0.0"
+    "version": "1.0.1"
 }

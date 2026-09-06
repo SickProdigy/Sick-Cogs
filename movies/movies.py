@@ -29,7 +29,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     default_guild = {
         "enabled": False,
@@ -196,11 +196,50 @@ class MovieReleases(commands.Cog):
         await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True))
 
     @commands.guild_only()
-    @commands.group(name="movieset", aliases=["moviereleaseset"])
+    @commands.command(name="movies", aliases=["moviereleases"])
+    async def movies(self, ctx: commands.Context):
+        """Show Movie Releases commands and setup guidance."""
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="Movie Releases",
+            description=(
+                "Posts upcoming and recently released movies from TMDb to a configured "
+                "Discord channel. Server moderators can configure the feed with the "
+                f"`{prefix}movieset` commands below."
+            ),
+            colour=discord.Colour.blurple(),
+        )
+        embed.add_field(
+            name="Setup",
+            value=(
+                f"`{prefix}movieset apikey <key>`\n"
+                f"`{prefix}movieset channel [channel]`\n"
+                f"`{prefix}movieset role [role]`\n"
+                f"`{prefix}movieset enabled <true|false>`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Review and controls",
+            value=(
+                f"`{prefix}movieset preview` · preview without posting\n"
+                f"`{prefix}movieset settings` · show configuration\n"
+                f"`{prefix}movieset force` · post the next unposted release\n"
+                f"`{prefix}help movieset` · show every moderator command"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Movie data provided by TMDb")
+        await ctx.send(embed=embed)
+
+    @commands.guild_only()
+    @commands.group(
+        name="movieset", aliases=["moviereleaseset"], invoke_without_command=True
+    )
     @checks.mod_or_permissions(manage_guild=True)
     async def movieset(self, ctx: commands.Context):
         """Configure new movie release announcements."""
-        pass
+        await ctx.send_help(ctx.command)
 
     @movieset.command(name="apikey")
     async def movieset_apikey(self, ctx: commands.Context, api_key: str):
