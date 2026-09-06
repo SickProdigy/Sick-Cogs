@@ -4,7 +4,7 @@
     "disabled": false,
     "end_user_data_statement": "This cog stores guild movie release announcement settings and posted movie IDs. It does not persistently store user data or metadata.",
     "hidden": false,
-    "install_msg": "Set your TMDb API key with `[p]movieset apikey`, choose a channel with `[p]movieset channel`, optionally set a notification role with `[p]movieset role`, then enable announcements with `[p]movieset enabled true`.",
+    "install_msg": "As the bot owner, set one shared TMDb API key with `[p]set api tmdb api_key,YOUR_KEY`. Users can then run `[p]movies <title>` or `[p]movie <title>`. To enable release announcements, choose a channel with `[p]movieset channel`, optionally set a notification role with `[p]movieset role`, then use `[p]movieset enable`.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links"],
     "name": "MovieReleases",
@@ -12,5 +12,5 @@
     "short": "New movie release announcements",
     "tags": ["movies", "tmdb", "releases", "notifications"],
     "type": "COG",
-    "version": "1.0.1"
+    "version": "1.1.0"
 }
