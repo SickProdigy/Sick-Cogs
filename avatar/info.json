@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "skeith"],
     "description": "Return a user's avatar URL.",
     "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users.",

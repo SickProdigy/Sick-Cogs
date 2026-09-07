@@ -7,7 +7,7 @@ from redbot.core import commands
 class Avatar(commands.Cog):
     """Get user's avatar URL."""
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "skeith"]
     __version__ = "1.0.0"
 
     async def red_delete_data_for_user(self, **kwargs):
