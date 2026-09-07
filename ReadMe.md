@@ -24,7 +24,6 @@ These folders may be used for testing, learning, or local customization before t
 
 - `assistant`
 - `avatar`
-- `cleverbot`
 - `dadjokes`
 - `dictionary`
 - `giveaways`

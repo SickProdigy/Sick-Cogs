@@ -1,5 +1,8 @@
 # Cleverbot
 
+> **Retired:** Cleverbot no longer offers a supported API for programmatic access. This cog is
+> hidden from repository listings and unavailable for new installations.
+
 Cleverbot lets the bot reply with simulated conversation responses from Cleverbot-compatible external APIs.
 
 It can respond to direct commands, bot mentions, direct messages if enabled by the bot owner, or every message in a configured channel. Server moderators can tune response style and control where automatic replies are allowed.
