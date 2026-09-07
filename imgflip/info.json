@@ -1,0 +1,18 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Generate memes with the Imgflip API.",
+    "disabled": false,
+    "end_user_data_statement": "This cog does not persistently store data or metadata about users. Meme template IDs and submitted caption text are sent to the Imgflip API to generate images.",
+    "hidden": false,
+    "install_msg": "Set Imgflip credentials with `[p]imgflipset`, then use `[p]meme <template> <text>` to generate memes. Use `[p]getmemes` to browse popular templates.",
+    "min_bot_version": "3.5.0",
+    "min_python_version": [3, 7, 2],
+    "name": "Imgflip",
+    "permissions": ["embed_links"],
+    "required_cogs": {},
+    "requirements": [],
+    "short": "Generate Imgflip memes",
+    "tags": ["meme", "memes", "fun", "imgflip"],
+    "type": "COG",
+    "version": "3.0.0"
+}
