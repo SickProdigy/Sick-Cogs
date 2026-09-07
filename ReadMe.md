@@ -6,8 +6,11 @@ This branch is the stable release branch. Active development, experiments, and u
 
 ## Available Cogs
 
+- `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `coc` - Clash of Clans clan and war status utilities.
+- `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
+- `movies` - Configurable TMDb new movie release announcements.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
