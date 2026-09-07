@@ -1,11 +1,7 @@
-# Reminder was originally written by ZeLarpMaster#0818
-# https://github.com/ZeLarpMaster/ZeCogsV3/blob/master/reminder/reminder.py
-
 import asyncio
 import collections
 import datetime
 import discord
-import hashlib
 from itertools import islice
 from math import ceil
 import re
@@ -20,7 +16,7 @@ from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 class Reminder(commands.Cog):
     """Utilities to remind yourself of whatever you want"""
 
-    __author__ = ["ZeLarpMaster#0818", "aikaterna#1393"]
+    __author__ = ["SickProdigy"]
 
     TIME_AMNT_REGEX = re.compile("([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
     TIME_QUANTITIES = collections.OrderedDict(
@@ -35,6 +31,7 @@ class Reminder(commands.Cog):
         ]
     )
     MAX_SECONDS = TIME_QUANTITIES["years"] * 2
+    CONFIG_IDENTIFIER = 1348292267606297903903568219578370169450187613858557601832253276183023563385860872570416775575021079665631013972557943647633665882074464969932193856474375
 
     async def red_delete_data_for_user(
         self,
@@ -47,8 +44,7 @@ class Reminder(commands.Cog):
     def __init__(self, bot: Red):
         super().__init__()
         self.bot = bot
-        unique_id = int(hashlib.sha512((self.__author__[0] + "@" + self.__class__.__name__).encode()).hexdigest(), 16)
-        self.config = Config.get_conf(self, identifier=unique_id, force_registration=True)
+        self.config = Config.get_conf(self, identifier=self.CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_user(reminders=[], offset=0)
         self.futures = {}
         asyncio.ensure_future(self.start_saved_reminders())
