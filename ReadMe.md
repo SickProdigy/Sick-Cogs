@@ -27,7 +27,7 @@ These folders may be used for testing, learning, or local customization before t
 - `dadjokes`
 - `dictionary`
 - `giveaways`
-- `imgflip`
+- `meme`
 - `nsfw`
 - `reminder`
 - `rlstats`

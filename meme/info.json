@@ -1,0 +1,18 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Create static memes locally from original bundled templates or Discord avatars.",
+    "disabled": false,
+    "end_user_data_statement": "This cog does not persistently store user data, submitted caption text, avatars, or generated images.",
+    "hidden": false,
+    "install_msg": "Use `[p]meme list` to browse templates, `[p]meme <template> <top> | <bottom>` to create one, or `[p]meme avatar @user <top> | <bottom>`.",
+    "min_bot_version": "3.5.0",
+    "min_python_version": [3, 8, 0],
+    "name": "Meme",
+    "permissions": ["attach_files"],
+    "required_cogs": {},
+    "requirements": ["Pillow>=10.0,<12.0"],
+    "short": "Create memes locally",
+    "tags": ["meme", "memes", "fun", "images", "avatar"],
+    "type": "COG",
+    "version": "1.0.0"
+}
