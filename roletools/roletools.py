@@ -88,7 +88,7 @@ class RoleTools(
     Role related tools for moderation
     """
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "TrustyJAID"]
     __version__ = "1.6.0"
 
     def __init__(self, bot: Red):

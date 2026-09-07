@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "TrustyJAID"],
     "description": "Various role utility commands, including reaction roles, sticky roles, self roles, auto roles, buttons, selects, and temporary roles.",
     "disabled": false,
     "end_user_data_statement": "This cog stores user IDs for the purpose of re-assigning sticky roles when a user rejoins a server. User IDs may also appear in bot logs.",
