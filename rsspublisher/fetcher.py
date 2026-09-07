@@ -22,7 +22,7 @@ from .models import INTERNAL_TAGS, RssFeed, TagType, entry_identity
 
 import aiohttp
 
-log = logging.getLogger("red.Sick-Cogs.RSS")
+log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
 IPV4_RE = re.compile("\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}")
 IPV6_RE = re.compile("([a-f0-9:]+:+)+[a-f0-9]+")
 
