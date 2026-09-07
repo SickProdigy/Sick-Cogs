@@ -14,6 +14,7 @@ This branch is the stable release branch. Active development, experiments, and u
 - `donate` - Configurable donation information command.
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
 - `movies` - Configurable TMDb new movie release announcements.
+- `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
