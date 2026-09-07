@@ -1,13 +1,8 @@
-import math
 import random
 from datetime import datetime, timezone
-from logging import getLogger
-from typing import Tuple
 
 import discord
 from redbot.core import bank
-
-log = getLogger("red.Sick-Cogs.Giveaways")
 
 
 class GiveawayError(Exception):
@@ -51,9 +46,37 @@ class Giveaway:
         self.ended = ended
         self.kwargs = kwargs
 
-    async def add_entrant(
-        self, user: discord.Member, *, bot, session, cog
-    ) -> Tuple[bool, GiveawayError]:
+    @classmethod
+    def from_dict(cls, data: dict) -> "Giveaway":
+        endtime = data["endtime"]
+        if isinstance(endtime, str):
+            endtime = datetime.fromisoformat(endtime)
+        return cls(
+            guildid=int(data["guildid"]),
+            channelid=int(data["channelid"]),
+            messageid=int(data["messageid"]),
+            endtime=endtime,
+            prize=data.get("prize"),
+            emoji=data.get("emoji", "🎉"),
+            ended=bool(data.get("ended", False)),
+            entrants=list(data.get("entrants") or []),
+            **dict(data.get("kwargs") or {}),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "guildid": self.guildid,
+            "channelid": self.channelid,
+            "messageid": self.messageid,
+            "endtime": self.endtime.isoformat(),
+            "prize": self.prize,
+            "entrants": list(self.entrants),
+            "emoji": self.emoji,
+            "ended": self.ended,
+            "kwargs": dict(self.kwargs),
+        }
+
+    async def add_entrant(self, user: discord.Member, *, cog) -> None:
         if not self.kwargs.get("multientry", False) and user.id in self.entrants:
             raise AlreadyEnteredError("You have already entered this giveaway.")
         bypass = self.does_entrant_bypass(user)
@@ -74,7 +97,7 @@ class Giveaway:
             if (
                 self.kwargs.get("joined", None) is not None
                 and (datetime.now(timezone.utc) - user.joined_at.replace(tzinfo=timezone.utc)).days
-                <= self.kwargs["joined"]
+                < self.kwargs["joined"]
             ):
                 raise GiveawayEnterError(
                     f"Your account is too new to join this giveaway. You must have joined {self.kwargs['joined']} days ago."
@@ -84,7 +107,7 @@ class Giveaway:
                 and (
                     datetime.now(timezone.utc) - user.created_at.replace(tzinfo=timezone.utc)
                 ).days
-                <= self.kwargs["created"]
+                < self.kwargs["created"]
             ):
                 raise GiveawayEnterError(
                     f"Your account is too new to join this giveaway. You must have created your account {self.kwargs['created']} days ago."
@@ -96,113 +119,6 @@ class Giveaway:
                     )
 
                 await bank.withdraw_credits(user, self.kwargs["cost"])
-            if self.kwargs.get("levelreq", None) is not None:
-                cog = bot.get_cog("Leveler")
-                if cog is None:
-                    raise GiveawayExecError("The Leveler cog is not installed.")
-                userinfo = await cog.db.users.find_one({"user_id": str(user.id)})
-                lvl = userinfo.get("servers", {}).get(str(self.guildid), {}).get("level", 0)
-                if lvl <= self.kwargs.get("levelreq", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required level to join this giveaway. You must be level {self.kwargs['levelreq']} or higher."
-                    )
-            if self.kwargs.get("levelupreq", None) is not None:
-                cog = bot.get_cog("LevelUp")
-                if cog is None:
-                    raise GiveawayExecError("The LevelUp cog is not installed.")
-                conf = cog.db.get_conf(user.guild)
-                profile = conf.get_profile(user)
-                lvl = profile.level
-                if lvl < self.kwargs.get("levelupreq", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required level to join this giveaway. You must have {self.kwargs['levelupreq']} or higher."
-                    )
-
-            if self.kwargs.get("repreq", None) is not None:
-                cog = bot.get_cog("Leveler")
-                if cog is None:
-                    raise GiveawayExecError("The Leveler cog is not installed.")
-                userinfo = await cog.db.users.find_one({"user_id": str(user.id)})
-                lvl = userinfo.get("servers", {}).get(str(self.guildid), {}).get("rep", 0)
-                if lvl <= self.kwargs.get("levelreq", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required rep to join this giveaway. You must have {self.kwargs['repreq']} or higher."
-                    )
-
-            if self.kwargs.get("mee6_level", None) is not None:
-                lb = await get_mee6lb(session, self.guildid)
-                if lb is None:
-                    raise GiveawayExecError("The MEE6 Leaderboard is not available.")
-                for user in lb:
-                    if user["id"] == str(user.id) and user["level"] < self.kwargs.get(
-                        "mee6-level", 0
-                    ):
-                        raise GiveawayEnterError(
-                            f"You do not meet the required MEE6 level to join this giveaway. You must be level {self.kwargs['mee6-level']} or higher."
-                        )
-
-            if self.kwargs.get("tatsu_level", None) is not None:
-                token = await bot.get_shared_api_tokens("tatsumaki")
-                if token.get("authorization") is None:
-                    raise GiveawayExecError("The Tatsu token is not set.")
-                uinfo = await get_tatsuinfo(session, token.get("authorization"), user.id)
-                if uinfo is None:
-                    raise GiveawayEnterError(
-                        "The Tatsu API did not return any data therefore you have not been entered."
-                    )
-                if int((1 / 278) * (9 + math.sqrt(81 + 1112 * uinfo["xp"]))) < self.kwargs.get(
-                    "tatsu_level", 0
-                ):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required Tatsu level to join this giveaway. You must be level {self.kwargs['tatsu_level']} or higher."
-                    )
-
-            if self.kwargs.get("tatsu_rep", None) is not None:
-                token = bot.get_shared_api_tokens("tatsumaki")
-                if token.get("authorization") is None:
-                    raise GiveawayExecError("The Tatsu token is not set.")
-                uinfo = await get_tatsuinfo(session, token.get("authorization"), user.id)
-                if uinfo is None:
-                    raise GiveawayEnterError(
-                        "The Tatsu API did not return any data therefore you have not been entered."
-                    )
-                if uinfo["reputation"] < self.kwargs.get("tatsu_rep", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required Tatsu rep to join this giveaway. You must have {self.kwargs['tatsu_rep']} or higher."
-                    )
-
-            if self.kwargs.get("amari_level", None) is not None:
-                token = bot.get_shared_api_tokens("amari")
-                if token.get("authorization") is None:
-                    raise GiveawayExecError("The Amari token is not set.")
-                uinfo = await get_amari_info(
-                    session, token.get("authorization"), user.id, self.guildid
-                )
-                if uinfo is None:
-                    raise GiveawayEnterError(
-                        "The Amari API did not return any data therefore you have not been entered."
-                    )
-                if uinfo["level"] < self.kwargs.get("amari_level", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required Amari level to join this giveaway. You must be level {self.kwargs['amari_level']} or higher."
-                    )
-
-            if self.kwargs.get("amari_weekly_xp", None) is not None:
-                token = bot.get_shared_api_tokens("amari")
-                if token.get("authorization") is None:
-                    raise GiveawayExecError("The Amari token is not set.")
-                uinfo = await get_amari_info(
-                    session, token.get("authorization"), user.id, self.guildid
-                )
-                if uinfo is None:
-                    raise GiveawayEnterError(
-                        "The Amari API did not return any data therefore you have not been entered."
-                    )
-                if uinfo["level"] < self.kwargs.get("amari_weekly_xp", 0):
-                    raise GiveawayEnterError(
-                        f"You do not meet the required Amari weekly XP to join this giveaway. You must have {self.kwargs['amari_weekly_xp']} or higher."
-                    )
-
         self.entrants.append(user.id)
         if self.kwargs.get("multi", None) is not None and any(
             int(role) in [x.id for x in user.roles] for role in self.kwargs.get("multi-roles", [])
@@ -219,9 +135,19 @@ class Giveaway:
 
     def draw_winner(self):
         winner_count = self.kwargs.get("winners") or 1
-        if len(self.entrants) < winner_count:
+        weighted_entrants = {}
+        for user_id in self.entrants:
+            weighted_entrants[user_id] = weighted_entrants.get(user_id, 0) + 1
+        if len(weighted_entrants) < winner_count:
             return None
-        winners = random.sample(self.entrants, winner_count)
+
+        winners = []
+        for _ in range(winner_count):
+            user_ids = list(weighted_entrants)
+            weights = [weighted_entrants[user_id] for user_id in user_ids]
+            winner = random.choices(user_ids, weights=weights, k=1)[0]
+            winners.append(winner)
+            del weighted_entrants[winner]
         return winners
 
     def does_entrant_bypass(self, user: discord.Member) -> bool:
@@ -247,34 +173,3 @@ class Giveaway:
 
     def __str__(self) -> str:
         return f"{self.prize} - {self.endtime}"
-
-
-async def get_mee6lb(session, guild):
-    async with session.get(
-        f"https://mee6.xyz/api/plugins/leaderboard/leaderboard?guild={guild}&limit=1000"
-    ) as r:
-        if r.status != 200:
-            return None
-        data = await r.json()
-        return data["players"]
-
-
-async def get_tatsuinfo(session, token, userid):
-    async with session.get(
-        f"https://api.tatsu.gg/v1/users/{userid}/profile", headers={"Authorization": token}
-    ) as r:
-        if r.status != 200:
-            return None
-        data = await r.json()
-        return data
-
-
-async def get_amari_info(session, token, userid, guildid):
-    async with session.get(
-        f"https://amaribot.com/api/v1/guild/{guildid}/member/{userid}",
-        headers={"Authorization": token},
-    ) as r:
-        if r.status != 200:
-            return None
-        data = await r.json()
-        return data

@@ -2,10 +2,8 @@ import asyncio
 import contextlib
 import logging
 from copy import deepcopy
-from datetime import datetime, timezone
 from typing import Optional
 
-import aiohttp
 import discord
 from discord.utils import utcnow
 from redbot.core import Config, app_commands, commands
@@ -39,11 +37,8 @@ class Giveaways(commands.Cog):
         self.config.init_custom(GIVEAWAY_KEY, 2)
         self.giveaways = {}
         self.giveaway_bgloop = asyncio.create_task(self.init())
-        self.session = aiohttp.ClientSession()
         with contextlib.suppress(Exception):
             self.bot.add_dev_env_value("giveaways", lambda x: self)
-        self.view = GiveawayView(self)
-        bot.add_view(self.view)
 
     async def init(self) -> None:
         await self.bot.wait_until_ready()
@@ -53,27 +48,17 @@ class Giveaways(commands.Cog):
                 try:
                     if giveaway.get("ended", False):
                         continue
-                    giveaway["endtime"] = datetime.fromisoformat(giveaway["endtime"])
-                    giveaway_obj = Giveaway(
-                        giveaway["guildid"],
-                        giveaway["channelid"],
-                        giveaway["messageid"],
-                        giveaway["endtime"],
-                        giveaway["prize"],
-                        giveaway["emoji"],
-                        giveaway.get("ended", False),
-                        entrants=giveaway["entrants"],
-                        **giveaway["kwargs"],
-                    )
+                    giveaway_obj = Giveaway.from_dict(giveaway)
                     self.giveaways[int(msgid)] = giveaway_obj
                     view = GiveawayView(self)
                     view.add_item(
                         GiveawayButton(
-                            label=giveaway["kwargs"].get("button-text", "Join Giveaway"),
-                            style=giveaway["kwargs"].get("button-style", "green"),
-                            emoji=giveaway["emoji"],
+                            label=giveaway_obj.kwargs.get("button-text", "Join Giveaway"),
+                            style=giveaway_obj.kwargs.get("button-style", "green"),
+                            emoji=giveaway_obj.emoji,
                             cog=self,
-                            id=giveaway["messageid"],
+                            update=giveaway_obj.kwargs.get("update_button", False),
+                            id=giveaway_obj.messageid,
                         )
                     )
                     self.bot.add_view(view)
@@ -89,15 +74,13 @@ class Giveaways(commands.Cog):
 
     async def cog_unload(self) -> None:
         for giveaway in self.giveaways.values():
-            giveaway_dict = deepcopy(giveaway.__dict__)
-            giveaway_dict["endtime"] = giveaway_dict["endtime"].isoformat()
+            giveaway_dict = giveaway.to_dict()
             await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(giveaway.messageid)).set(
                 giveaway_dict
             )
         with contextlib.suppress(Exception):
             self.bot.remove_dev_env_value("giveaways")
         self.giveaway_bgloop.cancel()
-        asyncio.create_task(self.session.close())
 
     async def check_giveaways(self) -> None:
         to_clear = []
@@ -112,7 +95,7 @@ class Giveaways(commands.Cog):
                 gw["ended"] = True
                 await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(msgid)).set(gw)
         for msgid in to_clear:
-            del self.giveaways[msgid]
+            self.giveaways.pop(msgid, None)
 
     async def draw_winner(self, giveaway: Giveaway):
         guild = self.bot.get_guild(giveaway.guildid)
@@ -259,8 +242,7 @@ class Giveaways(commands.Cog):
         if ctx.interaction:
             await ctx.send("Giveaway created!", ephemeral=True)
         self.giveaways[msg.id] = giveaway_obj
-        giveaway_dict = deepcopy(giveaway_obj.__dict__)
-        giveaway_dict["endtime"] = giveaway_dict["endtime"].isoformat()
+        giveaway_dict = giveaway_obj.to_dict()
         await self.config.custom(GIVEAWAY_KEY, str(ctx.guild.id), str(msg.id)).set(giveaway_dict)
 
     @giveaway.command()
@@ -275,10 +257,7 @@ class Giveaways(commands.Cog):
             return await ctx.send(
                 f"Giveaway already running. Please wait for it to end or end it via `{ctx.clean_prefix}gw end {msgid}`."
             )
-        giveaway_dict = data[str(msgid)]
-        giveaway_dict["endtime"] = datetime.fromisoformat(giveaway_dict["endtime"])
-        giveaway = Giveaway(**giveaway_dict)
-        print(giveaway.entrants)
+        giveaway = Giveaway.from_dict(data[str(msgid)])
         try:
             await self.draw_winner(giveaway)
         except GiveawayExecError as e:
@@ -387,8 +366,7 @@ class Giveaways(commands.Cog):
             },
         )
         self.giveaways[msg.id] = giveaway_obj
-        giveaway_dict = deepcopy(giveaway_obj.__dict__)
-        giveaway_dict["endtime"] = giveaway_dict["endtime"].isoformat()
+        giveaway_dict = giveaway_obj.to_dict()
         del giveaway_dict["kwargs"]["colour"]
         await self.config.custom(GIVEAWAY_KEY, str(ctx.guild.id), str(msg.id)).set(giveaway_dict)
 
