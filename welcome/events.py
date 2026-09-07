@@ -14,7 +14,7 @@ from redbot.core.utils.chat_formatting import humanize_list
 RE_CTX: Pattern = re.compile(r"{([^}]+)\}")
 RE_POS: Pattern = re.compile(r"{((\d+)[^.}]*(\.[^:}]+)?[^}]*)\}")
 _ = Translator("Welcome", __file__)
-log = getLogger("red.trusty-cogs.Welcome")
+log = getLogger("red.Sick-Cogs.Welcome")
 
 
 @cog_i18n(_)

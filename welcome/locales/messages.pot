@@ -19,7 +19,7 @@ msgstr ""
 #, docstring
 msgid ""
 "Welcomes new members to the guild in the default channel rewritten for V3 from\n"
-"     https://github.com/irdumbs/Dumb-Cogs/blob/master/welcome/welcome.py"
+"     Maintained as part of Sick-Cogs."
 msgstr ""
 
 #: welcome.py:36

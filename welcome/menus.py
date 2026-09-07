@@ -28,7 +28,7 @@ class EventType(Enum):
         return self.name.upper()
 
 
-log = getLogger("red.Trusty-cogs.welcome")
+log = getLogger("red.Sick-Cogs.Welcome")
 _ = Translator("Welcome", __file__)
 
 

@@ -1,8 +1,5 @@
 {
-    "author": [
-        "irdumb",
-        "TrustyJAID"
-    ],
+    "author": ["SickProdigy", "TrustyJAID"],
     "description": "Welcome new users to the server or say goodbye when they leave.",
     "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
