@@ -12,5 +12,5 @@
     "short": "Run Discord giveaways",
     "tags": ["giveaway", "giveaways", "raffle"],
     "type": "COG",
-    "version": "1.6.0"
+    "version": "1.6.1"
 }
