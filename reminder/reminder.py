@@ -68,7 +68,7 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.0.0"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
