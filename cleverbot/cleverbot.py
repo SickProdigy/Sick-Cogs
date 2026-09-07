@@ -19,7 +19,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
     Cleverbot conversation commands for Sick-Cogs.
     """
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "TrustyJAID"]
     __version__ = "2.4.5"
 
     def __init__(self, bot):

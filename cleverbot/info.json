@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "TrustyJAID"],
     "description": "Have your bot respond with Cleverbot-style conversation responses, with configurable response tweaks.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild configuration, response tweaks, and optional allowlist/blocklist IDs for channels, categories, roles, and users. It also passes user message content to an external API for simulated conversation responses.",
