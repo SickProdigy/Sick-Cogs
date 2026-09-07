@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Run Discord giveaways with duration or end-time scheduling, multipliers, role access, and optional bank integration.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores giveaway configuration, message IDs, entrant user IDs, and winner records for active and completed giveaways.",
+    "hidden": false,
+    "install_msg": "Use `[p]giveaway` to manage giveaways and `[p]help Giveaways` to view available options.",
+    "min_bot_version": "3.5.0",
+    "name": "Giveaways",
+    "permissions": ["embed_links", "add_reactions"],
+    "requirements": ["dateparser"],
+    "short": "Run Discord giveaways",
+    "tags": ["giveaway", "giveaways", "raffle"],
+    "type": "COG",
+    "version": "1.5.1"
+}
