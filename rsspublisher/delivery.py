@@ -64,7 +64,7 @@ def select_unseen_entries(
         return unseen[:1]
     return list(reversed(unseen))
 
-log = logging.getLogger("red.Sick-Cogs.RSS")
+log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 class RSSDeliveryMixin:
@@ -268,7 +268,7 @@ class RSSDeliveryMixin:
             #     Read-only mapping with parsed data from the feed.
             #     See documentation of feedparser.FeedParserDict for more information.
             # force: bool
-            #     True if the update was forced (through `[p]rss force`), False otherwise.
+            #     True if the update was forced (through `[p]rsspublisher force`), False otherwise.
             feedparser_dict_proxy = MappingProxyType(feedparser_plus_obj)
             proxied_dicts.append(feedparser_dict_proxy)
             self._dispatch_rss_event(
@@ -299,7 +299,7 @@ class RSSDeliveryMixin:
         #     from each **new** entry in the feed.
         #     See documentation of feedparser.FeedParserDict for more information.
         # force: bool
-        #     True if the update was forced (through `[p]rss force`), False otherwise.
+        #     True if the update was forced (through `[p]rsspublisher force`), False otherwise.
         self._dispatch_rss_event(
             "aikaternacogs_rss_feed_update",
             "sickcogs_rss_feed_update",

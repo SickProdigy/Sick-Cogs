@@ -5,7 +5,7 @@ from redbot.core import Config
 from .models import migrate_feed_data
 
 CONFIG_IDENTIFIER = 2761331001
-RSS_VERSION = "2.3.0"
+RSS_VERSION = "3.0.0"
 
 def create_config(cog) -> Config:
     """Register the stable RSS configuration schema."""
