@@ -1,413 +1,392 @@
 import asyncio
-import collections
 import datetime
 import logging
 import re
 import time
 import uuid
-from itertools import islice
-from math import ceil, isfinite
-from typing import Dict, List, Literal, Optional, Set
+from dataclasses import dataclass
+from math import isfinite
+from typing import Dict, List, Literal, Optional, Tuple
 
 import discord
 
-from redbot.core import commands, Config
+from redbot.core import Config, commands
 from redbot.core.bot import Red
 from redbot.core.commands import Context
-from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
+from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
 
 
 log = logging.getLogger("red.Sick-Cogs.Reminder")
 
 
+@dataclass
+class ReminderEntry:
+    reminder_id: str
+    content: str
+    created_at: float
+    due_at: float
+    failed_at: Optional[float] = None
+
+    @classmethod
+    def from_raw(cls, raw: object) -> Optional["ReminderEntry"]:
+        if not isinstance(raw, dict):
+            return None
+        content = raw.get("content")
+        created_at = raw.get("start_time")
+        due_at = raw.get("end_time")
+        if not isinstance(content, str) or not content:
+            return None
+        if not ReminderEntry._valid_timestamp(created_at):
+            return None
+        if not ReminderEntry._valid_timestamp(due_at):
+            return None
+        reminder_id = raw.get("id")
+        if not isinstance(reminder_id, str) or not reminder_id:
+            reminder_id = uuid.uuid4().hex
+        failed_at = raw.get("failed_at")
+        if not ReminderEntry._valid_timestamp(failed_at):
+            failed_at = None
+        return cls(reminder_id, content, float(created_at), float(due_at), failed_at)
+
+    @staticmethod
+    def _valid_timestamp(value: object) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+    def to_raw(self) -> dict:
+        raw = {
+            "id": self.reminder_id,
+            "content": self.content,
+            "start_time": self.created_at,
+            "end_time": self.due_at,
+        }
+        if self.failed_at is not None:
+            raw["failed_at"] = self.failed_at
+        return raw
+
+
 class Reminder(commands.Cog):
-    """Utilities to remind yourself of whatever you want"""
+    """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
     __version__ = "1.1.0"
 
-    TIME_AMNT_REGEX = re.compile("([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
-    TIME_QUANTITIES = collections.OrderedDict(
-        [
-            ("seconds", 1),
-            ("minutes", 60),
-            ("hours", 3600),
-            ("days", 86400),
-            ("weeks", 604800),
-            ("months", 2628000),
-            ("years", 31540000),
-        ]
-    )
-    MAX_SECONDS = TIME_QUANTITIES["years"] * 2
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
         "860872570416775575021079665631013972557943647633665882074464969932193856474375"
     )
+    MAX_SECONDS = 63_080_000
+    CHECK_INTERVAL = 3600.0
+    DURATION_PATTERN = re.compile(r"([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
+    DURATION_UNITS: Tuple[Tuple[str, int], ...] = (
+        ("seconds", 1),
+        ("minutes", 60),
+        ("hours", 3600),
+        ("days", 86_400),
+        ("weeks", 604_800),
+        ("months", 2_628_000),
+        ("years", 31_540_000),
+    )
+
+    def __init__(self, bot: Red):
+        self.bot = bot
+        self.config = Config.get_conf(
+            self, identifier=self.CONFIG_IDENTIFIER, force_registration=True
+        )
+        self.config.register_user(reminders=[], invalid_reminders=[], offset=0)
+        self._wake_scheduler = asyncio.Event()
+        self._deleted_users = set()
+        self._scheduler = asyncio.create_task(self._scheduler_loop())
+
+    def cog_unload(self) -> None:
+        self._scheduler.cancel()
 
     async def red_delete_data_for_user(
         self,
         *,
         requester: Literal["discord", "owner", "user", "user_strict"],
         user_id: int,
-    ):
-        self._deleted_user_ids.add(user_id)
-        self._cancel_user_tasks(user_id)
+    ) -> None:
+        self._deleted_users.add(user_id)
         await self.config.user_from_id(user_id).clear()
+        self._wake_scheduler.set()
 
-    def __init__(self, bot: Red):
-        super().__init__()
-        self.bot = bot
-        self.config = Config.get_conf(
-            self, identifier=self.CONFIG_IDENTIFIER, force_registration=True
-        )
-        self.config.register_user(reminders=[], invalid_reminders=[], offset=0)
-        self.futures: Dict[int, Dict[str, asyncio.Task]] = {}
-        self._deleted_user_ids: Set[int] = set()
-        self._startup_task = asyncio.create_task(self.start_saved_reminders())
-
-    def cog_unload(self):
-        self._startup_task.cancel()
-        for user_id in list(self.futures):
-            self._cancel_user_tasks(user_id)
-
-    @commands.group(invoke_without_command=True, aliases=["remindme"], name="remind")
-    async def command_remind(self, ctx: Context, time: str, *, reminder_text: str):
-        """
-        Remind yourself of something in a specific amount of time
-
-        Examples for time: `5d`, `10m`, `10m30s`, `1h`, `1y1mo2w5d10h30m15s`
-        Abbreviations: `s` for seconds, `m` for minutes, `h` for hours, `d` for days, `w` for weeks, `mo` for months, `y` for years
-        Any longer abbreviation is accepted. `m` assumes minutes instead of months.
-        One month is counted as exact 365/12 days.
-        Ignores all invalid abbreviations.
-        """
-        seconds = self.get_seconds(time)
+    @commands.group(name="remind", aliases=["remindme"], invoke_without_command=True)
+    async def remind(self, ctx: Context, duration: str, *, text: str) -> None:
+        """Create a reminder. Durations may be combined, for example `1h30m`."""
+        seconds = self.parse_duration(duration)
         if seconds is None:
-            response = ":x: Invalid time format."
-        elif seconds > self.MAX_SECONDS:
-            response = ":x: Too long amount of time. Maximum: 2 years"
-        else:
-            user = ctx.message.author
-            self._deleted_user_ids.discard(user.id)
-            time_now = datetime.datetime.now(datetime.timezone.utc)
-            days, secs = divmod(seconds, 3600 * 24)
-            end_time = time_now + datetime.timedelta(days=days, seconds=secs)
-            reminder = {
-                "id": uuid.uuid4().hex,
-                "content": reminder_text,
-                "start_time": time_now.timestamp(),
-                "end_time": end_time.timestamp(),
-            }
-            async with self.config.user(user).reminders() as user_reminders:
-                user_reminders.append(reminder)
-            self._schedule_reminder(user, reminder)
-            user_offset = await self.config.user(ctx.author).offset()
-            if seconds > 86400:
-                formatted_time = self.format_absolute_time(end_time.timestamp(), user_offset)
-                response = f":white_check_mark: I will remind you of that on {formatted_time}."
-            else:
-                duration = self.time_from_seconds(seconds)
-                response = f":white_check_mark: I will remind you of that in {duration}."
-        await ctx.send(response)
-
-    @command_remind.group(name="forget")
-    async def command_remind_forget(self, ctx: Context):
-        """Forget your reminders"""
-        pass
-
-    @command_remind_forget.command(name="all")
-    async def command_remind_forget_all(self, ctx: Context):
-        """Forget **all** of your reminders"""
-        self._cancel_user_tasks(ctx.message.author.id)
-        user_config = self.config.user(ctx.message.author)
-        async with user_config.reminders() as user_reminders:
-            user_reminders.clear()
-        await user_config.invalid_reminders.clear()
-        await ctx.send(":put_litter_in_its_place: Forgot **all** of your reminders!")
-
-    @command_remind_forget.command(name="one")
-    async def command_remind_forget_one(self, ctx: Context, index_number_of_reminder: int):
-        """
-        Forget one of your reminders
-
-        Use `[p]remind list` to find the index number of the reminder you wish to forget.
-        """
-        async with self.config.user(ctx.message.author).all() as user_data:
-            if not user_data["reminders"]:
-                await ctx.send("You don't have any reminders saved.")
-                return
-            time_sorted_reminders = sorted(user_data["reminders"], key=lambda x: (x["end_time"]))
-            if not 1 <= index_number_of_reminder <= len(time_sorted_reminders):
-                await ctx.send(f"There is no reminder at index {index_number_of_reminder}.")
-                return
-            removed = time_sorted_reminders.pop(index_number_of_reminder - 1)
-            user_data["reminders"] = time_sorted_reminders
-            reminder_id = removed.get("id")
-            if reminder_id:
-                task = self.futures.get(ctx.author.id, {}).pop(reminder_id, None)
-                if task is not None:
-                    task.cancel()
-            end_time = self.format_absolute_time(removed["end_time"], user_data["offset"])
-            msg = f":put_litter_in_its_place: Forgot reminder **#{index_number_of_reminder}**\n"
-            msg += f"Date: {end_time}\nContent: `{removed['content']}`"
-            await ctx.send(msg)
-
-    @command_remind.command(name="list")
-    async def command_remind_list(self, ctx: Context):
-        """List your reminders"""
-        user_data = await self.config.user(ctx.message.author).all()
-        if not user_data["reminders"]:
-            await ctx.send("There are no reminders to show.")
+            await ctx.send(":x: Invalid time format.")
+            return
+        if seconds > self.MAX_SECONDS:
+            await ctx.send(":x: Too long amount of time. Maximum: 2 years")
             return
 
-        if not ctx.channel.permissions_for(ctx.me).embed_links:
-            return await ctx.send(
-                "I need the `Embed Messages` permission here to display this information."
-            )
+        now = time.time()
+        entry = ReminderEntry(uuid.uuid4().hex, text, now, now + seconds)
+        self._deleted_users.discard(ctx.author.id)
+        async with self.config.user(ctx.author).reminders() as saved:
+            saved.append(entry.to_raw())
+        self._wake_scheduler.set()
 
-        embed_pages = await self.create_remind_list_embeds(ctx, user_data)
-        await ctx.send(embed=embed_pages[0]) if len(embed_pages) == 1 else await menu(
-            ctx, embed_pages, DEFAULT_CONTROLS
-        )
-
-    @command_remind.command(name="offset")
-    async def command_remind_offset(self, ctx: Context, offset_time_in_hours: str):
-        """
-        Set a basic timezone offset
-        from the default of UTC for use in [p]remindme list.
-
-        This command accepts number values from `-23.75` to `+23.75`.
-        You can look up your timezone offset on https://en.wikipedia.org/wiki/List_of_UTC_offsets
-        """
-        offset = self.remind_offset_check(offset_time_in_hours)
-        if offset is not None:
-            await self.config.user(ctx.author).offset.set(offset)
-            offset_text = str(offset).replace(".0", "")
-            await ctx.send(f"Your timezone offset was set to {offset_text} hours from UTC.")
+        if seconds > 86_400:
+            offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
+            due_text = self.format_due_time(entry.due_at, offset)
+            await ctx.send(f":white_check_mark: I will remind you of that on {due_text}.")
         else:
             await ctx.send(
+                f":white_check_mark: I will remind you of that in {self.describe_duration(seconds)}."
+            )
+
+    @remind.group(name="forget")
+    async def remind_forget(self, ctx: Context) -> None:
+        """Remove pending reminders."""
+
+    @remind_forget.command(name="all")
+    async def remind_forget_all(self, ctx: Context) -> None:
+        """Remove all of your pending and quarantined reminders."""
+        user_config = self.config.user(ctx.author)
+        await user_config.reminders.clear()
+        await user_config.invalid_reminders.clear()
+        self._wake_scheduler.set()
+        await ctx.send(":put_litter_in_its_place: Forgot **all** of your reminders!")
+
+    @remind_forget.command(name="one")
+    async def remind_forget_one(self, ctx: Context, number: int) -> None:
+        """Remove one reminder by its number from `[p]remind list`."""
+        async with self.config.user(ctx.author).all() as user_data:
+            entries = self._valid_entries(user_data.get("reminders", []))
+            entries.sort(key=lambda entry: entry.due_at)
+            if not 1 <= number <= len(entries):
+                await ctx.send(f"There is no reminder at index {number}.")
+                return
+            removed = entries.pop(number - 1)
+            user_data["reminders"] = [entry.to_raw() for entry in entries]
+            offset = self.validate_offset(user_data.get("offset")) or 0.0
+
+        self._wake_scheduler.set()
+        due_text = self.format_due_time(removed.due_at, offset)
+        await ctx.send(
+            f":put_litter_in_its_place: Forgot reminder **#{number}**\n"
+            f"Date: {due_text}\nContent: `{removed.content}`"
+        )
+
+    @remind.command(name="list")
+    async def remind_list(self, ctx: Context) -> None:
+        """List your pending reminders."""
+        user_data = await self.config.user(ctx.author).all()
+        entries = self._valid_entries(user_data.get("reminders", []))
+        if not entries:
+            await ctx.send("There are no reminders to show.")
+            return
+        if not ctx.channel.permissions_for(ctx.me).embed_links:
+            await ctx.send("I need the `Embed Messages` permission here to display reminders.")
+            return
+
+        offset = self.validate_offset(user_data.get("offset")) or 0.0
+        pages = self.build_list_pages(ctx.author, entries, offset)
+        if len(pages) == 1:
+            await ctx.send(embed=pages[0])
+        else:
+            await menu(ctx, pages, DEFAULT_CONTROLS)
+
+    @remind.command(name="offset")
+    async def remind_offset(self, ctx: Context, hours: str) -> None:
+        """Set a UTC offset from -23.75 through +23.75 for calendar displays."""
+        offset = self.validate_offset(hours)
+        if offset is None:
+            await ctx.send(
                 f"That doesn't seem like a valid hour offset. "
-                f"Check `{ctx.prefix}help remind offset`."
+                f"Check `{ctx.clean_prefix}help remind offset`."
             )
+            return
+        await self.config.user(ctx.author).offset.set(offset)
+        await ctx.send(f"Your timezone offset was set to {offset:g} hours from UTC.")
 
-    @staticmethod
-    async def chunker(items: List[dict], chunk_size: int) -> List[List[dict]]:
-        chunk_list = []
-        iterator = iter(items)
-        while chunk := list(islice(iterator, chunk_size)):
-            chunk_list.append(chunk)
-        return chunk_list
+    async def _scheduler_loop(self) -> None:
+        await self.bot.wait_until_red_ready()
+        await self._normalize_saved_data()
+        while True:
+            try:
+                self._wake_scheduler.clear()
+                await self._deliver_due_reminders()
+                delay = await self._next_check_delay()
+                await asyncio.wait_for(self._wake_scheduler.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("Unexpected error in the Reminder scheduler")
+                await asyncio.sleep(30)
 
-    async def create_remind_list_embeds(self, ctx: Context, user_data: dict) -> List[discord.Embed]:
-        """Embed creator for command_remind_list."""
-        offset = user_data["offset"]
-        reminder_list = []
-        time_sorted_reminders = sorted(user_data["reminders"], key=lambda x: (x["end_time"]))
-        entry_size = len(str(len(time_sorted_reminders)))
+    async def _normalize_saved_data(self) -> None:
+        users = await self.config.all_users()
+        for user_id, snapshot in users.items():
+            if user_id in self._deleted_users:
+                continue
+            raw_reminders = snapshot.get("reminders", [])
+            malformed = []
+            if not isinstance(raw_reminders, list):
+                malformed.append(raw_reminders)
+                raw_reminders = []
+            entries = []
+            for raw in raw_reminders:
+                entry = ReminderEntry.from_raw(raw)
+                if entry is None:
+                    malformed.append(raw)
+                else:
+                    entries.append(entry)
+            user_config = self.config.user_from_id(user_id)
+            if malformed:
+                quarantined = snapshot.get("invalid_reminders", [])
+                if not isinstance(quarantined, list):
+                    quarantined = [quarantined]
+                await user_config.invalid_reminders.set(quarantined + malformed)
+            normalized = [entry.to_raw() for entry in entries]
+            if normalized != raw_reminders:
+                await user_config.reminders.set(normalized)
+            if user_id in self._deleted_users:
+                await user_config.clear()
 
-        for i, reminder_dict in enumerate(time_sorted_reminders, 1):
-            entry_number = f"{str(i).zfill(entry_size)}"
-            end_time = reminder_dict["end_time"]
-            exact_time_timestamp = self.format_absolute_time(end_time, offset)
-            relative_timestamp = f"<t:{round(end_time)}:R>"
-            content = reminder_dict["content"]
-            display_content = content if len(content) < 200 else f"{content[:200]} [...]"
-            failure_note = (
-                " **Delivery failed; remove or recreate this reminder.**"
-                if reminder_dict.get("failed_at")
-                else ""
-            )
-            reminder = (
-                f"`{entry_number}`. {exact_time_timestamp}, {relative_timestamp}"
-                f"{failure_note}:\n{display_content}\n\n"
-            )
-            reminder_list.append(reminder)
+    async def _deliver_due_reminders(self) -> None:
+        now = time.time()
+        users = await self.config.all_users()
+        for user_id, snapshot in users.items():
+            if user_id in self._deleted_users:
+                continue
+            entries = self._valid_entries(snapshot.get("reminders", []))
+            due = [entry for entry in entries if entry.failed_at is None and entry.due_at <= now]
+            if not due:
+                continue
+            user = self.bot.get_user(user_id)
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except (discord.NotFound, discord.HTTPException) as exc:
+                    log.warning("Could not fetch reminder user %s: %s", user_id, exc)
+                    await self._mark_failed(user_id, due, now)
+                    continue
+            for entry in due:
+                await self._deliver_one(user, entry)
 
-        reminder_text_chunks = await self.chunker(reminder_list, 7)
-        max_pages = ceil(len(reminder_list) / 7)
-        offset_hours = str(user_data["offset"]).replace(".0", "")
-        offset_text = f" • UTC offset of {offset_hours}h applied" if offset != 0 else ""
-        menu_pages = []
-        for chunk in reminder_text_chunks:
-            embed = discord.Embed(title="", description="".join(chunk))
-            embed.set_author(
-                name=f"Reminders for {ctx.author}", icon_url=ctx.author.display_avatar.url
-            )
-            embed.set_footer(text=f"Page {len(menu_pages) + 1} of {max_pages}{offset_text}")
-            menu_pages.append(embed)
-        return menu_pages
-
-    def get_seconds(self, time: str):
-        """Returns the amount of converted time or None if invalid"""
-        seconds = 0
-        for time_match in self.TIME_AMNT_REGEX.finditer(time):
-            time_amnt = int(time_match.group(1))
-            time_abbrev = time_match.group(2)
-            time_quantity = discord.utils.find(
-                lambda item: item[0].startswith(time_abbrev), self.TIME_QUANTITIES.items()
-            )
-            if time_quantity is not None:
-                seconds += time_amnt * time_quantity[1]
-        return None if seconds == 0 else seconds
-
-    def _cancel_user_tasks(self, user_id: int) -> None:
-        for task in self.futures.pop(user_id, {}).values():
-            task.cancel()
-
-    def _schedule_reminder(self, user: discord.User, reminder: dict) -> None:
-        reminder_id = reminder["id"]
-        existing = self.futures.setdefault(user.id, {}).pop(reminder_id, None)
-        if existing is not None:
-            existing.cancel()
-        task = asyncio.create_task(self.remind_later(user, reminder))
-        self.futures[user.id][reminder_id] = task
-
-        def discard_finished(finished: asyncio.Task) -> None:
-            user_tasks = self.futures.get(user.id)
-            if user_tasks is not None and user_tasks.get(reminder_id) is finished:
-                user_tasks.pop(reminder_id, None)
-                if not user_tasks:
-                    self.futures.pop(user.id, None)
-
-        task.add_done_callback(discard_finished)
-
-    async def remind_later(self, user: discord.User, reminder: dict) -> None:
-        """Deliver a saved reminder once its UTC timestamp is due."""
-        delay = max(0.0, reminder["end_time"] - time.time())
-        await asyncio.sleep(delay)
+    async def _deliver_one(self, user: discord.User, entry: ReminderEntry) -> None:
         embed = discord.Embed(
-            title="Reminder", description=reminder["content"], color=discord.Colour.blue()
+            title="Reminder", description=entry.content, color=discord.Colour.blue()
         )
         try:
             await user.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException) as exc:
-            log.warning(
-                "Could not deliver reminder %s to user %s: %s",
-                reminder["id"],
-                user.id,
-                exc,
-            )
-            async with self.config.user(user).reminders() as user_reminders:
-                for saved in user_reminders:
-                    if isinstance(saved, dict) and saved.get("id") == reminder["id"]:
-                        saved["failed_at"] = time.time()
-                        break
+            log.warning("Could not deliver reminder %s to user %s: %s", entry.reminder_id, user.id, exc)
+            await self._mark_failed(user.id, [entry], time.time())
             return
-        async with self.config.user(user).reminders() as user_reminders:
-            user_reminders[:] = [
-                saved
-                for saved in user_reminders
-                if not isinstance(saved, dict) or saved.get("id") != reminder["id"]
+        async with self.config.user(user).reminders() as saved:
+            saved[:] = [
+                raw
+                for raw in saved
+                if not isinstance(raw, dict) or raw.get("id") != entry.reminder_id
             ]
 
+    async def _mark_failed(
+        self, user_id: int, entries: List[ReminderEntry], failed_at: float
+    ) -> None:
+        failed_ids = {entry.reminder_id for entry in entries}
+        async with self.config.user_from_id(user_id).reminders() as saved:
+            for raw in saved:
+                if isinstance(raw, dict) and raw.get("id") in failed_ids:
+                    raw["failed_at"] = failed_at
+
+    async def _next_check_delay(self) -> float:
+        now = time.time()
+        next_due = None
+        for snapshot in (await self.config.all_users()).values():
+            for entry in self._valid_entries(snapshot.get("reminders", [])):
+                if entry.failed_at is not None:
+                    continue
+                next_due = entry.due_at if next_due is None else min(next_due, entry.due_at)
+        if next_due is None:
+            return self.CHECK_INTERVAL
+        return max(0.05, min(self.CHECK_INTERVAL, next_due - now))
+
     @staticmethod
-    def remind_offset_check(offset: str) -> Optional[float]:
-        """Float validator for command_remind_offset."""
+    def _valid_entries(raw_entries: object) -> List[ReminderEntry]:
+        if not isinstance(raw_entries, list):
+            return []
+        return [entry for raw in raw_entries if (entry := ReminderEntry.from_raw(raw))]
+
+    @classmethod
+    def parse_duration(cls, value: str) -> Optional[int]:
+        seconds = 0
+        for match in cls.DURATION_PATTERN.finditer(value):
+            amount = int(match.group(1))
+            abbreviation = match.group(2).lower()
+            unit = next(
+                (multiplier for name, multiplier in cls.DURATION_UNITS if name.startswith(abbreviation)),
+                None,
+            )
+            if unit is not None:
+                seconds += amount * unit
+        return seconds or None
+
+    @staticmethod
+    def validate_offset(value: object) -> Optional[float]:
         try:
-            offset = float(offset)
-        except ValueError:
+            offset = float(value)
+        except (TypeError, ValueError):
             return None
         if not isfinite(offset) or not -23.75 <= offset <= 23.75:
             return None
         return round(offset * 4) / 4.0
 
     @staticmethod
-    def format_absolute_time(timestamp: float, offset: float) -> str:
+    def format_due_time(timestamp: float, offset: float) -> str:
         if offset == 0:
             return f"<t:{round(timestamp)}:F>"
         local_time = datetime.datetime.fromtimestamp(
             timestamp, tz=datetime.timezone.utc
         ) + datetime.timedelta(hours=offset)
         sign = "+" if offset >= 0 else "-"
-        absolute_offset = abs(offset)
-        hours = int(absolute_offset)
-        minutes = round((absolute_offset - hours) * 60)
-        return f"{local_time:%Y-%m-%d %H:%M} (UTC{sign}{hours:02d}:{minutes:02d})"
+        absolute = abs(offset)
+        offset_hours = int(absolute)
+        offset_minutes = round((absolute - offset_hours) * 60)
+        return (
+            f"{local_time:%Y-%m-%d %H:%M} "
+            f"(UTC{sign}{offset_hours:02d}:{offset_minutes:02d})"
+        )
 
     @staticmethod
-    def normalize_reminder(reminder: object) -> Optional[dict]:
-        if not isinstance(reminder, dict):
-            return None
-        content = reminder.get("content")
-        start_time = reminder.get("start_time")
-        end_time = reminder.get("end_time")
-        if not isinstance(content, str) or not content:
-            return None
-        if not isinstance(start_time, (int, float)) or not isfinite(start_time):
-            return None
-        if not isinstance(end_time, (int, float)) or not isfinite(end_time):
-            return None
-        reminder_id = reminder.get("id")
-        if not isinstance(reminder_id, str) or not reminder_id:
-            reminder_id = uuid.uuid4().hex
-        normalized = {
-            "id": reminder_id,
-            "content": content,
-            "start_time": float(start_time),
-            "end_time": float(end_time),
-        }
-        failed_at = reminder.get("failed_at")
-        if isinstance(failed_at, (int, float)) and isfinite(failed_at):
-            normalized["failed_at"] = float(failed_at)
-        return normalized
-
-    async def start_saved_reminders(self) -> None:
-        await self.bot.wait_until_red_ready()
-        user_configs = await self.config.all_users()
-        for user_id, user_config in list(user_configs.items()):
-            if user_id in self._deleted_user_ids:
-                continue
-            raw_reminders = user_config.get("reminders", [])
-            if isinstance(raw_reminders, list):
-                saved_reminders = raw_reminders
-                malformed = []
-            else:
-                saved_reminders = []
-                malformed = [raw_reminders]
-            reminders = []
-            for saved in saved_reminders:
-                normalized = self.normalize_reminder(saved)
-                if normalized is None:
-                    malformed.append(saved)
-                else:
-                    reminders.append(normalized)
-            if malformed:
-                quarantined = user_config.get("invalid_reminders", [])
-                if not isinstance(quarantined, list):
-                    quarantined = []
-                await self.config.user_from_id(user_id).invalid_reminders.set(
-                    quarantined + malformed
-                )
-            if reminders != saved_reminders:
-                await self.config.user_from_id(user_id).reminders.set(reminders)
-            if user_id in self._deleted_user_ids:
-                await self.config.user_from_id(user_id).clear()
-                continue
-            active_reminders = [r for r in reminders if "failed_at" not in r]
-            if not active_reminders:
-                continue
-            user = self.bot.get_user(user_id)
-            if user is None:
-                try:
-                    user = await self.bot.fetch_user(user_id)
-                except (discord.NotFound, discord.HTTPException):
-                    log.warning("Could not fetch user %s while restoring reminders", user_id)
-                    continue
-            for reminder in active_reminders:
-                self._schedule_reminder(user, reminder)
-
-    @staticmethod
-    def time_from_seconds(seconds: int) -> str:
+    def describe_duration(seconds: int) -> str:
         hours, remainder = divmod(seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
+        parts = []
         if hours:
-            msg = f"{hours} hour" if hours == 1 else f"{hours} hours"
-            if minutes != 0:
-                msg += f" and {minutes} minute" if minutes == 1 else f" and {minutes} minutes"
-        elif minutes:
-            msg = f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
-            if seconds != 0:
-                msg += f" and {seconds} second" if seconds == 1 else f" and {seconds} seconds"
-        else:
-            msg = f"{seconds} second" if seconds == 1 else f"{seconds} seconds"
-        return msg
+            parts.append(f"{hours} hour" if hours == 1 else f"{hours} hours")
+        if minutes:
+            parts.append(f"{minutes} minute" if minutes == 1 else f"{minutes} minutes")
+        if seconds or not parts:
+            parts.append(f"{seconds} second" if seconds == 1 else f"{seconds} seconds")
+        return " and ".join(parts)
+
+    @classmethod
+    def build_list_pages(
+        cls, author: discord.abc.User, entries: List[ReminderEntry], offset: float
+    ) -> List[discord.Embed]:
+        entries.sort(key=lambda entry: entry.due_at)
+        rows = []
+        width = len(str(len(entries)))
+        for number, entry in enumerate(entries, 1):
+            failed = " **Delivery failed; remove or recreate.**" if entry.failed_at else ""
+            content = entry.content if len(entry.content) <= 200 else f"{entry.content[:200]} […]"
+            rows.append(
+                f"`{number:0{width}}`. {cls.format_due_time(entry.due_at, offset)}, "
+                f"<t:{round(entry.due_at)}:R>{failed}:\n{content}\n\n"
+            )
+
+        pages = []
+        chunks = [rows[index : index + 7] for index in range(0, len(rows), 7)]
+        offset_note = f" • UTC offset {offset:g}h" if offset else ""
+        for page_number, chunk in enumerate(chunks, 1):
+            embed = discord.Embed(description="".join(chunk))
+            embed.set_author(name=f"Reminders for {author}", icon_url=author.display_avatar.url)
+            embed.set_footer(text=f"Page {page_number} of {len(chunks)}{offset_note}")
+            pages.append(embed)
+        return pages
