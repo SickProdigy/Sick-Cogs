@@ -9,7 +9,11 @@ from redbot.core import commands
 from .utils import OSRS_SKILLS, RS3_SKILLS, clean_extract, parse_hiscores, wiki_page_url
 
 log = logging.getLogger("red.Sick-Cogs.RuneScape")
-USER_AGENT = "Sick-Cogs RuneScape cog/1.0 (https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+RUNESCAPE_VERSION = "1.0.1"
+USER_AGENT = (
+    f"Sick-Cogs-RuneScape/{RUNESCAPE_VERSION} "
+    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/runescape)"
+)
 OSRS_HISCORES = "https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws"
 RS3_HISCORES = "https://secure.runescape.com/m=hiscore/index_lite.ws"
 WIKIS = {
