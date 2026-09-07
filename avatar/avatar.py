@@ -8,7 +8,7 @@ class Avatar(commands.Cog):
     """Get user's avatar URL."""
 
     __author__ = ["SickProdigy", "skeith"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -28,6 +28,6 @@ class Avatar(commands.Cog):
         """
         user = user or ctx.author
 
-        url = user.display_avatar.with_static_format("png")
+        url = user.display_avatar.url
 
         await ctx.send(f"{user}'s avatar URL: {url}")
