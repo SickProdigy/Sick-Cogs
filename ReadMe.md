@@ -23,10 +23,16 @@ Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 These folders may be used for testing, learning, or local customization before they become maintained Sick-Cogs:
 
 - `assistant`
+- `avatar`
+- `cleverbot`
 - `dadjokes`
 - `dictionary`
+- `giveaways`
+- `imgflip`
+- `nsfw`
 - `reminder`
 - `rlstats`
+- `roletools`
 - `welcome`
 - `wolfram`
 
