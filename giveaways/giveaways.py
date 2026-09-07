@@ -116,7 +116,9 @@ class Giveaways(commands.Cog):
             log.debug(f"Checking giveaway {msgid} with end time {giveaway.endtime}...")
             if giveaway.endtime < utcnow():
                 log.debug(f"Drawing winner for giveaway {msgid}")
-                await self.draw_winner(giveaway)
+                completed = await self.draw_winner(giveaway)
+                if not completed:
+                    continue
                 to_clear.append(msgid)
                 gw = await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(msgid)).all()
                 gw["ended"] = True
@@ -128,10 +130,10 @@ class Giveaways(commands.Cog):
     async def draw_winner(self, giveaway: Giveaway):
         guild = self.bot.get_guild(giveaway.guildid)
         if guild is None:
-            return
+            return False
         channel_obj = guild.get_channel(giveaway.channelid)
         if channel_obj is None:
-            return
+            return False
 
         valid_members = {
             user_id: guild.get_member(user_id) for user_id in set(giveaway.entrants)
@@ -176,7 +178,7 @@ class Giveaways(commands.Cog):
             await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(giveaway.messageid)).set(
                 gw
             )
-            return
+            return True
         if giveaway.kwargs.get("announce"):
             announce_embed = discord.Embed(
                 title="Giveaway Ended",
@@ -212,7 +214,7 @@ class Giveaways(commands.Cog):
         gw["ended"] = True
         gw["winning_users"] = [x.id for x in winner_objs] if winner_objs is not None else []
         await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(giveaway.messageid)).set(gw)
-        return
+        return True
 
     @commands.hybrid_group(aliases=["gw"])
     @commands.bot_has_permissions(add_reactions=True, embed_links=True)
@@ -296,8 +298,10 @@ class Giveaways(commands.Cog):
                 f"Giveaway already running. Please wait for it to end or end it via `{ctx.clean_prefix}gw end {msgid}`."
             )
         giveaway = Giveaway.from_dict(data[str(msgid)])
-        await self.draw_winner(giveaway)
-        await ctx.tick()
+        if await self.draw_winner(giveaway):
+            await ctx.tick()
+        else:
+            await ctx.send("The giveaway channel is temporarily unavailable.")
 
     @giveaway.command()
     @commands.has_permissions(manage_guild=True)
@@ -307,7 +311,8 @@ class Giveaways(commands.Cog):
         if msgid in self.giveaways:
             if self.giveaways[msgid].guildid != ctx.guild.id:
                 return await ctx.send("Giveaway not found.")
-            await self.draw_winner(self.giveaways[msgid])
+            if not await self.draw_winner(self.giveaways[msgid]):
+                return await ctx.send("The giveaway channel is temporarily unavailable.")
             self.giveaways.pop(msgid, None)
             self.entry_locks.pop(msgid, None)
             gw = await self.config.custom(GIVEAWAY_KEY, ctx.guild.id, str(msgid)).all()
