@@ -6,8 +6,8 @@ Moderators can start simple giveaways or advanced giveaways with custom embeds, 
 
 ## Commands
 
-- `[p]giveaway start [#channel] <time> <prize>` - Start a basic giveaway. Alias: `[p]gw start`.
-- `[p]giveaway advanced <flags>` - Start an advanced giveaway. Alias: `[p]gw adv`.
+- `[p]giveaway start [#channel] <time> <prize>` - Start a basic giveaway. Aliases: `[p]gw start`, `[p]giveaways start`.
+- `[p]giveaway advanced <flags>` - Start an advanced giveaway. Aliases: `[p]gw adv`, `[p]giveaways adv`.
 - `[p]giveaway end <message_id>` - End a running giveaway and draw winners.
 - `[p]giveaway reroll <message_id>` - Draw new winners for a completed giveaway.
 - `[p]giveaway cancel <message_id>` - Cancel an active giveaway without drawing a winner.

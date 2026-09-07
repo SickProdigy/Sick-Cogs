@@ -24,7 +24,7 @@ GIVEAWAY_KEY = "giveaways"
 class Giveaways(commands.Cog):
     """Giveaway Commands"""
 
-    __version__ = "1.6.0"
+    __version__ = "1.6.1"
     __author__ = ["SickProdigy", "flaree"]
 
     def format_help_for_context(self, ctx):
@@ -216,7 +216,7 @@ class Giveaways(commands.Cog):
         await self.config.custom(GIVEAWAY_KEY, giveaway.guildid, str(giveaway.messageid)).set(gw)
         return True
 
-    @commands.hybrid_group(aliases=["gw"])
+    @commands.hybrid_group(aliases=["gw", "giveaways"])
     @commands.bot_has_permissions(add_reactions=True, embed_links=True)
     @commands.has_permissions(manage_guild=True)
     async def giveaway(self, ctx: commands.Context):
