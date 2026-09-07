@@ -1,7 +1,8 @@
 import argparse
+import shlex
 from datetime import datetime, timezone
 
-import dateparser
+from dateutil import parser as date_parser
 from discord.ext.commands.converter import (
     ColourConverter,
     EmojiConverter,
@@ -21,6 +22,9 @@ class NoExitParser(argparse.ArgumentParser):
 
 
 class Args(Converter):
+    require_prize = True
+    require_time = True
+
     async def convert(self, ctx, argument):
         argument = argument.replace("—", "--")
         parser = NoExitParser(description="Giveaway Created", add_help=False)
@@ -63,38 +67,32 @@ class Args(Converter):
         parser.add_argument("--show-requirements", action="store_true")
         parser.add_argument("--update-button", action="store_true")
 
-        # Integrations
+        # Core entry options
         parser.add_argument("--cost", dest="cost", default=None, type=int, nargs="?")
-        parser.add_argument("--level-req", dest="levelreq", default=None, type=int, nargs="?")
-        parser.add_argument("--levelup-req", dest="levelupreq", default=None, type=int, nargs="?")
-        parser.add_argument("--rep-req", dest="repreq", default=None, type=int, nargs="?")
-        parser.add_argument("--tatsu-level", default=None, type=int, nargs="?")
-        parser.add_argument("--tatsu-rep", default=None, type=int, nargs="?")
-        parser.add_argument("--mee6-level", default=None, type=int, nargs="?")
-        parser.add_argument("--amari-level", default=None, type=int, nargs="?")
-        parser.add_argument("--amari-weekly-xp", default=None, type=int, nargs="?")
 
         try:
-            vals = vars(parser.parse_args(argument.split(" ")))
+            vals = vars(parser.parse_args(shlex.split(argument)))
         except Exception as error:
             raise BadArgument(
                 "Could not parse flags correctly, ensure flags are correctly used."
             ) from error
 
-        if not vals["prize"]:
+        if self.require_prize and not vals["prize"]:
             raise BadArgument("You must specify a prize. Use `--prize` or `-p`")  #
 
-        if not any([vals["duration"], vals["end"]]):
+        if self.require_time and not any([vals["duration"], vals["end"]]):
             raise BadArgument(
                 "You must specify a duration or end date. Use `--duration` or `-d` or `--end` or `-e`"
             )
 
-        nums = [vals["cost"], vals["joined"], vals["created"], vals["winners"]]
+        nums = [vals["cost"], vals["joined"], vals["created"], vals["winners"], vals["multi"]]
         for val in nums:
             if val is None:
                 continue
             if val < 1:
                 raise BadArgument("Number must be greater than 0")
+        if vals["multi"] is not None and vals["multi"] > 100:
+            raise BadArgument("Multiplier cannot be greater than 100")
 
         valid_multi_roles = []
         for role in vals["multi-roles"]:
@@ -153,34 +151,6 @@ class Args(Converter):
             except BadArgument:
                 raise BadArgument("Invalid channel.")
 
-        if vals["levelreq"] or vals["repreq"]:
-            cog = ctx.bot.get_cog("Leveler")
-            if not cog:
-                raise BadArgument("Leveler cog not loaded.")
-            if not hasattr(cog, "db"):
-                raise BadArgument(
-                    "This may be the wrong leveling cog. Ensure you are using Fixators."
-                )
-
-        if vals["levelupreq"]:
-            cog = ctx.bot.get_cog("LevelUp")
-            if not cog:
-                raise BadArgument("LevelUp cog not loaded.")
-
-        if vals["tatsu_level"] or vals["tatsu_rep"]:
-            token = await ctx.bot.get_shared_api_tokens("tatsumaki")
-            if not token.get("authorization"):
-                raise BadArgument(
-                    f"You do not have a valid Tatsumaki API token. Check `{ctx.clean_prefix}gw integrations` for more info."
-                )
-
-        if vals["amari_level"] or vals["amari_weekly_xp"]:
-            token = await ctx.bot.get_shared_api_tokens("amari")
-            if not token.get("authorization"):
-                raise BadArgument(
-                    f"You do not have a valid Amari API token. Check `{ctx.clean_prefix}gw integrations` for more info."
-                )
-
         if (vals["multi"] or vals["multi-roles"]) and not (vals["multi"] and vals["multi-roles"]):
             raise BadArgument(
                 "You must specify a multiplier and roles. Use `--multiplier` or `-m` and `--multi-roles` or `-mr`"
@@ -226,7 +196,7 @@ class Args(Converter):
         if vals["colour"]:
             vals["colour"] = " ".join(vals["colour"]).lower()
             try:
-                vals["colour"] = await ColourConverter().convert(ctx, vals["colour"])
+                vals["colour"] = (await ColourConverter().convert(ctx, vals["colour"])).value
             except Exception:
                 raise BadArgument("Invalid colour.")
 
@@ -257,9 +227,9 @@ class Args(Converter):
             else:
                 if duration.total_seconds() < 60:
                     raise BadArgument("Duration must be greater than 60 seconds.")
-        else:
+        elif vals["end"]:
             try:
-                time = dateparser.parse(" ".join(vals["end"]))
+                time = date_parser.parse(" ".join(vals["end"]))
                 if time.tzinfo is None:
                     time = time.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) > time:
@@ -272,6 +242,13 @@ class Args(Converter):
                 raise BadArgument(
                     "Invalid end date. Use `--end` or `-e`. Ensure to pass a timezone, otherwise it defaults to UTC."
                 )
+        else:
+            vals["duration"] = None
         vals["image"] = " ".join(vals["image"]) if vals["image"] else None
         vals["thumbnail"] = " ".join(vals["thumbnail"]) if vals["thumbnail"] else None
         return vals
+
+
+class EditArgs(Args):
+    require_prize = False
+    require_time = False

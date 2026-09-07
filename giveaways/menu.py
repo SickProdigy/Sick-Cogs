@@ -1,9 +1,9 @@
+import asyncio
 import logging
-
 import discord
-from discord.ui import Button, Modal, TextInput, View
+from discord.ui import Button, View
 
-from .objects import AlreadyEnteredError, GiveawayEnterError, GiveawayExecError
+from .objects import AlreadyEnteredError, GiveawayEnterError
 
 log = logging.getLogger("red.Sick-Cogs.Giveaways")
 
@@ -41,36 +41,52 @@ class GiveawayButton(Button):
         self.cog = cog
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.message.id in self.cog.giveaways:
-            giveaway = self.cog.giveaways[interaction.message.id]
-            await interaction.response.defer()
+        giveaway = self.cog.giveaways.get(interaction.message.id)
+        if giveaway is None:
+            await interaction.response.send_message(
+                "This giveaway is no longer active.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        lock = self.cog.entry_locks.setdefault(interaction.message.id, asyncio.Lock())
+        async with lock:
+            giveaway = self.cog.giveaways.get(interaction.message.id)
+            if giveaway is None:
+                await interaction.followup.send(
+                    "This giveaway is no longer active.", ephemeral=True
+                )
+                return
             try:
                 await giveaway.add_entrant(interaction.user, cog=self.cog)
-            except GiveawayEnterError as e:
-                await interaction.followup.send(e.message, ephemeral=True)
-                return
-            except GiveawayExecError as e:
-                log.exception("Error while adding user to giveaway", exc_info=e)
+            except GiveawayEnterError as exc:
+                await interaction.followup.send(exc.message, ephemeral=True)
                 return
             except AlreadyEnteredError:
-                await interaction.followup.send("You are already in the giveaway.", ephemeral=True)
+                await interaction.followup.send(
+                    "You are already in the giveaway.", ephemeral=True
+                )
                 return
-            await self.update_entrant(giveaway, interaction)
-            await interaction.followup.send(
-                f"You have been entered into the giveaway for {giveaway.prize}.",
-                ephemeral=True,
-            )
+            except Exception:
+                log.exception("Unexpected error while entering giveaway %s", giveaway.messageid)
+                await interaction.followup.send(
+                    "I could not add your entry. Please try again later.", ephemeral=True
+                )
+                return
             await self.update_label(giveaway, interaction)
 
-    async def update_entrant(self, giveaway, interaction):
-        await self.cog.config.custom(
-            "giveaways", interaction.guild_id, interaction.message.id
-        ).entrants.set(self.cog.giveaways[interaction.message.id].entrants)
+        await interaction.followup.send(
+            f"You have been entered into the giveaway for {giveaway.prize}.",
+            ephemeral=True,
+        )
 
     async def update_label(self, giveaway, interaction):
         if self.update:
-            if len(giveaway.entrants) >= 1:
-                self.label = f"{self.default_label} ({len(giveaway.entrants)})"
-            if len(giveaway.entrants) == 0:
+            if len(set(giveaway.entrants)) >= 1:
+                self.label = f"{self.default_label} ({len(set(giveaway.entrants))})"
+            if len(set(giveaway.entrants)) == 0:
                 self.label = self.default_label
-            await interaction.message.edit(view=self.view)
+            try:
+                await interaction.message.edit(view=self.view)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                log.warning("Could not update entrant count for giveaway %s", giveaway.messageid)

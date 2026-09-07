@@ -8,9 +8,9 @@
     "min_bot_version": "3.5.0",
     "name": "Giveaways",
     "permissions": ["embed_links", "add_reactions"],
-    "requirements": ["dateparser"],
+    "requirements": [],
     "short": "Run Discord giveaways",
     "tags": ["giveaway", "giveaways", "raffle"],
     "type": "COG",
-    "version": "1.5.1"
+    "version": "1.6.0"
 }

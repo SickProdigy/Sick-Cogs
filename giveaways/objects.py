@@ -10,10 +10,6 @@ class GiveawayError(Exception):
         self.message = message
 
 
-class GiveawayExecError(GiveawayError):
-    pass
-
-
 class GiveawayEnterError(GiveawayError):
     pass
 
@@ -51,15 +47,17 @@ class Giveaway:
         endtime = data["endtime"]
         if isinstance(endtime, str):
             endtime = datetime.fromisoformat(endtime)
+        if endtime.tzinfo is None:
+            endtime = endtime.replace(tzinfo=timezone.utc)
         return cls(
             guildid=int(data["guildid"]),
             channelid=int(data["channelid"]),
             messageid=int(data["messageid"]),
             endtime=endtime,
             prize=data.get("prize"),
-            emoji=data.get("emoji", "🎉"),
+            emoji=data.get("emoji") or "🎉",
             ended=bool(data.get("ended", False)),
-            entrants=list(data.get("entrants") or []),
+            entrants=[int(user_id) for user_id in data.get("entrants") or []],
             **dict(data.get("kwargs") or {}),
         )
 
@@ -94,6 +92,8 @@ class Giveaway:
                 for role in self.kwargs.get("blacklist", [])
             ):
                 raise GiveawayEnterError("Your role is blacklisted from this giveaway.")
+            if self.kwargs.get("joined") is not None and user.joined_at is None:
+                raise GiveawayEnterError("Your server join date is unavailable.")
             if (
                 self.kwargs.get("joined", None) is not None
                 and (datetime.now(timezone.utc) - user.joined_at.replace(tzinfo=timezone.utc)).days
@@ -133,10 +133,12 @@ class Giveaway:
     def remove_entrant(self, userid: int) -> None:
         self.entrants = [x for x in self.entrants if x != userid]
 
-    def draw_winner(self):
+    def draw_winner(self, valid_user_ids=None):
         winner_count = self.kwargs.get("winners") or 1
         weighted_entrants = {}
         for user_id in self.entrants:
+            if valid_user_ids is not None and user_id not in valid_user_ids:
+                continue
             weighted_entrants[user_id] = weighted_entrants.get(user_id, 0) + 1
         if len(weighted_entrants) < winner_count:
             return None
