@@ -38,7 +38,7 @@ def parse_datetime(value: Optional[str]) -> Optional[datetime.datetime]:
 class DadJokes(commands.Cog):
     """Random dad jokes from icanhazdadjoke.com"""
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "UltimatePancake"]
     __version__ = "1.1.0"
 
     default_guild = {

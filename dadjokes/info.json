@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "UltimatePancake"],
     "description": "Post configurable random dad jokes from icanhazdadjoke.com to a Discord channel.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild-level dad joke scheduler settings such as channel ID, interval, enablement, and next run time. It does not persistently store user data or metadata.",
