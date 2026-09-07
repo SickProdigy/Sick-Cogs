@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy", "Predä", "aikaterna"],
+    "description": "Send random NSFW images from configured subreddits and Nekobot API in NSFW-only channels.",
+    "disabled": false,
+    "end_user_data_statement": "This cog does not persistently store data or metadata about users. When using the default Martine API source, the external API may process request metadata according to its own privacy policy.",
+    "hidden": false,
+    "install_msg": "Use `[p]help Nsfw` to view commands. This cog contains mature content and should only be used in appropriate NSFW channels.",
+    "min_bot_version": "3.5.0",
+    "name": "Nsfw",
+    "permissions": ["embed_links"],
+    "requirements": [],
+    "short": "Send random NSFW images",
+    "tags": ["nsfw", "reddit", "images"],
+    "type": "COG",
+    "version": "3.0.0"
+}
