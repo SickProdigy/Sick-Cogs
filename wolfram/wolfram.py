@@ -12,6 +12,8 @@ from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 class Wolfram(commands.Cog):
     """Ask Wolfram Alpha any question."""
 
+    __version__ = "2.0.1"
+
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
         return
@@ -35,7 +37,7 @@ class Wolfram(commands.Cog):
         url = "http://api.wolframalpha.com/v2/query?"
         query = " ".join(question)
         payload = {"input": query, "appid": api_key}
-        headers = {"user-agent": "Red-cog/2.0.0"}
+        headers = {"user-agent": f"Sick-Cogs-Wolfram/{self.__version__}"}
         async with ctx.typing():
             async with self.session.get(url, params=payload, headers=headers) as r:
                 result = await r.text()

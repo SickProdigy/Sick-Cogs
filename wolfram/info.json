@@ -12,5 +12,5 @@
     "short": "Query Wolfram|Alpha for answers",
     "tags": ["wolfram", "wolframalpha", "math", "answers"],
     "type": "COG",
-    "version": "2.0.0"
+    "version": "2.0.1"
 }
