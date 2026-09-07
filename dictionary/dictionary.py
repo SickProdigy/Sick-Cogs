@@ -1,185 +1,349 @@
-import aiohttp
-import discord
-import contextlib
-from bs4 import BeautifulSoup
-import json
 import logging
 import re
+from typing import Optional
+from urllib.parse import quote
+
+import aiohttp
+import discord
 from redbot.core import commands
-from redbot.core.utils.chat_formatting import pagify
 
 
-log = logging.getLogger("red.aikaterna.dictionary")
+log = logging.getLogger("red.Sick-Cogs.Dictionary")
+
+API_BASE = "https://api.dictionaryapi.dev/api/v2/entries/en"
+URBAN_API_URL = "https://api.urbandictionary.com/v0/define"
+PROVIDER_URL = "https://dictionaryapi.dev/"
+URBAN_PROVIDER_URL = "https://www.urbandictionary.com/"
+USER_AGENT = "Sick-Cogs-Dictionary/2.0.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+MAX_ENTRIES = 3
+MAX_MEANINGS = 4
+MAX_DEFINITIONS = 3
+MAX_RELATED_WORDS = 25
+
+
+class UrbanDictionaryView(discord.ui.View):
+    """Requester-bound pagination for Urban Dictionary results."""
+
+    def __init__(self, author_id: int, embeds: list[discord.Embed]):
+        super().__init__(timeout=120)
+        self.author_id = author_id
+        self.embeds = embeds
+        self.index = 0
+        self.message: Optional[discord.Message] = None
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.previous.disabled = self.index == 0
+        self.next.disabled = self.index >= len(self.embeds) - 1
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.author_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who requested this lookup can change its result page.", ephemeral=True
+        )
+        return False
+
+    async def _show_page(self, interaction: discord.Interaction) -> None:
+        self._update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
+    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.index = max(0, self.index - 1)
+        await self._show_page(interaction)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
+    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        self.index = min(len(self.embeds) - 1, self.index + 1)
+        await self._show_page(interaction)
+
+    async def on_timeout(self) -> None:
+        if self.message is None:
+            return
+        for item in self.children:
+            item.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
 
 
 class Dictionary(commands.Cog):
-    """
-    Word, yo
-    Parts of this cog are adapted from the PyDictionary library.
-    """
+    """Look up English definitions and related words."""
 
-    async def red_delete_data_for_user(self, **kwargs):
-        """Nothing to delete"""
-        return
+    __author__ = ["SickProdigy"]
+    __version__ = "2.0.0"
 
     def __init__(self, bot):
         self.bot = bot
-        self.session = aiohttp.ClientSession()
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    async def red_delete_data_for_user(self, **kwargs):
+        """This cog does not store user data."""
+        return
 
     def cog_unload(self):
-        self.bot.loop.create_task(self.session.close())
+        if self.session and not self.session.closed:
+            self.bot.loop.create_task(self.session.close())
 
-    @commands.command()
-    async def define(self, ctx, *, word: str):
-        """Displays definitions of a given word."""
-        search_msg = await ctx.send("Searching...")
-        search_term = word.split(" ", 1)[0]
-        result = await self._definition(ctx, search_term)
-        str_buffer = ""
-        if not result:
-            with contextlib.suppress(discord.NotFound):
-                await search_msg.delete()
-            await ctx.send("This word is not in the dictionary.")
-            return
-        for key in result:
-            str_buffer += f"\n**{key}**: \n"
-            counter = 1
-            j = False
-            for val in result[key]:
-                if val.startswith("("):
-                    str_buffer += f"{str(counter)}. *{val})* "
-                    counter += 1
-                    j = True
-                else:
-                    if j:
-                        str_buffer += f"{val}\n"
-                        j = False
-                    else:
-                        str_buffer += f"{str(counter)}. {val}\n"
-                        counter += 1
-        with contextlib.suppress(discord.NotFound):
-            await search_msg.delete()
-        for page in pagify(str_buffer, delims=["\n"]):
-            await ctx.send(page)
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30),
+                headers={"Accept": "application/json", "User-Agent": USER_AGENT},
+            )
+        return self.session
 
-    async def _definition(self, ctx, word):
-        data = await self._get_soup_object(f"http://wordnetweb.princeton.edu/perl/webwn?s={word}")
-        if not data:
-            return await ctx.send("Error fetching data.")
-        types = data.findAll("h3")
-        length = len(types)
-        lists = data.findAll("ul")
-        out = {}
-        if not lists:
-            return
-        for a in types:
-            reg = str(lists[types.index(a)])
-            meanings = []
-            for x in re.findall(r">\s\((.*?)\)\s<", reg):
-                if "often followed by" in x:
-                    pass
-                elif len(x) > 5 or " " in str(x):
-                    meanings.append(x)
-            name = a.text
-            out[name] = meanings
-        return out
+    @staticmethod
+    def _clean_term(term: str) -> str:
+        return " ".join(term.strip().split())
 
-    @commands.command()
-    async def antonym(self, ctx, *, word: str):
-        """Displays antonyms for a given word."""
-        search_term = word.split(" ", 1)[0]
-        result = await self._antonym_or_synonym(ctx, "antonyms", search_term)
-        if not result:
-            await ctx.send("This word is not in the dictionary or nothing was found.")
-            return
-
-        result_text = "*, *".join(result)
-        msg = f"Antonyms for **{search_term}**: *{result_text}*"
-        for page in pagify(msg, delims=["\n"]):
-            await ctx.send(page)
-
-    @commands.command()
-    async def synonym(self, ctx, *, word: str):
-        """Displays synonyms for a given word."""
-        search_term = word.split(" ", 1)[0]
-        result = await self._antonym_or_synonym(ctx, "synonyms", search_term)
-        if not result:
-            await ctx.send("This word is not in the dictionary or nothing was found.")
-            return
-
-        result_text = "*, *".join(result)
-        msg = f"Synonyms for **{search_term}**: *{result_text}*"
-        for page in pagify(msg, delims=["\n"]):
-            await ctx.send(page)
-
-    async def _antonym_or_synonym(self, ctx, lookup_type, word):
-        if lookup_type not in ["antonyms", "synonyms"]:
-            return None
-        data = await self._get_soup_object(f"http://www.thesaurus.com/browse/{word}")
-        if not data:
-            await ctx.send("Error getting information from the website.")
-            return
-
-        script = data.find("script", id="preloaded-state")
-        if script:
-            script_text = script.string
-            script_text = script_text.strip()
-            script_text = script_text.replace("window.__PRELOADED_STATE__ = ", "")
-        else:
-            await ctx.send("Error fetching script from the website.")
-            return
-
+    async def _lookup(self, term: str) -> tuple[Optional[list[dict]], Optional[str]]:
+        session = await self._get_session()
+        url = f"{API_BASE}/{quote(term, safe='')}"
         try:
-            data = json.loads(script_text)
-        except json.decoder.JSONDecodeError:
-            await ctx.send("Error decoding script from the website.")
-            return
-        except Exception as e:
-            log.exception(e, exc_info=e)
-            await ctx.send("Something broke. Check your console for more information.")
-            return
-
-        try:
-            data_prefix = data["thesaurus"]["thesaurusData"]["data"]["slugs"][0]["entries"][0]["partOfSpeechGroups"][0]["shortDefinitions"][0]
-        except KeyError:
-            return None
-
-        if lookup_type == "antonyms":
-            try:
-                antonym_subsection = data_prefix["antonyms"]
-            except KeyError:
-                return None
-            antonyms = []
-            for item in antonym_subsection:
-                try:
-                    antonyms.append(item["targetWord"])
-                except KeyError:
-                    pass
-            if antonyms:
-                return antonyms
-            else:
-                return None
-
-        if lookup_type == "synonyms":
-            try:
-                synonyms_subsection = data_prefix["synonyms"]
-            except KeyError:
-                return None
-            synonyms = []
-            for item in synonyms_subsection:
-                try:
-                    synonyms.append(item["targetWord"])
-                except KeyError:
-                    pass
-            if synonyms:
-                return synonyms
-            else:
-                return None
-
-    async def _get_soup_object(self, url):
-        try:
-            async with self.session.request("GET", url) as response:
-                return BeautifulSoup(await response.text(), "html.parser")
+            async with session.get(url) as response:
+                if response.status == 404:
+                    return None, f"I could not find an English dictionary entry for **{term}**."
+                if response.status != 200:
+                    return None, f"The dictionary service returned HTTP {response.status}. Please try again later."
+                payload = await response.json(content_type=None)
+        except aiohttp.ClientError:
+            log.warning("Dictionary API request failed for %r", term, exc_info=True)
+            return None, "I could not reach the dictionary service. Please try again later."
         except Exception:
-            log.error("Error fetching dictionary.py related webpage", exc_info=True)
-            return None
+            log.exception("Unexpected dictionary lookup failure for %r", term)
+            return None, "Something unexpected went wrong during that dictionary lookup."
+
+        if not isinstance(payload, list) or not payload:
+            return None, f"I could not find an English dictionary entry for **{term}**."
+        return [entry for entry in payload if isinstance(entry, dict)], None
+
+    @staticmethod
+    def _unique_words(values) -> list[str]:
+        seen = set()
+        words = []
+        for value in values:
+            word = str(value).strip()
+            key = word.casefold()
+            if word and key not in seen:
+                seen.add(key)
+                words.append(word)
+        return words
+
+    @classmethod
+    def _related_words(cls, entries: list[dict], key: str) -> list[str]:
+        values = []
+        for entry in entries:
+            for meaning in entry.get("meanings") or []:
+                values.extend(meaning.get(key) or [])
+                for definition in meaning.get("definitions") or []:
+                    values.extend(definition.get(key) or [])
+        return cls._unique_words(values)
+
+    @staticmethod
+    def _pronunciation(entry: dict) -> tuple[Optional[str], Optional[str]]:
+        phonetic = entry.get("phonetic")
+        audio = None
+        for item in entry.get("phonetics") or []:
+            phonetic = phonetic or item.get("text")
+            if item.get("audio"):
+                audio = str(item["audio"])
+                if audio.startswith("//"):
+                    audio = f"https:{audio}"
+                break
+        return phonetic, audio
+
+    @classmethod
+    def _definition_embeds(cls, entries: list[dict]) -> list[discord.Embed]:
+        embeds = []
+        for entry in entries[:MAX_ENTRIES]:
+            word = str(entry.get("word") or "Dictionary").strip()
+            phonetic, audio = cls._pronunciation(entry)
+            description_parts = []
+            if phonetic:
+                description_parts.append(f"Pronunciation: *{phonetic}*")
+            if audio:
+                description_parts.append(f"[Listen to pronunciation]({audio})")
+            embed = discord.Embed(
+                title=word,
+                description=" · ".join(description_parts) or None,
+                color=0x5865F2,
+            )
+            source_urls = entry.get("sourceUrls") or []
+            if source_urls:
+                embed.url = str(source_urls[0])
+
+            for meaning in (entry.get("meanings") or [])[:MAX_MEANINGS]:
+                lines = []
+                for index, definition in enumerate((meaning.get("definitions") or [])[:MAX_DEFINITIONS], start=1):
+                    text = str(definition.get("definition") or "").strip()
+                    if not text:
+                        continue
+                    lines.append(f"**{index}.** {text}")
+                    example = str(definition.get("example") or "").strip()
+                    if example:
+                        lines.append(f"*Example: {example}*")
+                if lines:
+                    value = "\n".join(lines)
+                    embed.add_field(
+                        name=str(meaning.get("partOfSpeech") or "Meaning").title(),
+                        value=value[:1024],
+                        inline=False,
+                    )
+
+            synonyms = cls._related_words([entry], "synonyms")[:12]
+            antonyms = cls._related_words([entry], "antonyms")[:12]
+            if synonyms:
+                embed.add_field(name="Synonyms", value=", ".join(synonyms)[:1024], inline=False)
+            if antonyms:
+                embed.add_field(name="Antonyms", value=", ".join(antonyms)[:1024], inline=False)
+            embed.set_footer(text="Definitions provided by Free Dictionary API")
+            if embed.fields:
+                embeds.append(embed)
+        return embeds
+
+    async def _send_definition(self, ctx: commands.Context, term: str) -> None:
+        async with ctx.typing():
+            entries, error = await self._lookup(term)
+        if error:
+            await ctx.send(error)
+            return
+        embeds = self._definition_embeds(entries or [])
+        if not embeds:
+            await ctx.send(f"I found **{term}**, but it did not include any definitions.")
+            return
+        for embed in embeds:
+            await ctx.send(embed=embed)
+
+    async def _send_related(self, ctx: commands.Context, term: str, relation: str) -> None:
+        async with ctx.typing():
+            entries, error = await self._lookup(term)
+        if error:
+            await ctx.send(error)
+            return
+        words = self._related_words(entries or [], relation)[:MAX_RELATED_WORDS]
+        label = relation.title()
+        if not words:
+            await ctx.send(f"No {relation} were listed for **{term}**.")
+            return
+        embed = discord.Embed(
+            title=f"{label} for {term}",
+            description=", ".join(words)[:4096],
+            color=0x5865F2,
+            url=PROVIDER_URL,
+        )
+        embed.set_footer(text="Results provided by Free Dictionary API")
+        await ctx.send(embed=embed)
+
+    @staticmethod
+    def _clean_urban_text(value: str) -> str:
+        """Remove Urban Dictionary's bracket-link markup."""
+
+        return re.sub(r"\[([^\]]+)]", r"\1", str(value or "")).strip()
+
+    async def _send_urban(self, ctx: commands.Context, term: str) -> None:
+        session = await self._get_session()
+        try:
+            async with ctx.typing():
+                async with session.get(URBAN_API_URL, params={"term": term}) as response:
+                    if response.status != 200:
+                        await ctx.send(
+                            f"Urban Dictionary returned HTTP {response.status}. Please try again later."
+                        )
+                        return
+                    payload = await response.json(content_type=None)
+        except aiohttp.ClientError:
+            log.warning("Urban Dictionary API request failed for %r", term, exc_info=True)
+            await ctx.send("I could not reach Urban Dictionary. Please try again later.")
+            return
+        except Exception:
+            log.exception("Unexpected Urban Dictionary lookup failure for %r", term)
+            await ctx.send("Something unexpected went wrong during that Urban Dictionary lookup.")
+            return
+
+        results = [item for item in payload.get("list", []) if isinstance(item, dict)]
+        if not results:
+            await ctx.send(f"Urban Dictionary does not have an entry for **{term}**.")
+            return
+        results.sort(
+            key=lambda item: int(item.get("thumbs_up", 0) or 0) - int(item.get("thumbs_down", 0) or 0),
+            reverse=True,
+        )
+
+        visible_results = results[:5]
+        embeds = []
+        for index, item in enumerate(visible_results, start=1):
+            definition = self._clean_urban_text(item.get("definition"))
+            example = self._clean_urban_text(item.get("example"))
+            embed = discord.Embed(
+                title=f"Urban Dictionary: {item.get('word') or term}",
+                description=definition[:3800] or "No definition text.",
+                color=0xEFFF00,
+                url=str(item.get("permalink") or URBAN_PROVIDER_URL),
+            )
+            if example:
+                embed.add_field(name="Example", value=example[:1024], inline=False)
+            embed.add_field(
+                name="Votes",
+                value=(
+                    f"👍 {int(item.get('thumbs_up', 0) or 0):,}   "
+                    f"👎 {int(item.get('thumbs_down', 0) or 0):,}"
+                ),
+                inline=True,
+            )
+            embed.add_field(name="Author", value=str(item.get("author") or "Unknown")[:1024], inline=True)
+            embed.add_field(
+                name="Notice",
+                value="Community-written definitions may be inaccurate or offensive.",
+                inline=False,
+            )
+            embed.set_footer(text=f"Result {index} of {len(visible_results)} · Urban Dictionary")
+            embeds.append(embed)
+
+        view = UrbanDictionaryView(ctx.author.id, embeds)
+        view.message = await ctx.send(embed=embeds[0], view=view)
+
+    @commands.group(name="dictionary", aliases=["dict"], invoke_without_command=True)
+    async def dictionary(self, ctx: commands.Context, *, term: str = None):
+        """Look up an English word or phrase."""
+
+        if term is None:
+            await ctx.send_help(ctx.command)
+            return
+        term = self._clean_term(term)
+        if not term or len(term) > 100:
+            await ctx.send("Enter a word or short phrase up to 100 characters.")
+            return
+        await self._send_definition(ctx, term)
+
+    @commands.command(name="define")
+    async def define(self, ctx: commands.Context, *, term: str):
+        """Look up an English definition."""
+
+        await self.dictionary.callback(self, ctx, term=term)
+
+    @commands.command(name="synonym", aliases=["synonyms"])
+    async def synonym(self, ctx: commands.Context, *, term: str):
+        """Show synonyms for an English word."""
+
+        term = self._clean_term(term)
+        await self._send_related(ctx, term, "synonyms")
+
+    @commands.command(name="antonym", aliases=["antonyms"])
+    async def antonym(self, ctx: commands.Context, *, term: str):
+        """Show antonyms for an English word."""
+
+        term = self._clean_term(term)
+        await self._send_related(ctx, term, "antonyms")
+
+    @commands.command(name="urban", aliases=["urbandictionary", "ud"])
+    async def urban_dictionary(self, ctx: commands.Context, *, term: str):
+        """Look up community-written slang."""
+
+        term = self._clean_term(term)
+        if not term or len(term) > 100:
+            await ctx.send("Enter a word or short phrase up to 100 characters.")
+            return
+        await self._send_urban(ctx, term)
