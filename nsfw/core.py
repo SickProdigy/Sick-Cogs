@@ -27,7 +27,7 @@ _ = Translator("Nsfw", __file__)
 @cog_i18n(_)
 class Core(commands.Cog):
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "Predä", "aikaterna"]
     __version__ = "2.3.99"
 
     async def red_delete_data_for_user(self, **kwargs):

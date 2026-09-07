@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "Predä", "aikaterna"],
     "description": "Send random NSFW images from configured subreddits and Nekobot API in NSFW-only channels.",
     "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users. When using the default Martine API source, the external API may process request metadata according to its own privacy policy.",
