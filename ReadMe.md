@@ -7,6 +7,7 @@ This branch is the stable release branch. Active development, experiments, and u
 ## Available Cogs
 
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
+- `avatar` - Display a Discord user's avatar as a direct, clickable image URL.
 - `coc` - Clash of Clans clan and war status utilities.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
