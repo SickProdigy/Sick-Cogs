@@ -17,6 +17,7 @@ class Reminder(commands.Cog):
     """Utilities to remind yourself of whatever you want"""
 
     __author__ = ["SickProdigy"]
+    __version__ = "1.0.0"
 
     TIME_AMNT_REGEX = re.compile("([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
     TIME_QUANTITIES = collections.OrderedDict(

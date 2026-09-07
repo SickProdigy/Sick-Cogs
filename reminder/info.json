@@ -1,9 +1,17 @@
 {
     "author" : ["SickProdigy"],
     "description" : "Lets users tell the bot to remind them about anything they want.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores user reminder text, scheduled times, and timezone offsets needed to deliver reminders.",
+    "hidden": false,
     "install_msg" : "Enjoy reminding yourself of whatever you wanna remind yourself of! Use `[p]help Reminder` to get started.",
     "min_bot_version": "3.5.0",
+    "min_python_version": [3, 8, 0],
+    "name": "Reminder",
     "permissions" : ["embed_links"],
+    "requirements": [],
     "short" : "Allows users to remind themselves about anything they want.",
-    "tags" : ["remind", "reminder", "remindme"]
+    "tags" : ["remind", "reminder", "remindme"],
+    "type": "COG",
+    "version": "1.0.0"
 }
