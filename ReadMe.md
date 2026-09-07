@@ -9,6 +9,7 @@ This branch is the stable release branch. Active development, experiments, and u
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `avatar` - Display a Discord user's avatar as a direct, clickable image URL.
 - `coc` - Clash of Clans clan and war status utilities.
+- `dadjokes` - On-demand and scheduled random dad jokes.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
 - `movies` - Configurable TMDb new movie release announcements.
