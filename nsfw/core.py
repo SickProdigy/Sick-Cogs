@@ -30,7 +30,7 @@ REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3)
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "2.4.0"
+    __version__ = "3.0.0"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""

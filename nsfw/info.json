@@ -12,5 +12,5 @@
     "short": "Send random NSFW images",
     "tags": ["nsfw", "reddit", "images"],
     "type": "COG",
-    "version": "2.4.0"
+    "version": "3.0.0"
 }
