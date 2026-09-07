@@ -27,7 +27,7 @@ class Giveaways(commands.Cog):
     """Giveaway Commands"""
 
     __version__ = "1.5.1"
-    __author__ = "SickProdigy"
+    __author__ = "SickProdigy, flaree"
 
     def format_help_for_context(self, ctx):
         pre_processed = super().format_help_for_context(ctx)
