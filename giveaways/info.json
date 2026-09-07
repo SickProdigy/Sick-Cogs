@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy", "flaree"],
+    "author": ["SickProdigy"],
     "description": "Run Discord giveaways with duration or end-time scheduling, multipliers, role access, and optional bank integration.",
     "disabled": false,
     "end_user_data_statement": "This cog stores giveaway configuration, message IDs, entrant user IDs, and winner records for active and completed giveaways.",
