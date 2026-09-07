@@ -91,7 +91,7 @@ STATUS_EMOJIS = {
     "off": OFF_STATUS_EMOJI,
     "mixed": MIXED_STATUS_EMOJI,
 }
-THIRD_PARTY_DOCS_URL = "https://github.com/vertyco/vrt-cogs/blob/main/assistant/THIRD%20PARTY.md"
+THIRD_PARTY_DOCS_URL = "https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/THIRD%20PARTY.md"
 
 
 def normalize_endpoint_override(

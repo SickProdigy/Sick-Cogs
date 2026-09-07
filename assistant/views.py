@@ -2411,7 +2411,7 @@ class CodeMenu(discord.ui.View):
         embed = discord.Embed(
             description=_(
                 "Reply to this message with the json schema for your function\n"
-                "- [Example Functions](https://github.com/vertyco/vrt-cogs/tree/main/assistant/example-funcs)"
+                "- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
             ),
             color=discord.Color.blue(),
         )

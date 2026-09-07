@@ -81,7 +81,7 @@ class Assistant(
     - **[p]clearconvo**: reset your conversation with the assistant in the channel
     """
 
-    __author__ = "[vertyco](https://github.com/vertyco/vrt-cogs)"
+    __author__ = "[SickProdigy](https://gitea.rcs1.top/sickprodigy/Sick-Cogs), Vertyco"
     __version__ = "8.20.0"
 
     def format_help_for_context(self, ctx):

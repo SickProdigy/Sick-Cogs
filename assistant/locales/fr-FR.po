@@ -1,6 +1,6 @@
 msgid ""
 msgstr ""
-"Project-Id-Version: vrt-cogs\n"
+"Project-Id-Version: Sick-Cogs\n"
 "POT-Creation-Date: 2026-05-06 22:10-0400\n"
 "PO-Revision-Date: 2026-05-07 02:48\n"
 "Last-Translator: \n"
@@ -10,10 +10,10 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: redgettext 3.4.2\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
-"X-Crowdin-Project: vrt-cogs\n"
+"X-Crowdin-Project: Sick-Cogs\n"
 "X-Crowdin-Project-ID: 550681\n"
 "X-Crowdin-Language: fr\n"
-"X-Crowdin-File: /[vertyco.vrt-cogs] main/assistant/locales/messages.pot\n"
+"X-Crowdin-File: /[sickprodigy.Sick-Cogs] main/assistant/locales/messages.pot\n"
 "X-Crowdin-File-ID: 57\n"
 "Language: fr_FR\n"
 
@@ -207,7 +207,7 @@ msgstr "Voici vos fonctions personnalisées"
 
 #: assistant\views.py:1043
 msgid "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://github.com/vertyco/vrt-cogs/tree/main/assistant/example-funcs)"
+"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
 msgstr "Répondez à ce message avec le schéma JSON de votre fonction"
 
 #: assistant\views.py:1064 assistant\views.py:1142
