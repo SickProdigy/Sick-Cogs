@@ -12,6 +12,7 @@ This branch is the stable release branch. Active development, experiments, and u
 - `dadjokes` - On-demand and scheduled random dad jokes.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
+- `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
 - `movies` - Configurable TMDb new movie release announcements.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
