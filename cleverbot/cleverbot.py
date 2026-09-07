@@ -151,12 +151,9 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         can_embed = ctx.channel.permissions_for(ctx.me).embed_links
         for obj_id in whitelist:
             obj = await ChannelUserRole().convert(ctx, str(obj_id))
-            if isinstance(obj, discord.TextChannel):
-                msg += f"{obj.mention}\n"
-                continue
+            display_name = getattr(obj, "mention", obj.name)
             if can_embed:
-                msg += f"{obj.mention}\n"
-                continue
+                msg += f"{display_name}\n"
             else:
                 msg += f"{obj.name}\n"
         for page in pagify(msg):
@@ -222,12 +219,9 @@ class Cleverbot(CleverbotAPI, commands.Cog):
         can_embed = ctx.channel.permissions_for(ctx.me).embed_links
         for obj_id in blacklist:
             obj = await ChannelUserRole().convert(ctx, str(obj_id))
-            if isinstance(obj, discord.TextChannel):
-                msg += f"{obj.mention}\n"
-                continue
+            display_name = getattr(obj, "mention", obj.name)
             if can_embed:
-                msg += f"{obj.mention}\n"
-                continue
+                msg += f"{display_name}\n"
             else:
                 msg += f"{obj.name}\n"
         for page in pagify(msg):
@@ -352,7 +346,7 @@ class Cleverbot(CleverbotAPI, commands.Cog):
                 channel = ctx.message.channel
             await self.config.guild(guild).channel.set(channel.id)
             await ctx.send(
-                _("I will automaticall reply to all messages in {channel}").format(
+                _("I will automatically reply to all messages in {channel}").format(
                     channel=channel.mention
                 )
             )

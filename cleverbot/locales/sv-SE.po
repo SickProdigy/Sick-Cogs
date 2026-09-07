@@ -245,7 +245,7 @@ msgid "\n"
 msgstr ""
 
 #: cleverbot/cleverbot.py:357
-msgid "I will automaticall reply to all messages in {channel}"
+msgid "I will automatically reply to all messages in {channel}"
 msgstr ""
 
 #: cleverbot/cleverbot.py:363

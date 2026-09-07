@@ -25,11 +25,11 @@ Use these commands in direct messages when possible so credentials do not remain
 
 ## Allowlist And Blocklist
 
-- `[p]cleverbotset allowlist add <channel/user/role...>` - Allow automatic replies for specific targets.
-- `[p]cleverbotset allowlist remove <channel/user/role...>` - Remove targets from the allowlist.
+- `[p]cleverbotset allowlist add <channel/category/user/role...>` - Allow automatic replies for specific targets.
+- `[p]cleverbotset allowlist remove <channel/category/user/role...>` - Remove targets from the allowlist.
 - `[p]cleverbotset allowlist info` - Show the current allowlist.
-- `[p]cleverbotset blocklist add <channel/user/role...>` - Block automatic replies for specific targets.
-- `[p]cleverbotset blocklist remove <channel/user/role...>` - Remove targets from the blocklist.
+- `[p]cleverbotset blocklist add <channel/category/user/role...>` - Block automatic replies for specific targets.
+- `[p]cleverbotset blocklist remove <channel/category/user/role...>` - Remove targets from the blocklist.
 - `[p]cleverbotset blocklist info` - Show the current blocklist.
 
-This cog stores guild settings, response tweaks, and configured channel, role, or user IDs. Message content is sent to the configured external Cleverbot API for response generation.
+This cog stores guild settings, response tweaks, and configured channel, category, role, or user IDs. Message content is sent to the configured external Cleverbot API for response generation.

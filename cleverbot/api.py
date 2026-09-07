@@ -33,7 +33,7 @@ class ChannelUserRole(IDConverter):
 
     async def convert(
         self, ctx: commands.Context, argument: str
-    ) -> Union[discord.TextChannel, discord.Member, discord.Role]:
+    ) -> Union[discord.abc.GuildChannel, discord.Member, discord.Role]:
         guild = ctx.guild
         result = None
         id_match = self._get_id_match(argument)
@@ -47,7 +47,7 @@ class ChannelUserRole(IDConverter):
                     channel_id = match.group(1)
                     result = guild.get_channel(int(channel_id))
                 else:
-                    result = discord.utils.get(guild.text_channels, name=argument)
+                    result = discord.utils.get(guild.channels, name=argument)
             if converter == "member":
                 match = id_match or member_match
                 if match:
@@ -116,9 +116,10 @@ class CleverbotAPI:
             )
             await ctx.send(msg)
         else:
-            replies = version_info >= VersionInfo.from_str("3.4.6")
+            supports_replies = version_info >= VersionInfo.from_str("3.4.6")
+            replies = supports_replies
             if ctx.guild:
-                replies = replies or await self.config.guild(ctx.guild).reply()
+                replies = supports_replies and await self.config.guild(ctx.guild).reply()
                 if await self.config.guild(ctx.guild).mention():
                     if replies:
                         await ctx.send(response, reference=ctx.message, mention_author=True)
@@ -248,7 +249,7 @@ class CleverbotAPI:
         else:
             if channel.id in blacklist:
                 can_run = False
-            if channel.category_id and channel.category_id in whitelist:
+            if channel.category_id and channel.category_id in blacklist:
                 can_run = False
             if message.author.id in blacklist:
                 can_run = False
@@ -270,6 +271,8 @@ class CleverbotAPI:
             if guild and await self.bot.cog_disabled_in_guild(self, guild):
                 return
         ctx = await self.bot.get_context(message)
+        if ctx.valid:
+            return
         author = message.author
         text = message.clean_content
         to_strip = f"(?m)^(<@!?{self.bot.user.id}>)"
@@ -277,9 +280,10 @@ class CleverbotAPI:
         is_reply = False
         reply = getattr(message, "reference", None)
         if reply and (reference := getattr(reply, "resolved")) is not None:
-            author = getattr(reference, "author")
-            if author is not None:
-                is_reply = reference.author.id == self.bot.user.id and ctx.me in message.mentions
+            reference_author = getattr(reference, "author", None)
+            if reference_author is not None:
+                author = reference_author
+                is_reply = reference_author.id == self.bot.user.id and ctx.me in message.mentions
         if is_mention:
             text = text[len(ctx.me.display_name) + 2 :]
             log.trace("CleverbotAPI text: %s", text)
@@ -288,7 +292,7 @@ class CleverbotAPI:
             return
         if guild is None:
             if await self.config.allow_dm() and message.author.id != self.bot.user.id:
-                if ctx.prefix:
+                if ctx.valid:
                     return
                 await self.send_cleverbot_response(text, message.author, ctx)
             return
@@ -406,7 +410,7 @@ class CleverbotAPI:
     async def get_io_credentials(self) -> Tuple[str, str]:
         io_key = await self.config.io_key()
         io_user = await self.config.io_user()
-        if io_key is None:
+        if io_user is None or io_key is None:
             raise NoCredentials()
         else:
             return io_user, io_key
