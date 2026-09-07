@@ -16,11 +16,11 @@ from .renderer import FeedRenderer
 from .scheduler import FeedJob, FeedScheduler
 
 # Originally based on aikaterna-cogs RSS; maintained here by SickProdigy.
-log = logging.getLogger("red.Sick-Cogs.RSS")
+log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
 
 RSS_USER_AGENT = (
-    f"Sick-Cogs-RSS/{RSS_VERSION} "
-    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/rss)"
+    f"Sick-Cogs-RSSPublisher/{RSS_VERSION} "
+    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/rsspublisher)"
 )
 
 warnings.filterwarnings(

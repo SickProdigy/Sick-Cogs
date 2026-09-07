@@ -18,7 +18,7 @@ from .models import FeedMode, migrate_feed_data, normalize_mode
 from .models import INTERNAL_TAGS, TagType
 from .renderer import TemplateValidationError, validate_template
 
-log = logging.getLogger("red.Sick-Cogs.RSS")
+log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 class RSSCommands:

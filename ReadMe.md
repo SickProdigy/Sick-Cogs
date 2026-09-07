@@ -15,7 +15,7 @@ Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
 - `coc` - Clash of Clans clan and war status utilities.
 - `donate` - Configurable donation information command.
 - `movies` - Configurable TMDb new movie release announcements.
-- `rss` - Configurable RSS and Atom feed notifications.
+- `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
 ## Experimental or Learning Cogs
