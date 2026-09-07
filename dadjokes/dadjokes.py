@@ -15,7 +15,7 @@ log = logging.getLogger("red.Sick-Cogs.DadJokes")
 
 CONFIG_IDENTIFIER = 5829948157
 DAD_JOKE_URL = "https://icanhazdadjoke.com/"
-USER_AGENT = "Sick-Cogs-DadJokes/1.1.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-DadJokes/1.1.1 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -39,7 +39,7 @@ class DadJokes(commands.Cog):
     """Random dad jokes from icanhazdadjoke.com"""
 
     __author__ = ["SickProdigy", "UltimatePancake"]
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
     default_guild = {
         "enabled": False,
@@ -73,10 +73,13 @@ class DadJokes(commands.Cog):
 
     async def fetch_joke(self) -> str:
         session = await self.get_session()
-        async with session.get(DAD_JOKE_URL) as response:
-            if response.status != 200:
-                raise RuntimeError("Oops! Cannot get a dad joke...")
-            joke = (await response.text(encoding="UTF-8")).strip()
+        try:
+            async with session.get(DAD_JOKE_URL) as response:
+                if response.status != 200:
+                    raise RuntimeError("Oops! Cannot get a dad joke...")
+                joke = (await response.text(encoding="UTF-8")).strip()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            raise RuntimeError("Oops! Cannot get a dad joke...") from exc
         if not joke:
             raise RuntimeError("Oops! Cannot get a dad joke...")
         return joke
@@ -102,7 +105,7 @@ class DadJokes(commands.Cog):
 
     async def send_random_joke(self, channel: GuildMessageable) -> str:
         joke = await self.fetch_joke()
-        await channel.send(f"`{joke}`")
+        await channel.send(f"`{joke}`", allowed_mentions=discord.AllowedMentions.none())
         return joke
 
     async def maybe_send_scheduled_joke(self, guild: discord.Guild):
@@ -147,20 +150,20 @@ class DadJokes(commands.Cog):
     async def before_random_joke_loop(self):
         await self.bot.wait_until_red_ready()
 
-    @commands.command()
+    @commands.command(aliases=("dadjokes",))
     async def dadjoke(self, ctx: commands.Context):
-        """Gets a random dad joke."""
+        """Get a random dad joke.
+
+        Server moderators can configure scheduled jokes with `[p]dadjokeset`.
+        """
         try:
             joke = await self.fetch_joke()
         except RuntimeError as exc:
             return await ctx.send(str(exc))
-        except aiohttp.ClientConnectionError:
-            return await ctx.send("Oops! Cannot get a dad joke...")
-
-        await ctx.send(f"`{joke}`")
+        await ctx.send(f"`{joke}`", allowed_mentions=discord.AllowedMentions.none())
 
     @commands.guild_only()
-    @commands.group(name="dadjokeset", aliases=("dadjokes",), invoke_without_command=True)
+    @commands.group(name="dadjokeset", invoke_without_command=True)
     @checks.mod_or_permissions(manage_guild=True)
     async def dadjokeset(self, ctx: commands.Context):
         """Configure random dad joke posting."""
@@ -194,8 +197,7 @@ class DadJokes(commands.Cog):
             await ctx.send(f"Set a dad joke channel first with `{ctx.clean_prefix}dadjokeset channel`.")
             return
         await self.config.guild(ctx.guild).enabled.set(True)
-        if not settings.get("next_joke_at"):
-            await self.config.guild(ctx.guild).next_joke_at.set(self.next_run_after(settings["interval_minutes"]))
+        await self.config.guild(ctx.guild).next_joke_at.set(self.next_run_after(settings["interval_minutes"]))
         await ctx.send("Scheduled dad jokes are now enabled.")
 
     @dadjokeset.command(name="disable", aliases=("disabled",))

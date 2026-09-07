@@ -4,7 +4,7 @@ Random dad jokes from [icanhazdadjoke.com](https://icanhazdadjoke.com/).
 
 ## Commands
 
-- `[p]dadjoke` - Fetch one random dad joke in the current channel.
+- `[p]dadjoke` or `[p]dadjokes` - Fetch one random dad joke in the current channel.
 
 ## Scheduled random dad jokes
 

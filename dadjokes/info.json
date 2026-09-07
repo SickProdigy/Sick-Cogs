@@ -4,7 +4,7 @@
     "disabled": false,
     "end_user_data_statement": "This cog stores guild-level dad joke scheduler settings such as channel ID, interval, enablement, and next run time. It does not persistently store user data or metadata.",
     "hidden": false,
-    "install_msg": "Use `[p]dadjoke` to get one dad joke, or configure scheduled posts with `[p]dadjokeset channel`, `[p]dadjokeset interval`, and `[p]dadjokeset enable`.",
+    "install_msg": "Use `[p]dadjoke` or `[p]dadjokes` to get one dad joke, or configure scheduled posts with `[p]dadjokeset channel`, `[p]dadjokeset interval`, and `[p]dadjokeset enable`.",
     "min_bot_version": "3.5.0",
     "permissions": [],
     "name": "DadJokes",
@@ -12,5 +12,5 @@
     "short": "Scheduled random dad jokes",
     "tags": ["jokes", "dad", "dadjokes", "scheduler"],
     "type": "COG",
-    "version": "1.1.0"
+    "version": "1.1.1"
 }
