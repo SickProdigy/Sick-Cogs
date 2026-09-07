@@ -1,5 +1,5 @@
 {
-  "author": ["SickProdigy"],
+  "author": ["SickProdigy", "TrustyJAID"],
   "description": "Look up RuneScape and Old School RuneScape players, quests, items, and wiki articles.",
   "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
   "install_msg": "Use `[p]rs user <username>` for OSRS stats or `[p]rs wiki <query>` to search the Old School RuneScape Wiki.",
