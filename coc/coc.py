@@ -1428,21 +1428,29 @@ class Coc(commands.Cog):
                         await channel.send(notice)
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, "attacklog")
+                    attack_log_style = str(settings.get("WAR_ATTACK_LOG_STYLE") or "card").lower()
                     embed = self._build_war_attack_update_embed(
                         war_data,
                         clan_tag,
                         new_attacks,
-                        style=str(settings.get("WAR_ATTACK_LOG_STYLE") or "card"),
+                        style=attack_log_style,
                         timezone_name=str(settings.get("COC_TIMEZONE") or "America/New_York"),
                     )
-                    await self._send_embed_with_optional_image(
-                        channel,
-                        embed,
-                        WAR_BANNER_PATH,
-                        "war-banner.png",
-                        content=content,
-                        allowed_mentions=allowed_mentions,
-                    )
+                    if attack_log_style == "compact":
+                        await channel.send(
+                            content=content,
+                            embed=embed,
+                            allowed_mentions=allowed_mentions,
+                        )
+                    else:
+                        await self._send_embed_with_optional_image(
+                            channel,
+                            embed,
+                            WAR_BANNER_PATH,
+                            "war-banner.png",
+                            content=content,
+                            allowed_mentions=allowed_mentions,
+                        )
                 except discord.HTTPException:
                     log.exception("Could not send CoC war notification to channel %s in guild %s.", channel_id, guild_id)
                     continue
