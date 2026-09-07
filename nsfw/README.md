@@ -4,6 +4,8 @@ Nsfw sends random mature images or GIFs in Discord channels marked NSFW.
 
 Most commands fetch media from curated subreddit lists through the default Martine API source. The bot owner can switch to direct Reddit API requests, but that path may be rate limited more quickly.
 
+Every media command is restricted by Red's NSFW-channel check. Provider failures, timeouts, malformed responses, and empty results return a generic error and never expose response details in Discord.
+
 ## Commands
 
 - `[p]nsfwversion` - Show the installed cog version.

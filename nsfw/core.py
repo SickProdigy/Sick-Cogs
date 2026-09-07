@@ -3,13 +3,14 @@ import json
 import sys
 from random import choice
 from typing import List, Optional, Union
+from urllib.parse import urlparse
 
 import aiohttp
 import discord
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n
-from redbot.core.utils.chat_formatting import bold, box, inline
+from redbot.core.utils.chat_formatting import bold, box
 
 from .constants import (
     GOOD_EXTENSIONS,
@@ -22,13 +23,14 @@ from .constants import (
 
 _ = Translator("Nsfw", __file__)
 
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3)
 
-# FIXME: This code really needs a good rewrite at some point.
+
 @cog_i18n(_)
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "2.3.99"
+    __version__ = "2.4.0"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -42,7 +44,8 @@ class Core(commands.Cog):
                     f"Sick-Cogs-Nsfw/{self.__version__} "
                     f"(Python/{'.'.join(map(str, sys.version_info[:3]))} aiohttp/{aiohttp.__version__})"
                 )
-            }
+            },
+            timeout=REQUEST_TIMEOUT,
         )
         self.config = Config.get_conf(self, identifier=512227974893010954, force_registration=True)
         self.config.register_global(use_reddit_api=False)
@@ -57,6 +60,8 @@ class Core(commands.Cog):
 
     async def _get_imgs(self, subs: List[str] = None):
         """Get images from Reddit API."""
+        if not subs:
+            return None, None
         tries = 0
         while tries < 5:
             sub = choice(subs)
@@ -64,13 +69,14 @@ class Core(commands.Cog):
                 if await self.config.use_reddit_api():
                     async with self.session.get(REDDIT_BASEURL.format(sub=sub)) as reddit:
                         if reddit.status != 200:
-                            return None, None
+                            tries += 1
+                            continue
                         try:
                             data = await reddit.json(content_type=None)
                             content = data[0]["data"]["children"][0]["data"]
                             url = content["url"]
                             subr = content["subreddit"]
-                        except (KeyError, ValueError, json.decoder.JSONDecodeError):
+                        except (IndexError, KeyError, TypeError, ValueError, json.decoder.JSONDecodeError):
                             tries += 1
                             continue
                         if url.startswith(IMGUR_LINKS):
@@ -95,10 +101,10 @@ class Core(commands.Cog):
                         try:
                             data = await resp.json()
                             return data["data"]["image_url"], data["data"]["subreddit"]["name"]
-                        except (KeyError, json.JSONDecodeError):
+                        except (KeyError, TypeError, json.JSONDecodeError):
                             tries += 1
                             continue
-            except aiohttp.client_exceptions.ClientConnectionError:
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
                 tries += 1
                 continue
 
@@ -106,28 +112,29 @@ class Core(commands.Cog):
 
     async def _get_others_imgs(self, ctx: commands.Context, url: str = None):
         """Get images from all other images APIs."""
+        if not self._safe_url(url):
+            return None
         try:
             async with self.session.get(url) as resp:
                 if resp.status != 200:
-                    await self._api_errors_msg(ctx, error_code=resp.status)
                     return None
                 try:
                     data = await resp.json(content_type=None)
-                except json.decoder.JSONDecodeError as exception:
-                    await self._api_errors_msg(ctx, error_code=exception)
+                except (TypeError, ValueError, json.decoder.JSONDecodeError):
                     return None
             data = dict(img=data)
             return data
-        except aiohttp.client_exceptions.ClientConnectionError:
-            await self._api_errors_msg(ctx, error_code="JSON decode failed")
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
             return None
 
-    async def _api_errors_msg(self, ctx: commands.Context, error_code: int = None):
-        """Error message when API calls fail."""
-        return await ctx.send(
-            _("Error when trying to contact image service, please try again later. ")
-            + "(Code: {})".format(inline(str(error_code)))
-        )
+    @staticmethod
+    def _safe_url(value):
+        if not isinstance(value, str):
+            return None
+        parsed = urlparse(value.strip())
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            return None
+        return value.strip()
 
     async def _version_msg(self, ctx: commands.Context, version: str, authors: List[str]):
         """Cog version message."""
@@ -144,9 +151,9 @@ class Core(commands.Cog):
         try:
             url, subr = await asyncio.wait_for(self._get_imgs(subs=subs), 5)
         except asyncio.TimeoutError:
-            await ctx.send("Failed to get an image. Please try again later. (Timeout error)")
             return
-        if not url:
+        url = self._safe_url(url)
+        if not url or not isinstance(subr, str) or not subr.strip():
             return
 
         if any(wrong in url for wrong in NOT_EMBED_DOMAINS):
@@ -184,18 +191,23 @@ class Core(commands.Cog):
         try:
             data = await asyncio.wait_for(self._get_others_imgs(ctx, url=url), 5)
         except asyncio.TimeoutError:
-            await ctx.send("Failed to get an image. Please try again later. (Timeout error)")
             return
         if not data:
+            return
+        try:
+            image_url = self._safe_url(data["img"][arg])
+        except (KeyError, TypeError):
+            return
+        if not image_url:
             return
         em = await self._embed(
             color=0x891193,
             title=(_("Here is {name} image ...") + " \N{EYES}").format(name=name),
             description=bold(
-                _("[Link if you don't see image]({url})").format(url=data["img"][arg]),
+                _("[Link if you don't see image]({url})").format(url=image_url),
                 escape_formatting=False,
             ),
-            image=data["img"][arg],
+            image=image_url,
             footer=_("Requested by {req} {emoji} • From {source}").format(
                 req=ctx.author.display_name, emoji=emoji(), source=source
             ),
@@ -207,6 +219,10 @@ class Core(commands.Cog):
         Function to choose if type of the message is an embed or not
         and if not send a simple message.
         """
+        if embed is None:
+            return await ctx.send(
+                _("The image service is unavailable or returned no usable result. Please try again later.")
+            )
         try:
             if isinstance(embed, discord.Embed):
                 await ctx.send(embed=embed)
