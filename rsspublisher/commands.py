@@ -25,7 +25,7 @@ class RSSCommands:
     """Public RSS command groups and command-specific helpers."""
 
     @commands.guild_only()
-    @commands.group()
+    @commands.group(name="rsspublisher", aliases=["rss"])
     @checks.mod_or_permissions(manage_channels=True)
     async def rss(self, ctx):
         """RSS feed stuff."""
@@ -41,7 +41,7 @@ class RSSCommands:
         if feed_name.startswith("<#"):
             # someone typed a channel name but not a feed name
             msg = "Try again with a feed name included in the right spot so that you can refer to the feed later.\n"
-            msg += f"Example: `{ctx.prefix}rss add feed_name channel_name feed_url`"
+            msg += f"Example: `{ctx.prefix}rsspublisher add feed_name channel_name feed_url`"
             await ctx.send(msg)
             return
         channel = channel or ctx.channel
@@ -88,7 +88,7 @@ class RSSCommands:
         if not embed_toggle:
             embed_state_message += (
                 f"{bold(feed_name)} is not currently set to be in an embed. "
-                f"Toggle it on with `{ctx.prefix}rss embed toggle`.\n"
+                f"Toggle it on with `{ctx.prefix}rsspublisher embed toggle`.\n"
             )
 
         if not color:
@@ -145,7 +145,7 @@ class RSSCommands:
         if not embed_toggle:
             embed_state_message += (
                 f"{bold(feed_name)} is not currently set to be in an embed. "
-                f"Toggle it on with `{ctx.prefix}rss embed toggle`.\n"
+                f"Toggle it on with `{ctx.prefix}rsspublisher embed toggle`.\n"
             )
 
         if image_tag_name is not None:
@@ -153,14 +153,14 @@ class RSSCommands:
                 image_tag_name = image_tag_name.strip("$")
             else:
                 msg = "You must use a feed tag for this setting. "
-                msg += f"Feed tags start with `$` and can be found by using `{ctx.prefix}rss listtags` "
+                msg += f"Feed tags start with `$` and can be found by using `{ctx.prefix}rsspublisher listtags` "
                 msg += "with the saved feed name.\nImages that are scraped from feed content are usually "
                 msg += "stored under the tags styled similar to `$content_image01`: subsequent scraped images "
                 msg += "will be in tags named `$content_image02`, `$content_image03`, etc. Not every feed entry "
                 msg += "will have the same amount of scraped image tags. Images can also be found under tags named "
                 msg += "`$media_content_plaintext`, if present.\nExperiment with tags by setting them as your "
                 msg += (
-                    f"template with `{ctx.prefix}rss template` and using `{ctx.prefix}rss force` to view the content."
+                    f"template with `{ctx.prefix}rsspublisher template` and using `{ctx.prefix}rsspublisher force` to view the content."
                 )
                 await ctx.send(msg)
                 return
@@ -196,7 +196,7 @@ class RSSCommands:
         if not embed_toggle:
             embed_state_message += (
                 f"{bold(feed_name)} is not currently set to be in an embed. "
-                f"Toggle it on with `{ctx.prefix}rss embed toggle`.\n"
+                f"Toggle it on with `{ctx.prefix}rsspublisher embed toggle`.\n"
             )
 
         if thumbnail_tag_name is not None:
@@ -204,14 +204,14 @@ class RSSCommands:
                 thumbnail_tag_name = thumbnail_tag_name.strip("$")
             else:
                 msg = "You must use a feed tag for this setting. "
-                msg += f"Feed tags start with `$` and can be found by using `{ctx.prefix}rss listtags` "
+                msg += f"Feed tags start with `$` and can be found by using `{ctx.prefix}rsspublisher listtags` "
                 msg += "with the saved feed name.\nImages that are scraped from feed content are usually "
                 msg += "stored under the tags styled similar to `$content_image01`: subsequent scraped images "
                 msg += "will be in tags named `$content_image02`, `$content_image03`, etc. Not every feed entry "
                 msg += "will have the same amount of scraped image tags. Images can also be found under tags named "
                 msg += "`$media_content_plaintext`, if present.\nExperiment with tags by setting them as your "
                 msg += (
-                    f"template with `{ctx.prefix}rss template` and using `{ctx.prefix}rss force` to view the content."
+                    f"template with `{ctx.prefix}rsspublisher template` and using `{ctx.prefix}rsspublisher force` to view the content."
                 )
                 await ctx.send(msg)
                 return
@@ -785,7 +785,7 @@ class RSSCommands:
         Set an allowed tag for a feed to be posted. The tag must match exactly (without regard to title casing).
         No regex or placeholder qualification.
 
-        Tags can be found in `[p]rss listtags` under `$tags` or `$tags_list` (if tags are present in the feed - not all feeds have tags).
+        Tags can be found in `[p]rsspublisher listtags` under `$tags` or `$tags_list` (if tags are present in the feed - not all feeds have tags).
         """
         channel = channel or ctx.channel
         rss_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
@@ -862,7 +862,7 @@ class RSSCommands:
         """
         Set a template for the feed alert.
 
-        Each variable must start with $, valid variables can be found with `[p]rss listtags`.
+        Each variable must start with $, valid variables can be found with `[p]rsspublisher listtags`.
         """
         channel = channel or ctx.channel
         channel_permission_check = await self._check_channel_permissions(ctx, channel)
@@ -973,8 +973,8 @@ class RSSCommands:
                 feed_data[feed_name] = rss_object.to_json()
             msg = (
                 f"Feed `{feed_name}` added in channel: {channel.mention}\n"
-                f"List the template tags with `{ctx.prefix}rss listtags` "
-                f"and modify the template using `{ctx.prefix}rss template`."
+                f"List the template tags with `{ctx.prefix}rsspublisher listtags` "
+                f"and modify the template using `{ctx.prefix}rsspublisher template`."
             )
             await ctx.send(msg)
         else:
@@ -1117,7 +1117,7 @@ class RSSCommands:
 
         if announcement:
             await ctx.send(
-                f"Announcement for {bold(feed_name)} saved. Use `{ctx.prefix}rss force {feed_name}` to preview it."
+                f"Announcement for {bold(feed_name)} saved. Use `{ctx.prefix}rsspublisher force {feed_name}` to preview it."
             )
         else:
             await ctx.send(f"Announcement for {bold(feed_name)} cleared.")
