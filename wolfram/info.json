@@ -1,11 +1,16 @@
 {
     "author": ["SickProdigy", "aikaterna"],
     "description": "Query Wolfram|Alpha for answers. Requires a free API key.",
+    "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
-    "install_msg": "Thanks for installing, have fun.",
+    "hidden": false,
+    "install_msg": "Set your Wolfram|Alpha AppID with `[p]setwolframapi <key>`, then use `[p]wolfram <question>` or `[p]help Wolfram` to view available commands.",
     "min_bot_version": "3.5.0",
-    "short": "Query Wolfram|Alpha for answers.",
-    "tags": ["wolfram"],
-    "requirements": ["pillow"],
-    "type": "COG"
+    "name": "Wolfram",
+    "permissions": ["attach_files"],
+    "requirements": [],
+    "short": "Query Wolfram|Alpha for answers",
+    "tags": ["wolfram", "wolframalpha", "math", "answers"],
+    "type": "COG",
+    "version": "2.0.0"
 }
