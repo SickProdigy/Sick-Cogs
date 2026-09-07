@@ -1,0 +1,12 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Look up English definitions, pronunciations, related words, and community slang.",
+    "end_user_data_statement": "This cog does not persistently store data or metadata about users.",
+    "install_msg": "Use `[p]dictionary <word>` for a complete entry, or `[p]help dictionary` to view usage.",
+    "min_bot_version": "3.5.0",
+    "short": "Modern dictionary, thesaurus, and slang lookups",
+    "tags": ["dictionary", "definition", "pronunciation", "synonym", "antonym", "urban", "slang"],
+    "requirements": [],
+    "type": "COG",
+    "version": "2.0.0"
+}
