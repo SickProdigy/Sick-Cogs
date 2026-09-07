@@ -190,7 +190,7 @@ class Imgflip(commands.Cog):
     Generate memes from imgflip.com API
     """
 
-    __author__ = ["SickProdigy"]
+    __author__ = ["SickProdigy", "TrustyJAID"]
     __version__ = "3.0.0"
 
     def __init__(self, bot):

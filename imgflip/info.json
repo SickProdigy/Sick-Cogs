@@ -1,5 +1,5 @@
 {
-    "author": ["SickProdigy"],
+    "author": ["SickProdigy", "TrustyJAID"],
     "description": "Generate memes with the Imgflip API.",
     "disabled": false,
     "end_user_data_statement": "This cog does not persistently store data or metadata about users. Meme template IDs and submitted caption text are sent to the Imgflip API to generate images.",
