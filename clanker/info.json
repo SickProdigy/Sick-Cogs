@@ -1,8 +1,5 @@
 {
-    "author": [
-        "SickProdigy",
-        "chatgpt-codex"
-    ],
+    "author": ["SickProdigy"],
     "description": "Prepare Clanker token launch drafts with an interactive Discord card, optional airdrops, and explicit safety controls.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild Clanker API settings and token launch audit records. It does not store private keys, seed phrases, or user wallet credentials.",

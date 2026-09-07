@@ -38,7 +38,7 @@ log = logging.getLogger("red.Sick-Cogs.Clanker")
 class Clanker(ClankerAdminMixin, commands.Cog):
     """Prepare and optionally submit Clanker token launch requests on Base."""
 
-    __author__ = ["SickProdigy", "chatgpt-codex"]
+    __author__ = ["SickProdigy"]
     __version__ = "0.1.0"
 
     default_guild = {
