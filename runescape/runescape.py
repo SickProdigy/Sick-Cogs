@@ -8,11 +8,11 @@ from redbot.core import commands
 
 from .utils import OSRS_SKILLS, RS3_SKILLS, clean_extract, parse_hiscores, wiki_page_url
 
-log = logging.getLogger("red.Sick-Cogs.RuneScape")
+log = logging.getLogger("red.sick-cogs.RuneScape")
 RUNESCAPE_VERSION = "1.0.1"
 USER_AGENT = (
     f"Sick-Cogs-RuneScape/{RUNESCAPE_VERSION} "
-    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/runescape)"
+    "(+https://github.com/SickProdigy/Sick-Cogs)"
 )
 OSRS_HISCORES = "https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws"
 RS3_HISCORES = "https://secure.runescape.com/m=hiscore/index_lite.ws"
@@ -84,6 +84,7 @@ class RuneScape(commands.Cog):
         await ctx.send_help()
 
     @runescape.command(name="user", aliases=["player", "stats"])
+    @commands.bot_has_permissions(embed_links=True)
     async def user(self, ctx: commands.Context, *, query: str):
         """Show stats. Prefix a name with `rs3` to use RuneScape 3."""
         game, username = self._split_game(query)
@@ -116,21 +117,25 @@ class RuneScape(commands.Cog):
         await ctx.send(embed=self.player_embed(game, username, rows))
 
     @runescape.command(name="wiki", aliases=["search"])
+    @commands.bot_has_permissions(embed_links=True)
     async def wiki(self, ctx: commands.Context, *, query: str):
         """Search the Old School RuneScape Wiki."""
         await self._wiki_search(ctx, "osrs", query)
 
     @runescape.command(name="rs3wiki")
+    @commands.bot_has_permissions(embed_links=True)
     async def rs3wiki(self, ctx: commands.Context, *, query: str):
         """Search the RuneScape (RS3) Wiki."""
         await self._wiki_search(ctx, "rs3", query)
 
     @runescape.command(name="item")
+    @commands.bot_has_permissions(embed_links=True)
     async def item(self, ctx: commands.Context, *, name: str):
         """Find an item on the Old School RuneScape Wiki."""
         await self._wiki_search(ctx, "osrs", name)
 
     @runescape.command(name="quest")
+    @commands.bot_has_permissions(embed_links=True)
     async def quest(self, ctx: commands.Context, *, name: str):
         """Find a quest on the Old School RuneScape Wiki."""
         await self._wiki_search(ctx, "osrs", name)
