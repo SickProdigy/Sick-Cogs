@@ -207,7 +207,7 @@ msgstr "Voici vos fonctions personnalisées"
 
 #: assistant\views.py:1043
 msgid "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Example Functions](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 msgstr "Répondez à ce message avec le schéma JSON de votre fonction"
 
 #: assistant\views.py:1064 assistant\views.py:1142

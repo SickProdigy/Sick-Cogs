@@ -206,9 +206,9 @@ msgstr "Aquí están tus funciones personalizadas"
 
 #: assistant\views.py:1043
 msgid "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Example Functions](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 msgstr "Responda a este mensaje con el esquema JSON de su función\n"
-"- [Funciones de Ejemplo](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Funciones de Ejemplo](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 
 #: assistant\views.py:1064 assistant\views.py:1142
 msgid "SchemaError\n"

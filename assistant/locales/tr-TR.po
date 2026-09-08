@@ -206,9 +206,9 @@ msgstr "İşte özel işlevleriniz"
 
 #: assistant\views.py:1043
 msgid "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Example Functions](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 msgstr "Bu mesaja fonksiyonunuzun json şeması ile yanıt verin\n"
-"- [Örnek Fonksiyonlar](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Örnek Fonksiyonlar](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 
 #: assistant\views.py:1064 assistant\views.py:1142
 msgid "SchemaError\n"

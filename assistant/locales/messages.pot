@@ -555,7 +555,7 @@ msgstr ""
 #: assistant\views.py:2402
 msgid ""
 "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Example Functions](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 msgstr ""
 
 #: assistant\views.py:2423 assistant\views.py:2501

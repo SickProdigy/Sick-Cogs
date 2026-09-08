@@ -206,9 +206,9 @@ msgstr "Understood. I will ensure that the translations maintain the core meanin
 
 #: assistant\views.py:1043
 msgid "Reply to this message with the json schema for your function\n"
-"- [Example Functions](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [Example Functions](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 msgstr "이 메시지에 대한 json 스키마를 사용하여 함수에 대한 응답을 보내세요\n"
-"- [예제 함수](https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/assistant/example-funcs)"
+"- [예제 함수](https://github.com/SickProdigy/Sick-Cogs/tree/develop/assistant/example-funcs)"
 
 #: assistant\views.py:1064 assistant\views.py:1142
 msgid "SchemaError\n"
