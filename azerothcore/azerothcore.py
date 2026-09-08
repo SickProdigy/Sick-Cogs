@@ -4,13 +4,13 @@ import html
 import re
 import secrets
 import xml.etree.ElementTree as ET
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 import discord
 from redbot.core import Config, commands
+from redbot.core.data_manager import bundled_data_path
 from redbot.core.utils.chat_formatting import box, humanize_list, pagify
 
 
@@ -47,7 +47,6 @@ ONLINE_PROBE_COMMANDS = (
     DEFAULT_INFO_COMMAND,
 )
 DEFAULT_BANNER_FILENAME = "wow-status-banner.png"
-DEFAULT_BANNER_PATH = Path(__file__).parent / "assets" / DEFAULT_BANNER_FILENAME
 
 
 class AzerothCore(commands.Cog):
@@ -55,6 +54,7 @@ class AzerothCore(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.default_banner_path = bundled_data_path(self) / DEFAULT_BANNER_FILENAME
         self.session: Optional[aiohttp.ClientSession] = None
         self.config = Config.get_conf(self, identifier=4528967103, force_registration=True)
         self.config.register_global(
@@ -755,8 +755,8 @@ class AzerothCore(commands.Cog):
         return True
 
     def _server_banner_file(self) -> Optional[discord.File]:
-        if DEFAULT_BANNER_PATH.exists():
-            return discord.File(str(DEFAULT_BANNER_PATH), filename=DEFAULT_BANNER_FILENAME)
+        if self.default_banner_path.exists():
+            return discord.File(str(self.default_banner_path), filename=DEFAULT_BANNER_FILENAME)
         return None
 
     async def _send_embed(self, ctx: commands.Context, embed: discord.Embed, *, with_banner: bool = False) -> None:
@@ -953,10 +953,11 @@ class AzerothCore(commands.Cog):
         configured_realmlist = await self.config.realmlist()
         if configured_realmlist:
             embed.set_footer(text=f"Realmlist: {configured_realmlist}")
-        if with_banner and DEFAULT_BANNER_PATH.exists():
+        if with_banner and self.default_banner_path.exists():
             embed.set_image(url=f"attachment://{DEFAULT_BANNER_FILENAME}")
 
     @commands.group(name="azerothcore", aliases=("ac", "wow"), invoke_without_command=True)
+    @commands.bot_has_permissions(embed_links=True, attach_files=True)
     async def ac(self, ctx: commands.Context):
         """AzerothCore server commands."""
 
@@ -1717,6 +1718,7 @@ class AzerothCore(commands.Cog):
         await ctx.send("SOAP create command updated.")
 
     @acset.command(name="view")
+    @commands.bot_has_permissions(embed_links=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def acset_view(self, ctx: commands.Context):
