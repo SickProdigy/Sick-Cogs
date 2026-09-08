@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
@@ -174,51 +173,82 @@ class RoleToolsTemporary(RoleToolsMixin):
         now = datetime.now(timezone.utc)
 
         for guild_id, data in all_guilds.items():
-            if not data["temporary_roles"]:
+            records = data["temporary_roles"]
+            if not records:
                 continue
             guild = self.bot.get_guild(guild_id)
             if guild is None:
                 continue
-            for tr in data["temporary_roles"]:
-                temp_role = TempRole(**tr, guild=guild)
+            for record in list(records):
+                temp_role = TempRole(**record, guild=guild)
+                member = temp_role.member
+                if member is None:
+                    try:
+                        member = await guild.fetch_member(temp_role.user_id)
+                    except discord.NotFound:
+                        await self._discard_temporary_role(guild, record)
+                        log.debug("Removing %r because the member no longer exists", temp_role)
+                        continue
+                    except discord.HTTPException:
+                        log.warning(
+                            "Could not verify member %s for temporary role %s",
+                            temp_role.user_id,
+                            temp_role.role_id,
+                            exc_info=True,
+                        )
+                        continue
 
-                if temp_role.member is None:
-                    async with self.config.guild(guild).temporary_roles() as temp_roles:
-                        temp_roles.pop(temp_roles.index(tr))
-                    log.debug("Removing %r because member is None", temp_role)
+                role = temp_role.role
+                if role is None:
+                    await self._discard_temporary_role(guild, record)
+                    log.debug("Removing %r because the role no longer exists", temp_role)
+                    continue
+                if role not in member.roles:
+                    await self._discard_temporary_role(guild, record)
+                    log.debug("Removing %r because the member no longer has the role", temp_role)
+                    continue
+                if temp_role.datetime > now:
                     continue
 
-                if temp_role.role is None:
-                    async with self.config.guild(guild).temporary_roles() as temp_roles:
-                        temp_roles.pop(temp_roles.index(tr))
-                    log.debug("Removing %r because role is None", temp_role)
-                    continue
-                if temp_role.role not in temp_role.member.roles:
-                    async with self.config.guild(guild).temporary_roles() as temp_roles:
-                        temp_roles.pop(temp_roles.index(tr))
-                    log.debug("Removing %r because member doesn't have role", temp_role)
-                    continue
-                remove_date = temp_role.datetime
-                log.debug("maybe removing %r, %s", temp_role, now - remove_date)
-                if (remove_date - now) <= timedelta(minutes=5):
-                    async with self.config.guild(guild).temporary_roles() as temp_roles:
-                        temp_roles.pop(temp_roles.index(tr))
-                    asyncio.create_task(self.remove_temporary_role(temp_role))
+                if await self.remove_temporary_role(temp_role, member=member, role=role):
+                    await self._discard_temporary_role(guild, record)
+
+    async def _discard_temporary_role(self, guild: discord.Guild, record: dict) -> None:
+        async with self.config.guild(guild).temporary_roles() as temp_roles:
+            try:
+                temp_roles.remove(record)
+            except ValueError:
+                pass
 
     @temporary_roles_task.before_loop
     async def before_temporary_roles_loop(self):
         await self.bot.wait_until_red_ready()
 
-    async def remove_temporary_role(self, temp_role: TempRole):
-        log.debug("Waiting %s to remove %r", temp_role.time_left, temp_role)
-        await asyncio.sleep(temp_role.time_left)
-        member = temp_role.member
-        role = temp_role.role
+    async def remove_temporary_role(
+        self,
+        temp_role: TempRole,
+        *,
+        member: Optional[discord.Member] = None,
+        role: Optional[discord.Role] = None,
+    ) -> bool:
+        member = member or temp_role.member
+        role = role or temp_role.role
         if member is None or role is None:
-            return
+            return True
         try:
-            await self.remove_roles(member, [role], _("Temporary Role Removal"))
-        except Exception:
+            responses = await self.remove_roles(member, [role], _("Temporary Role Removal"))
+        except discord.HTTPException:
             log.exception(
                 "Error removing temporary role %s from %s", temp_role.role, temp_role.member
             )
+            return False
+        failures = [response.reason for response in responses if not response]
+        if failures:
+            log.warning(
+                "Temporary role %s remains scheduled for %s: %s",
+                role,
+                member,
+                "; ".join(failures),
+            )
+            return False
+        return True

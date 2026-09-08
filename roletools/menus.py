@@ -417,7 +417,7 @@ class RolePages(menus.ListPageSource):
             else:
                 cdn_fmt = " https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/{codepoint:x}.png"
                 url = cdn_fmt.format(codepoint=ord(str(role.display_icon)))
-                log.verbose("RolePages role.display_icon: %s", role.display_icon)
+                log.debug("RolePages role.display_icon: %s", role.display_icon)
                 em.set_thumbnail(url=url)
         em.set_footer(text=f"Page {menu.current_page + 1}/{self.get_max_pages()}")
         return em

@@ -63,7 +63,8 @@ class RoleToolsReactions(RoleToolsMixin):
                     except KeyError:
                         pass
                     async with self.config.role_from_id(role_id).reactions() as reactions:
-                        reactions.remove(key)
+                        if key in reactions:
+                            reactions.remove(key)
         msg = _("I am finished deleting old settings.")
         await ctx.send(msg)
 
@@ -82,7 +83,7 @@ class RoleToolsReactions(RoleToolsMixin):
                 guild = self.bot.get_guild(guild_id)
                 if not guild:
                     continue
-                async with self.config.guild(ctx.guild).reaction_roles() as cur_settings:
+                async with self.config.guild(guild).reaction_roles() as cur_settings:
                     to_remove = []
                     for key, role_id in cur_settings.items():
                         chan_id, message_id, emoji = key.split("-")
@@ -112,7 +113,8 @@ class RoleToolsReactions(RoleToolsMixin):
                         except KeyError:
                             pass
                         async with self.config.role_from_id(role_id).reactions() as reactions:
-                            reactions.remove(key)
+                            if key in reactions:
+                                reactions.remove(key)
         await ctx.send(_("I am finished deleting old settings."))
 
     @react_coms.command(aliases=["reactionroles", "reactrole"])
@@ -374,7 +376,7 @@ class RoleToolsReactions(RoleToolsMixin):
         send_to_react = False
         async with self.config.guild(ctx.guild).reaction_roles() as cur_setting:
             for role, emoji in role_emoji:
-                log.verbose("bulkreact emoji: %s", type(emoji))
+                log.debug("bulkreact emoji: %s", type(emoji))
                 if isinstance(emoji, discord.PartialEmoji):
                     use_emoji = str(emoji.id)
                 else:

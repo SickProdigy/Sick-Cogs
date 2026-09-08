@@ -213,7 +213,7 @@ class RoleToolsSettings(RoleToolsMixin):
         if cost is None:
             if cur_setting:
                 msg = _("The role {role} currently costs {cost} {currency_name}.").format(
-                    role=role, cost=cost, currency_name=currency_name
+                    role=role, cost=cur_setting, currency_name=currency_name
                 )
                 await ctx.send(msg)
             else:

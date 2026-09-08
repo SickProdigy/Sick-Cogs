@@ -6,7 +6,7 @@
     "hidden": false,
     "install_msg": "Use `[p]roletools` to manage role tools. Remember that role names are case sensitive.",
     "min_bot_version": "3.5.0",
-    "min_python_version": [3, 0, 0],
+    "min_python_version": [3, 8, 1],
     "name": "RoleTools",
     "permissions": ["manage_roles", "embed_links", "add_reactions", "read_message_history"],
     "required_cogs": {},
