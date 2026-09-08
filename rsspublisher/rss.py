@@ -20,7 +20,7 @@ log = logging.getLogger("red.sick-cogs.RSSPublisher")
 
 RSS_USER_AGENT = (
     f"Sick-Cogs-RSSPublisher/{RSS_VERSION} "
-    "(+https://github.com/SickProdigy/Sick-Cogs/tree/develop/rsspublisher)"
+    "(+https://github.com/SickProdigy/Sick-Cogs)"
 )
 
 warnings.filterwarnings(
