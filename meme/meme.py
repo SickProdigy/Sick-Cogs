@@ -3,18 +3,17 @@ from __future__ import annotations
 import asyncio
 import io
 import textwrap
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 import discord
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from redbot.core import commands
+from redbot.core.data_manager import bundled_data_path
 from redbot.core.utils.chat_formatting import box
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_PIXELS = 16_000_000
 CAPTION_LIMIT = 300
-TEMPLATE_DIR = Path(__file__).parent / "templates"
 TEMPLATES: Dict[str, Tuple[str, str]] = {
     "better-choice": ("Better Choice", "better-choice.png"),
     "paperwork-escalation": ("Paperwork Escalation", "paperwork-escalation.png"),
@@ -29,6 +28,7 @@ class Meme(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.template_dir = bundled_data_path(self)
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -140,7 +140,7 @@ class Meme(commands.Cog):
             return
         key = self._template(template)
         top, bottom = self._captions(text)
-        source = (TEMPLATE_DIR / TEMPLATES[key][1]).read_bytes()
+        source = (self.template_dir / TEMPLATES[key][1]).read_bytes()
         async with ctx.typing():
             await self._send_render(ctx, source, top, bottom, f"meme-{key}.png")
 

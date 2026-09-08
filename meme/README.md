@@ -12,9 +12,9 @@ Meme creates static images locally and sends normal Discord attachments. It does
 Examples:
 
 ```text
-!meme better-choice old way | new way
-!meme paperwork another small task | the backlog
-!meme avatar @user when the deploy | actually works
+[p]meme better-choice old way | new way
+[p]meme paperwork another small task | the backlog
+[p]meme avatar @user when the deploy | actually works
 ```
 
 Bundled templates:
