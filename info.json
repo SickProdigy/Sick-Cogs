@@ -1,0 +1,6 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Maintained utility, game, notification, information, and community cogs for Red-DiscordBot.",
+    "install_msg": "Thanks for adding Sick-Cogs. Use `[p]repo info Sick-Cogs` to browse available cogs and review each cog's setup instructions before loading it.",
+    "short": "Maintained cogs for Red-DiscordBot"
+}
