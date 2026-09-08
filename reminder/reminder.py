@@ -16,7 +16,7 @@ from redbot.core.commands import Context
 from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
 
 
-log = logging.getLogger("red.Sick-Cogs.Reminder")
+log = logging.getLogger("red.sick-cogs.Reminder")
 
 
 @dataclass
@@ -171,6 +171,7 @@ class Reminder(commands.Cog):
         )
 
     @remind.command(name="list")
+    @commands.bot_has_permissions(embed_links=True)
     async def remind_list(self, ctx: Context) -> None:
         """List your pending reminders."""
         user_data = await self.config.user(ctx.author).all()
@@ -315,16 +316,22 @@ class Reminder(commands.Cog):
 
     @classmethod
     def parse_duration(cls, value: str) -> Optional[int]:
+        compact = re.sub(r"\s+", "", value or "")
+        matches = list(cls.DURATION_PATTERN.finditer(compact))
+        if not matches or "".join(match.group(0) for match in matches) != compact:
+            return None
+
         seconds = 0
-        for match in cls.DURATION_PATTERN.finditer(value):
+        for match in matches:
             amount = int(match.group(1))
             abbreviation = match.group(2).lower()
             unit = next(
                 (multiplier for name, multiplier in cls.DURATION_UNITS if name.startswith(abbreviation)),
                 None,
             )
-            if unit is not None:
-                seconds += amount * unit
+            if unit is None:
+                return None
+            seconds += amount * unit
         return seconds or None
 
     @staticmethod
