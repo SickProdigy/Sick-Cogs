@@ -11,11 +11,11 @@ from redbot.core.bot import Red
 from redbot.core.utils import can_user_send_messages_in
 
 
-log = logging.getLogger("red.Sick-Cogs.DadJokes")
+log = logging.getLogger("red.sick-cogs.DadJokes")
 
 CONFIG_IDENTIFIER = 5829948157
 DAD_JOKE_URL = "https://icanhazdadjoke.com/"
-USER_AGENT = "Sick-Cogs-DadJokes/1.1.1 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-DadJokes/1.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -226,6 +226,7 @@ class DadJokes(commands.Cog):
         await ctx.send(f"Sent a dad joke to {channel.mention} and reset the wait timer.")
 
     @dadjokeset.command(name="settings")
+    @commands.bot_has_permissions(embed_links=True)
     async def dadjokeset_settings(self, ctx: commands.Context):
         """Show current random dad joke settings."""
         settings = await self.config.guild(ctx.guild).all()
