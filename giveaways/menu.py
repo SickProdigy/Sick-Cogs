@@ -5,7 +5,7 @@ from discord.ui import Button, View
 
 from .objects import AlreadyEnteredError, GiveawayEnterError
 
-log = logging.getLogger("red.Sick-Cogs.Giveaways")
+log = logging.getLogger("red.sick-cogs.Giveaways")
 
 
 class GiveawayView(View):
