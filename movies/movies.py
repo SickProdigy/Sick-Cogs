@@ -12,7 +12,7 @@ from redbot.core.bot import Red
 from redbot.core.utils import can_user_send_messages_in
 from redbot.core.utils.chat_formatting import humanize_list
 
-log = logging.getLogger("red.Sick-Cogs.MovieReleases")
+log = logging.getLogger("red.sick-cogs.MovieReleases")
 
 CONFIG_IDENTIFIER = 924771009
 TMDB_TOKEN_NAMESPACE = "tmdb"
@@ -22,7 +22,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.1.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -306,6 +306,7 @@ class MovieReleases(commands.Cog):
 
     @commands.guild_only()
     @commands.command(name="movies", aliases=["movie", "moviereleases"])
+    @commands.bot_has_permissions(embed_links=True)
     async def movies(self, ctx: commands.Context, *, title: Optional[str] = None):
         """Search for a movie by title, or show movie suggestions.
 
@@ -475,10 +476,19 @@ class MovieReleases(commands.Cog):
         The cog does not assign the role to members, and this does not affect manual
         movie lookups. Use `[p]movieset roleclear` to stop mentioning a role.
         """
+        author_can_mention = role.mentionable or ctx.author.guild_permissions.mention_everyone
+        bot_can_mention = role.mentionable or ctx.guild.me.guild_permissions.mention_everyone
+        if not author_can_mention or not bot_can_mention:
+            await ctx.send(
+                "Both you and I must be allowed to mention that role before it can be used for announcements."
+            )
+            return
+
         await self.config.guild(ctx.guild).role_id.set(role.id)
         await ctx.send(
             f"Automatic movie release posts will now mention {role.mention}. "
-            "This does not affect manual movie lookups."
+            "This does not affect manual movie lookups.",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @movieset.command(name="roleclear", aliases=["clearrole"])
@@ -588,6 +598,7 @@ class MovieReleases(commands.Cog):
         await ctx.send("Upcoming/recent releases: " + humanize_list(lines))
 
     @movieset.command(name="settings")
+    @commands.bot_has_permissions(embed_links=True)
     async def movieset_settings(self, ctx: commands.Context):
         """Show current movie release settings."""
         settings = await self.config.guild(ctx.guild).all()

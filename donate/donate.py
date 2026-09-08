@@ -157,7 +157,7 @@ class Donate(commands.Cog):
         if notes:
             lines.extend(["Notes", *[f"- {note}" for note in notes if note]])
         for page in pagify("\n".join(line for line in lines if line), delims=["\n"], page_length=1800):
-            await ctx.send(page)
+            await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
 
     @donate.group(name="set", invoke_without_command=True)
     @commands.guild_only()
@@ -186,6 +186,7 @@ class Donate(commands.Cog):
         await ctx.send(message)
 
     @donate_set.command(name="view")
+    @commands.bot_has_permissions(embed_links=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_view(self, ctx: commands.Context):
@@ -326,7 +327,7 @@ class Donate(commands.Cog):
         if not notes:
             return await ctx.send("No donation notes are configured.")
         lines = [f"{index}. {note}" for index, note in enumerate(notes, start=1)]
-        await ctx.send("\n".join(lines))
+        await ctx.send("\n".join(lines), allowed_mentions=discord.AllowedMentions.none())
 
     @donateset_note.command(name="add")
     @commands.guild_only()
@@ -360,7 +361,7 @@ class Donate(commands.Cog):
             if index < 1 or index > len(notes):
                 return await ctx.send("That note number does not exist.")
             removed = notes.pop(index - 1)
-        await ctx.send(f"Removed note: {removed}")
+        await ctx.send(f"Removed note: {removed}", allowed_mentions=discord.AllowedMentions.none())
 
     @donate_set.command(name="clear")
     @commands.guild_only()
