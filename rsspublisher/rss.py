@@ -16,11 +16,11 @@ from .renderer import FeedRenderer
 from .scheduler import FeedJob, FeedScheduler
 
 # Originally based on aikaterna-cogs RSS; maintained here by SickProdigy.
-log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
+log = logging.getLogger("red.sick-cogs.RSSPublisher")
 
 RSS_USER_AGENT = (
     f"Sick-Cogs-RSSPublisher/{RSS_VERSION} "
-    "(+https://gitea.rcs1.top/sickprodigy/Sick-Cogs/src/branch/develop/rsspublisher)"
+    "(+https://github.com/SickProdigy/Sick-Cogs/tree/develop/rsspublisher)"
 )
 
 warnings.filterwarnings(
@@ -59,9 +59,14 @@ class RSS(RSSCommands, RSSFetcherMixin, RSSDeliveryMixin, commands.Cog):
         self._read_feeds_loop = self.bot.loop.create_task(self._initialize())
 
     async def _initialize(self):
-        await self._get_http_session()
-        await migrate_stored_feeds(self.config, log)
-        await self.read_feeds()
+        try:
+            await self._get_http_session()
+            await migrate_stored_feeds(self.config, log)
+            await self.read_feeds()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("RSSPublisher background initialization failed")
 
     def cog_unload(self):
         if self._read_feeds_loop:
@@ -90,7 +95,14 @@ class RSS(RSSCommands, RSSFetcherMixin, RSSDeliveryMixin, commands.Cog):
             concurrency=5,
             interval=300,
         )
-        await self._scheduler.run()
+        while True:
+            try:
+                await self._scheduler.run()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("RSSPublisher scheduler stopped unexpectedly; retrying")
+                await asyncio.sleep(30)
 
     async def _collect_feed_jobs(self):
         config_data = await self.config.all_channels()
