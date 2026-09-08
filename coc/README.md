@@ -208,7 +208,7 @@ Toggle mentions for one event:
 
 ## Attack Log Updates
 
-When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `card` format uses an embed and shows each attack as a green friendly or red enemy entry with attacker, defender, stars, and destruction. The optional `compact` format sends an ordinary text-only Discord message with up to ten one-line attack entries. Compact updates contain no embed or banner image, allowing several recent logs to remain visible at once.
+When `attacklog` is enabled, war notifications send a focused `War Log Update` for new attacks. The default `compact` format sends an ordinary text-only Discord message with up to ten one-line attack entries. The optional `card` format uses an embed and shows each attack as a green friendly or red enemy entry with attacker, defender, stars, and destruction. Compact updates contain no embed or banner image, allowing several recent logs to remain visible at once.
 
 Card attack-log embeds stay focused on the war type, matchup, and newly detected attacks; they omit generic status, team totals, schedules, and score summaries.
 
