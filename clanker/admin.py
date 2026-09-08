@@ -8,6 +8,7 @@ from redbot.core import checks, commands
 
 from .constants import (
     DEFAULT_CLANKER_SUPPLY,
+    LEGACY_LIVE_SUBMISSION_AVAILABLE,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
 )
@@ -41,9 +42,17 @@ class ClankerAdminMixin:
 
     @clankerset.command(name="submit")
     async def clankerset_submit(self, ctx: commands.Context, enabled: bool):
-        """Enable or disable live API submission."""
-        await self.config.guild(ctx.guild).submit_enabled.set(enabled)
-        await ctx.send(f"Clanker launch mode set to {'live API submission' if enabled else 'dry-run/review only'}.")
+        """Keep legacy REST submission disabled during CryptoWallet migration."""
+        if enabled and not LEGACY_LIVE_SUBMISSION_AVAILABLE:
+            await self.config.guild(ctx.guild).submit_enabled.set(False)
+            await ctx.send(
+                "Legacy Clanker REST submission is permanently disabled. Launches remain "
+                "unsigned Base Sepolia drafts until the protected CryptoWallet deployment "
+                "intent passes security review."
+            )
+            return
+        await self.config.guild(ctx.guild).submit_enabled.set(False)
+        await ctx.send("Clanker launch mode set to dry-run/review only.")
 
     @clankerset.command(name="apiurl")
     async def clankerset_apiurl(self, ctx: commands.Context, api_base_url: str):

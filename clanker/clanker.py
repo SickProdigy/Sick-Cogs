@@ -16,6 +16,7 @@ from .constants import (
     BASE_CHAIN_ID,
     CONFIG_IDENTIFIER,
     DEFAULT_CLANKER_SUPPLY,
+    LEGACY_LIVE_SUBMISSION_AVAILABLE,
     MAX_AUDIT_RECORDS,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
@@ -164,6 +165,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         token: str,
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
+        if not LEGACY_LIVE_SUBMISSION_AVAILABLE:
+            raise RuntimeError(
+                "Legacy Clanker REST submission is disabled during the protected "
+                "CryptoWallet integration."
+            )
         endpoint = urljoin(api_base_url.rstrip("/") + "/", (api_submit_path or "tokens").lstrip("/"))
         session = await self.get_session()
         headers = {
@@ -393,6 +399,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return None
 
     async def submit_approved_launch(self, guild: discord.Guild, settings: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
+        if not LEGACY_LIVE_SUBMISSION_AVAILABLE:
+            raise RuntimeError(
+                "Legacy Clanker REST submission is disabled during the protected "
+                "CryptoWallet integration."
+            )
         if not settings.get("submit_enabled"):
             raise RuntimeError("Clanker submit mode is disabled.")
         if not settings.get("api_base_url"):
