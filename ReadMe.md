@@ -41,6 +41,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
+- `wolfram` - Wolfram|Alpha text, image, and step-by-step query tools.
 
 Develop-only cogs and experiments are not part of the stable Index release.
 
@@ -48,8 +49,7 @@ Develop-only cogs and experiments are not part of the stable Index release.
 
 Several cogs began with, or retain portions of, work by community authors who are
 listed in their cog metadata: skeith (Avatar), UltimatePancake (DadJokes), flaree
-(Giveaways), Predä and aikaterna (NSFW), and TrustyJAID (RuneScape). RSSPublisher
-was originally based on aikaterna's RSS cog and has since been substantially rewritten.
+(Giveaways), Predä and aikaterna (NSFW), and TrustyJAID (RuneScape). RSSPublisher and Wolfram were originally based on aikaterna's cogs; RSSPublisher has since been substantially rewritten.
 Their contributions remain credited regardless of current maintenance ownership. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for preserved upstream notices and links.
 

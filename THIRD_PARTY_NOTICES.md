@@ -25,6 +25,12 @@ and subsequently substantially rewritten in Sick-Cogs.
 
 Copyright (c) 2016-present aikaterna.
 
+## Wolfram
+
+Originally based on [aikaterna/aikaterna-cogs](https://github.com/aikaterna/aikaterna-cogs) and currently maintained in Sick-Cogs.
+
+Copyright (c) 2016-present aikaterna.
+
 ## Additional credited contributors
 
 UltimatePancake (DadJokes), Predä and aikaterna (NSFW), and TrustyJAID
