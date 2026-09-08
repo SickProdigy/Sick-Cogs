@@ -12,7 +12,7 @@ log = logging.getLogger("red.sick-cogs.RuneScape")
 RUNESCAPE_VERSION = "1.0.1"
 USER_AGENT = (
     f"Sick-Cogs-RuneScape/{RUNESCAPE_VERSION} "
-    "(+https://github.com/SickProdigy/Sick-Cogs/tree/develop/runescape)"
+    "(+https://github.com/SickProdigy/Sick-Cogs)"
 )
 OSRS_HISCORES = "https://secure.runescape.com/m=hiscore_oldschool/index_lite.ws"
 RS3_HISCORES = "https://secure.runescape.com/m=hiscore/index_lite.ws"
