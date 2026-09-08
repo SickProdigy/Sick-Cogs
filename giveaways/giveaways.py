@@ -15,7 +15,7 @@ from .converter import Args, EditArgs
 from .menu import GiveawayButton, GiveawayView
 from .objects import Giveaway
 
-log = logging.getLogger("red.Sick-Cogs.Giveaways")
+log = logging.getLogger("red.sick-cogs.Giveaways")
 GIVEAWAY_KEY = "giveaways"
 
 # TODO: Add a way to delete giveaways that have ended from the config
@@ -33,13 +33,24 @@ class Giveaways(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=95932766180343808)
+        self.config = Config.get_conf(self, identifier=95932766180343808, force_registration=True)
         self.config.init_custom(GIVEAWAY_KEY, 2)
         self.giveaways = {}
         self.entry_locks = {}
         self.giveaway_bgloop = asyncio.create_task(self.init())
         with contextlib.suppress(Exception):
             self.bot.add_dev_env_value("giveaways", lambda x: self)
+
+    @staticmethod
+    def _can_create_in(ctx: commands.Context, channel: discord.TextChannel) -> bool:
+        author_permissions = channel.permissions_for(ctx.author)
+        bot_permissions = channel.permissions_for(ctx.guild.me)
+        return (
+            author_permissions.view_channel
+            and bot_permissions.view_channel
+            and bot_permissions.send_messages
+            and bot_permissions.embed_links
+        )
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Remove a user's entrant and winner records from every giveaway."""
@@ -217,7 +228,7 @@ class Giveaways(commands.Cog):
         return True
 
     @commands.hybrid_group(aliases=["gw", "giveaways"])
-    @commands.bot_has_permissions(add_reactions=True, embed_links=True)
+    @commands.bot_has_permissions(embed_links=True)
     @commands.has_permissions(manage_guild=True)
     async def giveaway(self, ctx: commands.Context):
         """
@@ -245,6 +256,10 @@ class Giveaways(commands.Cog):
         This by default will DM the winner and also DM a user if they cannot enter the giveaway.
         """
         channel = channel or ctx.channel
+        if len(prize) > 240:
+            return await ctx.send("Prize text must be 240 characters or fewer.")
+        if not self._can_create_in(ctx, channel):
+            return await ctx.send("You must be able to view that channel, and I need View Channel, Send Messages, and Embed Links there.")
         end = utcnow() + time
         embed = discord.Embed(
             title=f"{prize}",
@@ -359,6 +374,8 @@ class Giveaways(commands.Cog):
         prize = arguments["prize"]
         duration = arguments["duration"]
         channel = arguments["channel"] or ctx.channel
+        if not self._can_create_in(ctx, channel):
+            return await ctx.send("You must be able to view that channel, and I need View Channel, Send Messages, and Embed Links there.")
 
         winners = arguments.get("winners", 1) or 1
         end = utcnow() + duration
@@ -379,6 +396,30 @@ class Giveaways(commands.Cog):
             embed.set_image(url=arguments["image"])
         if arguments["thumbnail"] is not None:
             embed.set_thumbnail(url=arguments["thumbnail"])
+
+        requested_everyone = bool(arguments["ateveryone"] or arguments["athere"])
+        can_mention_everyone = channel.permissions_for(ctx.author).mention_everyone
+        bot_can_mention_everyone = channel.permissions_for(ctx.guild.me).mention_everyone
+        if requested_everyone and not can_mention_everyone:
+            await ctx.send("You need the Mention Everyone permission to use @everyone or @here.")
+            return
+        if requested_everyone and not bot_can_mention_everyone:
+            await ctx.send("I need the Mention Everyone permission for that giveaway.")
+            return
+        for role_id in arguments["mentions"] or ():
+            role = ctx.guild.get_role(role_id)
+            if role is None:
+                continue
+            if not role.mentionable and not can_mention_everyone:
+                await ctx.send(
+                    f"You cannot mention {role.name}; make the role mentionable or request "
+                    "the Mention Everyone permission."
+                )
+                return
+            if not role.mentionable and not bot_can_mention_everyone:
+                await ctx.send(f"I do not have permission to mention {role.name}.")
+                return
+
         txt = "\n"
         if arguments["ateveryone"]:
             txt += "@everyone "
@@ -396,7 +437,7 @@ class Giveaways(commands.Cog):
             embed=embed,
             allowed_mentions=discord.AllowedMentions(
                 roles=bool(arguments["mentions"]),
-                everyone=bool(arguments["ateveryone"]),
+                everyone=requested_everyone,
             ),
         )
         view.add_item(
