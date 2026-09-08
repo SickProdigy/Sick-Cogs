@@ -2,12 +2,35 @@
 
 Sick-Cogs is a Red-DiscordBot cog repository maintained for SickProdigy's Discord projects.
 
-This branch is the stable release branch. Active development, experiments, and unreleased cogs live on `develop`.
+The repo is organized around two goals:
+
+- Keep `main` as the stable release branch.
+- Use `develop` for active work, experiments, and cogs that are still being shaped.
+
+Contribution notes are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Installation
+
+Add this repository with Red's Downloader:
+
+```text
+[p]repo add Sick-Cogs https://github.com/SickProdigy/Sick-Cogs
+```
+
+Review the available cogs and each cog's setup message before installing:
+
+```text
+[p]repo list Sick-Cogs
+[p]cog install Sick-Cogs <cog>
+[p]load <cog>
+```
+
+Use `[p]cog update` to install future updates. Replace `[p]` with your bot's configured prefix when typing commands.
 
 ## Available Cogs
 
-- `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `avatar` - Display a Discord user's avatar as a direct, clickable image URL.
+- `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `coc` - Clash of Clans clan and war status utilities.
 - `dadjokes` - On-demand and scheduled random dad jokes.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
@@ -19,10 +42,16 @@ This branch is the stable release branch. Active development, experiments, and u
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
-## Branches
+Develop-only cogs and experiments are not part of the stable Index release.
 
-- `main` - stable release branch.
-- `develop` - active working branch for ongoing development.
+## Credits
+
+Several cogs began with, or retain portions of, work by community authors who are
+listed in their cog metadata: skeith (Avatar), UltimatePancake (DadJokes), flaree
+(Giveaways), Predä and aikaterna (NSFW), and TrustyJAID (RuneScape). RSSPublisher
+was originally based on aikaterna's RSS cog and has since been substantially rewritten.
+Their contributions remain credited regardless of current maintenance ownership. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for preserved upstream notices and links.
 
 ## License
 
