@@ -8,13 +8,13 @@ import discord
 from redbot.core import commands
 
 
-log = logging.getLogger("red.Sick-Cogs.Dictionary")
+log = logging.getLogger("red.sick-cogs.Dictionary")
 
 API_BASE = "https://api.dictionaryapi.dev/api/v2/entries/en"
 URBAN_API_URL = "https://api.urbandictionary.com/v0/define"
 PROVIDER_URL = "https://dictionaryapi.dev/"
 URBAN_PROVIDER_URL = "https://www.urbandictionary.com/"
-USER_AGENT = "Sick-Cogs-Dictionary/2.0.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Dictionary/2.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 MAX_ENTRIES = 3
 MAX_MEANINGS = 4
 MAX_DEFINITIONS = 3
@@ -306,6 +306,7 @@ class Dictionary(commands.Cog):
         view.message = await ctx.send(embed=embeds[0], view=view)
 
     @commands.group(name="dictionary", aliases=["dict"], invoke_without_command=True)
+    @commands.bot_has_permissions(embed_links=True)
     async def dictionary(self, ctx: commands.Context, *, term: str = None):
         """Look up an English word or phrase."""
 
