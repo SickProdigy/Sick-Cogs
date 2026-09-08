@@ -18,7 +18,7 @@ from .models import FeedMode, migrate_feed_data, normalize_mode
 from .models import INTERNAL_TAGS, TagType
 from .renderer import TemplateValidationError, validate_template
 
-log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
+log = logging.getLogger("red.sick-cogs.RSSPublisher")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 class RSSCommands:
@@ -1111,6 +1111,26 @@ class RSSCommands:
             except TemplateValidationError as exc:
                 await ctx.send(f"That announcement was not saved. {exc}")
                 return
+
+            for role_id in self._renderer.announcement_role_ids(announcement):
+                role = ctx.guild.get_role(role_id)
+                if role is None:
+                    await ctx.send(f"That announcement was not saved because role `{role_id}` is not in this server.")
+                    return
+                author_can_mention = (
+                    role.mentionable
+                    or ctx.author.guild_permissions.mention_everyone
+                )
+                bot_can_mention = (
+                    role.mentionable
+                    or ctx.guild.me.guild_permissions.mention_everyone
+                )
+                if not author_can_mention or not bot_can_mention:
+                    await ctx.send(
+                        "That announcement was not saved because both you and I must be allowed "
+                        f"to mention {role.name!r}."
+                    )
+                    return
 
         async with self.config.channel(channel).feeds() as feeds:
             feeds[feed_name]["announcement"] = announcement or None
