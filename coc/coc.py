@@ -111,7 +111,7 @@ class Coc(commands.Cog):
             "WAR_NOTIFY_BATTLE_MENTION": True,
             "WAR_NOTIFY_ATTACK_LOG": True,
             "WAR_NOTIFY_ATTACK_LOG_MENTION": True,
-            "WAR_ATTACK_LOG_STYLE": "card",
+            "WAR_ATTACK_LOG_STYLE": "compact",
             "WAR_NOTIFY_END_SOON": True,
             "WAR_NOTIFY_END_SOON_MENTION": True,
             "WAR_END_SOON_MINUTES": 60,
@@ -1433,7 +1433,7 @@ class Coc(commands.Cog):
                         await channel.send(notice)
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, "attacklog")
-                    attack_log_style = str(settings.get("WAR_ATTACK_LOG_STYLE") or "card").lower()
+                    attack_log_style = str(settings.get("WAR_ATTACK_LOG_STYLE") or "compact").lower()
                     if attack_log_style == "compact":
                         compact_text = self._build_war_attack_update_text(new_attacks)
                         message = f"{content}\n{compact_text}" if content else compact_text
@@ -1740,7 +1740,7 @@ class Coc(commands.Cog):
             f"Timezone: **{settings.get('COC_TIMEZONE') or 'America/New_York'}**",
             f"Preparation ending soon: **{settings.get('WAR_PREP_SOON_MINUTES', 5)} minutes** before battle day",
             f"War ending soon: **{settings.get('WAR_END_SOON_MINUTES', 60)} minutes** before war end",
-            f"Attack log format: **{str(settings.get('WAR_ATTACK_LOG_STYLE') or 'card').upper()}**",
+            f"Attack log format: **{str(settings.get('WAR_ATTACK_LOG_STYLE') or 'compact').upper()}**",
             f"CWL notifications: **{'ON' if settings.get('COC_CWL_NOTIFICATIONS', True) else 'OFF'}**",
             f"Raid Weekend notifications: **{'ON' if settings.get('COC_RAID_WEEKEND_NOTIFICATIONS') else 'OFF'}**",
             "",
@@ -1803,7 +1803,7 @@ class Coc(commands.Cog):
 
         guild_config = self.config.guild(ctx.guild)
         if style is None:
-            current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "card").lower()
+            current = str(await guild_config.WAR_ATTACK_LOG_STYLE() or "compact").lower()
             return await ctx.send(
                 f"War attack-log notifications currently use **{current.upper()}** format.\n"
                 f"Choose a format with `{ctx.clean_prefix}cocset warattacks card` or "
