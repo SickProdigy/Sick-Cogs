@@ -64,7 +64,7 @@ def select_unseen_entries(
         return unseen[:1]
     return list(reversed(unseen))
 
-log = logging.getLogger("red.Sick-Cogs.RSSPublisher")
+log = logging.getLogger("red.sick-cogs.RSSPublisher")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 class RSSDeliveryMixin:
