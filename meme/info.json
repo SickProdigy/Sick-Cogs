@@ -1,0 +1,18 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Find online memes and GIFs, publish scheduled feeds, and caption local images.",
+    "disabled": false,
+    "end_user_data_statement": "This cog does not persistently store user data, submitted caption text, avatars, or generated images.",
+    "hidden": false,
+    "install_msg": "Use `[p]meme` for online memes, `[p]meme gif` for animated Imgur results, and `[p]memeify` (alias `[p]imgflip`) for local captioning. Online providers require optional Red shared API tokens; see the cog README.",
+    "min_bot_version": "3.5.0",
+    "min_python_version": [3, 9, 0],
+    "name": "Meme",
+    "permissions": ["attach_files", "embed_links"],
+    "required_cogs": {},
+    "requirements": ["Pillow>=10.0,<12.0"],
+    "short": "Find, publish, and create memes",
+    "tags": ["meme", "memes", "fun", "images", "gif", "reddit", "imgur"],
+    "type": "COG",
+    "version": "1.0.0"
+}
