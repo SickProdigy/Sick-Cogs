@@ -7,15 +7,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from red_commons.logging import getLogger
 from redbot.core import Config, commands, checks
+from redbot.core.data_manager import bundled_data_path
 from redbot.core.i18n import Translator
 
 _ = Translator("Coc", __file__)
-log = getLogger("red.Sick-Cogs.Coc")
+log = getLogger("red.sick-cogs.Coc")
 COC_API_BASE = "https://api.clashofclans.com/v1"
 COC_DEVELOPER_URL = "https://developer.clashofclans.com/"
 COC_TOKEN_NAMESPACE = "clashofclans"
-CLAN_BANNER_PATH = Path(__file__).parent / "data" / "images" / "clan-banner.png"
-WAR_BANNER_PATH = Path(__file__).parent / "data" / "images" / "war-banner.png"
+COC_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=30)
 WAR_NOTIFICATION_EVENTS = {
     "prep": "Preparation Started",
     "prepsoon": "Preparation Ending Soon",
@@ -88,6 +88,9 @@ class Coc(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        image_path = bundled_data_path(self) / "images"
+        self.clan_banner_path = image_path / "clan-banner.png"
+        self.war_banner_path = image_path / "war-banner.png"
         default_guild = {
             "COC_CLAN_KEY": None,
             "COC_WAR_CHANNEL": None,
@@ -133,11 +136,11 @@ class Coc(commands.Cog):
 
     @staticmethod
     def _clean_clan_tag(clan_tag: str) -> str:
-        return "%23" + clan_tag.replace("#", "")
+        return "%23" + clan_tag.replace("#", "").strip()
 
     @staticmethod
     def _normalize_tag(tag: str) -> str:
-        return "#" + tag.replace("#", "").upper()
+        return "#" + tag.replace("#", "").strip().upper()
 
     @staticmethod
     def _api_headers(api_key: str) -> dict:
@@ -250,7 +253,7 @@ class Coc(commands.Cog):
             async with aiohttp.request(
                 "GET",
                 f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}",
-                headers=headers,
+                headers=headers, timeout=COC_HTTP_TIMEOUT,
             ) as response:
                 if response.status != 200:
                     await self._send_api_error(ctx, response)
@@ -259,8 +262,9 @@ class Coc(commands.Cog):
         except aiohttp.ClientConnectionError as exc:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {exc}")
             return
-        except Exception as exc:
-            await ctx.send(f"An unexpected error occurred: {exc}")
+        except Exception:
+            log.exception("Unexpected error while fetching Clash of Clans clan information")
+            await ctx.send("An unexpected error occurred while contacting the Clash of Clans API.")
             return
 
         clan_name = str(clan.get("name", "Clash of Clans"))
@@ -279,14 +283,14 @@ class Coc(commands.Cog):
         embed.add_field(name="Member Count", value=clan.get("members", "Unknown"))
         embed.add_field(name="War Frequency", value=clan.get("warFrequency", "Unknown"))
         embed.set_footer(text="Brought to you by SickGaming.net", icon_url="https://i.imgur.com/TFTXZvP.png")
-        await self._send_embed_with_optional_image(ctx, embed, CLAN_BANNER_PATH, "clan-banner.png")
+        await self._send_embed_with_optional_image(ctx, embed, self.clan_banner_path, "clan-banner.png")
 
     async def _fetch_api_json(self, ctx: commands.Context, api_key: str, path: str) -> dict | None:
         """Fetch one API resource and report user-facing errors."""
 
         try:
             async with aiohttp.request(
-                "GET", f"{COC_API_BASE}{path}", headers=self._api_headers(api_key)
+                "GET", f"{COC_API_BASE}{path}", headers=self._api_headers(api_key), timeout=COC_HTTP_TIMEOUT
             ) as response:
                 if response.status != 200:
                     await self._send_api_error(ctx, response)
@@ -294,8 +298,9 @@ class Coc(commands.Cog):
                 return await response.json()
         except aiohttp.ClientConnectionError as exc:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {exc}")
-        except Exception as exc:
-            await ctx.send(f"An unexpected error occurred: {exc}")
+        except Exception:
+            log.exception("Unexpected error while fetching a Clash of Clans API resource")
+            await ctx.send("An unexpected error occurred while contacting the Clash of Clans API.")
         return None
 
     async def _send_player_info(self, ctx: commands.Context, api_key: str, player_tag: str) -> None:
@@ -397,7 +402,7 @@ class Coc(commands.Cog):
                     async with aiohttp.request(
                         "GET",
                         f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(war_tag)}",
-                        headers=headers,
+                        headers=headers, timeout=COC_HTTP_TIMEOUT,
                     ) as response:
                         if response.status != 200:
                             continue
@@ -466,7 +471,7 @@ class Coc(commands.Cog):
 
         url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/capitalraidseasons?limit=1"
         try:
-            async with aiohttp.request("GET", url, headers=self._api_headers(api_key)) as response:
+            async with aiohttp.request("GET", url, headers=self._api_headers(api_key), timeout=COC_HTTP_TIMEOUT) as response:
                 if response.status != 200:
                     log.debug("Raid Weekend API returned HTTP %s for guild %s.", response.status, guild.id)
                     return
@@ -535,7 +540,7 @@ class Coc(commands.Cog):
         normalized_clan_tag = self._normalize_tag(clan_tag)
         league_group_url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/currentwar/leaguegroup"
 
-        async with aiohttp.request("GET", league_group_url, headers=headers) as response:
+        async with aiohttp.request("GET", league_group_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
             if response.status != 200:
                 detail = await self._response_detail(response)
                 if detail:
@@ -556,7 +561,7 @@ class Coc(commands.Cog):
 
         for war_tag in war_tags:
             war_url = f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(war_tag)}"
-            async with aiohttp.request("GET", war_url, headers=headers) as response:
+            async with aiohttp.request("GET", war_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
                 if response.status != 200:
                     continue
                 war = await response.json()
@@ -579,7 +584,7 @@ class Coc(commands.Cog):
     async def _fetch_current_war(self, clan_tag: str, headers: dict) -> tuple[dict, str]:
         clan_war_url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/currentwar"
 
-        async with aiohttp.request("GET", clan_war_url, headers=headers) as response:
+        async with aiohttp.request("GET", clan_war_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
             if response.status == 200:
                 war_data = await response.json()
                 if war_data.get("state") != "notInWar":
@@ -1239,6 +1244,11 @@ class Coc(commands.Cog):
         )
 
     @staticmethod
+    def _can_send_war_updates(channel: discord.TextChannel) -> bool:
+        permissions = channel.permissions_for(channel.guild.me)
+        return permissions.send_messages and permissions.embed_links and permissions.attach_files
+
+    @staticmethod
     async def _send_embed_with_optional_image(
         destination,
         embed: discord.Embed,
@@ -1274,6 +1284,8 @@ class Coc(commands.Cog):
 
             guild_id = int(guild_id)
             guild = self.bot.get_guild(guild_id)
+            if guild is not None and await self.bot.cog_disabled_in_guild(self, guild):
+                continue
             if guild is None:
                 continue
 
@@ -1288,6 +1300,9 @@ class Coc(commands.Cog):
                 channel = None
             if channel is None:
                 log.warning("Configured CoC war channel %s was not found in guild %s.", channel_id, guild_id)
+                continue
+            if not self._can_send_war_updates(channel):
+                log.warning("Missing permissions in configured CoC war channel %s for guild %s.", channel_id, guild_id)
                 continue
 
             if raid_notifications_enabled:
@@ -1401,7 +1416,7 @@ class Coc(commands.Cog):
                     await self._send_embed_with_optional_image(
                         channel,
                         embed,
-                        WAR_BANNER_PATH,
+                        self.war_banner_path,
                         "war-banner.png",
                         content=content,
                         allowed_mentions=allowed_mentions,
@@ -1446,7 +1461,7 @@ class Coc(commands.Cog):
                         await self._send_embed_with_optional_image(
                             channel,
                             embed,
-                            WAR_BANNER_PATH,
+                            self.war_banner_path,
                             "war-banner.png",
                             content=content,
                             allowed_mentions=allowed_mentions,
@@ -1470,6 +1485,7 @@ class Coc(commands.Cog):
 
     @commands.guild_only()
     @commands.group(invoke_without_command=True, aliases=['clashofclans'], name='coc')
+    @commands.bot_has_permissions(embed_links=True, attach_files=True)
     async def command_coc(self, ctx):
         """
         Show Clash of Clans clan information and war results.
@@ -1548,8 +1564,9 @@ class Coc(commands.Cog):
         except aiohttp.ClientConnectionError as e:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
             return
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
+        except Exception:
+            log.exception("Unexpected error while fetching the current Clash of Clans war")
+            await ctx.send("An unexpected error occurred while contacting the Clash of Clans API.")
             return
 
         if not user_json:
@@ -1565,7 +1582,7 @@ class Coc(commands.Cog):
         await guild_config.LAST_API_PULL.set((datetime.now() - timedelta(hours=5)).isoformat())
         await guild_config.LAST_WAR_ID.set(self._war_id(user_json))
         await guild_config.LAST_WAR_ATTACKS.set(self._current_attack_keys(user_json, clan_key))
-        await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
+        await self._send_embed_with_optional_image(ctx, embed, self.war_banner_path, "war-banner.png")
 
     @command_coc.command(name="attacks", aliases=["attack", "attackstatus", "hits"])
     async def command_coc_attacks(self, ctx):
@@ -1585,8 +1602,9 @@ class Coc(commands.Cog):
         except aiohttp.ClientConnectionError as e:
             await ctx.send(f"Oops! Couldn't return results from COC api due to a connection error: {e}")
             return
-        except Exception as e:
-            await ctx.send(f"An unexpected error occurred: {e}")
+        except Exception:
+            log.exception("Unexpected error while fetching Clash of Clans war attacks")
+            await ctx.send("An unexpected error occurred while contacting the Clash of Clans API.")
             return
 
         if not war_data:
@@ -1596,10 +1614,11 @@ class Coc(commands.Cog):
 
         timezone_name = str(await self.config.guild(ctx.guild).COC_TIMEZONE() or "America/New_York")
         embed = self._build_war_attacks_embed(war_data, clan_key, timezone_name)
-        await self._send_embed_with_optional_image(ctx, embed, WAR_BANNER_PATH, "war-banner.png")
+        await self._send_embed_with_optional_image(ctx, embed, self.war_banner_path, "war-banner.png")
         
     @commands.guild_only()
     @commands.group(name="cocset", invoke_without_command=True)
+    @commands.bot_has_permissions(embed_links=True)
     @coc_manager()
     async def command_coc_set(self, ctx):
         """Configure this server's Clash of Clans integration."""
@@ -1845,7 +1864,10 @@ class Coc(commands.Cog):
             return await ctx.send("I could not find that role. Mention it or enter its exact name or ID.")
 
         await guild_config.COC_MANAGER_ROLE.set(role.id)
-        await ctx.send(f"CoC manager role set to {role.mention}.")
+        await ctx.send(
+            f"CoC manager role set to {role.mention}.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @command_coc_set.command(name="notificationrole")
     async def command_coc_set_notificationrole(self, ctx, *, role_name: str = None):
@@ -1874,8 +1896,18 @@ class Coc(commands.Cog):
         except commands.BadArgument:
             return await ctx.send("I could not find that role. Mention it or enter its exact name or ID.")
 
+        author_can_mention = role.mentionable or ctx.author.guild_permissions.mention_everyone
+        bot_can_mention = role.mentionable or ctx.guild.me.guild_permissions.mention_everyone
+        if not author_can_mention or not bot_can_mention:
+            return await ctx.send(
+                "Both you and I must be allowed to mention that role before it can be used for notifications."
+            )
+
         await guild_config.COC_WAR_MENTION_ROLE.set(role.id)
-        await ctx.send(f"War notification mention role set to {role.mention}.")
+        await ctx.send(
+            f"War notification mention role set to {role.mention}.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @coc_manager()
     @command_coc_set.command(name="event")
@@ -1961,6 +1993,10 @@ class Coc(commands.Cog):
         """
 
         channel = channel or ctx.channel
+        if not self._can_send_war_updates(channel):
+            return await ctx.send(
+                "I need Send Messages, Embed Links, and Attach Files in that channel."
+            )
         guild_config = self.config.guild(ctx.guild)
         await guild_config.COC_WAR_CHANNEL.set(channel.id)
         await guild_config.COC_WAR_NOTIFICATIONS.set(True)
