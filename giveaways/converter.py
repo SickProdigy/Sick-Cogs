@@ -156,14 +156,12 @@ class Args(Converter):
                 "You must specify a multiplier and roles. Use `--multiplier` or `-m` and `--multi-roles` or `-mr`"
             )
 
-        if (
-            (vals["ateveryone"] or vals["athere"])
-            and not ctx.channel.permissions_for(ctx.me).mention_everyone
-            and not ctx.channel.permissions_for(ctx.author).mention_everyone
-        ):
-            raise BadArgument(
-                "You do not have permission to mention everyone. Please ensure the bot and you have `Mention Everyone` permission."
-            )
+        target_channel = vals["channel"] or ctx.channel
+        if vals["ateveryone"] or vals["athere"]:
+            if not target_channel.permissions_for(ctx.author).mention_everyone:
+                raise BadArgument("You need the Mention Everyone permission in the target channel.")
+            if not target_channel.permissions_for(ctx.me).mention_everyone:
+                raise BadArgument("The bot needs the Mention Everyone permission in the target channel.")
 
         if vals["description"]:
             vals["description"] = " ".join(vals["description"])
@@ -217,6 +215,8 @@ class Args(Converter):
                 vals["emoji"] = vals["emoji"].id
 
         vals["prize"] = " ".join(vals["prize"])
+        if len(vals["prize"]) > 240:
+            raise BadArgument("Prize text must be 240 characters or fewer.")
         if vals["duration"]:
             tc = TimedeltaConverter()
             try:
