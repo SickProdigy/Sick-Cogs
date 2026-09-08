@@ -1,3 +1,12 @@
+# Local agent files
+AGENTS.md
+/.github/copilot-instructions.md
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.py[cod]
@@ -10,6 +19,7 @@ __pycache__/
 venv/
 env/
 redenv/
+.red-runtime/
 
 # IDE / editor
 .vscode/
@@ -21,11 +31,21 @@ redenv/
 .DS_Store
 Thumbs.db
 
+# Packaging/build output
+node_modules/
+build/
+dist/
+*.egg-info/
+
 # Logs / caches
 *.log
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Coverage
+.coverage
+htmlcov/
 
 # Local bot/runtime data
 .config/
