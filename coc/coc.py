@@ -670,17 +670,22 @@ class Coc(commands.Cog):
     def _mention_for_event(guild: discord.Guild, settings: dict, event: str) -> tuple[str | None, discord.AllowedMentions | None]:
         role_id = settings.get("COC_WAR_MENTION_ROLE")
         if not role_id or not Coc._event_mention_enabled(settings, event):
-            return None, None
+            return None, discord.AllowedMentions.none()
 
         try:
             role = guild.get_role(int(role_id))
         except (TypeError, ValueError):
-            return None, None
+            return None, discord.AllowedMentions.none()
 
         if role is None:
-            return None, None
+            return None, discord.AllowedMentions.none()
 
-        return role.mention, discord.AllowedMentions(roles=[role])
+        return role.mention, discord.AllowedMentions(
+            everyone=False,
+            users=False,
+            roles=[role],
+            replied_user=False,
+        )
 
     @staticmethod
     def _positive_int(value, default: int) -> int:
@@ -761,38 +766,6 @@ class Coc(commands.Cog):
         ]
         new_attacks.sort(key=lambda attack: attack["order"])
         return new_attacks
-
-    @classmethod
-    def _new_attack_summaries(
-        cls, war_data: dict, clan_tag: str, previous_attack_keys: list[str]
-    ) -> list[str]:
-        new_attacks = cls._new_war_attacks(war_data, clan_tag, previous_attack_keys)
-        try:
-            manager_role = ctx.guild.get_role(int(manager_role_id)) if manager_role_id else None
-        except (TypeError, ValueError):
-            manager_role = None
-        lines = []
-        for attack in new_attacks[:6]:
-            stars = attack["stars"]
-            star_word = "star" if stars == 1 else "stars"
-            attack_type = "Friendly" if attack["is_friendly"] else "Enemy"
-            lines.append(
-                f"**{attack_type}: {attack['side_name']}**\n"
-                f"**{attack['attacker_name']}** attacked **{attack['defender_name']}**\n"
-                f"Result: **{stars} {star_word}**, **{cls._format_percent(attack['destruction'])}** "
-                "destruction."
-            )
-
-        remaining = len(new_attacks) - len(lines)
-        if remaining > 0:
-            lines.append(f"...and {remaining} more new attack{'s' if remaining != 1 else ''}.")
-
-        while len("\n".join(lines)) > 1024 and lines:
-            lines.pop()
-            hidden_count = len(new_attacks) - len(lines)
-            lines.append(f"...and {hidden_count} more new attack{'s' if hidden_count != 1 else ''}.")
-
-        return lines
 
     @staticmethod
     def _trim_embed_lines(lines: list[str], max_chars: int = 1024) -> str:
@@ -989,8 +962,45 @@ class Coc(commands.Cog):
         embed.set_footer(text="Brought to you by SickGaming.net")
         return embed
 
+    def _build_war_attack_update_text(
+        self, new_attacks: list[dict], *, max_chars: int = 1900
+    ) -> str:
+        """Build compact one-line attack updates for a normal Discord message."""
+
+        lines = []
+        for attack in new_attacks[:10]:
+            direction_marker = "🟢" if attack["is_friendly"] else "🔴"
+            attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
+            attacker = discord.utils.escape_markdown(
+                discord.utils.escape_mentions(str(attack["attacker_name"])), as_needed=True
+            )
+            defender = discord.utils.escape_markdown(
+                discord.utils.escape_mentions(str(attack["defender_name"])), as_needed=True
+            )
+            star_count = max(0, min(3, int(attack["stars"] or 0)))
+            stars = "⭐" * star_count or "0 stars"
+            line = (
+                f"{direction_marker} {attack_type} | {attacker} → {defender} | "
+                f"{stars} | {self._format_percent(attack['destruction'])}"
+            )
+            if len("\n".join([*lines, line])) > max_chars:
+                break
+            lines.append(line)
+
+        hidden_count = len(new_attacks) - len(lines)
+        if hidden_count > 0:
+            suffix = f"…and {hidden_count} more attack{'s' if hidden_count != 1 else ''}."
+            while lines and len("\n".join([*lines, suffix])) > max_chars:
+                lines.pop()
+                hidden_count = len(new_attacks) - len(lines)
+                suffix = f"…and {hidden_count} more attack{'s' if hidden_count != 1 else ''}."
+            if len(suffix) <= max_chars:
+                lines.append(suffix)
+
+        return "\n".join(lines)
+
     def _build_war_attack_update_embed(
-        self, war_data: dict, clan_tag: str, new_attacks: list[dict], *, style: str = "card", timezone_name: str = "America/New_York"
+        self, war_data: dict, clan_tag: str, new_attacks: list[dict]
     ) -> discord.Embed:
         clan, opponent = self._configured_war_sides(war_data, clan_tag)
         enemy_attack = any(not attack["is_friendly"] for attack in new_attacks)
@@ -1003,26 +1013,6 @@ class Coc(commands.Cog):
             color=0x992D22 if enemy_attack else 0x2ECC71,
             timestamp=None,
         )
-
-        if style == "compact":
-            lines = []
-            for attack in new_attacks[:10]:
-                direction_marker = "🟢" if attack["is_friendly"] else "🔴"
-                attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
-                stars = "⭐" * int(attack["stars"] or 0) or "No stars"
-                lines.append(
-                    f"{direction_marker} **{attack_type}** · **{attack['attacker_name']}** → "
-                    f"**{attack['defender_name']}** | {stars} | "
-                    f"**{self._format_percent(attack['destruction'])}**"
-                )
-            remaining = len(new_attacks) - len(lines)
-            if remaining > 0:
-                lines.append(f"…and {remaining} more attack{'s' if remaining != 1 else ''}.")
-            if enemy_attack and any(attack["is_friendly"] for attack in new_attacks):
-                embed.color = 0x5865F2
-            embed.description += "\n\n" + "\n".join(lines)
-            embed.set_footer(text="Brought to you by SickGaming.net")
-            return embed
 
         for attack in new_attacks[:20]:
             marker = "🟢" if attack["is_friendly"] else "🔴"
@@ -1444,20 +1434,19 @@ class Coc(commands.Cog):
                         notice = None
                     content, allowed_mentions = self._mention_for_event(guild, settings, "attacklog")
                     attack_log_style = str(settings.get("WAR_ATTACK_LOG_STYLE") or "card").lower()
-                    embed = self._build_war_attack_update_embed(
-                        war_data,
-                        clan_tag,
-                        new_attacks,
-                        style=attack_log_style,
-                        timezone_name=str(settings.get("COC_TIMEZONE") or "America/New_York"),
-                    )
                     if attack_log_style == "compact":
+                        compact_text = self._build_war_attack_update_text(new_attacks)
+                        message = f"{content}\n{compact_text}" if content else compact_text
                         await channel.send(
-                            content=content,
-                            embed=embed,
+                            content=message,
                             allowed_mentions=allowed_mentions,
                         )
                     else:
+                        embed = self._build_war_attack_update_embed(
+                            war_data,
+                            clan_tag,
+                            new_attacks,
+                        )
                         await self._send_embed_with_optional_image(
                             channel,
                             embed,
