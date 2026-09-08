@@ -24,10 +24,10 @@ class RoleToolsButtons(RoleToolsMixin):
     async def initialize_buttons(self):
         for guild_id, settings in self.settings.items():
             if guild_id not in self.views:
-                log.trace("Adding guild ID %s to views in buttons", guild_id)
+                log.debug("Adding guild ID %s to views in buttons", guild_id)
                 self.views[guild_id] = {}
             for button_name, button_data in settings["buttons"].items():
-                log.verbose("Adding Button %s", button_name)
+                log.debug("Adding Button %s", button_name)
                 role_id = button_data["role_id"]
                 emoji = button_data["emoji"]
                 if emoji is not None:
@@ -47,7 +47,7 @@ class RoleToolsButtons(RoleToolsMixin):
                     if guild is not None:
                         button.replace_label(guild)
                     if message_id not in self.views[guild_id]:
-                        log.trace("Creating view for button %s", button_name)
+                        log.debug("Creating view for button %s", button_name)
                         self.views[guild_id][message_id] = RoleToolsView(self)
                     if button.custom_id not in {
                         c.custom_id for c in self.views[guild_id][message_id].children
@@ -293,6 +293,8 @@ class RoleToolsButtons(RoleToolsMixin):
         it will not be found if the thread is archived and subsequently removed.
         """
         guild = ctx.guild
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
         async with ctx.typing():
             async with self.config.guild(guild).buttons() as buttons:
                 for name, button_settings in self.settings[guild.id].get("buttons", {}).items():

@@ -53,9 +53,9 @@ class RoleToolsEvents(RoleToolsMixin):
             # add roles
 
             role = guild.get_role(guild_settings[key])
-            if not await self.config.role(role).selfassignable():
-                return
             if not role:
+                return
+            if not await self.config.role(role).selfassignable():
                 return
 
             member = payload.member or guild.get_member(payload.user_id)
@@ -104,9 +104,9 @@ class RoleToolsEvents(RoleToolsMixin):
         if key in guild_settings:
             # add roles
             role = guild.get_role(guild_settings[key])
-            if not await self.config.role(role).selfremovable():
-                return
             if not role:
+                return
+            if not await self.config.role(role).selfremovable():
                 return
             member = guild.get_member(payload.user_id)
             if not member:
@@ -136,7 +136,7 @@ class RoleToolsEvents(RoleToolsMixin):
             return
         before_pending = getattr(before, "pending", False)
         after_pending = getattr(after, "pending", False)
-        if before_pending != after_pending:
+        if before_pending and not after_pending:
             await self._auto_give(after)
         removed_roles = list(set(before.roles) - set(after.roles))
         added_roles = list(set(after.roles) - set(before.roles))
@@ -394,7 +394,7 @@ class RoleToolsEvents(RoleToolsMixin):
             if (inclusive := await self.config.role(role).inclusive_with()) and check_inclusive:
                 inclusive_roles = []
                 for role_id in inclusive:
-                    log.verbose("role_id: %s", role_id)
+                    log.debug("role_id: %s", role_id)
                     r = guild.get_role(role_id)
                     if r is None:
                         async with self.config.role(role).inclusive_with() as inclusive_with:
@@ -458,10 +458,10 @@ class RoleToolsEvents(RoleToolsMixin):
                         temp_roles.append(temp_role)
         log.debug("Adding %s to %s", to_add, member.name)
         if atomic:
-            log.verbose("Atomic is true")
+            log.debug("Atomic is true")
             await member.add_roles(*list(to_add), reason=reason)
         else:
-            log.verbose("Atomic is false")
+            log.debug("Atomic is false")
             await member.edit(roles=list(to_add), reason=reason)
         return ret
 
@@ -504,10 +504,20 @@ class RoleToolsEvents(RoleToolsMixin):
                 log.debug(
                     "A request was made for %s that is not part of the %s", member, member.guild
                 )
-                return []
+                return [
+                    RoleChangeResponse(
+                        None,
+                        _("A request was made for a user that is not part of the guild."),
+                        False,
+                    )
+                ]
         guild = member.guild
         if not guild.me.guild_permissions.manage_roles:
-            return []
+            return [
+                RoleChangeResponse(
+                    None, _("The bot does not have manage roles permission."), False
+                )
+            ]
         if atomic is None:
             atomic = await self.check_atomicity(guild)
         # log.debug(f"{atomic}")
@@ -555,7 +565,7 @@ class RoleToolsEvents(RoleToolsMixin):
                 to_rem.add(role)
             else:
                 to_rem.remove(role)
-        log.verbose("remove_roles  to_rem: %s", to_rem)
+        log.debug("remove_roles  to_rem: %s", to_rem)
         if atomic:
             await member.remove_roles(*list(to_rem), reason=reason)
         else:
@@ -567,9 +577,14 @@ class RoleToolsEvents(RoleToolsMixin):
         if guild.id not in self.settings:
             return
         await self.wait_for_verification(member, guild)
-        roles_ids = self.settings[guild.id]["auto_roles"]
-        roles = [guild.get_role(role) for role in roles_ids]
-        await self.give_roles(member, roles, _("Automatic Roles"))
+        role_ids = self.settings[guild.id]["auto_roles"]
+        roles = [role for role_id in role_ids if (role := guild.get_role(role_id)) is not None]
+        valid_ids = [role.id for role in roles]
+        if valid_ids != role_ids:
+            await self.config.guild(guild).auto_roles.set(valid_ids)
+            self.settings[guild.id]["auto_roles"] = valid_ids
+        if roles:
+            await self.give_roles(member, roles, _("Automatic Roles"))
 
     async def _sticky_leave(self, member: discord.Member) -> None:
         guild = member.guild
@@ -591,16 +606,22 @@ class RoleToolsEvents(RoleToolsMixin):
         to_reapply = await self.config.member(member).sticky_roles()
         if not to_reapply:
             return
-        await self.config.member(member).sticky_roles.clear()
 
         to_add = []
-
+        remaining = []
         for role_id in to_reapply:
             role = guild.get_role(role_id)
-            if role and role < guild.me.top_role:
+            if role is None:
+                continue
+            if role < guild.me.top_role:
                 to_add.append(role)
+            else:
+                remaining.append(role_id)
 
         if to_add:
-            # use this to prevent issues with inclusive/exclusive roles
-            # That may have previously been assigned manually
-            await member.add_roles(*to_add, reason=_("Sticky Roles"))
+            try:
+                await member.add_roles(*to_add, reason=_("Sticky Roles"))
+            except discord.HTTPException:
+                log.exception("Could not restore sticky roles to %s", member)
+                return
+        await self.config.member(member).sticky_roles.set(remaining)

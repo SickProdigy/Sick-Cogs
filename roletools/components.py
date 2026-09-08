@@ -31,10 +31,15 @@ class RoleToolsView(discord.ui.View):
         error: Exception,
         item: Union[SelectRole, ButtonRole],
     ):
-        # await interaction.response.send_message(
-        #     _("An error occured trying to apply a role to you."), ephemeral=True
-        # )
-        log.error("An error occured %s with interaction %s: %s", item, interaction, error)
+        message = _("I could not update your roles due to an unexpected error.")
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(message, ephemeral=True)
+            else:
+                await interaction.response.send_message(message, ephemeral=True)
+        except discord.HTTPException:
+            log.exception("Could not report a role component error to the user")
+        log.error("An error occurred %s with interaction %s: %s", item, interaction, error)
 
     def add_item(self, item: Union[SelectRole, ButtonRole]):
         rt_type = getattr(item, "_rt_type", None)
@@ -158,7 +163,17 @@ class ButtonRole(discord.ui.Button):
                 )
                 return
             # log.debug(f"Removing role from {interaction.user.name} in {guild}")
-            await self.view.cog.remove_roles(interaction.user, [role], _("Button Role"))
+            response = await self.view.cog.remove_roles(
+                interaction.user, [role], _("Button Role")
+            )
+            if response:
+                await interaction.response.send_message(
+                    _("I could not remove {role} for the following reasons: {reasons}").format(
+                        role=role.mention, reasons="\n".join(r.reason for r in response)
+                    ),
+                    ephemeral=True,
+                )
+                return
             await interaction.response.send_message(
                 _("I have removed the {role} role from you.").format(role=role.mention),
                 ephemeral=True,
@@ -234,16 +249,15 @@ class SelectRole(discord.ui.Select):
                 continue
             role_ids.append(int(option.split("-")[-1]))
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
         msg = ""
         if disabled_role:
             msg += _("One or more of the selected roles are no longer available.\n")
-        elif self.disabled:
+        if self.disabled:
             await interaction.response.send_message(
                 _("This selection has been disabled from giving roles."), ephemeral=True
             )
-            await interaction.message.edit()
             return
+        await interaction.response.defer(ephemeral=True, thinking=True)
         guild = interaction.guild
         added_roles = []
         removed_roles = []

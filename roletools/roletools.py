@@ -47,7 +47,7 @@ def custom_cooldown(ctx: commands.Context) -> Optional[discord.app_commands.Cool
     members = []
 
     for entity in who:
-        log.verbose("custom_cooldown entity: %s", entity)
+        log.debug("custom_cooldown entity: %s", entity)
         if isinstance(entity, discord.TextChannel) or isinstance(entity, discord.Role):
             members += entity.members
         elif isinstance(entity, discord.Member):
@@ -182,7 +182,7 @@ class RoleTools(
             log.exception("Error initializing Buttons")
         for guild_id, guild_views in self.views.items():
             for msg_ids, view in guild_views.items():
-                log.trace("Adding view %r to %s", view, guild_id)
+                log.debug("Adding view %r to %s", view, guild_id)
                 channel_id, message_id = msg_ids.split("-")
                 self.bot.add_view(view, message_id=int(message_id))
                 # These should be unique messages containing views
@@ -234,7 +234,7 @@ class RoleTools(
         for views in self.views.values():
             for view in views.values():
                 # Don't forget to remove persistent views when the cog is unloaded.
-                log.verbose("Stopping view %s", view)
+                log.debug("Stopping view %s", view)
                 view.stop()
         try:
             self.bot.remove_dev_env_value("roletools")

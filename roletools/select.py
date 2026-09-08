@@ -29,10 +29,10 @@ class RoleToolsSelect(RoleToolsMixin):
     async def initialize_select(self) -> None:
         for guild_id, settings in self.settings.items():
             if guild_id not in self.views:
-                log.trace("Adding guild ID %s to views in selects", guild_id)
+                log.debug("Adding guild ID %s to views in selects", guild_id)
                 self.views[guild_id] = {}
             for select_name, select_data in settings["select_menus"].items():
-                log.verbose("Adding Option %s", select_name)
+                log.debug("Adding Option %s", select_name)
                 options = []
                 disabled = []
                 for option_name in select_data["options"]:
@@ -77,7 +77,7 @@ class RoleToolsSelect(RoleToolsMixin):
                     if guild is not None:
                         select.update_options(guild)
                     if message_id not in self.views[guild_id]:
-                        log.trace("Creating view for select %s", select_name)
+                        log.debug("Creating view for select %s", select_name)
                         self.views[guild_id][message_id] = RoleToolsView(self)
                     if select.custom_id not in {
                         c.custom_id for c in self.views[guild_id][message_id].children
@@ -484,6 +484,8 @@ class RoleToolsSelect(RoleToolsMixin):
         it will not be found if the thread is archived and subsequently removed.
         """
         guild = ctx.guild
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
         async with ctx.typing():
             async with self.config.guild(guild).select_menus() as select_menus:
                 for name, select_menu_settings in (

@@ -373,7 +373,7 @@ class RoleToolsMessages(RoleToolsMixin):
         if ctx.guild.id not in self.views:
             self.views[ctx.guild.id] = {}
         new_view = RoleToolsView(self)
-        log.verbose("send_buttons buttons: %s", buttons)
+        log.debug("send_buttons buttons: %s", buttons)
         for button in buttons:
             new_view.add_item(button)
         content = text[:2000] if text else None
