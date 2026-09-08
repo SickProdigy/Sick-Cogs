@@ -54,6 +54,7 @@ class Events:
         else:
             username = str(member)
         for result in results:
+            param = "{" + result[0] + "}"
             if int(result[1]) == 1:
                 param = self.transform_arg(result[0], result[2], guild)
             elif int(result[1]) == 0:
@@ -163,6 +164,8 @@ class Events:
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
         guild = member.guild
+        if guild is None:
+            return
         if await self.config.guild(guild).PENDING() and member.pending:
             log.debug("Ignoring member join %r to wait for pending", member)
             return
@@ -172,14 +175,14 @@ class Events:
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         guild = after.guild
         if await self.config.guild(guild).PENDING():
-            if before.pending != after.pending:
+            if before.pending and not after.pending:
                 await self.check_member_join(after)
 
     async def check_member_join(self, member: discord.Member):
         guild = member.guild
-        if not await self.config.guild(guild).ON():
-            return
         if guild is None:
+            return
+        if not await self.config.guild(guild).ON():
             return
         if await self.bot.cog_disabled_in_guild(self, guild):
             return
@@ -245,14 +248,14 @@ class Events:
             if not channel:
                 return
             if is_embed and channel.permissions_for(guild.me).embed_links:
-                em = await self.make_embed(member, guild, msg, False)
+                em = await self.make_embed(member, guild, msg, True)
                 if await self.config.guild(guild).EMBED_DATA.mention():
                     await channel.send(member.mention, embed=em, allowed_mentions=allowed_mentions)
                 else:
                     await channel.send(embed=em, allowed_mentions=allowed_mentions)
             else:
                 await channel.send(
-                    await self.convert_parms(member, guild, bot_welcome, False),
+                    await self.convert_parms(member, guild, bot_welcome, True),
                     allowed_mentions=allowed_mentions,
                 )
 
@@ -262,9 +265,11 @@ class Events:
         # grab the welcome channel
         # guild_settings = await self.config.guild(guild).guild_settings()
         c_id = await self.config.guild(guild).CHANNEL()
-        channel = cast(discord.TextChannel, guild.get_channel(c_id))
+        channel = cast(Optional[discord.TextChannel], guild.get_channel(c_id))
         only_whisper = await self.config.guild(guild).WHISPER() is True
         if channel is None:  # complain even if only whisper
+            if c_id is not None:
+                await self.config.guild(guild).CHANNEL.set(None)
             if not only_whisper:
                 log.info(
                     "welcome.py: Channel not found. It was most likely deleted. User joined: %s",
@@ -324,7 +329,8 @@ class Events:
                         else:
                             await member.send(embed=em)  # type: ignore
                     else:
-                        await member.send(await self.convert_parms(member, guild, msg, False))  # type: ignore
+                        converted = await self.convert_parms(member, guild, msg, True)
+                        await member.send(converted)  # type: ignore
                 except discord.errors.Forbidden:
                     log.info(
                         "welcome.py: unable to whisper %s. Probably doesn't want to be PM'd",
@@ -401,9 +407,12 @@ class Events:
 
         # grab the welcome channel
         # guild_settings = await self.config.guild(guild).guild_settings()
-        channel = self.bot.get_channel(await self.config.guild(guild).LEAVE_CHANNEL())
+        leave_channel_id = await self.config.guild(guild).LEAVE_CHANNEL()
+        channel = guild.get_channel(leave_channel_id)
         if channel is None:  # complain even if only whisper
             log.debug("welcome.py: Channel not found in %s. It was most likely deleted.", guild)
+            if leave_channel_id is not None:
+                await self.config.guild(guild).LEAVE_CHANNEL.set(None)
             return
         # we can stop here
         if await self.config.guild(guild).DELETE_PREVIOUS_GOODBYE():
@@ -449,11 +458,14 @@ class Events:
     async def bot_leave(self, member: discord.Member, guild: discord.Guild):
         bot_welcome = await self.config.guild(guild).BOTS_GOODBYE_MSG()
         msg = bot_welcome or rand_choice(await self.config.guild(guild).GOODBYE())
-        channel = self.bot.get_channel(await self.config.guild(guild).LEAVE_CHANNEL())
+        leave_channel_id = await self.config.guild(guild).LEAVE_CHANNEL()
+        channel = guild.get_channel(leave_channel_id)
         if channel is None:
+            if leave_channel_id is not None:
+                await self.config.guild(guild).LEAVE_CHANNEL.set(None)
             return
         is_embed = await self.config.guild(guild).EMBED()
-        mentions = await self.config.guild(guild).MENTIONS()
+        mentions = await self.config.guild(guild).GOODBYE_MENTIONS()
         allowed_mentions = discord.AllowedMentions(**mentions)
         if bot_welcome:
             # finally, welcome them
@@ -555,8 +567,9 @@ class Events:
                         embed=em, delete_after=60, allowed_mentions=allowed_mentions
                     )
             else:
+                test_member = members if guild_settings["GROUPED"] else member
                 await channel.send(
-                    await self.convert_parms(members, guild, rand_msg, is_welcome),
+                    await self.convert_parms(test_member, guild, rand_msg, is_welcome),
                     delete_after=60,
                     allowed_mentions=allowed_mentions,
                 )

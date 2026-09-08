@@ -94,6 +94,10 @@ class Welcome(Events, commands.Cog):
         clear_guilds = []
         for guild_id, members in self.joined.items():
             if members:
+                guild = self.bot.get_guild(guild_id)
+                if guild is None:
+                    clear_guilds.append(guild_id)
+                    continue
                 last_time_id = await self.config.guild_from_id(guild_id).LAST_GREETING()
                 if last_time_id is not None:
                     last_time = (
@@ -102,7 +106,7 @@ class Welcome(Events, commands.Cog):
                     if len(members) > 1 and last_time <= 30.0:
                         continue
                 try:
-                    await self.send_member_join(members, self.bot.get_guild(guild_id))
+                    await self.send_member_join(members, guild)
                     clear_guilds.append(guild_id)
                 except Exception:
                     log.exception("Error in group welcome:")
