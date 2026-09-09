@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import jwt
 from jwt import DecodeError, ExpiredSignatureError, InvalidAudienceError
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from redbot.core import commands
 
@@ -53,7 +54,7 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider
-from ..providers.cdp_api import CdpApiError
+from ..providers.cdp_api import CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
     build_solana_transfer_message,
@@ -1292,6 +1293,25 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(Exception, "does not match"):
                 await provider.get_transaction_status(profile, intent)
+
+    def test_cdp_bearer_jwt_uses_current_plural_uris_claim(self):
+        private_key = ec.generate_private_key(ec.SECP256R1())
+        secret = private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode("ascii")
+        token = _api_jwt(
+            CdpApiCredentials("key-id", secret, "unused-wallet-secret"),
+            "POST",
+            "/v2/end-users",
+        )
+        claims = jwt.decode(token, options={"verify_signature": False})
+        self.assertEqual(
+            claims["uris"],
+            ["POST api.cdp.coinbase.com/platform/v2/end-users"],
+        )
+        self.assertNotIn("uri", claims)
 
     def test_provisioning_idempotency_key_is_rotated_and_stable(self):
         profile_id = "profile-7"

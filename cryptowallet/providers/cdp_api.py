@@ -98,7 +98,7 @@ def _api_jwt(credentials: CdpApiCredentials, method: str, path: str) -> str:
         "aud": ["cdp_service"],
         "nbf": now,
         "exp": now + 120,
-        "uri": f"{method} {CDP_API_HOST}{full_path}",
+        "uris": [f"{method} {CDP_API_HOST}{full_path}"],
     }
     headers = {
         "alg": algorithm,
@@ -279,7 +279,7 @@ class CdpApiClient:
                 "createSmartAccount": True,
                 "enableSpendPermissions": False,
             },
-            "solanaAccount": {},
+            "solanaAccount": {"createSmartAccount": False},
         }
         return await self._request(
             "POST",
