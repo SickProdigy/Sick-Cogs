@@ -332,7 +332,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("wallet command", ctx.send.await_args.args[0])
         ctx.send_help.assert_awaited_once_with(ctx.command)
 
-    async def test_authorization_handoff_is_sent_as_message_content(self):
+    async def test_authorization_handoff_is_inside_card(self):
         token = "x" * 600
         user = SimpleNamespace(id=7, send=AsyncMock())
         cog = SimpleNamespace(
@@ -351,11 +351,13 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         sent = user.send.await_args.kwargs
         self.assertEqual(expires_at, 1_800_000_000)
-        self.assertEqual(
-            sent["content"],
-            f"🔐 [Open protected authorization page](https://wallet.example.test/cryptowallet/session.html#handoff={token})",
-        )
+        self.assertNotIn("content", sent)
+        self.assertIn("embed", sent)
         self.assertNotIn("view", sent)
+        self.assertIn(
+            f"🔐 **[Open protected authorization page](https://wallet.example.test/cryptowallet/session.html#handoff={token})**",
+            sent["embed"].description,
+        )
 
     async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
