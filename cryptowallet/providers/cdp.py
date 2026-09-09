@@ -45,6 +45,7 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
+PROVISIONING_IDEMPOTENCY_VERSION = 2
 HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 log = logging.getLogger("red.sickcogs.cryptowallet")
 
@@ -150,7 +151,12 @@ class CdpWalletProvider(WalletProvider):
         return {"ready": True, "stage": "complete"}
     @staticmethod
     def _idempotency_key(profile_id: str) -> str:
-        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:{profile_id}"))
+        return str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"sick-cogs:cdp:create:v{PROVISIONING_IDEMPOTENCY_VERSION}:{profile_id}",
+            )
+        )
 
     @staticmethod
     def _profile_from_end_user(
