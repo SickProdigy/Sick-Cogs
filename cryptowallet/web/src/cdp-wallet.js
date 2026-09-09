@@ -15,8 +15,6 @@ async function authenticateWallet(projectId, expectedUserId, expectedAccounts, h
   await initialize({
     projectId,
     customAuth: { getJwt: async () => handoffToken },
-    ethereum: { createOnLogin: "smart" },
-    solana: { createOnLogin: false },
     disableAnalytics: true,
   });
   if (await isSignedIn()) await signOut();
