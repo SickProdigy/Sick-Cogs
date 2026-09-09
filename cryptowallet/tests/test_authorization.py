@@ -761,6 +761,19 @@ class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
+    def test_rejected_intent_has_explicit_final_title_and_footer(self):
+        intent = TransactionIntent(
+            intent_id="rejected-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.REJECTED,
+        )
+        embed = WalletTransactionCommands._intent_embed(intent, BASE_SEPOLIA, None)
+        self.assertEqual(embed.title, "Rejected wallet transaction")
+        self.assertEqual(embed.footer.text, "Rejected — no transaction was sent")
+
     def test_uncertain_intent_round_trips_and_warns_against_replacement(self):
         intent = TransactionIntent(
             intent_id="intent-7",

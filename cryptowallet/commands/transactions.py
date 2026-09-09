@@ -154,6 +154,7 @@ class WalletTransactionCommands:
             IntentStatus.SUBMITTED: "Submitted wallet transaction",
             IntentStatus.CONFIRMED: "Confirmed wallet transaction",
             IntentStatus.FAILED: "Failed wallet transaction",
+            IntentStatus.REJECTED: "Rejected wallet transaction",
         }
         colors = {
             IntentStatus.PENDING: discord.Color.blurple(),
@@ -227,6 +228,8 @@ class WalletTransactionCommands:
             footer = f"Confirmed {network.name} testnet transaction"
         elif intent.status is IntentStatus.SUBMITTED:
             footer = f"Submitted to {network.name} — awaiting confirmation"
+        elif intent.status is IntentStatus.REJECTED:
+            footer = "Rejected — no transaction was sent"
         else:
             footer = f"{network.name} testnet transaction intent"
         embed.set_footer(text=footer)
