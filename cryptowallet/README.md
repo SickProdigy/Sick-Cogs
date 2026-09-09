@@ -515,8 +515,8 @@ once; replay, expiry, and unknown handles return the same unavailable response. 
 uses a direct three-minute signed handoff and must not be described as single-use. Normal wallet
 provisioning, reads, and sends do not depend on the relay, listener, or pairing workflow.
 The packaged `/setup/` wizard can initialize the MySQL/MariaDB relay tables and private server-side
-configuration on DirectAdmin-style hosting; it requires a deliberately uploaded enable marker and
-locks itself after a successful installation.
+configuration on DirectAdmin-style hosting. It stays available until installation succeeds, then
+writes a private lock file and refuses reuse. Deploy it only when you are ready to complete setup.
 
 ## Remaining work
 
