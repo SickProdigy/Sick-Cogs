@@ -7,5 +7,6 @@ Options -Indexes
   RewriteRule ^recovery/?$ recovery.html [L]
   RewriteRule ^security/?$ security.html [L]
   RewriteRule ^session/?$ session.html [L]
+  RewriteRule ^setup/?$ setup/index.php [L]
 </IfModule>
 

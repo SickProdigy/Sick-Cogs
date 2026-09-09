@@ -514,6 +514,9 @@ at rest by the public relay. The DM URL carries an opaque random handle that is 
 once; replay, expiry, and unknown handles return the same unavailable response. Authorization still
 uses a direct three-minute signed handoff and must not be described as single-use. Normal wallet
 provisioning, reads, and sends do not depend on the relay, listener, or pairing workflow.
+The packaged `/setup/` wizard can initialize the MySQL/MariaDB relay tables and private server-side
+configuration on DirectAdmin-style hosting; it requires a deliberately uploaded enable marker and
+locks itself after a successful installation.
 
 ## Remaining work
 
