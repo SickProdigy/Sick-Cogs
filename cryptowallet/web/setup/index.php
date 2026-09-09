@@ -14,12 +14,11 @@ header('X-Content-Type-Options: nosniff');
 header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
 
 $serverDirectory = dirname(__DIR__) . '/server';
-$enablePath = $serverDirectory . '/setup-enabled';
+$installedLockPath = $serverDirectory . '/setup-locked';
 $lockPath = $serverDirectory . '/setup.lock';
 $configPath = $serverDirectory . '/recovery-config.local.php';
 $schemaPath = $serverDirectory . '/recovery-schema.sql';
-$installed = is_file($configPath);
-$enabled = is_file($enablePath) && !is_link($enablePath);
+$installed = is_file($configPath) || is_file($installedLockPath);
 $success = false;
 $error = '';
 $relaySecret = '';
@@ -57,7 +56,7 @@ function setup_write_configuration(string $path, array $configuration): void
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed && $enabled) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
     $lock = fopen($lockPath, 'c');
     try {
         if ($lock === false || !flock($lock, LOCK_EX)) {
@@ -114,7 +113,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed && $enabled) {
             'database_user' => $user,
             'database_password' => $password,
         ]);
-        @unlink($enablePath);
+        if (file_put_contents($installedLockPath, "installed\n", LOCK_EX) !== false) {
+            chmod($installedLockPath, 0600);
+        }
         $success = true;
         $installed = true;
         unset($_SESSION['sickwallet_setup_csrf']);
@@ -149,13 +150,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed && $enabled) {
       <p>This secret is shown only on this response. Store it in Red before leaving this page.</p>
     <?php elseif ($installed): ?>
       <div class="notice info"><strong>Setup is locked.</strong><p>CryptoWallet recovery is already configured.</p></div>
-    <?php elseif (!$enabled): ?>
-      <div class="notice danger"><strong>Setup is disabled.</strong><p>Create an empty <code>server/setup-enabled</code> file, then reload this page. It is removed after successful installation.</p></div>
     <?php else: ?>
       <?php if ($error !== ''): ?>
         <div class="notice danger"><strong>Setup failed.</strong><p><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></div>
       <?php endif; ?>
       <p>Create an empty database and database user in DirectAdmin first. This wizard tests the connection, installs only the CryptoWallet relay tables, generates the relay secret, and writes the private configuration.</p>
+      <div class="notice danger"><strong>Complete setup promptly.</strong><p>This installer is public until installation succeeds and creates its lock.</p></div>
       <form method="post" autocomplete="off">
         <input type="hidden" name="csrf" value="<?= htmlspecialchars((string) $_SESSION['sickwallet_setup_csrf'], ENT_QUOTES, 'UTF-8') ?>">
         <label for="database_host">Database host</label>
