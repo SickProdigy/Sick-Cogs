@@ -389,7 +389,7 @@ class WalletAdminCommands:
         """Show non-secret wallet integration settings."""
 
         approval_base_url = await self.config.approval_base_url()
-        provider = await self.config.provider()
+        provider = str(self.wallet_provider.name or "unconfigured").upper()
         network = NETWORKS.get(await self.config.default_network(), BASE_SEPOLIA)
         oauth_ready = await self.discord_oauth_config() is not None
         deployment_id = await self.config.deployment_id()
