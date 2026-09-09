@@ -138,8 +138,18 @@ button:disabled {
   margin-top: .25rem;
 }
 
-#key-export-container {
-  margin: 1rem 0;
+.recovery-account-export {
+  min-width: 0;
+}
+
+.recovery-account-export iframe {
+  display: block;
+  max-width: 100%;
+}
+
+.recovery-account-waiting {
+  color: #8fa5c6;
+  font-size: .9rem;
 }
 
 .recovery-accounts {

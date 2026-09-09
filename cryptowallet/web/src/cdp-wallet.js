@@ -80,38 +80,49 @@ export function resolveSmartAccountOwner(user, expectedAddress) {
   return owner.address;
 }
 
-export async function prepareRecoveryExport(
-  projectId, expectedUserId, expectedAccounts, selectedAccount, handoffToken, target
+export async function prepareRecoveryExports(
+  projectId, expectedUserId, expectedAccounts, handoffToken, targets
 ) {
+  const controls = [];
   try {
     const user = await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
-    const exportAddress = selectedAccount.family === "evm"
-      ? resolveSmartAccountOwner(user, selectedAccount.address)
-      : selectedAccount.address;
-    const createExportIframe = selectedAccount.family === "evm"
-      ? createEvmKeyExportIframe
-      : createSolanaKeyExportIframe;
-    await createExportIframe({
-      address: exportAddress,
-      target,
-      projectId,
-      label: selectedAccount.family === "evm"
-        ? "Copy EVM wallet signer private key"
-        : "Copy Solana wallet private key",
-      copiedLabel: "Wallet private key copied",
-      fullWidth: true,
-      onStatusUpdate: (status, message) => {
-        const event = new CustomEvent("sickwallet-export-status", {
-          detail: { status, message: message || "" },
-        });
-        window.dispatchEvent(event);
-        if (["success", "error", "expired"].includes(status)) {
-          void signOut().catch(() => undefined);
-        }
+    for (const account of expectedAccounts) {
+      const target = targets?.[account.family];
+      if (!(target instanceof HTMLElement)) {
+        throw new Error("A secure wallet export target is missing.");
+      }
+      const exportAddress = account.family === "evm"
+        ? resolveSmartAccountOwner(user, account.address)
+        : account.address;
+      const createExportIframe = account.family === "evm"
+        ? createEvmKeyExportIframe
+        : createSolanaKeyExportIframe;
+      const control = await createExportIframe({
+        address: exportAddress,
+        target,
+        projectId,
+        label: account.family === "evm"
+          ? "Copy EVM wallet signer private key"
+          : "Copy Solana wallet private key",
+        copiedLabel: "Wallet private key copied",
+        fullWidth: true,
+        onStatusUpdate: (status, message) => {
+          const event = new CustomEvent("sickwallet-export-status", {
+            detail: { family: account.family, status, message: message || "" },
+          });
+          window.dispatchEvent(event);
+        },
+      });
+      controls.push(control);
+    }
+    return {
+      cleanup: async () => {
+        controls.forEach((control) => control.cleanup());
+        await signOut().catch(() => undefined);
       },
-    });
-    return { exportAddress, family: selectedAccount.family };
+    };
   } catch (error) {
+    controls.forEach((control) => control.cleanup());
     await signOut().catch(() => undefined);
     throw error;
   }
