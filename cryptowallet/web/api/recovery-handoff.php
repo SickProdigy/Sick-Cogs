@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname(__DIR__) . '/server/recovery-config.php';
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
@@ -15,7 +17,8 @@ function recovery_error(string $code, string $message, int $status): void
 
 function recovery_secret(): string
 {
-    $secret = (string) getenv('SICKWALLET_RECOVERY_RELAY_SECRET');
+    $configuration = sickwallet_recovery_config();
+    $secret = (string) ($configuration['relay_secret'] ?? '');
     if (strlen($secret) < 32 || strlen($secret) > 512) {
         throw new RuntimeException('Recovery relay secret is unavailable.');
     }
@@ -24,9 +27,10 @@ function recovery_secret(): string
 
 function recovery_database(): PDO
 {
-    $dsn = (string) getenv('SICKWALLET_DATABASE_DSN');
-    $user = (string) getenv('SICKWALLET_DATABASE_USER');
-    $password = (string) getenv('SICKWALLET_DATABASE_PASSWORD');
+    $configuration = sickwallet_recovery_config();
+    $dsn = (string) ($configuration['database_dsn'] ?? '');
+    $user = (string) ($configuration['database_user'] ?? '');
+    $password = (string) ($configuration['database_password'] ?? '');
     if ($dsn === '' || !str_starts_with($dsn, 'mysql:')) {
         throw new RuntimeException('Recovery database is unavailable.');
     }

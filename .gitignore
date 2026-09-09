@@ -6,6 +6,10 @@ AGENTS.md
 .env
 .env.*
 !.env.example
+cryptowallet/web/server/recovery-config.local.php
+cryptowallet/web/server/recovery-config.local.php.*.tmp
+cryptowallet/web/server/setup-enabled
+cryptowallet/web/server/setup.lock
 
 # Python bytecode and caches
 __pycache__/

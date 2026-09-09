@@ -7,9 +7,28 @@ listener and pairing tools below remain optional and must not be publicly expose
 
 ## One-time recovery relay
 
-Requirements: PHP 8.0+, PDO MySQL, OpenSSL, MySQL/MariaDB, and HTTPS. Apply
-`recovery-schema.sql`, publish `web/api/recovery-handoff.php` with the other public website assets,
-and configure the web runtime:
+Requirements: PHP 8.0+, PDO MySQL, OpenSSL, MySQL/MariaDB, and HTTPS. Publish the complete
+`web/` directory so the access-denied `server/` support files remain beside the public endpoint.
+
+### Guided DirectAdmin-style setup
+
+1. Create an empty database and database user in DirectAdmin.
+2. Create the empty file `web/server/setup-enabled` after upload. The included `.htaccess`
+   prevents HTTP access to this directory.
+3. Visit `/cryptowallet/setup/` over HTTPS and enter the database details.
+4. The wizard tests the connection, applies `recovery-schema.sql`, generates a relay secret,
+   writes `web/server/recovery-config.local.php` with mode `0600`, removes `setup-enabled`, and
+   locks itself against reuse.
+5. Copy the displayed owner-only Red command, run it in a private Discord channel, and delete the
+   message afterward. The generated secret is shown only on the successful setup response.
+
+The local configuration, enable marker, and lock file are excluded from Git. Never remove the
+configuration file merely to reopen the public installer. To reinstall, first take the site out of
+service and deliberately remove or replace the configuration through server-side file access.
+
+### Manual/environment setup
+
+Alternatively, apply `recovery-schema.sql` yourself and configure the web runtime:
 
 ```text
 SICKWALLET_RECOVERY_RELAY_SECRET=<random secret of at least 32 characters>
