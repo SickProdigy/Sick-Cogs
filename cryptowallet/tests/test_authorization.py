@@ -2,6 +2,7 @@ import base64
 import copy
 import time
 import unittest
+import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -1291,6 +1292,15 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaisesRegex(Exception, "does not match"):
                 await provider.get_transaction_status(profile, intent)
+
+    def test_provisioning_idempotency_key_is_rotated_and_stable(self):
+        profile_id = "profile-7"
+        current = CdpWalletProvider._idempotency_key(profile_id)
+        legacy = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:{profile_id}"))
+        expected = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:v2:{profile_id}"))
+        self.assertEqual(current, expected)
+        self.assertEqual(current, CdpWalletProvider._idempotency_key(profile_id))
+        self.assertNotEqual(current, legacy)
 
     def test_cdp_profile_preserves_separate_evm_and_solana_accounts(self):
         evm_address = _profile()["accounts"][0]["address"]
