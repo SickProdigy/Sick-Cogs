@@ -45,7 +45,7 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
-PROVISIONING_IDEMPOTENCY_VERSION = 2
+PROVISIONING_IDEMPOTENCY_VERSION = 3
 HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 log = logging.getLogger("red.sickcogs.cryptowallet")
 

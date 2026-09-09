@@ -1317,7 +1317,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         profile_id = "profile-7"
         current = CdpWalletProvider._idempotency_key(profile_id)
         legacy = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:{profile_id}"))
-        expected = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:v2:{profile_id}"))
+        expected = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:cdp:create:v3:{profile_id}"))
         self.assertEqual(current, expected)
         self.assertEqual(current, CdpWalletProvider._idempotency_key(profile_id))
         self.assertNotEqual(current, legacy)
