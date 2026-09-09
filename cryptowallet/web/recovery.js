@@ -5,10 +5,10 @@ const detailsElement = document.querySelector("#recovery-details");
 const controlsElement = document.querySelector("#recovery-controls");
 const confirmInput = document.querySelector("#recovery-confirm");
 const accountsElement = document.querySelector("#recovery-accounts");
-const exportContainer = document.querySelector("#key-export-container");
 let handoffToken = null;
 let recoverySession = null;
-let activeFamily = null;
+let exportSession = null;
+const exportTargets = new Map();
 
 function addDetail(label, value) {
   const term = document.createElement("dt");
@@ -64,42 +64,8 @@ async function consumeRecoveryHandoff() {
   };
 }
 
-confirmInput.addEventListener("change", () => {
-  setExportButtonsDisabled(!confirmInput.checked);
-});
-
-function setExportButtonsDisabled(disabled) {
-  accountsElement.querySelectorAll("button").forEach((button) => {
-    button.disabled = disabled;
-  });
-}
-
 function accountLabel(account) {
   return account.family === "evm" ? "EVM signer" : "Solana account";
-}
-
-async function prepareAccountExport(account) {
-  setExportButtonsDisabled(true);
-  confirmInput.disabled = true;
-  activeFamily = account.family;
-  exportContainer.replaceChildren();
-  statusElement.textContent = `Verifying your ${accountLabel(account)} with Coinbase…`;
-  try {
-    const { prepareRecoveryExport } = await import("./cdp-wallet.js");
-    await prepareRecoveryExport(
-      recoverySession.projectId,
-      recoverySession.userId,
-      recoverySession.accounts,
-      account,
-      handoffToken,
-      exportContainer
-    );
-    statusElement.textContent = `Verified. Use the secure Coinbase control below to copy the ${accountLabel(account)} key.`;
-  } catch (error) {
-    statusElement.textContent = error instanceof Error ? error.message : "Secure wallet export could not start.";
-    confirmInput.disabled = false;
-    setExportButtonsDisabled(!confirmInput.checked);
-  }
 }
 
 function addAccountControl(account) {
@@ -109,36 +75,72 @@ function addAccountControl(account) {
   heading.textContent = account.family === "evm" ? "Base Sepolia EVM signer" : "Solana Devnet account";
   const address = document.createElement("code");
   address.textContent = account.address;
-  const button = document.createElement("button");
-  button.type = "button";
-  button.disabled = true;
-  button.textContent = account.family === "evm" ? "Export EVM signer key" : "Export Solana account key";
-  button.addEventListener("click", () => void prepareAccountExport(account));
-  card.append(heading, address, button);
+  const target = document.createElement("div");
+  target.className = "recovery-account-export";
+  target.setAttribute("aria-label", `Coinbase ${accountLabel(account)} key export control`);
+  const waiting = document.createElement("span");
+  waiting.className = "recovery-account-waiting";
+  waiting.textContent = "Confirm the private-key safety notice to enable Coinbase export.";
+  target.append(waiting);
+  exportTargets.set(account.family, target);
+  card.append(heading, address, target);
   accountsElement.append(card);
 }
 
-window.addEventListener("sickwallet-export-status", (event) => {
-  const { status, message } = event.detail || {};
-  if (status === "success") {
-    statusElement.textContent = `${accountLabel({ family: activeFamily })} key copied. Store it securely and clear your clipboard when finished.`;
+async function mountCoinbaseExportControls() {
+  if (!confirmInput.checked || !recoverySession || exportSession) return;
+  confirmInput.disabled = true;
+  statusElement.textContent = "Verifying both wallet accounts with Coinbase…";
+  exportTargets.forEach((target) => target.replaceChildren());
+  try {
+    const { prepareRecoveryExports } = await import("./cdp-wallet.js");
+    exportSession = await prepareRecoveryExports(
+      recoverySession.projectId,
+      recoverySession.userId,
+      recoverySession.accounts,
+      handoffToken,
+      Object.fromEntries(exportTargets)
+    );
+    statusElement.textContent = "Verified. Use the secure Coinbase button in each account card to copy that private key.";
+  } catch (error) {
+    statusElement.textContent = error instanceof Error ? error.message : "Secure wallet export could not start.";
+    confirmInput.checked = false;
     confirmInput.disabled = false;
-    setExportButtonsDisabled(!confirmInput.checked);
+    recoverySession.accounts.forEach((account) => {
+      const target = exportTargets.get(account.family);
+      if (!target) return;
+      const retry = document.createElement("span");
+      retry.className = "recovery-account-waiting";
+      retry.textContent = "Confirm the safety notice to retry Coinbase export.";
+      target.replaceChildren(retry);
+    });
+  }
+}
+
+confirmInput.addEventListener("change", () => {
+  if (confirmInput.checked) void mountCoinbaseExportControls();
+});
+
+window.addEventListener("sickwallet-export-status", (event) => {
+  const { status, message, family } = event.detail || {};
+  if (status === "success") {
+    statusElement.textContent = `${accountLabel({ family })} key copied. Store it securely and clear your clipboard when finished.`;
   } else if (status === "expired") {
     statusElement.textContent = "The secure export session expired. Request a new link from Discord.";
     confirmInput.disabled = true;
-    setExportButtonsDisabled(true);
   } else if (status === "error") {
-    statusElement.textContent = message || "Coinbase could not export this wallet signer key.";
-    confirmInput.disabled = false;
-    setExportButtonsDisabled(!confirmInput.checked);
+    statusElement.textContent = message || `Coinbase could not export the ${accountLabel({ family })} key.`;
   }
+});
+
+window.addEventListener("pagehide", () => {
+  if (exportSession?.cleanup) void exportSession.cleanup();
 });
 
 Promise.resolve().then(consumeRecoveryHandoff)
   .then((session) => {
     recoverySession = session;
-    statusElement.textContent = "Protected wallet recovery handoff loaded. Choose each account you want to back up.";
+    statusElement.textContent = "Protected wallet recovery handoff loaded. Confirm the safety notice to enable Coinbase export.";
     session.accounts.forEach(addAccountControl);
     addDetail("Accounts available", String(session.accounts.length));
     addDetail("Expires", new Date(session.expiresAt * 1000).toLocaleString());
