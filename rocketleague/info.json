@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Look up supported Rocket League Championship Series tournament information from start.gg.",
+    "disabled": false,
+    "end_user_data_statement": "This cog does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "This cog uses the supported start.gg API for RLCS tournament information. As the bot owner, create a start.gg developer token and set it privately with `[p]set api startgg token,YOUR_TOKEN`. Then use `[p]rlcs upcoming` or `[p]rlcs event <start.gg URL or slug>`.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links"],
+    "name": "RocketLeague",
+    "requirements": [],
+    "short": "Supported RLCS tournament lookups",
+    "tags": ["rocket league", "rlcs", "esports", "start.gg"],
+    "type": "COG",
+    "version": "1.0.0"
+}
