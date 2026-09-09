@@ -11,7 +11,7 @@ session_start([
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
 header('X-Content-Type-Options: nosniff');
-header("Content-Security-Policy: default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+header("Content-Security-Policy: default-src 'none'; style-src 'self'; script-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
 
 $serverDirectory = dirname(__DIR__) . '/server';
 $installedLockPath = $serverDirectory . '/setup-locked';
@@ -146,7 +146,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
     <?php if ($success): ?>
       <div class="notice info"><strong>Installation complete.</strong><p>The database tables and private configuration were created, and setup is now locked.</p></div>
       <p>Run this owner-only command in a private Discord channel, then delete the message:</p>
-      <pre><code>[p]set api cryptowallet_relay secret <?= htmlspecialchars($relaySecret, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></code></pre>
+      <div class="setup-command-row">
+        <pre class="setup-command"><code id="setup-command">[p]set api cryptowallet_relay secret <?= htmlspecialchars($relaySecret, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></code></pre>
+        <button class="setup-copy-button" id="copy-setup-command" type="button">Copy command</button>
+      </div>
+      <p id="copy-setup-status" role="status" aria-live="polite"></p>
       <p>This secret is shown only on this response. Store it in Red before leaving this page.</p>
     <?php elseif ($installed): ?>
       <div class="notice info"><strong>Setup is locked.</strong><p>CryptoWallet recovery is already configured.</p></div>
@@ -172,5 +176,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
       </form>
     <?php endif; ?>
   </main>
+  <script src="./setup.js" defer></script>
 </body>
 </html>
