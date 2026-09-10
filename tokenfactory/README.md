@@ -24,3 +24,7 @@ CryptoWallet's community token registry.
 
 No mainnet network, arbitrary Solidity, arbitrary bytecode, arbitrary calldata, later minting
 authority, or bot ownership is supported.
+
+The first candidate factory source and reproducible build live under [`contracts/`](contracts/).
+Compiling it does not enable deployment; it remains subject to independent review and a controlled
+Base Sepolia deployment before its address and runtime code hash can be configured.
