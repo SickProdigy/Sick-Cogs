@@ -382,6 +382,45 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             sent["embed"].description,
         )
 
+    async def test_authorization_link_prefills_requested_days(self):
+        token = "x" * 20
+        user = SimpleNamespace(id=7, send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=_Value("https://wallet.example.test/cryptowallet"),
+                delegation_duration_days=_Value(365),
+                delegation_max_duration_days=_Value(365),
+                user_from_id=lambda user_id: SimpleNamespace(security_locked=_Value(False)),
+            ),
+            create_authorization_handoff=AsyncMock(return_value=(token, 1_800_000_000)),
+        )
+
+        await WalletAuthorizationCommands.send_authorization_link(
+            cog, user, _profile(), requested_days=7
+        )
+
+        cog.create_authorization_handoff.assert_awaited_once_with(
+            7, _profile(), delegation_days=7
+        )
+        embed = user.send.await_args.kwargs["embed"]
+        duration = next(field.value for field in embed.fields if field.name == "Authorization duration")
+        self.assertIn("defaults to 7 days", duration)
+
+    async def test_authorization_link_rejects_days_above_server_maximum(self):
+        user = SimpleNamespace(id=7)
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=_Value("https://wallet.example.test/cryptowallet"),
+                delegation_duration_days=_Value(30),
+                delegation_max_duration_days=_Value(90),
+                user_from_id=lambda user_id: SimpleNamespace(security_locked=_Value(False)),
+            ),
+        )
+        with self.assertRaisesRegex(RuntimeError, "1 through 90"):
+            await WalletAuthorizationCommands.send_authorization_link(
+                cog, user, _profile(), requested_days=91
+            )
+
     async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
         handle = "opaque_recovery_handle_abcdefghijklmnopqrstuvwxyz"
@@ -552,6 +591,18 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
+
+    async def test_authorization_handoff_accepts_requested_default_days(self):
+        harness = _JwtHarness(self.configuration)
+        token, _ = await harness.create_authorization_handoff(
+            7, _profile(), delegation_days=7
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_delegation_default_days"], 7)
+        self.assertEqual(claims["sickwallet_delegation_max_days"], 365)
 
     async def test_recovery_handoff_has_a_distinct_bound_purpose(self):
         harness = _JwtHarness(self.configuration)
