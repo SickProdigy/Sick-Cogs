@@ -1,0 +1,13 @@
+import re
+
+
+CONFIG_IDENTIFIER = 4108453201
+NETWORK_KEY = "base-sepolia"
+CHAIN_ID = 84532
+DEFAULT_DECIMALS = 18
+MAX_DECIMALS = 18
+MAX_NAME_LENGTH = 64
+MAX_SYMBOL_LENGTH = 10
+MAX_WHOLE_SUPPLY = 10**18
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._'&()+-]*$")
+SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9]{1,9}$")
