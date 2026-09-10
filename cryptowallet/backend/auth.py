@@ -235,8 +235,16 @@ class JwtAuthMixin:
         }
         if purpose == "authorize":
             delegation_days = int(await self.config.delegation_duration_days() or 0)
-            if not 1 <= delegation_days <= 365:
+            delegation_max_days = int(
+                await self.config.delegation_max_duration_days() or 0
+            )
+            if (
+                not 1 <= delegation_days <= 365
+                or not delegation_days <= delegation_max_days <= 365
+            ):
                 raise RuntimeError("The wallet delegation policy is invalid")
+            claims["sickwallet_delegation_default_days"] = delegation_days
+            claims["sickwallet_delegation_max_days"] = delegation_max_days
             claims["sickwallet_delegation_expires_at"] = (
                 now + delegation_days * 24 * 60 * 60
             )

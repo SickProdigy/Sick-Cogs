@@ -442,27 +442,51 @@ class CdpWalletProvider(WalletProvider):
         return {"provider_user_id": returned_user_id, "address": sorted(matched)[0]}
 
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
-        """Read the user-scoped delegation shared by every wallet account."""
+        """Read a legacy profile grant or the complete account-scoped grant set."""
         if network not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
             raise WalletProviderError("Delegation lookup uses the wallet profile scope.")
         provider_user_id = str(profile.get("provider_user_id") or "")
-        if not provider_user_id:
+        accounts = [
+            str(item.get("address") or "") for item in profile.get("accounts") or []
+            if item.get("network") in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}
+        ]
+        if not provider_user_id or not accounts or any(not address for address in accounts):
             raise WalletProviderError("The stored wallet profile is incomplete.")
         credentials = await self.credentials()
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
-            delegation = await self._api_client(credentials).get_user_delegation(
+            client = self._api_client(credentials)
+            delegation = await client.get_user_delegation(
                 provider_user_id, credentials.project_id
             )
+            scope = "profile"
+            delegations = [delegation] if delegation is not None else []
             if delegation is None:
-                return {"active": False, "expires_at": None, "scope": "profile"}
-            expires_at = str(delegation.get("expiresAt") or "")
-            expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-            if expiry.tzinfo is None:
-                raise ValueError("Delegation expiry lacks a timezone")
-            active = expiry.astimezone(timezone.utc) > datetime.now(timezone.utc)
-            return {"active": active, "expires_at": expires_at, "scope": "profile"}
+                scope = "accounts"
+                for address in accounts:
+                    item = await client.get_account_delegation(
+                        provider_user_id, address, credentials.project_id
+                    )
+                    if item is not None:
+                        delegations.append(item)
+            expiries = []
+            for item in delegations:
+                expires_at = str(item.get("expiresAt") or "")
+                expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    raise ValueError("Delegation expiry lacks a timezone")
+                expiries.append((expiry.astimezone(timezone.utc), expires_at))
+            now = datetime.now(timezone.utc)
+            active_count = sum(expiry > now for expiry, _ in expiries)
+            required_count = 1 if scope == "profile" else len(accounts)
+            active = active_count == required_count
+            earliest = min(expiries, default=(None, None), key=lambda item: item[0])[1]
+            return {
+                "active": active, "expires_at": earliest, "scope": scope,
+                "partial": scope == "accounts" and 0 < active_count < required_count,
+                "active_accounts": active_count, "required_accounts": required_count,
+            }
         except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve delegation status. Try again later."
@@ -801,9 +825,19 @@ class CdpWalletProvider(WalletProvider):
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
-            await self._api_client(credentials).revoke_user_delegation(
+            client = self._api_client(credentials)
+            await client.revoke_user_delegation(
                 provider_user_id, credentials.project_id
             )
+            for account in profile.get("accounts") or []:
+                if account.get("network") not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
+                    continue
+                address = str(account.get("address") or "")
+                if not address:
+                    raise WalletProviderError("The stored wallet profile is incomplete.")
+                await client.revoke_account_delegation(
+                    provider_user_id, address, credentials.project_id
+                )
         except CdpApiError as exc:
             raise WalletProviderError(
                 "CDP could not revoke this wallet profile signing authorization."

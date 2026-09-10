@@ -27,7 +27,11 @@ class WalletAuthorizationCommands:
         embed.add_field(name="Status", value="Active", inline=True)
         embed.add_field(
             name="Scope",
-            value="All wallet accounts",
+            value=(
+                "All wallet accounts (account-specific grants)"
+                if status.get("scope") == "accounts"
+                else "All wallet accounts"
+            ),
             inline=True,
         )
         embed.add_field(
@@ -38,8 +42,7 @@ class WalletAuthorizationCommands:
         embed.add_field(
             name="Options",
             value=(
-                "Leave it active for future sends, deliberately renew it for another "
-                "one year, or use **Revoke authorization** below. "
+                "Leave it active for future sends, deliberately renew it for a duration you choose, or use **Revoke authorization** below. "
                 "Revoking does not delete the wallet or move funds."
             ),
             inline=False,
@@ -71,6 +74,12 @@ class WalletAuthorizationCommands:
                     view=WalletAuthorizationView(self, ctx.author.id, profile),
                 )
                 return
+            if status.get("partial"):
+                await ctx.send(
+                    "Wallet authorization is incomplete. Use `wallet revoke` to clear "
+                    "the partial grant before authorizing again."
+                )
+                return
             expires_at = await self.send_authorization_link(ctx.author, profile)
         except (RuntimeError, WalletProviderError) as exc:
             await ctx.send(f"Wallet authorization is unavailable: {exc}")
@@ -87,6 +96,8 @@ class WalletAuthorizationCommands:
                 "the bot owner completes an identity review and unlocks it."
             )
         approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
+        recommended_days = int(await self.config.delegation_duration_days() or 0)
+        maximum_days = int(await self.config.delegation_max_duration_days() or 0)
         token, expires_at = await self.create_authorization_handoff(user.id, profile)
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
         embed = discord.Embed(
@@ -96,7 +107,7 @@ class WalletAuthorizationCommands:
                 else "Authorize Crypto Wallet"
             ),
             description=(
-                "Create a new one-year limited signing grant for every account in this "
+                "Create a new time-limited signing grant for every account in this "
                 "test wallet profile. The existing authorization remains unchanged until "
                 "you complete this protected approval."
                 if renewal
@@ -108,7 +119,14 @@ class WalletAuthorizationCommands:
         if len(embed.description) > 4096:
             raise RuntimeError("The protected wallet link is too long for Discord delivery.")
         embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>", inline=True)
-        embed.add_field(name="Authorization duration", value="1 year", inline=True)
+        embed.add_field(
+            name="Authorization duration",
+            value=(
+                f"Choose 1–{maximum_days} days on the protected page "
+                f"({recommended_days} recommended)."
+            ),
+            inline=True,
+        )
         embed.add_field(name="Scope", value="All current wallet accounts", inline=False)
         embed.set_footer(
             text=(
@@ -152,6 +170,14 @@ class WalletAuthorizationCommands:
                 view=WalletAuthorizationView(self, ctx.author.id, profile),
             )
             return
+        if status.get("partial"):
+            await ctx.send(
+                "Wallet authorization is incomplete: only "
+                f"`{status.get('active_accounts', 0)}` of "
+                f"`{status.get('required_accounts', 0)}` accounts are authorized. "
+                "Use `wallet revoke` to clear the partial grant before trying again."
+            )
+            return
         await ctx.send(
             "No active signing authorization exists. You can still receive funds and view "
             "your wallet; authorization will be requested when you first approve a send."
@@ -174,7 +200,7 @@ class WalletAuthorizationCommands:
         except WalletProviderError as exc:
             await ctx.send(f"Wallet authorization status is unavailable: {exc}")
             return
-        if not status["active"]:
+        if not status["active"] and not status.get("partial"):
             await ctx.send("No active signing authorization exists for this wallet profile.")
             return
         expiry = datetime.fromisoformat(status["expires_at"].replace("Z", "+00:00"))
@@ -193,6 +219,10 @@ class WalletAuthorizationCommands:
             status = await self.wallet_provider.get_delegation_status(
                 view.profile, BASE_SEPOLIA.key
             )
+            if status.get("partial"):
+                raise RuntimeError(
+                    "Clear the partial authorization with wallet revoke before renewing."
+                )
             expires_at = await self.send_authorization_link(
                 interaction.user, view.profile, renewal=status["active"]
             )
@@ -231,9 +261,9 @@ class WalletAuthorizationCommands:
                 f"Wallet authorization could not be revoked: {exc}", ephemeral=True
             )
             return
-        if status["active"]:
+        if status["active"] or status.get("partial"):
             await interaction.followup.send(
-                "CDP still reports this wallet-profile authorization as active; no success was recorded.",
+                "CDP still reports an active or partial wallet authorization; no success was recorded.",
                 ephemeral=True,
             )
             return

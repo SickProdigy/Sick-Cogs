@@ -81,6 +81,7 @@ class _JwtHarness(JwtAuthMixin):
         self.config = SimpleNamespace(
             deployment_id=_Value(deployment_id),
             delegation_duration_days=_Value(365),
+            delegation_max_duration_days=_Value(365),
         )
         self.bot = SimpleNamespace(user=SimpleNamespace(id=application_id))
 
@@ -338,6 +339,8 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         cog = SimpleNamespace(
             config=SimpleNamespace(
                 approval_base_url=_Value("https://wallet.example.test/cryptowallet"),
+                delegation_duration_days=_Value(365),
+                delegation_max_duration_days=_Value(365),
                 user_from_id=lambda user_id: SimpleNamespace(
                     security_locked=_Value(False)
                 ),
@@ -510,6 +513,8 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["sickwallet_application"], "42")
         self.assertEqual(claims["sickwallet_deployment"], "deployment")
         self.assertEqual(claims["sickwallet_purpose"], "authorize")
+        self.assertEqual(claims["sickwallet_delegation_default_days"], 365)
+        self.assertEqual(claims["sickwallet_delegation_max_days"], 365)
         self.assertGreater(
             claims["sickwallet_delegation_expires_at"], claims["exp"]
         )
@@ -1373,6 +1378,81 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["value_atomic"], 7)
         self.assertEqual(stored["estimated_fee_atomic"], 3)
         self.assertEqual(stored["value_wei"], 7)
+
+
+class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_complete_account_grants_use_earliest_expiry(self):
+        profile = _profile()
+        profile["accounts"].append({
+            "network": SOLANA_DEVNET.key,
+            "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        })
+        client = SimpleNamespace(
+            get_user_delegation=AsyncMock(return_value=None),
+            get_account_delegation=AsyncMock(side_effect=[
+                {"expiresAt": "2099-01-02T00:00:00Z"},
+                {"expiresAt": "2099-01-01T00:00:00Z"},
+            ]),
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project")
+        )
+        provider._api_client = lambda credentials: client
+
+        status = await provider.get_delegation_status(profile, BASE_SEPOLIA.key)
+
+        self.assertTrue(status["active"])
+        self.assertFalse(status["partial"])
+        self.assertEqual(status["scope"], "accounts")
+        self.assertEqual(status["expires_at"], "2099-01-01T00:00:00Z")
+        self.assertEqual(status["active_accounts"], 2)
+
+    async def test_partial_account_grants_fail_closed(self):
+        profile = _profile()
+        profile["accounts"].append({
+            "network": SOLANA_DEVNET.key,
+            "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        })
+        client = SimpleNamespace(
+            get_user_delegation=AsyncMock(return_value=None),
+            get_account_delegation=AsyncMock(side_effect=[
+                {"expiresAt": "2099-01-01T00:00:00Z"}, None,
+            ]),
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project")
+        )
+        provider._api_client = lambda credentials: client
+
+        status = await provider.get_delegation_status(profile, BASE_SEPOLIA.key)
+
+        self.assertFalse(status["active"])
+        self.assertTrue(status["partial"])
+        self.assertEqual(status["active_accounts"], 1)
+        self.assertEqual(status["required_accounts"], 2)
+
+    async def test_revocation_clears_profile_and_each_account_grant(self):
+        profile = _profile()
+        profile["accounts"].append({
+            "network": SOLANA_DEVNET.key,
+            "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        })
+        client = SimpleNamespace(
+            revoke_user_delegation=AsyncMock(),
+            revoke_account_delegation=AsyncMock(),
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project")
+        )
+        provider._api_client = lambda credentials: client
+
+        await provider.revoke_authorization(profile, BASE_SEPOLIA.key)
+
+        client.revoke_user_delegation.assert_awaited_once_with("profile-7", "project")
+        self.assertEqual(client.revoke_account_delegation.await_count, 2)
 
 
 class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):

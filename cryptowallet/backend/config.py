@@ -29,6 +29,7 @@ def create_config(cog) -> Config:
         token_registry={},
         send_limits_atomic={},
         delegation_duration_days=365,
+        delegation_max_duration_days=365,
     )
     config.register_user(
         profile=None,
