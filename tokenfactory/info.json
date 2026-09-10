@@ -1,0 +1,15 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Prepare protected fixed-supply ERC-20 deployment drafts for Base Sepolia.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores public test-token deployment drafts linked to Discord user IDs and public wallet addresses. It never stores wallet keys, recovery material, or credentials.",
+  "hidden": false,
+  "install_msg": "TokenFactory is a Base Sepolia-only draft prototype. Load CryptoWallet first. Use `[p]tokenfactory create` to open the token form. Contract deployment remains unavailable until an owner configures a reviewed and pinned factory contract.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Fixed-supply Base Sepolia token deployment drafts",
+  "tags": ["tokens", "erc20", "base", "testnet", "wallet"],
+  "type": "COG",
+  "version": "0.1.0"
+}
