@@ -376,9 +376,16 @@ companion pairing credential for any field above.
 #### Required setup order
 
 1. Create or select the CDP project and record its project ID.
-2. Create a **Secret API Key** for that project and save its ID and secret.
-3. Generate the project's **Wallet Secret** and save it separately.
-4. As the Red bot owner, run `[p]set api`, set the service to `cryptowallet_cdp`, and enter:
+2. Create an **Ed25519 Secret API Key** for that project and save its ID and secret. Set its IP
+   allowlist to the bot/web server’s public outbound IP (normally one `/32` entry), not a Discord
+   member’s or browser visitor’s IP. Enable **Account → Non-custodial → Manage** for the
+   server-side wallet and delegation management used by CryptoWallet. **Export**, **Trade**, and
+   **Transfer** are not required by this integration.
+3. Generate the project’s separate **Wallet Secret** under **Wallets → Non-custodial Wallet →
+   Security**, and save it when CDP displays it.
+4. On that same **Security** page, enable **Delegated Signing**. This project-level switch is
+   required for protected wallet authorization and is separate from the Secret API Key permissions.
+5. As the Red bot owner, run `[p]set api`, set the service to `cryptowallet_cdp`, and enter:
 
    ```text
    project_id YOUR_PROJECT_ID
@@ -387,19 +394,35 @@ companion pairing credential for any field above.
    wallet_secret YOUR_WALLET_SECRET
    ```
 
-5. Reload the cog so CryptoWallet initializes its server-only JWT identity key.
-6. Run `[p]walletset cdpstatus`, then test `[p]wallet` using valueless testnet assets only.
+6. Reload the cog so CryptoWallet initializes its server-only JWT identity key.
+7. Configure the browser client and custom authentication using the settings below.
+8. Run `[p]walletset cdpstatus`, `[p]walletset cdpcheck`, and `[p]walletset jwtstatus`, then test
+   `[p]wallet` and `[p]wallet authorize` using valueless testnet assets only.
 
-The companion website and CDP custom-auth/JWKS configuration are not required to provision and
-display a wallet address. Configure those later when implementing authorization, recovery,
-export, or transaction-approval flows.
+Basic wallet provisioning and public-address display use the server credentials. Protected
+authorization, recovery, export, and transaction approval also require the browser/custom-auth
+configuration below.
 
-`[p]walletset jwtstatus` displays only public configuration. It never displays the JWT private
-key. The issuer is the configured website URL, the audience is the CDP project ID, and tokens use
-the stable wallet-profile ID as `sub`. Run `[p]walletset jwksfile`, upload the resulting public
-`jwks.json` beside the wallet web files, and keep CDP's JWKS URL set to
-`https://your-site.example/cryptowallet/api/jwks.php`. The file contains no private key or CDP
-credential. Add the exact website origin to the CDP Client API Key domain allowlist.
+#### Browser client and custom authentication
+
+In the same CDP project, configure the non-custodial wallet browser client and custom
+authentication to match the deployed companion:
+
+| CDP setting | Required value |
+| --- | --- |
+| Allowed domain/origin | The exact website origin, such as `https://your-site.example`. Include a non-default port when used, but do not include `/cryptowallet` or another URL path. |
+| JWKS URL | `https://your-site.example/cryptowallet/api/jwks.php` |
+| JWT issuer (`iss`) | The exact configured CryptoWallet approval URL, such as `https://your-site.example/cryptowallet` |
+| JWT audience (`aud`) | The CDP `project_id` UUID |
+| JWT algorithm | `ES256` |
+| User identifier claim | `sub` |
+
+`[p]walletset jwtstatus` displays these public values and never displays the JWT private key.
+CryptoWallet uses the stable wallet-profile ID as `sub`. Run `[p]walletset jwksfile` when a
+manually deployed public `jwks.json` is needed; the PHP JWKS endpoint otherwise publishes the
+public key installed by the secure website setup. Neither form contains a private key or CDP
+credential. The browser allowed-domain entry and the server API key IP allowlist are separate:
+the former contains the website origin, while the latter contains the server’s public outbound IP.
 
 Authorization handoffs expire after three minutes. They are sent by DM, carried after `#handoff=` so they
 are not sent to the web server, and removed from browser history as soon as the page loads. The
