@@ -1,10 +1,9 @@
+import time
+
 import discord
 
-from ..core.models import TransactionIntent
-from ..core.networks import BASE_SEPOLIA
-from .constants import (
-    INTENT_LIFETIME_SECONDS,
-)
+from ..core.models import IntentStatus, TransactionIntent
+from ..core.networks import BASE_SEPOLIA, NETWORKS
 
 
 class WalletHistoryView(discord.ui.View):
@@ -44,12 +43,28 @@ class WalletIntentView(discord.ui.View):
     """Owner-bound approval controls for one pending transaction intent."""
 
     def __init__(self, cog, user_id: int, intent: TransactionIntent):
-        super().__init__(timeout=INTENT_LIFETIME_SECONDS)
+        super().__init__(timeout=max(1.0, intent.expires_at - time.time()))
         self.cog = cog
         self.user_id = user_id
         self.intent_id = intent.intent_id
         self.quote = cog._intent_quote(intent)
         self.processing = False
+        self.message = None
+
+    async def on_timeout(self) -> None:
+        intent = await self.cog._stored_intent(self.user_id, self.intent_id)
+        if intent is None or intent.status is not IntentStatus.PENDING:
+            return
+        intent.status = IntentStatus.EXPIRED
+        await self.cog.config.user_from_id(self.user_id).intents.set_raw(
+            intent.intent_id, value=intent.to_dict()
+        )
+        self.clear_items()
+        if self.message is not None:
+            await self.message.edit(
+                embed=self.cog._intent_embed(intent, NETWORKS[intent.network], None),
+                view=None,
+            )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
