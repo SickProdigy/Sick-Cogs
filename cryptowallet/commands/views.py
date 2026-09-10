@@ -108,17 +108,12 @@ class WalletIntentView(discord.ui.View):
 class WalletRevocationView(discord.ui.View):
     """Owner-bound confirmation for wallet-profile delegation revocation."""
 
-    def __init__(self, cog, user_id: int, profile: dict, *, allow_renew: bool = False):
-        super().__init__(timeout=180 if allow_renew else 60)
+    def __init__(self, cog, user_id: int, profile: dict):
+        super().__init__(timeout=60)
         self.cog = cog
         self.user_id = user_id
         self.profile = profile
         self.processing = False
-        if not allow_renew:
-            renewal_button = next(
-                item for item in self.children if item.label == "Renew authorization"
-            )
-            self.remove_item(renewal_button)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -131,24 +126,6 @@ class WalletRevocationView(discord.ui.View):
     def disable_controls(self) -> None:
         for item in self.children:
             item.disabled = True
-
-    def disable_renewal(self) -> None:
-        for item in self.children:
-            if item.label == "Renew authorization":
-                item.disabled = True
-
-    @discord.ui.button(label="Renew authorization", emoji="🔐", style=discord.ButtonStyle.primary)
-    async def renew(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if self.processing:
-            await interaction.response.send_message(
-                "This authorization is already being checked.", ephemeral=True
-            )
-            return
-        self.processing = True
-        try:
-            await self.cog.renew_authorization_interaction(interaction, self)
-        finally:
-            self.processing = False
 
     @discord.ui.button(label="Revoke authorization", emoji="🔒", style=discord.ButtonStyle.danger)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -174,4 +151,4 @@ class WalletAuthorizationView(WalletRevocationView):
     """Owner-bound controls for an active signing authorization."""
 
     def __init__(self, cog, user_id: int, profile: dict):
-        super().__init__(cog, user_id, profile, allow_renew=True)
+        super().__init__(cog, user_id, profile)

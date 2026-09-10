@@ -269,10 +269,7 @@ validated again by the browser before authorization. `walletset delegationdays` 
 authorizations; existing grants retain their current expiry. The grant covers the exact signed set
 of provisioned EVM and Solana accounts. `wallet revoke` requires an owner-bound
 Discord confirmation, revokes the user-scoped delegation across every account in the wallet profile,
-and verifies with CDP that it is inactive; it does not delete the wallet or move funds. When authorization is already active,
-`wallet authorize` and `wallet authorization` show an explicit **Renew authorization** control.
-Renewal sends a separately labeled protected link and leaves the current grant unchanged unless the
-user deliberately completes that browser approval.
+and verifies with CDP that it is inactive; it does not delete the wallet or move funds. When authorization is already active, `wallet authorize` and `wallet authorization` show its current expiry and revocation control. CDP permits only one active user-scoped grant, so changing its duration requires revoking it first and then running `wallet auth [days]` again.
 
 `wallet security lock` immediately persists an emergency lock, rejects pending send intents, and attempts to revoke the profile-wide bot signing delegation. While locked, receiving funds, balances, history, public transaction lookup, and authorization revocation remain available; new sends, approval clicks, authorization/renewal links, and signer export are blocked. Only the configured Red bot owner can remove the lock with `walletset unlock <mention-or-user-id>` after an independent identity review. An already-issued signed handoff can remain usable until its three-minute expiry, so the owner should retry delegation revocation if CDP was unavailable during locking. This is the current compromised-Discord response; a Discord-only PIN would not be an independent factor, and optional external 2FA remains future work.
 

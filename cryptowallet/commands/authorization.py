@@ -42,7 +42,7 @@ class WalletAuthorizationCommands:
         embed.add_field(
             name="Options",
             value=(
-                "Leave it active for future sends, deliberately renew it for a duration you choose, or use **Revoke authorization** below. "
+                "Leave it active for future sends, or use **Revoke authorization** below before choosing a different duration. "
                 "Revoking does not delete the wallet or move funds."
             ),
             inline=False,
@@ -64,11 +64,20 @@ class WalletAuthorizationCommands:
             status = await self.wallet_provider.get_delegation_status(
                 profile, BASE_SEPOLIA.key
             )
-            if status["active"] and days is None:
+            if status["active"]:
                 expiry = datetime.fromisoformat(
                     status["expires_at"].replace("Z", "+00:00")
                 )
                 embed = self._active_authorization_embed(status, expiry)
+                if days is not None:
+                    embed.add_field(
+                        name="Duration not changed",
+                        value=(
+                            "CDP allows only one active authorization. Revoke the current "
+                            f"authorization first, then use `wallet auth {days}` again."
+                        ),
+                        inline=False,
+                    )
                 await ctx.send(
                     embed=embed,
                     view=WalletAuthorizationView(self, ctx.author.id, profile),
@@ -219,42 +228,6 @@ class WalletAuthorizationCommands:
             "This does not delete the wallet or move funds. Future sends will require "
             f"authorization again. The current authorization expires <t:{int(expiry.timestamp())}:R>.",
             view=WalletRevocationView(self, ctx.author.id, profile),
-        )
-
-    async def renew_authorization_interaction(
-        self, interaction: discord.Interaction, view: WalletAuthorizationView
-    ) -> None:
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            status = await self.wallet_provider.get_delegation_status(
-                view.profile, BASE_SEPOLIA.key
-            )
-            if status.get("partial"):
-                raise RuntimeError(
-                    "Clear the partial authorization with wallet revoke before renewing."
-                )
-            expires_at = await self.send_authorization_link(
-                interaction.user, view.profile, renewal=status["active"]
-            )
-        except (RuntimeError, WalletProviderError) as exc:
-            await interaction.followup.send(
-                f"Wallet authorization renewal is unavailable: {exc}", ephemeral=True
-            )
-            return
-        view.disable_renewal()
-        await interaction.message.edit(view=view)
-        if status["active"]:
-            message = (
-                "I sent a deliberate renewal link by DM. Your current authorization "
-                "remains active and unchanged unless you complete it. "
-            )
-        else:
-            message = (
-                "The previous authorization has expired, so I sent a new authorization "
-                "link by DM. "
-            )
-        await interaction.followup.send(
-            message + f"The link expires <t:{expires_at}:R>.", ephemeral=True
         )
 
     async def revoke_authorization_interaction(
