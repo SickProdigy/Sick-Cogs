@@ -214,7 +214,7 @@ User commands:
 [p]wallet auth [days]           # Short alias; optional days prefill
 [p]wallet authorization
 [p]wallet recovery             # Aliases: recover, backup
-[p]wallet revoke                # Aliases: deauthorize, de-auth
+[p]wallet revoke                # Aliases: deauthorize, de-auth, deauth
 ```
 
 Owner commands:
