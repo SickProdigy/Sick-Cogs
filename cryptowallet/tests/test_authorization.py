@@ -493,52 +493,49 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Receiving funds", message)
         self.assertIn("authorization revocation remain available", message)
 
-    async def test_active_and_revoke_only_controls_are_distinct(self):
+    async def test_active_and_revoke_views_offer_only_valid_controls(self):
         active = WalletAuthorizationView(object(), 7, _profile())
         revoke = WalletRevocationView(object(), 7, _profile())
         self.assertEqual(
             [item.label for item in active.children],
-            ["Renew authorization", "Revoke authorization", "Cancel"],
+            ["Revoke authorization", "Cancel"],
         )
         self.assertEqual(
             [item.label for item in revoke.children],
             ["Revoke authorization", "Cancel"],
         )
 
-    async def test_active_card_explains_deliberate_renewal(self):
+    async def test_active_card_explains_duration_change_requires_revoke(self):
         expiry = datetime(2026, 9, 5, tzinfo=timezone.utc)
         embed = WalletAuthorizationCommands._active_authorization_embed(
             {"address": _profile()["accounts"][0]["address"]}, expiry
         )
         options = next(field.value for field in embed.fields if field.name == "Options")
-        self.assertIn("deliberately renew", options)
+        self.assertIn("before choosing a different duration", options)
         self.assertIn("Revoke authorization", options)
 
-    async def test_renewal_rechecks_status_and_preserves_active_grant(self):
-        provider = SimpleNamespace(
-            get_delegation_status=AsyncMock(
-                return_value={"active": True, "expires_at": "2026-09-05T00:00:00Z"}
-            )
-        )
+    async def test_auth_days_does_not_replace_an_active_grant(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
         cog = SimpleNamespace(
-            wallet_provider=provider,
-            send_authorization_link=AsyncMock(return_value=1_800_000_000),
+            _active_authorization_embed=WalletAuthorizationCommands._active_authorization_embed,
+            _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_profile_or_error=AsyncMock(return_value=_profile()),
+            wallet_provider=SimpleNamespace(
+                get_delegation_status=AsyncMock(return_value={
+                    "active": True, "expires_at": "2027-09-10T17:22:07Z",
+                })
+            ),
         )
-        view = WalletAuthorizationView(cog, 7, _profile())
-        interaction = _interaction()
-        await WalletAuthorizationCommands.renew_authorization_interaction(
-            cog, interaction, view
+
+        await WalletAuthorizationCommands.wallet_authorize.callback(cog, ctx, 7)
+
+        sent = ctx.send.await_args.kwargs
+        duration_notice = next(
+            field.value for field in sent["embed"].fields
+            if field.name == "Duration not changed"
         )
-        cog.send_authorization_link.assert_awaited_once_with(
-            interaction.user, view.profile, renewal=True
-        )
-        renewal = next(
-            item for item in view.children if item.label == "Renew authorization"
-        )
-        self.assertTrue(renewal.disabled)
-        self.assertIn(
-            "remains active and unchanged", interaction.followup.send.await_args.args[0]
-        )
+        self.assertIn("wallet auth 7", duration_notice)
+
 
 
 class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
