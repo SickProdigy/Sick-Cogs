@@ -20,6 +20,10 @@
   "factoryRuntimeCodeHash": "0xa4e867671846a61743568f19d897fb5ffe40ad9678c9c06e791ff45dad7136f7",
   "tokenTemplateCreationCodeHash": "0x125e0b15d930ba32d893a461b1672d89edf9b78aa6ec2052249c6aa76663d297",
   "tokenTemplateUnlinkedRuntimeCodeHash": "0xa300cddc0851dcb68d3d9764e2263e42369368ea648745d7cf559e6caa18eb5c",
+  "singletonFactory": "0xce0042B868300000d44A59004Da54A005ffdcf9f",
+  "singletonFactoryRuntimeCodeHash": "0xc4d5542b53a8b779595a20a8ddd60e58a6c49d3c3decc2df83ced1c69c8ca807",
+  "deploymentSalt": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "predictedFactoryAddress": "0xCBa30318008035BB5A855a8684cEa954D573c2C3",
   "factoryAddress": null,
   "deploymentTransaction": null
 }
