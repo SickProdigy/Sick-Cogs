@@ -1,12 +1,12 @@
 import {
   authenticateWithJWT,
-  createDelegationForAccount,
-  getDelegationForAccount,
+  createDelegation,
+  getDelegation,
   createEvmKeyExportIframe,
   createSolanaKeyExportIframe,
   initialize,
   isSignedIn,
-  revokeDelegationForAccount,
+  revokeDelegation,
   signEvmMessage,
   signOut,
 } from "@coinbase/cdp-core";
@@ -99,34 +99,21 @@ export async function authorizeWallet(
     } catch (error) {
       throw safeCdpStageError("EVM wallet signing preflight", error);
     }
-    const created = [];
     try {
-      for (const account of delegationAccounts) {
-        const result = await createDelegationForAccount({
-          address: account.address,
-          expiresAt: expiresAt.toISOString(),
-        });
-        created.push(account.address);
-        const verified = await getDelegationForAccount({ address: account.address });
-        if (
-          !verified?.expiresAt ||
-          new Date(verified.expiresAt).getTime() !== new Date(result.expiresAt).getTime()
-        ) {
-          throw new Error("Coinbase did not verify every wallet-account delegation.");
-        }
+      const result = await createDelegation({
+        expiresAt: expiresAt.toISOString(),
+      });
+      const verified = await getDelegation();
+      if (
+        !verified?.expiresAt ||
+        new Date(verified.expiresAt).getTime() !== new Date(result.expiresAt).getTime()
+      ) {
+        await revokeDelegation().catch(() => undefined);
+        throw new Error("Coinbase did not verify the wallet-profile delegation.");
       }
-      return { expiresAt: expiresAt.toISOString(), scope: "accounts" };
+      return { expiresAt: expiresAt.toISOString(), scope: "profile" };
     } catch (error) {
-      const rollback = await Promise.allSettled(
-        created.map((address) => revokeDelegationForAccount({ address }))
-      );
-      if (rollback.some((result) => result.status === "rejected")) {
-        throw new Error(
-          "Wallet authorization failed and Coinbase could not fully roll it back.",
-          { cause: error }
-        );
-      }
-      throw safeCdpStageError("Account-scoped wallet delegation", error);
+      throw safeCdpStageError("Wallet-profile delegation", error);
     }
   } finally {
     await signOut().catch(() => undefined);
