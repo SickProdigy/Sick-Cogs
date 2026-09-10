@@ -7,6 +7,7 @@ import {
   initialize,
   isSignedIn,
   revokeDelegationForAccount,
+  signEvmMessage,
   signOut,
 } from "@coinbase/cdp-core";
 
@@ -79,6 +80,24 @@ export async function authorizeWallet(
       }));
     } catch (error) {
       throw safeCdpStageError("Wallet authentication", error);
+    }
+    const evmOwner = delegationAccounts.find((account) => account.family === "evm");
+    if (!evmOwner) {
+      throw new Error("EVM wallet signing preflight could not identify the wallet owner.");
+    }
+    const diagnosticMessage =
+      "SickGaming CryptoWallet diagnostic\n" +
+      "This signature grants no permission and authorizes no transaction.\n" +
+      "Project: " + projectId + "\n" +
+      "Wallet user: " + expectedUserId + "\n" +
+      "Authorization expiry: " + expiresAt.toISOString();
+    try {
+      await signEvmMessage({
+        evmAccount: evmOwner.address,
+        message: diagnosticMessage,
+      });
+    } catch (error) {
+      throw safeCdpStageError("EVM wallet signing preflight", error);
     }
     const created = [];
     try {
