@@ -193,7 +193,7 @@ class WalletAuthorizationCommands:
             "your wallet; authorization will be requested when you first approve a send."
         )
 
-    @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize", "de-auth"))
+    @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize", "de-auth", "deauth"))
     async def wallet_revoke(self, ctx: commands.Context):
         """Revoke limited signing authorization for every account in your wallet profile."""
         if not await self._wallet_read_allowed(
