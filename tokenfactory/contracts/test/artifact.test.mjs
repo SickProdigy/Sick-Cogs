@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { getCreate2Address } from "ethers";
 
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,4 +42,12 @@ test("factory build records pinned reproducibility metadata", () => {
   assert.equal(manifest.compiler, artifact.compilerVersion);
   assert.equal(manifest.factoryCreationCodeHash, artifact.creationCodeHash);
   assert.equal(manifest.factoryRuntimeCodeHash, artifact.runtimeCodeHash);
+  assert.equal(
+    getCreate2Address(
+      manifest.singletonFactory,
+      manifest.deploymentSalt,
+      artifact.creationCodeHash,
+    ),
+    manifest.predictedFactoryAddress,
+  );
 });
