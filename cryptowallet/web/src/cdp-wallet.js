@@ -1,10 +1,13 @@
 import {
   authenticateWithJWT,
   createDelegation,
+  createDelegationForAccount,
+  getDelegationForAccount,
   createEvmKeyExportIframe,
   createSolanaKeyExportIframe,
   initialize,
   isSignedIn,
+  revokeDelegationForAccount,
   signOut,
 } from "@coinbase/cdp-core";
 
@@ -41,22 +44,59 @@ async function authenticateWallet(projectId, expectedUserId, expectedAccounts, h
 }
 
 export async function authorizeWallet(
-  projectId, expectedUserId, expectedAccounts, handoffToken, delegationExpiresAt
+  projectId, expectedUserId, expectedAccounts, handoffToken, delegationExpiresAt,
+  delegationMaxDays
 ) {
   const expiresAt = new Date(Number(delegationExpiresAt) * 1000);
+  const maxDays = Number(delegationMaxDays);
   if (
     !Number.isSafeInteger(Number(delegationExpiresAt)) ||
+    !Number.isSafeInteger(maxDays) || maxDays < 1 || maxDays > 365 ||
     expiresAt.getTime() <= Date.now() ||
-    expiresAt.getTime() > Date.now() + 365 * 24 * 60 * 60 * 1000
+    expiresAt.getTime() > Date.now() + maxDays * 24 * 60 * 60 * 1000
   ) {
     throw new Error("Wallet delegation policy is invalid.");
   }
   try {
     await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
-    const delegation = await createDelegation({
-      expiresAt: expiresAt.toISOString(),
-    });
-    return { expiresAt: delegation.expiresAt };
+    try {
+      const delegation = await createDelegation({ expiresAt: expiresAt.toISOString() });
+      return { expiresAt: delegation.expiresAt, scope: "profile" };
+    } catch (error) {
+      if (
+        error?.statusCode !== 401 || error?.errorType !== "unauthorized" ||
+        error?.errorMessage !== "Wallet authentication error."
+      ) throw error;
+    }
+    const created = [];
+    try {
+      for (const account of expectedAccounts) {
+        const result = await createDelegationForAccount({
+          address: account.address,
+          expiresAt: expiresAt.toISOString(),
+        });
+        created.push(account.address);
+        const verified = await getDelegationForAccount({ address: account.address });
+        if (
+          !verified?.expiresAt ||
+          new Date(verified.expiresAt).getTime() !== new Date(result.expiresAt).getTime()
+        ) {
+          throw new Error("Coinbase did not verify every wallet-account delegation.");
+        }
+      }
+      return { expiresAt: expiresAt.toISOString(), scope: "accounts" };
+    } catch (error) {
+      const rollback = await Promise.allSettled(
+        created.map((address) => revokeDelegationForAccount({ address }))
+      );
+      if (rollback.some((result) => result.status === "rejected")) {
+        throw new Error(
+          "Wallet authorization failed and Coinbase could not fully roll it back.",
+          { cause: error }
+        );
+      }
+      throw error;
+    }
   } finally {
     await signOut().catch(() => undefined);
   }

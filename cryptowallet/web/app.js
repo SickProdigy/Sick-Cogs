@@ -7,6 +7,8 @@ const detailsElement = document.querySelector("#session-details");
 const authorizationControls = document.querySelector("#authorization-controls");
 const authorizationButton = document.querySelector("#authorize-wallet");
 const authorizationStatus = document.querySelector("#authorization-status");
+const authorizationDays = document.querySelector("#authorization-days");
+const authorizationDurationHelp = document.querySelector("#authorization-duration-help");
 let handoffToken = null;
 
 function addDetail(label, value) {
@@ -32,8 +34,15 @@ function decodeHandoff() {
   if (!Array.isArray(claims.sickwallet_accounts) || !claims.sickwallet_accounts.length || Number(claims.exp) * 1000 <= Date.now()) {
     throw new Error("This wallet authorization link has expired or is incomplete.");
   }
+  const delegationDefaultDays = Number(claims.sickwallet_delegation_default_days || 0);
+  const delegationMaxDays = Number(claims.sickwallet_delegation_max_days || 0);
   const delegationExpiresAt = Number(claims.sickwallet_delegation_expires_at);
   if (
+    !Number.isSafeInteger(delegationDefaultDays) ||
+    !Number.isSafeInteger(delegationMaxDays) ||
+    delegationDefaultDays < 1 ||
+    delegationDefaultDays > delegationMaxDays ||
+    delegationMaxDays > 365 ||
     !Number.isSafeInteger(delegationExpiresAt) ||
     delegationExpiresAt * 1000 <= Date.now() ||
     delegationExpiresAt * 1000 > Date.now() + 365 * 24 * 60 * 60 * 1000
@@ -46,6 +55,8 @@ function decodeHandoff() {
     wallet: { accounts: claims.sickwallet_accounts },
     cdp: { project_id: claims.aud, user_id: claims.sub },
     delegation_expires_at: delegationExpiresAt,
+    delegation_default_days: delegationDefaultDays,
+    delegation_max_days: delegationMaxDays,
   };
 }
 
@@ -54,7 +65,9 @@ function configureAuthorization(session) {
     session.purpose !== "authorize" ||
     !authorizationControls ||
     !authorizationButton ||
-    !authorizationStatus
+    !authorizationStatus ||
+    !authorizationDays ||
+    !authorizationDurationHelp
   ) return;
   authorizationControls.hidden = false;
   if (!session.wallet?.accounts?.length || !session.cdp?.project_id) {
@@ -62,17 +75,28 @@ function configureAuthorization(session) {
     authorizationStatus.textContent = "Wallet authorization is not completely configured.";
     return;
   }
+  authorizationDays.value = String(session.delegation_default_days);
+  authorizationDays.max = String(session.delegation_max_days);
+  authorizationDurationHelp.textContent =
+    `Recommended: ${session.delegation_default_days} day(s). Maximum: ${session.delegation_max_days} day(s).`;
   authorizationButton.addEventListener("click", async () => {
     authorizationButton.disabled = true;
     authorizationStatus.textContent = "Authenticating this wallet with Coinbase…";
     try {
+      const selectedDays = Number(authorizationDays.value);
+      if (
+        !Number.isSafeInteger(selectedDays) || selectedDays < 1 ||
+        selectedDays > session.delegation_max_days
+      ) throw new Error(`Choose a whole number from 1 through ${session.delegation_max_days} days.`);
+      const selectedExpiresAt = Math.floor(Date.now() / 1000) + selectedDays * 24 * 60 * 60;
       const { authorizeWallet } = await import("./cdp-wallet.js");
       const result = await authorizeWallet(
         session.cdp.project_id,
         session.cdp.user_id,
         session.wallet.accounts,
         handoffToken,
-        session.delegation_expires_at
+        selectedExpiresAt,
+        session.delegation_max_days
       );
       handoffToken = null;
       authorizationStatus.textContent = `Wallet delegated until ${new Date(result.expiresAt).toLocaleString()}.`;

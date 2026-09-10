@@ -229,6 +229,7 @@ Owner commands:
 [p]walletset reconcile <mention-or-user-id> <bot-reference>
 [p]walletset sendlimit [network] [amount|clear]
 [p]walletset delegationdays [1-365]
+[p]walletset delegationmaxdays [1-365]
 [p]walletset cdpstatus
 [p]walletset cdpcheck
 [p]walletset jwtstatus

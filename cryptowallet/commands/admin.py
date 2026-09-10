@@ -336,13 +336,38 @@ class WalletAdminCommands:
         if days is None:
             await ctx.send(f"Wallet delegation lifetime: `{current} day(s)`.")
             return
-        if not 1 <= days <= 365:
-            await ctx.send("Choose a delegation lifetime from 1 through 365 days.")
+        maximum = int(await self.config.delegation_max_duration_days() or 0)
+        if not 1 <= days <= maximum:
+            await ctx.send(
+                f"Choose a recommended lifetime from 1 through `{maximum}` days."
+            )
             return
         await self.config.delegation_duration_days.set(days)
         await ctx.send(
             f"New wallet authorizations will expire after `{days} day(s)`. "
             "Existing authorizations are unchanged."
+        )
+
+    @walletset.command(name="delegationmaxdays")
+    @commands.is_owner()
+    async def walletset_delegation_max_days(
+        self, ctx: commands.Context, days: int = None
+    ):
+        """Show or set the maximum member-selectable authorization lifetime."""
+        current = int(await self.config.delegation_max_duration_days() or 0)
+        if days is None:
+            await ctx.send(f"Maximum wallet delegation lifetime: `{current} day(s)`.")
+            return
+        recommended = int(await self.config.delegation_duration_days() or 0)
+        if not recommended <= days <= 365:
+            await ctx.send(
+                f"Choose a maximum from `{recommended}` through `365` days, or lower "
+                "the recommended duration first."
+            )
+            return
+        await self.config.delegation_max_duration_days.set(days)
+        await ctx.send(
+            f"Members may select wallet authorization lifetimes up to `{days} day(s)`."
         )
 
     @walletset.command(name="usage")
