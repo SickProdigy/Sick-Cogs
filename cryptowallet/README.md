@@ -211,10 +211,10 @@ User commands:
 [p]wallet security              # Show emergency-lock status
 [p]wallet security lock         # Alias: freeze; only bot owner can unlock
 [p]wallet authorize
-[p]wallet auth                  # Short alias
+[p]wallet auth [days]           # Short alias; optional days prefill
 [p]wallet authorization
 [p]wallet recovery             # Aliases: recover, backup
-[p]wallet revoke
+[p]wallet revoke                # Aliases: deauthorize, de-auth
 ```
 
 Owner commands:

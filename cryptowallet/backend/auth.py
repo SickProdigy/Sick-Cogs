@@ -153,11 +153,12 @@ class JwtAuthMixin:
         return token, expires_at
 
     async def create_authorization_handoff(
-        self, discord_user_id: int, profile: dict
+        self, discord_user_id: int, profile: dict, *, delegation_days: int | None = None
     ) -> tuple[str, int]:
         """Create a short-lived CDP custom-auth token for wallet authorization."""
         return await self._create_wallet_handoff(
-            discord_user_id, profile, purpose="authorize"
+            discord_user_id, profile, purpose="authorize",
+            delegation_default_days=delegation_days,
         )
 
     async def create_recovery_handoff(
@@ -169,7 +170,8 @@ class JwtAuthMixin:
         )
 
     async def _create_wallet_handoff(
-        self, discord_user_id: int, profile: dict, *, purpose: str
+        self, discord_user_id: int, profile: dict, *, purpose: str,
+        delegation_default_days: int | None = None,
     ) -> tuple[str, int]:
         if purpose not in {"authorize", "recovery"}:
             raise ValueError("Unsupported wallet handoff purpose")
@@ -234,7 +236,12 @@ class JwtAuthMixin:
             "sickwallet_purpose": purpose,
         }
         if purpose == "authorize":
-            delegation_days = int(await self.config.delegation_duration_days() or 0)
+            configured_days = int(await self.config.delegation_duration_days() or 0)
+            delegation_days = (
+                configured_days
+                if delegation_default_days is None
+                else int(delegation_default_days)
+            )
             delegation_max_days = int(
                 await self.config.delegation_max_duration_days() or 0
             )

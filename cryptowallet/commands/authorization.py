@@ -51,7 +51,7 @@ class WalletAuthorizationCommands:
         return embed
 
     @WalletCoreCommands.wallet.command(name="authorize", aliases=("auth",))
-    async def wallet_authorize(self, ctx: commands.Context):
+    async def wallet_authorize(self, ctx: commands.Context, days: int = None):
         """Authorize limited bot actions for your provisioned wallet."""
         if not await self._wallet_read_allowed(
             ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
@@ -64,7 +64,7 @@ class WalletAuthorizationCommands:
             status = await self.wallet_provider.get_delegation_status(
                 profile, BASE_SEPOLIA.key
             )
-            if status["active"]:
+            if status["active"] and days is None:
                 expiry = datetime.fromisoformat(
                     status["expires_at"].replace("Z", "+00:00")
                 )
@@ -80,14 +80,17 @@ class WalletAuthorizationCommands:
                     "the partial grant before authorizing again."
                 )
                 return
-            expires_at = await self.send_authorization_link(ctx.author, profile)
+            expires_at = await self.send_authorization_link(
+                ctx.author, profile, renewal=status["active"], requested_days=days
+            )
         except (RuntimeError, WalletProviderError) as exc:
             await ctx.send(f"Wallet authorization is unavailable: {exc}")
             return
         await ctx.send(f"I sent your wallet authorization link by DM; it expires <t:{expires_at}:R>.")
 
     async def send_authorization_link(
-        self, user, profile: dict, *, renewal: bool = False
+        self, user, profile: dict, *, renewal: bool = False,
+        requested_days: int | None = None,
     ) -> int:
         """DM a short-lived authorization link and return its expiry."""
         if await self.config.user_from_id(user.id).security_locked():
@@ -96,9 +99,16 @@ class WalletAuthorizationCommands:
                 "the bot owner completes an identity review and unlocks it."
             )
         approval_base_url = str(await self.config.approval_base_url() or "").rstrip("/")
-        recommended_days = int(await self.config.delegation_duration_days() or 0)
+        configured_days = int(await self.config.delegation_duration_days() or 0)
         maximum_days = int(await self.config.delegation_max_duration_days() or 0)
-        token, expires_at = await self.create_authorization_handoff(user.id, profile)
+        recommended_days = configured_days if requested_days is None else int(requested_days)
+        if not 1 <= recommended_days <= maximum_days:
+            raise RuntimeError(
+                f"Authorization duration must be from 1 through {maximum_days} days."
+            )
+        token, expires_at = await self.create_authorization_handoff(
+            user.id, profile, delegation_days=recommended_days
+        )
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
         embed = discord.Embed(
             title=(
@@ -122,8 +132,8 @@ class WalletAuthorizationCommands:
         embed.add_field(
             name="Authorization duration",
             value=(
-                f"Choose 1–{maximum_days} days on the protected page "
-                f"({recommended_days} recommended)."
+                f"The protected page defaults to {recommended_days} days. "
+                f"You may enter any whole number from 1 through {maximum_days}."
             ),
             inline=True,
         )
@@ -183,7 +193,7 @@ class WalletAuthorizationCommands:
             "your wallet; authorization will be requested when you first approve a send."
         )
 
-    @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize",))
+    @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize", "de-auth"))
     async def wallet_revoke(self, ctx: commands.Context):
         """Revoke limited signing authorization for every account in your wallet profile."""
         if not await self._wallet_read_allowed(
