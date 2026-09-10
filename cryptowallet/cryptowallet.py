@@ -75,6 +75,27 @@ class CryptoWallet(
         self.bot.loop.create_task(self.flush_provider_usage())
         self.bot.loop.create_task(self.companion.stop())
 
+    async def tokenfactory_wallet_context(self, user) -> dict:
+        """Return the narrow public wallet identity needed by TokenFactory."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        if not profile.get("profile_id") or not account or not account.get("address"):
+            raise RuntimeError("The Base Sepolia wallet profile is incomplete.")
+        return {
+            "profile_id": str(profile["profile_id"]),
+            "owner_address": str(account["address"]),
+            "network": BASE_SEPOLIA.key,
+            "chain_id": BASE_SEPOLIA.chain_id,
+        }
+
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""
         user_config = self.config.user_from_id(user_id)
