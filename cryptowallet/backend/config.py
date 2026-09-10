@@ -39,6 +39,7 @@ def create_config(cog) -> Config:
         intents={},
         approval_sessions={},
         notifications_enabled=True,
+        default_send_asset=None,
         security_locked=False,
         security_locked_at=0,
         security_lock_source=None,
@@ -101,6 +102,10 @@ class WalletConfigMixin:
             "to_address": str(data.get("to_address") or ""),
             "value_atomic": str(data.get("value_atomic", data.get("value_wei", 0))),
             "value_wei": str(data.get("value_wei", data.get("value_atomic", 0))),
+            "asset_kind": str(data.get("asset_kind") or "native"),
+            "asset_contract": data.get("asset_contract"),
+            "asset_symbol": data.get("asset_symbol"),
+            "asset_decimals": data.get("asset_decimals"),
             "status": str(data.get("status") or "unknown"),
             "expires_at": int(data.get("expires_at", 0) or 0),
         }

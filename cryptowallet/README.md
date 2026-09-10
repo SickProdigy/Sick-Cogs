@@ -201,11 +201,15 @@ User commands:
 [p]wallet send base @member <amount>
 [p]wallet send sol <address> <amount>
 [p]wallet send sol @member <amount>
+[p]wallet send <asset> base <address-or-member> <amount> # Registered Base Sepolia ERC-20
 [p]wallet intent <bot-reference>
 [p]wallet txid <network> <txid-or-signature>
 [p]wallet transactions [network] # Aliases: tx, trans, history
 [p]wallet token [network]
 [p]wallet token add <network> <contract>
+[p]wallet token default
+[p]wallet token default <network> [native|symbol|contract]
+[p]wallet token default reset
 [p]wallet mode [testnet|live]     # Live remains disabled
 [p]wallet notifications [true|false]
 [p]wallet security              # Show emergency-lock status
@@ -216,6 +220,12 @@ User commands:
 [p]wallet recovery             # Aliases: recover, backup
 [p]wallet revoke                # Aliases: deauthorize, de-auth, deauth
 ```
+
+The two-argument send form uses the member's selected default asset. Without a
+member selection it follows the server's default network and native token. ERC-20
+sends are currently limited to reviewed Base Sepolia tokens in the shared registry;
+the cog verifies the contract metadata and balance again before approval. If two
+registered contracts share a symbol, use the exact contract address.
 
 Owner commands:
 

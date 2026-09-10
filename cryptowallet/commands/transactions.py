@@ -13,6 +13,7 @@ from ..providers import WalletProviderError
 from ..core.validation import (
     format_atomic_amount,
     normalize_address_for_network,
+    parse_asset_amount,
     parse_native_amount,
 )
 from .constants import INTENT_LIFETIME_SECONDS, WALLET_PROVIDER_COOLDOWN_SECONDS
@@ -55,6 +56,10 @@ class WalletTransactionCommands:
             intent.from_address,
             intent.to_address,
             intent.value_wei,
+            intent.asset_kind,
+            intent.asset_contract,
+            intent.asset_symbol,
+            intent.asset_decimals,
             intent.estimated_gas_fee_wei,
             intent.gas_sponsored,
             intent.created_at,
@@ -172,11 +177,20 @@ class WalletTransactionCommands:
             title=titles.get(intent.status, "Wallet transaction intent"),
             color=colors.get(intent.status, color),
         )
+        asset_symbol = intent.asset_symbol or network.native_symbol
+        asset_decimals = (
+            intent.asset_decimals
+            if intent.asset_decimals is not None
+            else network.native_decimals
+        )
+        amount_text = format_atomic_amount(
+            intent.value_wei, network, decimals=asset_decimals
+        )
         embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
         embed.add_field(name="Network", value=f"{network.name} ({network.reference_label} `{network.reference}`)", inline=True)
         embed.add_field(
             name="Amount",
-            value=f"{format_atomic_amount(intent.value_wei, network)} {network.native_symbol}",
+            value=f"{amount_text} {asset_symbol}",
             inline=True,
         )
         gas_value = f"{format_atomic_amount(intent.estimated_gas_fee_wei, network)} {network.native_symbol}"
@@ -188,14 +202,21 @@ class WalletTransactionCommands:
             else "Estimated gas fee"
         )
         embed.add_field(name=fee_label, value=gas_value, inline=True)
-        embed.add_field(
-            name="Estimated total",
-            value=(
+        if intent.asset_kind == "erc20":
+            total_value = f"{amount_text} {asset_symbol}; gas {gas_value}"
+        else:
+            total_value = (
                 f"{format_atomic_amount(intent.value_wei + intent.estimated_gas_fee_wei, network)} "
                 f"{network.native_symbol}"
-            ),
-            inline=True,
-        )
+            )
+        embed.add_field(name="Estimated total", value=total_value, inline=True)
+        if intent.asset_kind == "erc20" and intent.asset_contract:
+            embed.add_field(
+                name="Token contract", value=f"`{intent.asset_contract}`", inline=False
+            )
+            embed.add_field(
+                name="Token decimals", value=str(asset_decimals), inline=True
+            )
         embed.add_field(name="From", value=f"`{intent.from_address}`", inline=False)
         embed.add_field(name="To", value=f"`{intent.to_address}`", inline=False)
         embed.add_field(name="Intent ID", value=f"`{intent.intent_id}`", inline=False)
@@ -431,17 +452,49 @@ class WalletTransactionCommands:
             return
         intent = refreshed_intent
         try:
-            current_balance = await self.wallet_provider.get_native_balance(
-                intent.from_address, intent.network
-            )
-        except WalletProviderError as exc:
+            if intent.asset_kind == "erc20":
+                registry = await self.config.token_registry()
+                registered = (registry.get(intent.network) or {}).get(
+                    str(intent.asset_contract or "").lower()
+                )
+                if (
+                    not registered
+                    or str(registered.get("status") or "")
+                    not in {"community", "recognized"}
+                    or str(registered.get("symbol") or "") != intent.asset_symbol
+                    or int(registered.get("decimals", -1)) != intent.asset_decimals
+                ):
+                    raise WalletProviderError(
+                        "This token is no longer enabled with the approved metadata."
+                    )
+                current_asset = await self.wallet_provider.get_registered_token_asset(
+                    intent.from_address, intent.network, intent.asset_contract or "",
+                    include_metadata=True,
+                )
+                if (
+                    str(current_asset.get("contract_address") or "").lower()
+                    != str(intent.asset_contract or "").lower()
+                    or str(current_asset.get("symbol") or "") != intent.asset_symbol
+                    or int(current_asset.get("decimals", -1)) != intent.asset_decimals
+                ):
+                    raise WalletProviderError(
+                        "The token contract metadata changed after the preview."
+                    )
+                current_balance = int(current_asset.get("amount_atomic", -1))
+                required_balance = intent.value_wei
+            else:
+                current_balance = await self.wallet_provider.get_native_balance(
+                    intent.from_address, intent.network
+                )
+                required_balance = intent.value_wei + intent.estimated_gas_fee_wei
+        except (TypeError, ValueError, WalletProviderError) as exc:
             await interaction.followup.send(
                 f"The final balance check failed: {exc}", ephemeral=True
             )
             return
-        if current_balance < intent.value_wei + intent.estimated_gas_fee_wei:
+        if current_balance < required_balance:
             await interaction.followup.send(
-                "The wallet balance no longer covers the displayed total. Create a new "
+                "The wallet balance no longer covers the displayed transfer. Create a new "
                 "transaction preview.",
                 ephemeral=True,
             )
@@ -534,41 +587,40 @@ class WalletTransactionCommands:
             )
 
     @WalletCoreCommands.wallet.command(name="send")
-    async def wallet_send(
-        self, ctx: commands.Context, network_or_address: str,
-        address_or_amount: str, amount: str = None
-    ):
-        """Prepare an unsigned native-token transfer on the enabled test network."""
+    async def wallet_send(self, ctx: commands.Context, *arguments: str):
+        """Prepare an unsigned native-token or registered ERC-20 transfer."""
         if not await self._wallet_sensitive_allowed(ctx):
             return
-        if not await self._wallet_read_allowed(
-            ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS
-        ):
+        if not await self._wallet_read_allowed(ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS):
+            return
+        if len(arguments) not in {2, 3, 4}:
+            await ctx.send("Use `wallet send <recipient> <amount>`, `wallet send <network> <recipient> <amount>`, or `wallet send <asset> <network> <recipient> <amount>`.")
+            return
+        asset_selector = None
+        if len(arguments) == 2:
+            to_address, amount = arguments
+            default_asset = await self.config.user(ctx.author).default_send_asset()
+            if isinstance(default_asset, dict):
+                network = NETWORKS.get(str(default_asset.get("network") or ""))
+                asset_selector = str(default_asset.get("contract") or "native")
+            else:
+                network = NETWORKS.get(await self.config.default_network())
+        elif len(arguments) == 3:
+            network = self._send_network(arguments[0])
+            to_address, amount = arguments[1:]
+        else:
+            asset_selector, network_value, to_address, amount = arguments
+            network = self._send_network(network_value)
+        if (network is None or not network.testnet
+                or not network.supports(NetworkCapability.SEND)
+                or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)):
+            if network is None:
+                await ctx.send("That wallet network is unknown. Use `wallet networks` to list testnets.")
+            else:
+                await ctx.send(f"Sending is not enabled for {network.name}. Only capability-reviewed testnet send paths are available.")
             return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
-            return
-        if amount is None:
-            network = NETWORKS.get(await self.config.default_network())
-            to_address, amount = network_or_address, address_or_amount
-        else:
-            network = self._send_network(network_or_address)
-            to_address = address_or_amount
-        if (
-            network is None
-            or not network.testnet
-            or not network.supports(NetworkCapability.SEND)
-            or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)
-        ):
-            if network is None:
-                await ctx.send(
-                    "That wallet network is unknown. Use `wallet networks` to list testnets."
-                )
-            else:
-                await ctx.send(
-                    f"Sending is not enabled for {network.name}. "
-                    "Only capability-reviewed testnet send paths are available."
-                )
             return
         account = self._account_for_network(profile, network.key)
         if account is None:
@@ -576,38 +628,75 @@ class WalletTransactionCommands:
             return
         try:
             from_address = normalize_address_for_network(str(account.get("address") or ""), network)
-            value_wei = parse_native_amount(amount, network)
         except ValueError as exc:
             await ctx.send(str(exc))
             return
-        if not await self._send_value_allowed(ctx, network, value_wei):
-            return
+        asset_kind, asset_contract = "native", None
+        asset_symbol, asset_decimals = network.native_symbol, network.native_decimals
+        token_balance = None
+        if asset_selector and asset_selector.strip().lower() not in {"native", network.native_symbol.lower()}:
+            if network is not BASE_SEPOLIA:
+                await ctx.send("Registered-token sends are only enabled on Base Sepolia.")
+                return
+            selector = asset_selector.strip().lower()
+            registry = await self.config.token_registry()
+            entries = registry.get(network.key) or {}
+            matches = [(contract.lower(), entry) for contract, entry in entries.items()
+                       if str(entry.get("status") or "") in {"community", "recognized"}
+                       and (contract.lower() == selector
+                            or str(entry.get("symbol") or "").lower() == selector)]
+            if not matches:
+                await ctx.send("That token is not an enabled registered token on Base Sepolia. Use `wallet token base` and verify its contract address.")
+                return
+            if len(matches) != 1:
+                await ctx.send("That token symbol is ambiguous. Use the exact contract address.")
+                return
+            asset_contract, entry = matches[0]
+            asset_kind = "erc20"
+            asset_symbol = str(entry.get("symbol") or "TOKEN")
+            asset_decimals = int(entry.get("decimals", -1))
+            try:
+                current_asset = await self.wallet_provider.get_registered_token_asset(
+                    from_address, network.key, asset_contract, include_metadata=True
+                )
+                if (str(current_asset.get("contract_address") or "").lower() != asset_contract
+                        or str(current_asset.get("symbol") or "") != asset_symbol
+                        or int(current_asset.get("decimals", -1)) != asset_decimals):
+                    raise WalletProviderError("The current contract metadata no longer matches the registry.")
+                token_balance = int(current_asset.get("amount_atomic", -1))
+            except (TypeError, ValueError, WalletProviderError) as exc:
+                await ctx.send(f"The token transaction preview is unavailable: {exc}")
+                return
         try:
-            balance_wei = await self.wallet_provider.get_native_balance(
-                from_address, network.key
-            )
-        except WalletProviderError as exc:
-            await ctx.send(f"The transaction preview is unavailable: {exc}")
+            value_wei = (parse_native_amount(amount, network) if asset_kind == "native"
+                         else parse_asset_amount(amount, asset_symbol, asset_decimals))
+        except ValueError as exc:
+            await ctx.send(str(exc))
             return
-        if value_wei > balance_wei:
-            await ctx.send(
-                f"Insufficient {network.name} balance. Available: "
-                f"`{format_atomic_amount(balance_wei, network)} {network.native_symbol}`."
-            )
+        if asset_kind == "native":
+            if not await self._send_value_allowed(ctx, network, value_wei):
+                return
+            try:
+                balance_wei = await self.wallet_provider.get_native_balance(from_address, network.key)
+            except WalletProviderError as exc:
+                await ctx.send(f"The transaction preview is unavailable: {exc}")
+                return
+        else:
+            balance_wei = token_balance
+        if balance_wei is None or value_wei > balance_wei:
+            available = format_atomic_amount(max(0, int(balance_wei or 0)), network, decimals=asset_decimals)
+            await ctx.send(f"Insufficient {asset_symbol} balance on {network.name}. Available: `{available} {asset_symbol}`.")
             return
         recipient = await self._send_recipient_address(ctx, to_address, network)
         if recipient is None:
             return
         now = int(time.time())
         intent = TransactionIntent(
-            intent_id=secrets.token_urlsafe(12),
-            profile_id=str(profile.get("profile_id") or ""),
-            network=network.key,
-            from_address=from_address,
-            to_address=recipient,
-            value_wei=value_wei,
-            created_at=now,
-            expires_at=now + INTENT_LIFETIME_SECONDS,
+            intent_id=secrets.token_urlsafe(12), profile_id=str(profile.get("profile_id") or ""),
+            network=network.key, from_address=from_address, to_address=recipient,
+            value_wei=value_wei, created_at=now, expires_at=now + INTENT_LIFETIME_SECONDS,
+            asset_kind=asset_kind, asset_contract=asset_contract,
+            asset_symbol=asset_symbol, asset_decimals=asset_decimals,
             estimated_gas_fee_wei=0,
             gas_sponsored=network.supports(NetworkCapability.SPONSORSHIP),
         )
@@ -619,17 +708,14 @@ class WalletTransactionCommands:
         except WalletProviderError as exc:
             await ctx.send(f"The transaction preview is unavailable: {exc}")
             return
-        if value_wei + intent.estimated_gas_fee_wei > balance_wei:
+        if asset_kind == "native" and value_wei + intent.estimated_gas_fee_wei > balance_wei:
             await ctx.send(f"Insufficient {network.name} balance for the amount and network fee.")
             return
         async with self.config.user(ctx.author).intents() as intents:
             intents[intent.intent_id] = intent.to_dict()
         await self.expire_and_trim_intents(ctx.author)
         view = WalletIntentView(self, ctx.author.id, intent)
-        view.message = await ctx.send(
-            embed=self._intent_embed(intent, network, await ctx.embed_color()),
-            view=view,
-        )
+        view.message = await ctx.send(embed=self._intent_embed(intent, network, await ctx.embed_color()), view=view)
 
     @WalletCoreCommands.wallet.command(name="intent", aliases=("transaction",))
     async def wallet_intent(self, ctx: commands.Context, reference: str):

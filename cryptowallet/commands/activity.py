@@ -273,6 +273,7 @@ class WalletActivityCommands:
                 pass
             break
         wallet_transfers = transaction["wallet_transfers"]
+        stored_asset = None
         if stored_intent is not None:
             wallet_transfers = [
                 {
@@ -281,6 +282,13 @@ class WalletActivityCommands:
                     "value_wei": stored_intent.value_wei,
                 }
             ]
+            stored_asset = (
+                stored_intent.asset_symbol or network.native_symbol,
+                stored_intent.asset_decimals
+                if stored_intent.asset_decimals is not None
+                else network.native_decimals,
+                stored_intent.asset_contract,
+            )
         success = transaction["success"]
         status = "Pending" if success is None else "Confirmed" if success else "Failed"
         color = (
@@ -328,10 +336,18 @@ class WalletActivityCommands:
                 embed.add_field(
                     name=f"Value{suffix}",
                     value=(
-                        f"{format_wei_as_eth(transfer['value_wei'])} "
-                        f"{network.native_symbol}"
+                        f"{format_atomic_amount(transfer['value_wei'], network, decimals=stored_asset[1])} "
+                        f"{stored_asset[0]}"
+                        if stored_asset is not None
+                        else f"{format_wei_as_eth(transfer['value_wei'])} {network.native_symbol}"
                     ),
                     inline=True,
+                )
+            if stored_asset is not None and stored_asset[2]:
+                embed.add_field(
+                    name="Token contract",
+                    value=f"`{stored_asset[2]}`",
+                    inline=False,
                 )
         elif wallet_transfers is None:
             embed.add_field(

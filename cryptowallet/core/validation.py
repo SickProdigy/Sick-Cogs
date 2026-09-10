@@ -94,6 +94,27 @@ def parse_native_amount(value: str, network: Network) -> int:
     return atomic_value
 
 
+def parse_asset_amount(value: str, symbol: str, decimals: int) -> int:
+    """Convert a positive fungible-token amount to its exact atomic unit."""
+
+    if decimals < 0 or decimals > 255:
+        raise InvalidAmount("The token decimals are outside the supported range.")
+    match = ETH_AMOUNT_RE.fullmatch(value.strip())
+    if match is None:
+        raise InvalidAmount(f"Enter the {symbol} amount as a positive decimal number.")
+    fraction = match.group("fraction") or ""
+    if len(fraction) > decimals:
+        raise InvalidAmount(f"{symbol} amounts may have at most {decimals} decimal places.")
+    atomic_value = int(match.group("whole")) * (10 ** decimals)
+    if fraction:
+        atomic_value += int(fraction.ljust(decimals, "0"))
+    if atomic_value <= 0:
+        raise InvalidAmount(f"The {symbol} amount must be greater than zero.")
+    if atomic_value > MAX_UINT256:
+        raise InvalidAmount("The token amount exceeds the EVM transaction limit.")
+    return atomic_value
+
+
 def format_atomic_amount(
     value_atomic: int, network: Network, *, decimals: int | None = None
 ) -> str:
