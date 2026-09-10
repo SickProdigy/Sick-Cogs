@@ -36,16 +36,12 @@ function decodeHandoff() {
   }
   const delegationDefaultDays = Number(claims.sickwallet_delegation_default_days || 0);
   const delegationMaxDays = Number(claims.sickwallet_delegation_max_days || 0);
-  const delegationExpiresAt = Number(claims.sickwallet_delegation_expires_at);
   if (
     !Number.isSafeInteger(delegationDefaultDays) ||
     !Number.isSafeInteger(delegationMaxDays) ||
     delegationDefaultDays < 1 ||
     delegationDefaultDays > delegationMaxDays ||
-    delegationMaxDays > 365 ||
-    !Number.isSafeInteger(delegationExpiresAt) ||
-    delegationExpiresAt * 1000 <= Date.now() ||
-    delegationExpiresAt * 1000 > Date.now() + 365 * 24 * 60 * 60 * 1000
+    delegationMaxDays > 365
   ) {
     throw new Error("This wallet authorization link has an invalid delegation policy.");
   }
@@ -54,7 +50,6 @@ function decodeHandoff() {
     expires_at: Number(claims.exp),
     wallet: { accounts: claims.sickwallet_accounts },
     cdp: { project_id: claims.aud, user_id: claims.sub },
-    delegation_expires_at: delegationExpiresAt,
     delegation_default_days: delegationDefaultDays,
     delegation_max_days: delegationMaxDays,
   };
@@ -75,10 +70,23 @@ function configureAuthorization(session) {
     authorizationStatus.textContent = "Wallet authorization is not completely configured.";
     return;
   }
-  authorizationDays.value = String(session.delegation_default_days);
-  authorizationDays.max = String(session.delegation_max_days);
+  const choices = [...new Set([
+    1, 7, 30, 90, 365,
+    session.delegation_default_days, session.delegation_max_days,
+  ])].filter((days) => days <= session.delegation_max_days).sort((a, b) => a - b);
+  for (const days of choices) {
+    const option = document.createElement("option");
+    option.value = String(days);
+    option.textContent = days === 1 ? "1 day" : `${days} days`;
+    if (days === session.delegation_default_days) {
+      option.textContent += " (recommended)";
+      option.selected = true;
+    }
+    authorizationDays.append(option);
+  }
   authorizationDurationHelp.textContent =
-    `Recommended: ${session.delegation_default_days} day(s). Maximum: ${session.delegation_max_days} day(s).`;
+    `Choose a shorter period for tighter security or ${session.delegation_default_days} days for fewer approvals. ` +
+    "You can revoke access anytime with wallet revoke.";
   authorizationButton.addEventListener("click", async () => {
     authorizationButton.disabled = true;
     authorizationStatus.textContent = "Authenticating this wallet with Coinbase…";
@@ -114,7 +122,7 @@ if (statusElement && detailsElement) {
     .then((session) => {
       statusElement.textContent = "Protected wallet handoff loaded.";
       addDetail("Purpose", session.purpose);
-      addDetail("Expires", new Date(session.expires_at * 1000).toLocaleString());
+      addDetail("Approval link expires", new Date(session.expires_at * 1000).toLocaleString());
       if (session.wallet?.accounts?.length) {
         for (const account of session.wallet.accounts) {
           addDetail(account.family === "solana" ? "Solana account" : "EVM smart account", account.address);

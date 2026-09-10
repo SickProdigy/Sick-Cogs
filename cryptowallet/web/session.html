@@ -13,13 +13,13 @@
     <p id="session-status">Loading verified session details…</p>
     <dl id="session-details" hidden></dl>
     <div id="authorization-controls" hidden>
-      <label for="authorization-days">Authorization duration (days)</label>
-      <input id="authorization-days" type="number" min="1" step="1" inputmode="numeric">
+      <label for="authorization-days">How long should the bot stay authorized?</label>
+      <select id="authorization-days"></select>
       <p id="authorization-duration-help"></p>
       <button id="authorize-wallet" type="button">Authorize this wallet</button>
       <p id="authorization-status" role="status"></p>
     </div>
-    <p class="notice">This grants time-limited authority for one testnet account. It does not send funds.</p>
+    <p class="notice">This grants time-limited authority for the listed testnet accounts. It does not send funds, and you can revoke it anytime.</p>
   </main>
   <script src="app.js" type="module"></script>
 </body>
