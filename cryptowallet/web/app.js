@@ -70,22 +70,11 @@ function configureAuthorization(session) {
     authorizationStatus.textContent = "Wallet authorization is not completely configured.";
     return;
   }
-  const choices = [...new Set([
-    1, 7, 30, 90, 365,
-    session.delegation_default_days, session.delegation_max_days,
-  ])].filter((days) => days <= session.delegation_max_days).sort((a, b) => a - b);
-  for (const days of choices) {
-    const option = document.createElement("option");
-    option.value = String(days);
-    option.textContent = days === 1 ? "1 day" : `${days} days`;
-    if (days === session.delegation_default_days) {
-      option.textContent += " (recommended)";
-      option.selected = true;
-    }
-    authorizationDays.append(option);
-  }
+  authorizationDays.min = "1";
+  authorizationDays.max = String(session.delegation_max_days);
+  authorizationDays.value = String(session.delegation_default_days);
   authorizationDurationHelp.textContent =
-    `Choose a shorter period for tighter security or ${session.delegation_default_days} days for fewer approvals. ` +
+    `Enter 1 through ${session.delegation_max_days} days. The server recommends ${session.delegation_default_days} days for fewer approvals. ` +
     "You can revoke access anytime with wallet revoke.";
   authorizationButton.addEventListener("click", async () => {
     authorizationButton.disabled = true;
