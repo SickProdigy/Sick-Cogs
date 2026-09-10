@@ -339,6 +339,66 @@ class WalletCoreCommands:
             if lines else "No shared tokens are registered yet."
         )
 
+    @wallet_token.command(name="default")
+    async def wallet_token_default(
+        self, ctx: commands.Context, network_or_action: str = None, asset: str = None
+    ):
+        """View, set, or reset the asset used by the short wallet send form."""
+        user_config = self.config.user(ctx.author)
+        if network_or_action is None:
+            current = await user_config.default_send_asset()
+            if not isinstance(current, dict):
+                await ctx.send("Your default send asset follows the server default network native token.")
+                return
+            network = NETWORKS.get(str(current.get("network") or ""))
+            if network is None:
+                await ctx.send("Your stored default asset is unavailable. Use `wallet token default reset`.")
+                return
+            symbol = str(current.get("symbol") or network.native_symbol)
+            contract = current.get("contract")
+            detail = f" · `{contract}`" if contract else " · native token"
+            await ctx.send(f"Default send asset: **{symbol}** on {network.name}{detail}.")
+            return
+        if network_or_action.strip().lower() in {"reset", "clear"}:
+            await user_config.default_send_asset.clear()
+            await ctx.send("Your default send asset now follows the server default network native token.")
+            return
+        network = self._send_network(network_or_action)
+        if network is None or not network.testnet or not network.supports(NetworkCapability.SEND):
+            await ctx.send("Choose a send-enabled testnet from `wallet networks`.")
+            return
+        selector = str(asset or "native").strip().lower()
+        if selector in {"native", network.native_symbol.lower()}:
+            selected = {"network": network.key, "kind": "native", "contract": None,
+                        "symbol": network.native_symbol, "decimals": network.native_decimals}
+        else:
+            if network is not BASE_SEPOLIA:
+                await ctx.send("Registered-token sends are only enabled on Base Sepolia.")
+                return
+            registry = await self.config.token_registry()
+            matches = [(contract.lower(), entry)
+                       for contract, entry in (registry.get(network.key) or {}).items()
+                       if str(entry.get("status") or "") in {"community", "recognized"}
+                       and (contract.lower() == selector
+                            or str(entry.get("symbol") or "").lower() == selector)]
+            if not matches:
+                await ctx.send("That token is not enabled in the shared registry.")
+                return
+            if len(matches) != 1:
+                await ctx.send("That symbol is ambiguous. Use the exact contract address.")
+                return
+            contract, entry = matches[0]
+            selected = {"network": network.key, "kind": "erc20", "contract": contract,
+                        "symbol": str(entry.get("symbol") or "TOKEN"),
+                        "decimals": int(entry.get("decimals", -1))}
+        await user_config.default_send_asset.set(selected)
+        selected_contract = selected["contract"]
+        selected_symbol = selected["symbol"]
+        detail = f" (`{selected_contract}`)" if selected_contract else ""
+        await ctx.send(
+            f"Default send asset set to **{selected_symbol}** on {network.name}{detail}."
+        )
+
     @wallet.command(name="notifications", aliases=("notify",))
     async def wallet_notifications(
         self, ctx: commands.Context, enabled: bool = None

@@ -84,6 +84,10 @@ class TransactionIntent:
     value_wei: int
     created_at: int
     expires_at: int
+    asset_kind: str = "native"
+    asset_contract: str | None = None
+    asset_symbol: str | None = None
+    asset_decimals: int | None = None
     estimated_gas_fee_wei: int = 0
     gas_sponsored: bool = False
     status: IntentStatus = IntentStatus.PENDING
@@ -111,6 +115,10 @@ class TransactionIntent:
             "to_address": self.to_address,
             "value_atomic": self.value_atomic,
             "value_wei": self.value_wei,
+            "asset_kind": self.asset_kind,
+            "asset_contract": self.asset_contract,
+            "asset_symbol": self.asset_symbol,
+            "asset_decimals": self.asset_decimals,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "estimated_fee_atomic": self.estimated_fee_atomic,
@@ -134,7 +142,20 @@ class TransactionIntent:
             value_wei=int(data.get("value_atomic", data.get("value_wei", 0))),
             created_at=int(data["created_at"]),
             expires_at=int(data["expires_at"]),
-            estimated_gas_fee_wei=int(data.get("estimated_fee_atomic", data.get("estimated_gas_fee_wei", 0))),
+            asset_kind=str(data.get("asset_kind") or "native"),
+            asset_contract=data.get("asset_contract"),
+            asset_symbol=data.get("asset_symbol"),
+            asset_decimals=(
+                int(data["asset_decimals"])
+                if data.get("asset_decimals") is not None
+                else None
+            ),
+            estimated_gas_fee_wei=int(
+                data.get(
+                    "estimated_fee_atomic",
+                    data.get("estimated_gas_fee_wei", 0),
+                )
+            ),
             gas_sponsored=bool(data.get("gas_sponsored", False)),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
             provider_status=data.get("provider_status"),

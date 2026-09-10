@@ -50,6 +50,15 @@ HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 log = logging.getLogger("red.sickcogs.cryptowallet")
 
 
+def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
+    """Encode only ERC-20 transfer(address,uint256); arbitrary calldata is forbidden."""
+
+    address = normalize_evm_address(recipient)
+    if amount_atomic <= 0 or amount_atomic >= 2 ** 256:
+        raise ValueError("ERC-20 transfer amount is invalid")
+    return "0xa9059cbb" + address[2:].lower().rjust(64, "0") + format(amount_atomic, "064x")
+
+
 @dataclass(frozen=True, slots=True)
 class CdpCredentials:
     """Server-only CDP identifiers and secrets loaded from Red's secret store."""
@@ -567,6 +576,35 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("The transaction sender no longer matches the wallet profile.")
         if intent.value_wei <= 0:
             raise WalletProviderError("The transaction amount must be positive.")
+        call_to = to_address
+        call_value = intent.value_wei
+        call_data = "0x"
+        if intent.asset_kind == "erc20":
+            try:
+                call_to = normalize_evm_address(intent.asset_contract or "").lower()
+                if (
+                    not intent.asset_symbol
+                    or intent.asset_decimals is None
+                    or intent.asset_decimals < 0
+                    or intent.asset_decimals > 255
+                ):
+                    raise ValueError("missing token metadata")
+                call_data = _erc20_transfer_data(to_address, intent.value_wei)
+            except ValueError as exc:
+                raise WalletProviderError(
+                    "The token intent contains invalid immutable fields."
+                ) from exc
+            call_value = 0
+        elif intent.asset_kind != "native":
+            raise WalletProviderError("That transaction asset type is unsupported.")
+        elif (
+            intent.asset_contract is not None
+            or intent.asset_symbol not in {None, BASE_SEPOLIA.native_symbol}
+            or intent.asset_decimals not in {None, BASE_SEPOLIA.native_decimals}
+        ):
+            raise WalletProviderError(
+                "The native transaction contains invalid immutable asset fields."
+            )
         credentials = await self.credentials()
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
@@ -582,9 +620,10 @@ class CdpWalletProvider(WalletProvider):
                 account_address,
                 credentials.project_id,
                 BASE_SEPOLIA.key,
-                to_address,
-                intent.value_wei,
+                call_to,
+                call_value,
                 idempotency_key,
+                call_data,
             )
             provider_status = str(result.get("status") or "")
             user_op_hash = str(result.get("userOpHash") or "")
@@ -598,9 +637,9 @@ class CdpWalletProvider(WalletProvider):
                 or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
                 or not isinstance(returned_calls, list)
                 or len(returned_calls) != 1
-                or normalize_evm_address(str(returned_calls[0].get("to") or "")) != to_address
-                or int(returned_calls[0].get("value", -1)) != intent.value_wei
-                or str(returned_calls[0].get("data") or "") != "0x"
+                or normalize_evm_address(str(returned_calls[0].get("to") or "")) != call_to
+                or int(returned_calls[0].get("value", -1)) != call_value
+                or str(returned_calls[0].get("data") or "").lower() != call_data.lower()
             ):
                 raise ValueError("CDP returned mismatched user-operation data")
             receipts = result.get("receipts") or []
@@ -638,7 +677,8 @@ class CdpWalletProvider(WalletProvider):
         except ValueError as exc:
             raise WalletProviderError("The Solana transaction contains an invalid address.") from exc
         if (not provider_user_id or intent.profile_id != profile_id
-                or sender != intent_sender or intent.value_wei <= 0 or intent.gas_sponsored):
+                or sender != intent_sender or intent.value_wei <= 0 or intent.gas_sponsored
+                or intent.asset_kind != "native" or intent.asset_contract is not None):
             raise WalletProviderError("The Solana transaction does not match this wallet profile.")
         credentials = await self.credentials()
         if credentials is None:
@@ -813,10 +853,19 @@ class CdpWalletProvider(WalletProvider):
     async def prepare_transaction(self, intent: TransactionIntent) -> TransactionIntent:
         """Rebuild the current Base Sepolia quote without signing or submitting."""
         if intent.network == SOLANA_DEVNET.key:
-            if (intent.status is not IntentStatus.PENDING or intent.value_wei <= 0
-                    or intent.gas_sponsored or intent.provider_status is not None
-                    or intent.user_operation_hash is not None
-                    or intent.transaction_hash is not None or intent.block_number is not None):
+            if (
+                intent.status is not IntentStatus.PENDING
+                or intent.value_wei <= 0
+                or intent.asset_kind != "native"
+                or intent.asset_contract is not None
+                or intent.asset_symbol not in {None, SOLANA_DEVNET.native_symbol}
+                or intent.asset_decimals not in {None, SOLANA_DEVNET.native_decimals}
+                or intent.gas_sponsored
+                or intent.provider_status is not None
+                or intent.user_operation_hash is not None
+                or intent.transaction_hash is not None
+                or intent.block_number is not None
+            ):
                 raise WalletProviderError("Only a clean pending Solana Devnet intent can be quoted.")
             try:
                 sender = normalize_solana_address(intent.from_address)
@@ -827,12 +876,53 @@ class CdpWalletProvider(WalletProvider):
             return replace(intent, from_address=sender, to_address=recipient,
                            estimated_gas_fee_wei=int(quote_data["fee_atomic"]),
                            gas_sponsored=False)
+        if intent.asset_kind == "erc20":
+            if (
+                intent.status is not IntentStatus.PENDING
+                or intent.network != BASE_SEPOLIA.key
+                or not intent.gas_sponsored
+                or intent.estimated_gas_fee_wei != 0
+                or intent.value_wei <= 0
+                or not intent.asset_symbol
+                or intent.asset_decimals is None
+                or intent.asset_decimals < 0
+                or intent.asset_decimals > 255
+                or intent.provider_status is not None
+                or intent.user_operation_hash is not None
+                or intent.transaction_hash is not None
+                or intent.block_number is not None
+            ):
+                raise WalletProviderError(
+                    "Only a clean, pending, sponsored Base Sepolia token intent can be quoted."
+                )
+            try:
+                from_address = normalize_evm_address(intent.from_address)
+                to_address = normalize_evm_address(intent.to_address)
+                contract = normalize_evm_address(intent.asset_contract or "")
+                _erc20_transfer_data(to_address, intent.value_wei)
+            except ValueError as exc:
+                raise WalletProviderError(
+                    "The token transaction quote contains invalid immutable fields."
+                ) from exc
+            return replace(
+                intent,
+                from_address=from_address,
+                to_address=to_address,
+                asset_contract=contract.lower(),
+                estimated_gas_fee_wei=0,
+                gas_sponsored=True,
+            )
+        if intent.asset_kind != "native":
+            raise WalletProviderError("That transaction asset type is unsupported.")
         if (
             intent.status is not IntentStatus.PENDING
             or intent.network != BASE_SEPOLIA.key
             or not intent.gas_sponsored
             or intent.estimated_gas_fee_wei != 0
             or intent.value_wei <= 0
+            or intent.asset_contract is not None
+            or intent.asset_symbol not in {None, BASE_SEPOLIA.native_symbol}
+            or intent.asset_decimals not in {None, BASE_SEPOLIA.native_decimals}
             or intent.provider_status is not None
             or intent.user_operation_hash is not None
             or intent.transaction_hash is not None

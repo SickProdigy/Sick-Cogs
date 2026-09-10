@@ -51,9 +51,10 @@ from ..core.validation import (
     normalize_address_for_network,
     normalize_solana_address,
     normalize_solana_signature,
+    parse_asset_amount,
     parse_native_amount,
 )
-from ..providers.cdp import CdpWalletProvider
+from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
 from ..providers.cdp_api import CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
@@ -1632,6 +1633,163 @@ class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
             "decimals": 6,
         }])
         self.assertEqual(format_atomic_amount(1_250_000, ETHEREUM_SEPOLIA, decimals=6), "1.25")
+
+
+
+class TokenSendTests(unittest.IsolatedAsyncioTestCase):
+    def test_token_amount_and_intent_round_trip_are_exact(self):
+        self.assertEqual(parse_asset_amount("1.25", "USDC", 6), 1_250_000)
+        with self.assertRaisesRegex(ValueError, "at most 6"):
+            parse_asset_amount("0.0000001", "USDC", 6)
+        intent = TransactionIntent(
+            intent_id="token-1", profile_id="profile-7", network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1_250_000, created_at=1, expires_at=2,
+            asset_kind="erc20",
+            asset_contract="0x1111111111111111111111111111111111111111",
+            asset_symbol="USDC", asset_decimals=6, gas_sponsored=True,
+        )
+        restored = TransactionIntent.from_dict(intent.to_dict())
+        self.assertEqual(restored.asset_kind, "erc20")
+        self.assertEqual(restored.asset_contract, intent.asset_contract)
+        self.assertEqual(restored.asset_symbol, "USDC")
+        self.assertEqual(restored.asset_decimals, 6)
+        self.assertIn(intent.asset_contract, WalletTransactionCommands._intent_quote(restored))
+
+    def test_token_card_identifies_asset_contract_and_native_gas(self):
+        contract = "0x1111111111111111111111111111111111111111"
+        intent = TransactionIntent(
+            intent_id="token-card", profile_id="profile-7", network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1_250_000, created_at=1, expires_at=2,
+            asset_kind="erc20", asset_contract=contract,
+            asset_symbol="USDC", asset_decimals=6, gas_sponsored=True,
+        )
+        fields = {
+            field.name: field.value for field in
+            WalletTransactionCommands._intent_embed(intent, BASE_SEPOLIA, None).fields
+        }
+        self.assertEqual(fields["Amount"], "1.25 USDC")
+        self.assertEqual(fields["Token contract"], f"`{contract}`")
+        self.assertEqual(fields["Token decimals"], "6")
+        self.assertIn("0 ETH (sponsored by CDP)", fields["Estimated total"])
+
+    async def test_provider_constructs_only_standard_erc20_transfer_call(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
+        contract = "0x1111111111111111111111111111111111111111"
+        amount = 1_250_000
+        calldata = _erc20_transfer_data(recipient, amount)
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="token-send", profile_id="profile-7",
+            network=BASE_SEPOLIA.key, from_address=sender,
+            to_address=recipient, value_wei=amount, created_at=1,
+            expires_at=9999999999, asset_kind="erc20",
+            asset_contract=contract, asset_symbol="USDC",
+            asset_decimals=6, gas_sponsored=True,
+        )
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": BASE_SEPOLIA.key, "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{"to": contract, "value": "0", "data": calldata}],
+            }
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+        result = await provider.submit_transaction(profile, intent)
+        self.assertEqual(result["provider_status"], "broadcast")
+        args = client.send_smart_account_user_operation.await_args.args
+        self.assertEqual(args[4], contract)
+        self.assertEqual(args[5], 0)
+        self.assertEqual(args[7], calldata)
+
+    async def test_user_can_set_registered_token_as_canonical_default(self):
+        stored = _MutableValue(None)
+        user_config = SimpleNamespace(default_send_asset=stored)
+        registry = {
+            BASE_SEPOLIA.key: {
+                "0x1111111111111111111111111111111111111111": {
+                    "symbol": "USDC", "decimals": 6, "status": "recognized"
+                }
+            }
+        }
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                user=lambda user: user_config,
+                token_registry=_Value(registry),
+            ),
+            _send_network=WalletTransactionCommands._send_network,
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        await WalletCoreCommands.wallet_token_default.callback(
+            cog, ctx, "base", "usdc"
+        )
+        self.assertEqual(stored.value["kind"], "erc20")
+        self.assertEqual(stored.value["network"], BASE_SEPOLIA.key)
+        self.assertEqual(
+            stored.value["contract"],
+            "0x1111111111111111111111111111111111111111",
+        )
+
+
+    async def test_explicit_registered_token_send_creates_typed_intent(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
+        contract = "0x1111111111111111111111111111111111111111"
+        intents = _ApprovalStore()
+        user_config = SimpleNamespace(default_send_asset=_Value(None), intents=intents)
+        registry = {BASE_SEPOLIA.key: {contract: {
+            "symbol": "USDC", "decimals": 6, "status": "recognized"
+        }}}
+        provider = SimpleNamespace(
+            supports=lambda network, capability: True,
+            get_registered_token_asset=AsyncMock(return_value={
+                "contract_address": contract, "symbol": "USDC", "name": "USD Coin",
+                "decimals": 6, "amount_atomic": 5_000_000,
+            }),
+            prepare_transaction=AsyncMock(side_effect=lambda intent: intent),
+        )
+        profile = {"profile_id": "profile-7",
+                   "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}]}
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user=lambda user: user_config,
+                                   token_registry=_Value(registry)),
+            wallet_provider=provider,
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_profile_or_error=AsyncMock(return_value=profile),
+            _account_for_network=lambda stored, network: stored["accounts"][0],
+            _send_network=WalletTransactionCommands._send_network,
+            _send_recipient_address=AsyncMock(return_value=recipient),
+            expire_and_trim_intents=AsyncMock(),
+            _intent_embed=WalletTransactionCommands._intent_embed,
+            _intent_quote=WalletTransactionCommands._intent_quote,
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7),
+            send=AsyncMock(return_value=SimpleNamespace()),
+            embed_color=AsyncMock(return_value=None),
+        )
+        await WalletTransactionCommands.wallet_send.callback(
+            cog, ctx, "usdc", "base", recipient, "1.25"
+        )
+        self.assertEqual(len(intents.data), 1)
+        stored = TransactionIntent.from_dict(next(iter(intents.data.values())))
+        self.assertEqual(stored.asset_kind, "erc20")
+        self.assertEqual(stored.asset_contract, contract)
+        self.assertEqual(stored.asset_symbol, "USDC")
+        self.assertEqual(stored.asset_decimals, 6)
+        self.assertEqual(stored.value_wei, 1_250_000)
+        provider.get_registered_token_asset.assert_awaited_once()
+        provider.prepare_transaction.assert_awaited_once()
 
 
 class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):

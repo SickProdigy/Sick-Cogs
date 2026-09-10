@@ -384,6 +384,7 @@ class CdpApiClient:
         to_address: str,
         value_wei: int,
         idempotency_key: str,
+        data: str = "0x",
     ) -> dict:
         """Prepare, sign, and send one sponsored smart-account user operation."""
         path = (
@@ -392,7 +393,7 @@ class CdpApiClient:
         )
         body = {
             "network": network,
-            "calls": [{"to": to_address, "value": str(value_wei), "data": "0x"}],
+            "calls": [{"to": to_address, "value": str(value_wei), "data": data}],
             "useCdpPaymaster": True,
         }
         return await self._request(
