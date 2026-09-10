@@ -25,7 +25,7 @@ from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
 from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
-from ..commands.views import WalletAuthorizationView, WalletRevocationView
+from ..commands.views import WalletAuthorizationView, WalletIntentView, WalletRevocationView
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
 from ..commands.admin import WalletAdminCommands
@@ -767,6 +767,40 @@ class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret provider detail", output)
 
 
+class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_expires_intent_and_removes_controls(self):
+        intent = TransactionIntent(
+            intent_id="expired-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+        )
+        intents = SimpleNamespace(set_raw=AsyncMock())
+        cog = SimpleNamespace(
+            _intent_quote=WalletTransactionCommands._intent_quote,
+            _stored_intent=AsyncMock(return_value=intent),
+            _intent_embed=WalletTransactionCommands._intent_embed,
+            config=SimpleNamespace(
+                user_from_id=lambda user_id: SimpleNamespace(intents=intents)
+            ),
+        )
+        view = WalletIntentView(cog, 7, intent)
+        view.message = AsyncMock()
+
+        await view.on_timeout()
+
+        self.assertIs(intent.status, IntentStatus.EXPIRED)
+        intents.set_raw.assert_awaited_once_with(
+            intent.intent_id, value=intent.to_dict()
+        )
+        self.assertEqual(view.children, [])
+        edited = view.message.edit.await_args.kwargs
+        self.assertIsNone(edited["view"])
+        self.assertEqual(edited["embed"].title, "Expired wallet transaction")
+        self.assertEqual(edited["embed"].footer.text, "Expired — no transaction was sent")
+
+
 class FailClosedTransactionTests(unittest.TestCase):
     def test_rejected_intent_has_explicit_final_title_and_footer(self):
         intent = TransactionIntent(
@@ -780,6 +814,20 @@ class FailClosedTransactionTests(unittest.TestCase):
         embed = WalletTransactionCommands._intent_embed(intent, BASE_SEPOLIA, None)
         self.assertEqual(embed.title, "Rejected wallet transaction")
         self.assertEqual(embed.footer.text, "Rejected — no transaction was sent")
+
+    def test_expired_intent_has_explicit_final_title_and_footer(self):
+        intent = TransactionIntent(
+            intent_id="expired-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.EXPIRED,
+        )
+        embed = WalletTransactionCommands._intent_embed(intent, BASE_SEPOLIA, None)
+        self.assertEqual(embed.title, "Expired wallet transaction")
+        self.assertEqual(embed.color.value, 0xE74C3C)
+        self.assertEqual(embed.footer.text, "Expired — no transaction was sent")
 
     def test_uncertain_intent_round_trips_and_warns_against_replacement(self):
         intent = TransactionIntent(

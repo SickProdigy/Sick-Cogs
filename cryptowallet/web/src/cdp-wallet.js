@@ -1,10 +1,12 @@
 import {
   authenticateWithJWT,
-  createDelegation,
+  createDelegationForAccount,
+  getDelegationForAccount,
   createEvmKeyExportIframe,
   createSolanaKeyExportIframe,
   initialize,
   isSignedIn,
+  revokeDelegationForAccount,
   signOut,
 } from "@coinbase/cdp-core";
 
@@ -71,11 +73,34 @@ export async function authorizeWallet(
     } catch (error) {
       throw safeCdpStageError("Wallet authentication", error);
     }
+    const created = [];
     try {
-      const delegation = await createDelegation({ expiresAt: expiresAt.toISOString() });
-      return { expiresAt: delegation.expiresAt, scope: "profile" };
+      for (const account of expectedAccounts) {
+        const result = await createDelegationForAccount({
+          address: account.address,
+          expiresAt: expiresAt.toISOString(),
+        });
+        created.push(account.address);
+        const verified = await getDelegationForAccount({ address: account.address });
+        if (
+          !verified?.expiresAt ||
+          new Date(verified.expiresAt).getTime() !== new Date(result.expiresAt).getTime()
+        ) {
+          throw new Error("Coinbase did not verify every wallet-account delegation.");
+        }
+      }
+      return { expiresAt: expiresAt.toISOString(), scope: "accounts" };
     } catch (error) {
-      throw safeCdpStageError("User-scoped wallet delegation", error);
+      const rollback = await Promise.allSettled(
+        created.map((address) => revokeDelegationForAccount({ address }))
+      );
+      if (rollback.some((result) => result.status === "rejected")) {
+        throw new Error(
+          "Wallet authorization failed and Coinbase could not fully roll it back.",
+          { cause: error }
+        );
+      }
+      throw safeCdpStageError("Account-scoped wallet delegation", error);
     }
   } finally {
     await signOut().catch(() => undefined);

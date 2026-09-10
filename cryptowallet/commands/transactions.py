@@ -155,6 +155,7 @@ class WalletTransactionCommands:
             IntentStatus.CONFIRMED: "Confirmed wallet transaction",
             IntentStatus.FAILED: "Failed wallet transaction",
             IntentStatus.REJECTED: "Rejected wallet transaction",
+            IntentStatus.EXPIRED: "Expired wallet transaction",
         }
         colors = {
             IntentStatus.PENDING: discord.Color.blurple(),
@@ -165,7 +166,7 @@ class WalletTransactionCommands:
             IntentStatus.CONFIRMED: discord.Color.green(),
             IntentStatus.FAILED: discord.Color.red(),
             IntentStatus.REJECTED: discord.Color.red(),
-            IntentStatus.EXPIRED: discord.Color.dark_grey(),
+            IntentStatus.EXPIRED: discord.Color.red(),
         }
         embed = discord.Embed(
             title=titles.get(intent.status, "Wallet transaction intent"),
@@ -230,6 +231,8 @@ class WalletTransactionCommands:
             footer = f"Submitted to {network.name} — awaiting confirmation"
         elif intent.status is IntentStatus.REJECTED:
             footer = "Rejected — no transaction was sent"
+        elif intent.status is IntentStatus.EXPIRED:
+            footer = "Expired — no transaction was sent"
         else:
             footer = f"{network.name} testnet transaction intent"
         embed.set_footer(text=footer)
@@ -351,8 +354,12 @@ class WalletTransactionCommands:
             await self.config.user_from_id(view.user_id).intents.set_raw(
                 intent.intent_id, value=intent.to_dict()
             )
-            view.disable_controls()
-            await interaction.message.edit(view=view)
+            view.clear_items()
+            view.stop()
+            network = NETWORKS[intent.network]
+            await interaction.message.edit(
+                embed=self._intent_embed(intent, network, None), view=None
+            )
             await interaction.followup.send("This transaction quote has expired.", ephemeral=True)
             return
         profile = await self.config.user_from_id(view.user_id).profile()
@@ -618,9 +625,10 @@ class WalletTransactionCommands:
         async with self.config.user(ctx.author).intents() as intents:
             intents[intent.intent_id] = intent.to_dict()
         await self.expire_and_trim_intents(ctx.author)
-        await ctx.send(
+        view = WalletIntentView(self, ctx.author.id, intent)
+        view.message = await ctx.send(
             embed=self._intent_embed(intent, network, await ctx.embed_color()),
-            view=WalletIntentView(self, ctx.author.id, intent),
+            view=view,
         )
 
     @WalletCoreCommands.wallet.command(name="intent", aliases=("transaction",))
