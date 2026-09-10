@@ -1,26 +1,12 @@
 import {
   authenticateWithJWT,
   createDelegation,
-  getDelegation,
   createEvmKeyExportIframe,
   createSolanaKeyExportIframe,
   initialize,
   isSignedIn,
-  revokeDelegation,
-  signEvmMessage,
   signOut,
 } from "@coinbase/cdp-core";
-
-function safeCdpStageError(stage, error) {
-  const status = Number(error?.statusCode);
-  const correlationId = typeof error?.correlationId === "string" &&
-    /^[A-Za-z0-9_-]{1,128}$/.test(error.correlationId) ? error.correlationId : "";
-  let message = `${stage} failed`;
-  if (Number.isInteger(status) && status >= 400 && status <= 599) message += ` (HTTP ${status})`;
-  if (correlationId) message += `. CDP correlation ID: ${correlationId}`;
-  else message += ".";
-  return new Error(message, { cause: error });
-}
 
 async function authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken) {
   if (!projectId || !expectedUserId || !Array.isArray(expectedAccounts) || !expectedAccounts.length || !handoffToken) {
@@ -56,67 +42,13 @@ async function authenticateWallet(projectId, expectedUserId, expectedAccounts, h
   return user;
 }
 
-export async function authorizeWallet(
-  projectId, expectedUserId, expectedAccounts, handoffToken, delegationExpiresAt,
-  delegationMaxDays
-) {
-  const expiresAt = new Date(Number(delegationExpiresAt) * 1000);
-  const maxDays = Number(delegationMaxDays);
-  if (
-    !Number.isSafeInteger(Number(delegationExpiresAt)) ||
-    !Number.isSafeInteger(maxDays) || maxDays < 1 || maxDays > 365 ||
-    expiresAt.getTime() <= Date.now() ||
-    expiresAt.getTime() > Date.now() + maxDays * 24 * 60 * 60 * 1000
-  ) {
-    throw new Error("Wallet delegation policy is invalid.");
-  }
+export async function authorizeWallet(projectId, expectedUserId, expectedAccounts, handoffToken) {
   try {
-    let delegationAccounts;
-    try {
-      const user = await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
-      delegationAccounts = expectedAccounts.map((account) => ({
-        family: account.family,
-        address: account.family === "evm"
-          ? resolveSmartAccountOwner(user, account.address)
-          : account.address,
-      }));
-    } catch (error) {
-      throw safeCdpStageError("Wallet authentication", error);
-    }
-    const evmOwner = delegationAccounts.find((account) => account.family === "evm");
-    if (!evmOwner) {
-      throw new Error("EVM wallet signing preflight could not identify the wallet owner.");
-    }
-    const diagnosticMessage =
-      "SickGaming CryptoWallet diagnostic\n" +
-      "This signature grants no permission and authorizes no transaction.\n" +
-      "Project: " + projectId + "\n" +
-      "Wallet user: " + expectedUserId + "\n" +
-      "Authorization expiry: " + expiresAt.toISOString();
-    try {
-      await signEvmMessage({
-        evmAccount: evmOwner.address,
-        message: diagnosticMessage,
-      });
-    } catch (error) {
-      throw safeCdpStageError("EVM wallet signing preflight", error);
-    }
-    try {
-      const result = await createDelegation({
-        expiresAt: expiresAt.toISOString(),
-      });
-      const verified = await getDelegation();
-      if (
-        !verified?.expiresAt ||
-        new Date(verified.expiresAt).getTime() !== new Date(result.expiresAt).getTime()
-      ) {
-        await revokeDelegation().catch(() => undefined);
-        throw new Error("Coinbase did not verify the wallet-profile delegation.");
-      }
-      return { expiresAt: expiresAt.toISOString(), scope: "profile" };
-    } catch (error) {
-      throw safeCdpStageError("Wallet-profile delegation", error);
-    }
+    await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
+    const delegation = await createDelegation({
+      expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+    return { expiresAt: delegation.expiresAt };
   } finally {
     await signOut().catch(() => undefined);
   }
