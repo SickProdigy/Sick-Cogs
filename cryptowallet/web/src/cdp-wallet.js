@@ -43,23 +43,22 @@ async function authenticateWallet(projectId, expectedUserId, expectedAccounts, h
 }
 
 export async function authorizeWallet(
-  projectId, expectedUserId, expectedAccounts, handoffToken, delegationExpiresAt,
+  projectId, expectedUserId, expectedAccounts, handoffToken, delegationDays,
   delegationMaxDays
 ) {
-  const expiresAt = new Date(Number(delegationExpiresAt) * 1000);
+  const days = Number(delegationDays);
   const maxDays = Number(delegationMaxDays);
   if (
-    !Number.isSafeInteger(Number(delegationExpiresAt)) ||
+    !Number.isSafeInteger(days) ||
     !Number.isSafeInteger(maxDays) || maxDays < 1 || maxDays > 365 ||
-    expiresAt.getTime() <= Date.now() ||
-    expiresAt.getTime() > Date.now() + maxDays * 24 * 60 * 60 * 1000
+    days < 1 || days > maxDays
   ) {
     throw new Error("Wallet delegation policy is invalid.");
   }
   try {
     await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
     const delegation = await createDelegation({
-      expiresAt: expiresAt.toISOString(),
+      expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
     });
     return { expiresAt: delegation.expiresAt };
   } finally {

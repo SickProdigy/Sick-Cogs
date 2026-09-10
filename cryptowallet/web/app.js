@@ -85,14 +85,13 @@ function configureAuthorization(session) {
         !Number.isSafeInteger(selectedDays) || selectedDays < 1 ||
         selectedDays > session.delegation_max_days
       ) throw new Error(`Choose a whole number from 1 through ${session.delegation_max_days} days.`);
-      const selectedExpiresAt = Math.floor(Date.now() / 1000) + selectedDays * 24 * 60 * 60;
       const { authorizeWallet } = await import("./cdp-wallet.js");
       const result = await authorizeWallet(
         session.cdp.project_id,
         session.cdp.user_id,
         session.wallet.accounts,
         handoffToken,
-        selectedExpiresAt,
+        selectedDays,
         session.delegation_max_days
       );
       handoffToken = null;
