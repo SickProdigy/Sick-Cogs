@@ -441,6 +441,47 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("The authenticated CDP account does not match this wallet.")
         return {"provider_user_id": returned_user_id, "address": sorted(matched)[0]}
 
+
+    @staticmethod
+    def _delegation_addresses(end_user: dict, profile: dict) -> list[str]:
+        """Resolve stored public accounts to the addresses that own signing authority."""
+        smart_accounts = end_user.get("evmSmartAccountObjects") or []
+        eoa_addresses = {
+            normalize_evm_address(str(item.get("address") or ""))
+            for item in end_user.get("evmAccountObjects") or []
+        }
+        solana_addresses = {
+            normalize_solana_address(str(item.get("address") or ""))
+            for item in end_user.get("solanaAccountObjects") or []
+        }
+        resolved = []
+        for account in profile.get("accounts") or []:
+            network = account.get("network")
+            address = str(account.get("address") or "")
+            if network == BASE_SEPOLIA.key:
+                stored = normalize_evm_address(address)
+                matched = next(
+                    (item for item in smart_accounts
+                     if normalize_evm_address(str(item.get("address") or "")) == stored),
+                    None,
+                )
+                owners = {
+                    normalize_evm_address(str(owner))
+                    for owner in (matched or {}).get("ownerAddresses") or []
+                }
+                eligible = owners.intersection(eoa_addresses)
+                if len(eligible) != 1:
+                    raise ValueError("CDP did not return one EOA owner for the smart account")
+                resolved.append(next(iter(eligible)))
+            elif network == SOLANA_DEVNET.key:
+                stored = normalize_solana_address(address)
+                if stored not in solana_addresses:
+                    raise ValueError("CDP did not return the stored Solana account")
+                resolved.append(stored)
+        if not resolved:
+            raise ValueError("No delegation accounts were resolved")
+        return resolved
+
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
         """Read a legacy profile grant or the complete account-scoped grant set."""
         if network not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
@@ -457,6 +498,10 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
             client = self._api_client(credentials)
+            end_user = await client.get_end_user(provider_user_id)
+            if str(end_user.get("userId") or "") != provider_user_id:
+                raise ValueError("CDP returned a different end user")
+            accounts = self._delegation_addresses(end_user, profile)
             delegation = await client.get_user_delegation(
                 provider_user_id, credentials.project_id
             )
@@ -826,19 +871,18 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
             client = self._api_client(credentials)
+            end_user = await client.get_end_user(provider_user_id)
+            if str(end_user.get("userId") or "") != provider_user_id:
+                raise ValueError("CDP returned a different end user")
+            accounts = self._delegation_addresses(end_user, profile)
             await client.revoke_user_delegation(
                 provider_user_id, credentials.project_id
             )
-            for account in profile.get("accounts") or []:
-                if account.get("network") not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
-                    continue
-                address = str(account.get("address") or "")
-                if not address:
-                    raise WalletProviderError("The stored wallet profile is incomplete.")
+            for address in accounts:
                 await client.revoke_account_delegation(
                     provider_user_id, address, credentials.project_id
                 )
-        except CdpApiError as exc:
+        except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not revoke this wallet profile signing authorization."
             ) from exc

@@ -109,6 +109,26 @@ def _profile():
     }
 
 
+def _end_user(profile):
+    smart_address = next(
+        item["address"] for item in profile["accounts"]
+        if item["network"] == BASE_SEPOLIA.key
+    )
+    solana = [
+        {"address": item["address"]} for item in profile["accounts"]
+        if item["network"] == SOLANA_DEVNET.key
+    ]
+    owner = "0x1111111111111111111111111111111111111111"
+    return {
+        "userId": profile["provider_user_id"],
+        "evmAccountObjects": [{"address": owner}],
+        "evmSmartAccountObjects": [{
+            "address": smart_address, "ownerAddresses": [owner],
+        }],
+        "solanaAccountObjects": solana,
+    }
+
+
 def _interaction(user_id=7):
     return SimpleNamespace(
         user=SimpleNamespace(id=user_id),
@@ -1436,6 +1456,7 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
             "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
         })
         client = SimpleNamespace(
+            get_end_user=AsyncMock(return_value=_end_user(profile)),
             get_user_delegation=AsyncMock(return_value=None),
             get_account_delegation=AsyncMock(side_effect=[
                 {"expiresAt": "2099-01-02T00:00:00Z"},
@@ -1455,6 +1476,21 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["scope"], "accounts")
         self.assertEqual(status["expires_at"], "2099-01-01T00:00:00Z")
         self.assertEqual(status["active_accounts"], 2)
+        looked_up = [call.args[1] for call in client.get_account_delegation.await_args_list]
+        self.assertEqual(looked_up, [
+            "0x1111111111111111111111111111111111111111",
+            "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        ])
+
+    def test_delegation_addresses_reject_unrelated_eoa(self):
+        profile = _profile()
+        end_user = _end_user(profile)
+        end_user["evmAccountObjects"] = [{
+            "address": "0x2222222222222222222222222222222222222222"
+        }]
+
+        with self.assertRaisesRegex(ValueError, "one EOA owner"):
+            CdpWalletProvider._delegation_addresses(end_user, profile)
 
     async def test_partial_account_grants_fail_closed(self):
         profile = _profile()
@@ -1463,6 +1499,7 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
             "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
         })
         client = SimpleNamespace(
+            get_end_user=AsyncMock(return_value=_end_user(profile)),
             get_user_delegation=AsyncMock(return_value=None),
             get_account_delegation=AsyncMock(side_effect=[
                 {"expiresAt": "2099-01-01T00:00:00Z"}, None,
@@ -1488,6 +1525,7 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
             "address": "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
         })
         client = SimpleNamespace(
+            get_end_user=AsyncMock(return_value=_end_user(profile)),
             revoke_user_delegation=AsyncMock(),
             revoke_account_delegation=AsyncMock(),
         )
@@ -1501,6 +1539,11 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
 
         client.revoke_user_delegation.assert_awaited_once_with("profile-7", "project")
         self.assertEqual(client.revoke_account_delegation.await_count, 2)
+        revoked = [call.args[1] for call in client.revoke_account_delegation.await_args_list]
+        self.assertEqual(revoked, [
+            "0x1111111111111111111111111111111111111111",
+            "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
+        ])
 
 
 class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
