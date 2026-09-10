@@ -14,7 +14,7 @@
     <dl id="session-details" hidden></dl>
     <div id="authorization-controls" hidden>
       <label for="authorization-days">How long should the bot stay authorized?</label>
-      <select id="authorization-days"></select>
+      <input id="authorization-days" type="number" inputmode="numeric" step="1" min="1" required aria-describedby="authorization-duration-help">
       <p id="authorization-duration-help"></p>
       <button id="authorize-wallet" type="button">Authorize this wallet</button>
       <p id="authorization-status" role="status"></p>
