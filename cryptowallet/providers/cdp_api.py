@@ -269,6 +269,12 @@ class CdpApiClient:
         if not isinstance(end_users, list):
             raise CdpApiError("CDP returned an invalid end-user list.")
 
+    async def get_end_user(self, user_id: str) -> dict:
+        """Return one end user and its public account relationships."""
+        return await self._request(
+            "GET", f"/v2/end-users/{quote(user_id, safe=chr(39))}"
+        )
+
     async def create_end_user(
         self, profile_id: str, jwt_kid: str, idempotency_key: str
     ) -> dict:
@@ -301,6 +307,10 @@ class CdpApiClient:
             wallet_auth=True,
             idempotency_key=idempotency_key,
         )
+
+    async def get_end_user(self, user_id: str) -> dict:
+        path = "/v2/end-users/" + quote(user_id, safe="")
+        return await self._request("GET", path)
 
     async def validate_access_token(self, access_token: str) -> dict:
         return await self._request(

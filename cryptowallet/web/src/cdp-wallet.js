@@ -68,14 +68,21 @@ export async function authorizeWallet(
     throw new Error("Wallet delegation policy is invalid.");
   }
   try {
+    let delegationAccounts;
     try {
-      await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
+      const user = await authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken);
+      delegationAccounts = expectedAccounts.map((account) => ({
+        family: account.family,
+        address: account.family === "evm"
+          ? resolveSmartAccountOwner(user, account.address)
+          : account.address,
+      }));
     } catch (error) {
       throw safeCdpStageError("Wallet authentication", error);
     }
     const created = [];
     try {
-      for (const account of expectedAccounts) {
+      for (const account of delegationAccounts) {
         const result = await createDelegationForAccount({
           address: account.address,
           expiresAt: expiresAt.toISOString(),
