@@ -21,6 +21,7 @@ __pycache__/
 .coverage
 htmlcov/
 rocketleague/tmp/
+clanker/tmp/
 
 # Packaging/build output
 node_modules/
