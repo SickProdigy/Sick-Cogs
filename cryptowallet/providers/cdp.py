@@ -54,6 +54,9 @@ HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 log = logging.getLogger("red.sickcogs.cryptowallet")
 TOKEN_FACTORY_SINGLETON = "0xce0042b868300000d44a59004da54a005ffdcf9f"
 TOKEN_FACTORY_ADDRESS = "0xcba30318008035bb5a855a8684cea954d573c2c3"
+TOKEN_FACTORY_DEPLOYED_TOPIC = (
+    "0x8fdcf262da18a046c6f85d4fd10e822a07e071a567fa391c6b3d1fe6d91a1c5f"
+)
 TOKEN_FACTORY_CREATION_SHA256 = "8f8f4cd23e799be527a98bc723aa77695aa1addff5a805f7c0971bfb8251dd45"
 TOKEN_FACTORY_RUNTIME_SHA256 = "d9cdd1effe5aac3b2bab44d78897fb27d4527f6ac964cdbc517e812da2bf20fb"
 TOKEN_FACTORY_SINGLETON_SHA256 = "687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
@@ -882,12 +885,28 @@ class CdpWalletProvider(WalletProvider):
                 return {"deployed": False, "provider_status": "pending"}
             if transaction.get("success") is not True:
                 raise WalletProviderError("The external deployment transaction failed on-chain.")
+            transaction_to = normalize_evm_address(
+                str(transaction.get("to_address") or "")
+            )
+            transaction_input = str(transaction.get("input_data") or "").lower()
+            direct_call = (
+                transaction_to == TOKEN_FACTORY_ADDRESS
+                and transaction_input == expected_data.lower()
+            )
+            factory_log = any(
+                item.get("address") == TOKEN_FACTORY_ADDRESS
+                and item.get("topics")
+                and item["topics"][0] == TOKEN_FACTORY_DEPLOYED_TOPIC
+                for item in transaction.get("receipt_logs") or []
+            )
+            wrapped_call = (
+                TOKEN_FACTORY_ADDRESS.removeprefix("0x") in transaction_input
+                and expected_data.removeprefix("0x").lower() in transaction_input
+                and factory_log
+            )
             if (
-                normalize_evm_address(str(transaction.get("to_address") or ""))
-                != TOKEN_FACTORY_ADDRESS
-                or int(transaction.get("value_wei", -1)) != 0
-                or str(transaction.get("input_data") or "").lower()
-                != expected_data.lower()
+                int(transaction.get("value_wei", -1)) != 0
+                or not (direct_call or wrapped_call)
             ):
                 raise WalletProviderError(
                     "The external transaction does not match the reviewed token draft."

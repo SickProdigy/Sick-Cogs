@@ -395,6 +395,21 @@ async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict |
         input_data = str(transaction.get("input") or transaction.get("data") or "")
         receipt_status = receipt.get("status") if receipt else None
         success = int(str(receipt_status), 16) == 1 if receipt_status is not None else None
+        receipt_logs = []
+        if receipt is not None:
+            raw_logs = receipt.get("logs")
+            if not isinstance(raw_logs, list) or len(raw_logs) > 1024:
+                raise ValueError("Invalid transaction logs")
+            for item in raw_logs:
+                if not isinstance(item, dict):
+                    raise ValueError("Invalid transaction log")
+                topics = item.get("topics")
+                if not isinstance(topics, list) or len(topics) > 8:
+                    raise ValueError("Invalid transaction log topics")
+                receipt_logs.append({
+                    "address": str(item.get("address") or "").lower(),
+                    "topics": [str(topic).lower() for topic in topics],
+                })
     except (KeyError, TypeError, ValueError) as exc:
         raise BaseRpcError(f"{network} returned malformed transaction data.") from exc
     wallet_transfers = []
@@ -413,6 +428,7 @@ async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict |
         "input_data": input_data,
         "block_number": block_number,
         "success": success,
+        "receipt_logs": receipt_logs,
         "wallet_transfers": wallet_transfers,
     }
 
