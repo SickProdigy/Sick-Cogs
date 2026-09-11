@@ -41,8 +41,6 @@ class TokenDetailsModal(discord.ui.Modal):
             decimals = normalize_decimals(self.decimals_input.value)
             draft = TokenDraft(
                 creator_discord_id=self.view_ref.user_id,
-                wallet_profile_id=self.view_ref.wallet_profile_id,
-                owner_address=self.view_ref.owner_address,
                 name=normalize_name(self.name_input.value),
                 symbol=normalize_symbol(self.symbol_input.value),
                 decimals=decimals,
@@ -52,11 +50,9 @@ class TokenDetailsModal(discord.ui.Modal):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         self.view_ref.draft = draft
-        self.view_ref.deploy.disabled = not self.view_ref.deployment_available
-        self.view_ref.deploy.label = (
-            "Review deployment" if self.view_ref.deployment_available
-            else "Deployment unavailable"
-        )
+        enabled = self.view_ref.deployment_available
+        self.view_ref.discord_deploy.disabled = not enabled
+        self.view_ref.external_deploy.disabled = not enabled
         await self.view_ref.cog.save_draft(self.view_ref.user, draft)
         await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
         await interaction.followup.send("Token deployment draft saved.", ephemeral=True)
@@ -64,21 +60,17 @@ class TokenDetailsModal(discord.ui.Modal):
 
 class TokenFactoryDraftView(discord.ui.View):
     def __init__(
-        self, cog: "TokenFactory", user, wallet_context: dict, draft=None,
+        self, cog: "TokenFactory", user, draft=None,
         *, deployment_available: bool = False,
     ):
         super().__init__(timeout=900)
         self.cog = cog
         self.user = user
         self.user_id = user.id
-        self.wallet_profile_id = wallet_context["profile_id"]
-        self.owner_address = wallet_context["owner_address"]
         self.draft = draft
         self.deployment_available = deployment_available
-        self.deploy.disabled = not (deployment_available and draft is not None)
-        self.deploy.label = (
-            "Review deployment" if deployment_available else "Deployment unavailable"
-        )
+        self.discord_deploy.disabled = not (deployment_available and draft is not None)
+        self.external_deploy.disabled = not (deployment_available and draft is not None)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -112,7 +104,9 @@ class TokenFactoryDraftView(discord.ui.View):
             embed.add_field(name="Fixed supply", value=display, inline=True)
             embed.add_field(name="Decimals", value=str(self.draft.decimals), inline=True)
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
-        embed.add_field(name="Token owner", value=f"`{self.owner_address}`", inline=False)
+        embed.add_field(
+            name="Token recipient", value="Chosen with the deployment wallet", inline=False
+        )
         embed.add_field(
             name="Deployment",
             value=(
@@ -129,16 +123,47 @@ class TokenFactoryDraftView(discord.ui.View):
     async def edit_details(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TokenDetailsModal(self))
 
-    @discord.ui.button(label="Review deployment", style=discord.ButtonStyle.success)
-    async def deploy(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Use Discord Wallet", style=discord.ButtonStyle.success)
+    async def discord_deploy(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.draft is None or not self.deployment_available:
             await interaction.response.send_message(
                 "Token deployment is unavailable.", ephemeral=True
             )
             return
-        confirmation = TokenDeploymentConfirmView(self.cog, self.user, self.draft)
+        try:
+            draft = await self.cog.resolve_discord_wallet_draft(self.user, self.draft)
+        except Exception as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        confirmation = TokenDeploymentConfirmView(self.cog, self.user, draft)
         await interaction.response.send_message(
             embed=confirmation.embed(), view=confirmation, ephemeral=True
+        )
+
+    @discord.ui.button(label="Use External Wallet", style=discord.ButtonStyle.primary)
+    async def external_deploy(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.draft is None or not self.deployment_available:
+            await interaction.response.send_message(
+                "Token deployment is unavailable.", ephemeral=True
+            )
+            return
+        try:
+            link = await self.cog.create_external_deployment_link(self.user, self.draft)
+        except Exception as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        view = discord.ui.View(timeout=180)
+        view.add_item(discord.ui.Button(
+            label="Open external wallet deployment", url=link, emoji="🔗"
+        ))
+        await interaction.response.send_message(
+            "Connect a Base Sepolia wallet on the protected page. That wallet pays gas. "
+            "Leave recipient blank to send the full supply to the signer.",
+            view=view, ephemeral=True,
         )
 
 

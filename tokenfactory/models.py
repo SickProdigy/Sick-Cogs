@@ -9,12 +9,12 @@ class TokenDraft:
     """Public, non-secret fixed-supply deployment parameters."""
 
     creator_discord_id: int
-    wallet_profile_id: str
-    owner_address: str
     name: str
     symbol: str
     decimals: int
     supply_atomic: int
+    wallet_profile_id: str = ""
+    owner_address: str = ""
     network: str = NETWORK_KEY
     chain_id: int = CHAIN_ID
 
@@ -35,8 +35,8 @@ class TokenDraft:
     def from_dict(cls, data: dict[str, Any]) -> "TokenDraft":
         return cls(
             creator_discord_id=int(data["creator_discord_id"]),
-            wallet_profile_id=str(data["wallet_profile_id"]),
-            owner_address=str(data["owner_address"]),
+            wallet_profile_id=str(data.get("wallet_profile_id") or ""),
+            owner_address=str(data.get("owner_address") or ""),
             name=str(data["name"]),
             symbol=str(data["symbol"]),
             decimals=int(data["decimals"]),
