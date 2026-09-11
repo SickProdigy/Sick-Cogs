@@ -117,3 +117,58 @@ class TokenFactoryDraftView(discord.ui.View):
     )
     async def deploy(self, interaction: discord.Interaction, button: discord.ui.Button):
         return
+
+
+class FactoryDeploymentView(discord.ui.View):
+    """One-use owner confirmation for the pinned infrastructure deployment."""
+
+    def __init__(self, cog: "TokenFactory", user, creation_code: str):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.user = user
+        self.user_id = user.id
+        self.creation_code = creation_code
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id and await self.cog.bot.is_owner(
+            interaction.user
+        ):
+            return True
+        await interaction.response.send_message(
+            "Only the bot owner who requested this deployment can approve it.",
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(
+        label="Deploy pinned factory", style=discord.ButtonStyle.danger, emoji="⚠️"
+    )
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "Factory deployment is already being processed.", ephemeral=True
+            )
+            return
+        self.processing = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        try:
+            result = await self.cog.deploy_pinned_factory(
+                self.user, self.creation_code
+            )
+        except RuntimeError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        if result.get("already_deployed"):
+            message = f"The pinned factory already exists at `{result['address']}`."
+        else:
+            message = (
+                "Pinned factory deployment submitted. "
+                f"User operation: `{result['user_operation_hash']}`"
+            )
+            if result.get("transaction_hash"):
+                message += f"\nTransaction: `{result['transaction_hash']}`"
+            message += "\nRun `tokenfactoryset verifyfactory` after confirmation."
+        await interaction.followup.send(message, ephemeral=True)

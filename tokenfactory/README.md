@@ -9,6 +9,8 @@ requesting user's existing Base Sepolia wallet identity.
 ```text
 [p]tokenfactory create
 [p]tokenfactory status
+[p]tokenfactoryset deployfactory
+[p]tokenfactoryset verifyfactory
 ```
 
 `tokenfactory create` opens a requester-bound card. Clicking **Enter token details** opens a modal
