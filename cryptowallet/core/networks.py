@@ -185,6 +185,46 @@ ETHEREUM_SEPOLIA = Network(
     ),
 )
 
+OPTIMISM_MAINNET = Network(
+    key="optimism",
+    name="OP Mainnet",
+    family=ChainFamily.EVM,
+    chain_id=10,
+    native_symbol="ETH",
+    native_decimals=18,
+    explorer_url="https://explorer.optimism.io",
+    testnet=False,
+    enabled=False,
+    capabilities=NetworkCapabilities(sponsorship=False),
+)
+
+BNB_MAINNET = Network(
+    key="bnb",
+    name="BNB Chain",
+    family=ChainFamily.EVM,
+    chain_id=56,
+    native_symbol="BNB",
+    native_decimals=18,
+    explorer_url="https://bscscan.com",
+    testnet=False,
+    enabled=False,
+    capabilities=NetworkCapabilities(sponsorship=False),
+)
+
+ZORA_MAINNET = Network(
+    key="zora",
+    name="Zora",
+    family=ChainFamily.EVM,
+    chain_id=7777777,
+    native_symbol="ETH",
+    native_decimals=18,
+    explorer_url="https://explorer.zora.energy",
+    testnet=False,
+    enabled=False,
+    capabilities=NetworkCapabilities(sponsorship=False),
+)
+
+
 # KNOWN_NETWORKS includes planned entries for diagnostics and documentation. Only
 # independently reviewed, enabled entries are exposed through NETWORKS.
 KNOWN_NETWORKS = {
@@ -195,11 +235,14 @@ KNOWN_NETWORKS = {
         POLYGON_AMOY,
         AVALANCHE_FUJI,
         SOLANA_DEVNET,
+        OPTIMISM_MAINNET,
+        BNB_MAINNET,
+        ZORA_MAINNET,
     )
 }
 
-# Only reviewed networks belong in NETWORKS. Capabilities remain independently
-# limited per network; every registered network is a testnet.
+# Only reviewed networks belong in NETWORKS. Disabled mainnet definitions remain
+# metadata-only until their capabilities and production safety are reviewed.
 NETWORKS = {
     key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
 }

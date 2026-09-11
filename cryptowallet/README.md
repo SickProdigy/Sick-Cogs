@@ -10,7 +10,9 @@ CryptoWallet models each blockchain with an explicit chain family, network refer
 
 A capability must be enabled in both the network registry and the active provider adapter before a send can be created. Address validation is dispatched from the explicitly selected network, including independent 32-byte base58 validation for Solana addresses; a Solana address is never interpreted as EVM data. Transaction storage now also exposes network-neutral atomic amount and fee fields while retaining the existing Base wei keys for stored-profile compatibility.
 
-Base Sepolia and Solana devnet are the only send-enabled networks. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with native SOL balance, recent activity, transaction-signature lookup, explorer support, protected native-SOL sends, and isolated Coinbase key export. Solana tokens remain disabled, and no mainnet is registered.
+Base Sepolia and Solana devnet are the only send-enabled networks. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with native SOL balance, recent activity, transaction-signature lookup, explorer support, protected native-SOL sends, and isolated Coinbase key export. Solana tokens remain disabled.
+
+OP Mainnet, BNB Chain, and Zora are staged as disabled metadata-only definitions using CDP's documented network identifiers. They have no enabled balance, discovery, history, send, delegation, or sponsorship capability and do not appear in ordinary wallet cards. Future mainnet sends must use user-funded native gas; this project does not promise bot-funded gas. Enabling any of these entries still requires the separate mainnet security, legal, policy, fee-estimation, and transaction-verification review.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
@@ -240,6 +242,10 @@ Owner commands:
 [p]walletset sendlimit [network] [amount|clear]
 [p]walletset delegationdays [1-365]
 [p]walletset delegationmaxdays [1-365]
+[p]walletset emoji
+[p]walletset emoji sync
+[p]walletset emoji set <network> <emoji-id>
+[p]walletset emoji clear <network>
 [p]walletset cdpstatus
 [p]walletset cdpcheck
 [p]walletset jwtstatus
@@ -253,6 +259,39 @@ Owner commands:
 [p]walletset companion start [port]
 [p]walletset companion stop
 ```
+
+### Discord application emojis
+
+Discord-ready chain images are packaged in
+[`data/assets/app-emoji/`](data/assets/app-emoji/). Each file is a 128 × 128 transparent PNG,
+is below 256 KB, and uses a valid application-emoji name. In the Discord Developer
+Portal, open the same application used by this bot, open **Emojis**, and upload
+the desired files without renaming them. Let the cog discover every matching
+application emoji by name in one step:
+
+```text
+[p]walletset emoji sync
+```
+
+Use `[p]walletset emoji set <network> <emoji-id>` only to assign or replace an
+individual mapping manually.
+
+The same folder also includes future-use `optimism`, `bnb`, `zora`, `tron`, and
+`linea` images. Those networks remain disabled and intentionally have no active
+CryptoWallet emoji mapping until their capabilities and mainnet safety are reviewed.
+
+`[p]walletset emoji` shows the current mappings. The network argument also accepts the
+full registry key, such as `base-sepolia` or `polygon-amoy`. Use
+`[p]walletset emoji clear <network>` to restore that network's built-in fallback symbol.
+Application emojis belong to the Discord application and can be rendered by the bot
+across its servers; they do not consume a server's emoji slots. Reload CryptoWallet
+after installing an updated cog version, but changing an emoji ID takes effect on the
+next wallet card without another reload.
+
+Public wallet cards use one compact field per account family. The divider-styled EVM field groups its
+supported-network icons, shared address, and tightly spaced nonzero balances; the Solana field
+uses a matching divider heading and groups its address and balance. Addresses remain plain inline code for easier copying,
+while each visible network name links to that address on the network's explorer.
 
 `[p]walletset usage` reports UTC-month CDP reads and writes, Onchain Data reads, recent request
 traffic, pending confirmation workload, conservative Embedded Wallet operation estimates, and

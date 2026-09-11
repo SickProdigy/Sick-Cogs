@@ -27,6 +27,26 @@ from ..backend.usage import (
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
+NETWORK_EMOJI_NAMES = {
+    "base-sepolia": "base",
+    "ethereum-sepolia": "ethereum",
+    "arbitrum-sepolia": "arbitrum",
+    "polygon-amoy": "polygon",
+    "avalanche-fuji": "avalanche",
+    "solana-devnet": "solana",
+    "optimism": "optimism",
+    "bnb": "bnb",
+    "zora": "zora",
+    "tron": "tron",
+    "linea": "linea",
+}
+NETWORK_EMOJI_ALIASES = {
+    alias: key
+    for key, name in NETWORK_EMOJI_NAMES.items()
+    for alias in (key, name, key.replace("-", "_"))
+}
+
+
 class WalletAdminCommands:
     """Owner-only wallet integration commands."""
 
@@ -178,6 +198,99 @@ class WalletAdminCommands:
         await ctx.send(
             "**Token moderation registry**\n" + "\n".join(lines)
             if lines else "The token moderation registry is empty."
+        )
+
+    @walletset.group(name="emoji", aliases=("emojis",), invoke_without_command=True)
+    @commands.is_owner()
+    async def walletset_emoji(self, ctx: commands.Context):
+        """Show application-emoji IDs configured for wallet network labels."""
+
+        configured = await self.config.network_emojis()
+        lines = [
+            f"{name}: `{configured.get(key, 'not configured')}`"
+            for key, name in NETWORK_EMOJI_NAMES.items()
+        ]
+        await ctx.send(
+            "**CryptoWallet network emojis**\n"
+            + "\n".join(lines)
+            + "\nUpload the packaged PNG files as application emojis, then use "
+            "`walletset emoji sync` to discover them by name."
+        )
+
+    @walletset_emoji.command(name="sync")
+    @commands.is_owner()
+    async def walletset_emoji_sync(self, ctx: commands.Context):
+        """Discover uploaded application emojis by their packaged names."""
+
+        try:
+            application_emojis = await self.bot.fetch_application_emojis()
+        except discord.HTTPException:
+            await ctx.send(
+                "Discord could not retrieve this application's uploaded emojis."
+            )
+            return
+        by_name = {emoji.name.lower(): str(emoji.id) for emoji in application_emojis}
+        found = {
+            key: by_name[name]
+            for key, name in NETWORK_EMOJI_NAMES.items()
+            if name in by_name
+        }
+        async with self.config.network_emojis() as configured:
+            configured.update(found)
+        missing = [
+            name for name in NETWORK_EMOJI_NAMES.values() if name not in by_name
+        ]
+        message = f"Saved `{len(found)}` application emoji mapping(s)."
+        if missing:
+            message += " Missing: " + ", ".join(missing) + "."
+        await ctx.send(message)
+
+    @walletset_emoji.command(name="set")
+    @commands.is_owner()
+    async def walletset_emoji_set(
+        self, ctx: commands.Context, network: str, emoji: str
+    ):
+        """Assign an uploaded application emoji to a wallet network."""
+
+        network_key = NETWORK_EMOJI_ALIASES.get(network.strip().lower())
+        if network_key is None:
+            await ctx.send(
+                "Unknown network. Use base, ethereum, arbitrum, polygon, avalanche, "
+                "solana, optimism, bnb, zora, tron, or linea."
+            )
+            return
+        raw = emoji.strip()
+        if raw.isdigit():
+            emoji_id = raw
+        else:
+            match = re.fullmatch(r"<a?:[A-Za-z0-9_]{2,32}:(\d{15,22})>", raw)
+            emoji_id = match.group(1) if match else ""
+        if not re.fullmatch(r"\d{15,22}", emoji_id):
+            await ctx.send(
+                "Provide the numeric Discord emoji ID or a custom emoji mention."
+            )
+            return
+        async with self.config.network_emojis() as configured:
+            configured[network_key] = emoji_id
+        name = NETWORK_EMOJI_NAMES[network_key]
+        await ctx.send(f"{name.title()} wallet labels now use <:{name}:{emoji_id}>.")
+
+    @walletset_emoji.command(name="clear")
+    @commands.is_owner()
+    async def walletset_emoji_clear(self, ctx: commands.Context, network: str):
+        """Restore the built-in fallback symbol for a wallet network."""
+
+        network_key = NETWORK_EMOJI_ALIASES.get(network.strip().lower())
+        if network_key is None:
+            await ctx.send(
+                "Unknown network. Use base, ethereum, arbitrum, polygon, avalanche, "
+                "solana, optimism, bnb, zora, tron, or linea."
+            )
+            return
+        async with self.config.network_emojis() as configured:
+            configured.pop(network_key, None)
+        await ctx.send(
+            f"{NETWORK_EMOJI_NAMES[network_key].title()} now uses its fallback symbol."
         )
 
     @walletset.command(name="pause")

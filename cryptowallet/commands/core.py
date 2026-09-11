@@ -82,6 +82,7 @@ class WalletCoreCommands:
         embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
         embed.description = f"{display_name}’s public testnet wallet portfolio."
         registry = await self.config.token_registry()
+        network_emojis = await self.config.network_emojis()
         networks = [network] if network is not None else [
             item for item in NETWORKS.values() if item.testnet
         ]
@@ -95,22 +96,17 @@ class WalletCoreCommands:
             ),
             None,
         )
+        evm_lines = []
         if evm_account is not None:
             address = str(evm_account.get("address") or "")
             evm_networks = [
                 item for item in networks if item.family is ChainFamily.EVM
             ]
             network_badges = " · ".join(
-                f"{self._network_badge(item)} {item.name}" for item in evm_networks
+                self._network_compact_label(item, network_emojis)
+                for item in evm_networks
             )
-            embed.add_field(
-                name="EVM wallet",
-                value=(
-                    f"[{address}]({BASE_SEPOLIA.explorer_address_url(address)})\n"
-                    f"Supported: {network_badges}"
-                )[:1024],
-                inline=False,
-            )
+            evm_lines.extend((f"Networks: {network_badges}", f"`{address}`"))
 
         solana_account = next(
             (
@@ -121,17 +117,11 @@ class WalletCoreCommands:
             ),
             None,
         )
+        solana_lines = []
         if solana_account is not None:
-            solana_network = next(
-                item for item in networks if item.family is ChainFamily.SOLANA
-            )
-            address = str(solana_account.get("address") or "")
-            embed.add_field(
-                name=f"{self._network_badge(solana_network)} Solana wallet",
-                value=f"[{address}]({solana_network.explorer_address_url(address)})",
-                inline=False,
-            )
+            solana_lines.append(f"`{str(solana_account.get('address') or '')}`")
 
+        evm_balance_added = False
         for item in networks:
             account = self._account_for_network(profile, item.key)
             if account is None or not item.supports(NetworkCapability.BALANCE):
@@ -178,33 +168,56 @@ class WalletCoreCommands:
             tokens = list(merged.values())
             if network is None and not native_balance and not tokens:
                 continue
-            lines = []
+            balance_lines = []
             if native_balance is None:
-                lines.append(f"{item.native_symbol}: Temporarily unavailable")
+                balance_lines.append(f"{item.native_symbol}: Temporarily unavailable")
             else:
-                lines.append(
+                balance_lines.append(
                     f"{item.native_symbol}: **{format_atomic_amount(native_balance, item)}**"
                 )
-            if tokens:
-                lines.append("Tokens:")
-                for token_asset in tokens[:6]:
-                    amount = format_atomic_amount(
-                        int(token_asset["amount_atomic"]),
-                        item,
-                        decimals=int(token_asset["decimals"]),
-                    )
-                    contract = str(token_asset["contract_address"])
-                    short_contract = f"{contract[:8]}…{contract[-6:]}"
-                    marker = " ✅" if token_asset.get("status") == "recognized" else ""
-                    lines.append(
-                        f"• {token_asset['symbol']}{marker}: **{amount}** "
-                        f"([{short_contract}]({item.explorer_url}/token/{contract}))"
-                    )
-                if len(tokens) > 6:
-                    lines.append(f"• {len(tokens) - 6} more token(s) with a balance")
+            for token_asset in tokens[:6]:
+                amount = format_atomic_amount(
+                    int(token_asset["amount_atomic"]),
+                    item,
+                    decimals=int(token_asset["decimals"]),
+                )
+                contract = str(token_asset["contract_address"])
+                short_contract = f"{contract[:8]}…{contract[-6:]}"
+                marker = " ✅" if token_asset.get("status") == "recognized" else ""
+                balance_lines.append(
+                    f"• {token_asset['symbol']}{marker}: **{amount}** "
+                    f"([{short_contract}]({item.explorer_url}/token/{contract}))"
+                )
+            if len(tokens) > 6:
+                balance_lines.append(f"• {len(tokens) - 6} more token(s) with a balance")
+
+            balance_url = item.explorer_address_url(address)
+            badge = self._network_badge(item, network_emojis)
+            section = (
+                f"{badge} **[{item.name}]({balance_url})**\n"
+                + "\n".join(balance_lines)
+            )
+            if item.family is ChainFamily.SOLANA:
+                solana_lines.extend(("", section))
+            else:
+                if not evm_balance_added:
+                    evm_lines.append("")
+                evm_lines.append(section)
+                evm_balance_added = True
+
+        if evm_lines:
             embed.add_field(
-                name=f"{self._network_badge(item)} {item.name} balances",
-                value="\n".join(lines)[:1024],
+                name="━━ EVM WALLET ━━",
+                value="\n".join(evm_lines)[:1024],
+                inline=False,
+            )
+        if solana_lines:
+            solana_network = next(
+                item for item in networks if item.family is ChainFamily.SOLANA
+            )
+            embed.add_field(
+                name="━━ SOLANA WALLET ━━",
+                value="\n".join(solana_lines)[:1024],
                 inline=False,
             )
 
@@ -216,7 +229,30 @@ class WalletCoreCommands:
         return embed
 
     @staticmethod
-    def _network_badge(network) -> str:
+    def _network_compact_label(network, emoji_ids: dict | None = None) -> str:
+        """Use an application emoji alone, or the network name when none is configured."""
+
+        emoji_id = str((emoji_ids or {}).get(network.key) or "")
+        if emoji_id.isdigit():
+            return WalletCoreCommands._network_badge(network, emoji_ids)
+        return network.name
+
+    @staticmethod
+    def _network_badge(network, emoji_ids: dict | None = None) -> str:
+        emoji_names = {
+            "base-sepolia": "base",
+            "ethereum-sepolia": "ethereum",
+            "arbitrum-sepolia": "arbitrum",
+            "polygon-amoy": "polygon",
+            "avalanche-fuji": "avalanche",
+            "solana-devnet": "solana",
+            "optimism": "optimism",
+            "bnb": "bnb",
+            "zora": "zora",
+        }
+        emoji_id = str((emoji_ids or {}).get(network.key) or "")
+        if emoji_id.isdigit():
+            return f"<:{emoji_names.get(network.key, 'chain')}:{emoji_id}>"
         return {
             "base-sepolia": "🔵",
             "ethereum-sepolia": "◆",
@@ -224,6 +260,9 @@ class WalletCoreCommands:
             "polygon-amoy": "🟣",
             "avalanche-fuji": "🔺",
             "solana-devnet": "🟢",
+            "optimism": "🔴",
+            "bnb": "🟡",
+            "zora": "⚪",
         }.get(network.key, "⛓️")
 
     @commands.group(
@@ -557,13 +596,14 @@ class WalletCoreCommands:
             )
         planned = [
             f"- **{network.name}** — {network.reference_label} `{network.reference}` "
-            f"({network.native_symbol}, unavailable until reviewed)"
+            f"({network.native_symbol}, {'testnet' if network.testnet else 'mainnet'}, "
+            "unavailable until reviewed)"
             for network in KNOWN_NETWORKS.values()
             if not network.enabled
         ]
         message = "**Enabled wallet networks**\n" + "\n".join(lines)
         if planned:
-            message += "\n\n**Planned test networks (disabled)**\n" + "\n".join(planned)
+            message += "\n\n**Planned networks (disabled)**\n" + "\n".join(planned)
         await ctx.send(message)
 
     @wallet.command(name="network")

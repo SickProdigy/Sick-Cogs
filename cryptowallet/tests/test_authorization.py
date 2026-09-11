@@ -39,6 +39,9 @@ from ..core.networks import (
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
     SOLANA_DEVNET,
+    OPTIMISM_MAINNET,
+    BNB_MAINNET,
+    ZORA_MAINNET,
     KNOWN_NETWORKS,
     NETWORKS,
     ChainFamily,
@@ -287,7 +290,11 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         ]}
 
         async def native_balance(address, network):
-            return 5 if network == BASE_SEPOLIA.key else 0
+            return (
+                5
+                if network == BASE_SEPOLIA.key
+                else (1 if network == SOLANA_DEVNET.key else 0)
+            )
 
         async def discovered(address, network):
             if network != BASE_SEPOLIA.key:
@@ -302,16 +309,25 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             }
 
         cog = SimpleNamespace(
-            config=SimpleNamespace(token_registry=_Value({
-                BASE_SEPOLIA.key: {
-                    positive_contract: {
-                        "symbol": "OWNED", "decimals": 0, "status": "community"
-                    },
-                    zero_contract: {
-                        "symbol": "ZERO", "decimals": 0, "status": "community"
-                    },
-                }
-            })),
+            config=SimpleNamespace(
+                network_emojis=_Value({BASE_SEPOLIA.key: "123456789012345678"}),
+                token_registry=_Value(
+                    {
+                        BASE_SEPOLIA.key: {
+                            positive_contract: {
+                                "symbol": "OWNED",
+                                "decimals": 0,
+                                "status": "community",
+                            },
+                            zero_contract: {
+                                "symbol": "ZERO",
+                                "decimals": 0,
+                                "status": "community",
+                            },
+                        }
+                    }
+                ),
+            ),
             wallet_provider=SimpleNamespace(
                 get_native_balance=AsyncMock(side_effect=native_balance),
                 get_token_balances=AsyncMock(side_effect=discovered),
@@ -319,6 +335,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             ),
             _account_for_network=WalletCoreCommands._account_for_network,
             _network_badge=WalletCoreCommands._network_badge,
+            _network_compact_label=WalletCoreCommands._network_compact_label,
         )
         ctx = SimpleNamespace(author=SimpleNamespace(display_name="Member"))
         embed = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
@@ -327,14 +344,67 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            sum(evm in field.value for field in embed.fields), 1
+            sum(f"`{evm}`" in field.value for field in embed.fields), 1
         )
-        self.assertIn("EVM wallet", rendered)
-        self.assertIn("Solana wallet", rendered)
+        self.assertIn("━━ EVM WALLET ━━", rendered)
+        self.assertIn("<:base:123456789012345678>", rendered)
+        self.assertIn(
+            "Networks: <:base:123456789012345678> · Ethereum Sepolia", rendered
+        )
+        self.assertNotIn("<:base:123456789012345678> Base Sepolia", rendered)
+        evm_field = next(
+            field for field in embed.fields if field.name == "━━ EVM WALLET ━━"
+        )
+        self.assertLess(
+            evm_field.value.index("Networks:"), evm_field.value.index(f"`{evm}`")
+        )
+        self.assertNotIn(f"[{evm}]", evm_field.value)
+        self.assertIn(
+            f"[Base Sepolia]({BASE_SEPOLIA.explorer_address_url(evm)})",
+            evm_field.value,
+        )
+        self.assertIn("━━ SOLANA WALLET ━━", rendered)
+        solana_field = next(
+            field for field in embed.fields if "━━ SOLANA WALLET ━━" in field.name
+        )
+        self.assertLess(
+            solana_field.value.index(f"`{solana}`"),
+            solana_field.value.index("[Solana Devnet]"),
+        )
+        self.assertEqual(len(embed.fields), 2)
         self.assertIn("OWNED", rendered)
         self.assertNotIn("ZERO", rendered)
         self.assertNotIn("Automatic token discovery", rendered)
-        self.assertNotIn("Arbitrum Sepolia balances", rendered)
+        self.assertNotIn("[Arbitrum Sepolia]", rendered)
+
+    async def test_walletset_emoji_sync_discovers_application_emojis_by_name(self):
+        stored = {}
+
+        class EmojiConfig:
+            async def __aenter__(self):
+                return stored
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                return False
+
+        cog = SimpleNamespace(
+            bot=SimpleNamespace(
+                fetch_application_emojis=AsyncMock(
+                    return_value=[
+                        SimpleNamespace(name="base", id=123456789012345678),
+                        SimpleNamespace(name="solana", id=223456789012345678),
+                    ]
+                )
+            ),
+            config=SimpleNamespace(network_emojis=lambda: EmojiConfig()),
+        )
+        ctx = SimpleNamespace(send=AsyncMock())
+
+        await WalletAdminCommands.walletset_emoji_sync.callback(cog, ctx)
+
+        self.assertEqual(stored[BASE_SEPOLIA.key], "123456789012345678")
+        self.assertEqual(stored[SOLANA_DEVNET.key], "223456789012345678")
+        self.assertIn("Saved `2`", ctx.send.await_args.args[0])
 
     async def test_member_send_recipient_lazily_provisions_network_account(self):
         target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
@@ -1109,8 +1179,17 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(
-            set(KNOWN_NETWORKS), set(NETWORKS)
+            set(KNOWN_NETWORKS) - set(NETWORKS),
+            {OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
         )
+        for network in (OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
+            with self.subTest(planned_network=network.key):
+                self.assertFalse(network.enabled)
+                self.assertFalse(network.testnet)
+                self.assertEqual(network.capabilities.enabled(), ())
+                self.assertFalse(network.supports(NetworkCapability.BALANCE))
+                self.assertFalse(network.supports(NetworkCapability.SEND))
+                self.assertFalse(network.supports(NetworkCapability.SPONSORSHIP))
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(

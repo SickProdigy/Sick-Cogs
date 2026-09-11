@@ -25,6 +25,18 @@ and subsequently substantially rewritten in Sick-Cogs.
 
 Copyright (c) 2016-present aikaterna.
 
+## CryptoWallet network images
+
+The normalized Discord emoji files under `cryptowallet/data/assets/app-emoji/`, except
+for `zora.png`, are derived from
+[Trust Wallet Assets](https://github.com/trustwallet/assets). `zora.png` is derived
+from the official [Zora GitHub organization](https://github.com/ourzora) avatar.
+
+Copyright (c) 2019-2023 Trust Wallet.
+
+The source asset repository is distributed under the MIT License. Network names and
+marks remain the property of their respective owners.
+
 ## Additional credited contributors
 
 UltimatePancake (DadJokes), Predä and aikaterna (NSFW), and TrustyJAID
