@@ -132,13 +132,14 @@ class TokenFactoryDraftView(discord.ui.View):
                 "Token deployment is unavailable.", ephemeral=True
             )
             return
+        await interaction.response.defer(ephemeral=True)
         try:
             draft = await self.cog.resolve_discord_wallet_draft(self.user, self.draft)
         except Exception as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await interaction.followup.send(str(exc), ephemeral=True)
             return
         confirmation = TokenDeploymentConfirmView(self.cog, self.user, draft)
-        await interaction.response.send_message(
+        await interaction.followup.send(
             embed=confirmation.embed(), view=confirmation, ephemeral=True
         )
 
@@ -151,16 +152,17 @@ class TokenFactoryDraftView(discord.ui.View):
                 "Token deployment is unavailable.", ephemeral=True
             )
             return
+        await interaction.response.defer(ephemeral=True)
         try:
             link = await self.cog.create_external_deployment_link(self.user, self.draft)
         except Exception as exc:
-            await interaction.response.send_message(str(exc), ephemeral=True)
+            await interaction.followup.send(str(exc), ephemeral=True)
             return
         view = discord.ui.View(timeout=180)
         view.add_item(discord.ui.Button(
             label="Open external wallet deployment", url=link, emoji="🔗"
         ))
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Connect a Base Sepolia wallet on the protected page. That wallet pays gas. "
             "Leave recipient blank to send the full supply to the signer.",
             view=view, ephemeral=True,
