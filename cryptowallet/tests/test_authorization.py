@@ -55,7 +55,7 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
-from ..providers.cdp_api import CdpApiCredentials, CdpApiError, _api_jwt
+from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
     build_solana_transfer_message,
@@ -1710,6 +1710,21 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[4], contract)
         self.assertEqual(args[5], 0)
         self.assertEqual(args[7], calldata)
+
+    async def test_user_operation_lookup_uses_documented_project_route(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"status": "pending"})
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        operation_hash = "0x" + "1" * 64
+
+        await client.get_smart_account_user_operation(
+            "end-user-id", address, operation_hash, "project-id"
+        )
+
+        client._request.assert_awaited_once_with(
+            "GET",
+            f"/v2/evm/smart-accounts/{address}/user-operations/{operation_hash}",
+        )
 
     async def test_user_can_set_registered_token_as_canonical_default(self):
         stored = _MutableValue(None)

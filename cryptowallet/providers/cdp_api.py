@@ -409,12 +409,13 @@ class CdpApiClient:
         self, user_id: str, address: str, user_operation_hash: str, project_id: str
     ) -> dict:
         """Retrieve current public state for one submitted user operation."""
+        # Coinbase exposes operation lookup through the project-level EVM API,
+        # including for operations submitted through the delegated end-user route.
         path = (
-            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
-            f"/evm/smart-accounts/{quote(address, safe='')}"
+            f"/v2/evm/smart-accounts/{quote(address, safe='')}"
             f"/user-operations/{quote(user_operation_hash, safe='')}"
         )
-        return await self._request("GET", path, query={"projectID": project_id})
+        return await self._request("GET", path)
 
     async def send_solana_transaction(
         self, user_id: str, address: str, project_id: str, network: str,
