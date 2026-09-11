@@ -596,7 +596,9 @@ class CdpWalletProvider(WalletProvider):
                 "Base Sepolia could not verify the TokenFactory deployment state."
             ) from exc
 
-    async def deploy_token_factory(self, profile: dict, creation_code: str) -> dict:
+    async def deploy_token_factory(
+        self, profile: dict, creation_code: str, attempt_id: str
+    ) -> dict:
         """Submit exactly the pinned factory artifact through EIP-2470."""
 
         state = await self.token_factory_deployment_status()
@@ -639,7 +641,12 @@ class CdpWalletProvider(WalletProvider):
                 BASE_SEPOLIA.key,
                 TOKEN_FACTORY_SINGLETON,
                 0,
-                str(uuid.uuid5(uuid.NAMESPACE_URL, "sick-cogs:tokenfactory:factory:v1")),
+                str(
+                    uuid.uuid5(
+                        uuid.NAMESPACE_URL,
+                        f"sick-cogs:tokenfactory:factory:v1:{attempt_id}",
+                    )
+                ),
                 calldata,
             )
             status = str(result.get("status") or "")
@@ -670,6 +677,62 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not safely submit the pinned TokenFactory deployment."
+            ) from exc
+
+    async def token_factory_operation_status(
+        self, profile: dict, user_operation_hash: str
+    ) -> dict:
+        """Retrieve one pinned-factory deployment operation from CDP."""
+
+        if not HASH_PATTERN.fullmatch(user_operation_hash or ""):
+            raise WalletProviderError("The stored factory operation hash is invalid.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        try:
+            address = normalize_evm_address(str((account or {}).get("address") or ""))
+        except ValueError as exc:
+            raise WalletProviderError("The stored wallet address is invalid.") from exc
+        if not provider_user_id:
+            raise WalletProviderError("The wallet profile is incomplete.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).get_smart_account_user_operation(
+                provider_user_id,
+                address,
+                user_operation_hash,
+                credentials.project_id,
+            )
+            status = str(result.get("status") or "")
+            returned_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            if (
+                status
+                not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                or returned_hash.lower() != user_operation_hash.lower()
+                or not HASH_PATTERN.fullmatch(returned_hash)
+                or transaction_hash is not None
+                and not HASH_PATTERN.fullmatch(transaction_hash)
+            ):
+                raise ValueError("CDP returned mismatched factory operation data")
+            return {
+                "provider_status": status,
+                "user_operation_hash": returned_hash.lower(),
+                "transaction_hash": (
+                    transaction_hash.lower() if transaction_hash else None
+                ),
+            }
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not retrieve the factory deployment operation."
             ) from exc
 
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
