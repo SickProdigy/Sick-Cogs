@@ -40,6 +40,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `movies` - Configurable TMDb new movie release announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
+- `rocketleague` - Cached RLCS tournament schedules and configurable server announcements.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 - `tokenfactory` - Protected fixed-supply Base Sepolia token deployments through Discord or external wallets.
