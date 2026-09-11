@@ -14,6 +14,7 @@ const commandText = document.querySelector("#verification-text");
 const copyButton = document.querySelector("#copy-verification");
 let draft;
 let signer;
+let resultHandle;
 
 function padWord(hex) { return hex.replace(/^0x/, "").padStart(64, "0"); }
 function encodeText(value) {
@@ -59,6 +60,7 @@ async function consumeHandoff() {
       payload?.error?.message || "This deployment link is invalid, expired, or already used."
     );
   }
+  resultHandle = handle;
   return payload.jwt;
 }
 
@@ -143,7 +145,23 @@ Network: Base Sepolia`
     }]});
     commandText.value = `!tokenfactory deployment ${txHash} ${recipient}`;
     commandBox.hidden = false;
-    result.textContent = "Transaction submitted: " + txHash + ". Wait for confirmation, then run the command below in Discord.";
+    result.textContent = "Transaction submitted: " + txHash + ". Reporting it to Discord…";
+    const report = await fetch("./api/tokenfactory-result.php", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {"Content-Type": "application/json", Accept: "application/json"},
+      body: JSON.stringify({
+        operation: "complete", handoff: resultHandle,
+        transaction_hash: txHash, recipient
+      }),
+    });
+    const reportBody = await report.json().catch(() => null);
+    if (!report.ok || reportBody?.status !== "accepted") {
+      throw new Error(
+        "Transaction submitted, but automatic Discord reporting failed. Use the command below."
+      );
+    }
+    result.textContent = "Transaction submitted and reported. The bot will verify it and DM you; the command below is a fallback.";
   } catch (error) {
     result.textContent = error instanceof Error ? error.message : "External deployment failed.";
     deployButton.disabled = false;

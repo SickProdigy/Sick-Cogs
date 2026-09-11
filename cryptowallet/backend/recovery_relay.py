@@ -93,3 +93,54 @@ class RecoveryRelayMixin:
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise RuntimeError("The recovery relay could not be reached") from exc
         return handle
+
+    async def poll_tokenfactory_result(self, handle: str) -> dict | None:
+        """Poll one external TokenFactory handoff result through authenticated HTTPS."""
+
+        status = await self.recovery_relay_status()
+        if not status["configured"]:
+            raise RuntimeError("The one-time relay is not configured")
+        if not handle or len(handle) > 128:
+            raise RuntimeError("The TokenFactory result handle is invalid")
+        tokens = await self.bot.get_shared_api_tokens(RECOVERY_RELAY_TOKEN_NAMESPACE)
+        secret = str(tokens.get("secret") or "").strip()
+        payload = {
+            "operation": "poll",
+            "handoff_digest": hashlib.sha256(handle.encode("utf-8")).hexdigest(),
+        }
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        timestamp = int(time.time())
+        nonce = secrets.token_urlsafe(24)
+        path = "/api/tokenfactory-result.php"
+        canonical = "\n".join((
+            "v1", str(timestamp), nonce, "POST", path, hashlib.sha256(body).hexdigest(),
+        ))
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-SickWallet-Timestamp": str(timestamp),
+            "X-SickWallet-Nonce": nonce,
+            "X-SickWallet-Signature": hmac.new(
+                secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+            ).hexdigest(),
+        }
+        timeout = aiohttp.ClientTimeout(total=RECOVERY_RELAY_TIMEOUT_SECONDS)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{status['approval_base_url']}{path}", data=body, headers=headers
+                ) as response:
+                    raw = await response.content.read(RECOVERY_RELAY_MAX_RESPONSE_BYTES + 1)
+                    if len(raw) > RECOVERY_RELAY_MAX_RESPONSE_BYTES:
+                        raise RuntimeError("The TokenFactory relay returned too much data")
+                    if response.status == 204:
+                        return None
+                    result = json.loads(raw.decode("utf-8"))
+                    if response.status != 200 or result.get("status") != "submitted":
+                        raise RuntimeError("The TokenFactory relay rejected the poll")
+                    return {
+                        "transaction_hash": str(result["transaction_hash"]),
+                        "recipient": str(result["recipient"]),
+                    }
+        except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("The TokenFactory relay could not be reached") from exc
