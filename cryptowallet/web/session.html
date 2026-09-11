@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wallet Session · SickGaming</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">SickGaming Crypto Wallet</p>
+    <h1>Protected wallet session</h1>
+    <p id="session-status">Loading verified session details…</p>
+    <dl id="session-details" hidden></dl>
+    <div id="authorization-controls" hidden>
+      <label for="authorization-days">How long should the bot stay authorized?</label>
+      <input id="authorization-days" type="number" inputmode="numeric" step="1" min="1" required aria-describedby="authorization-duration-help">
+      <p id="authorization-duration-help"></p>
+      <button id="authorize-wallet" type="button">Authorize this wallet</button>
+      <p id="authorization-status" role="status"></p>
+    </div>
+    <p class="notice">This grants time-limited authority for the listed testnet accounts. It does not send funds, and you can revoke it anytime.</p>
+  </main>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

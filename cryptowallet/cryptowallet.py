@@ -1,0 +1,227 @@
+import asyncio
+import logging
+import secrets
+import time
+
+from redbot.core import commands
+
+from .backend import (
+    ApprovalSessionMixin,
+    CompanionPairingMixin,
+    CompanionServer,
+    JwtAuthMixin,
+    RecoveryRelayMixin,
+)
+from .backend.confirmation import ConfirmationProcessorMixin
+from .backend.config import WalletConfigMixin, create_config
+from .backend.provisioning import WalletProvisioningMixin
+from .backend.usage import ProviderUsageMixin
+from .commands import WalletAdminCommands, WalletCommands
+from .core.networks import BASE_SEPOLIA
+from .providers import CdpWalletProvider
+
+log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
+
+
+class CryptoWallet(
+    ProviderUsageMixin,
+    ConfirmationProcessorMixin,
+    WalletCommands,
+    WalletAdminCommands,
+    WalletConfigMixin,
+    ApprovalSessionMixin,
+    CompanionPairingMixin,
+    WalletProvisioningMixin,
+    JwtAuthMixin,
+    RecoveryRelayMixin,
+    commands.Cog,
+):
+    """Manage public smart-wallet information through a secure companion service."""
+
+    def __init__(self, bot):
+        self.bot = bot
+        self.config = create_config(self)
+        self.pairing_lock = asyncio.Lock()
+        self.wallet_read_cooldowns = {}
+        self.initialize_provisioning()
+        self.initialize_provider_usage()
+        self.wallet_provider = CdpWalletProvider(
+            bot,
+            request_limiter=self.limit_cdp_request,
+            request_observer=self.record_cdp_request,
+        )
+        self.companion = CompanionServer(self)
+        self.initialize_confirmation_processor()
+
+    async def initialize(self):
+        """Restore the loopback companion only when explicitly enabled."""
+        if not await self.config.deployment_id():
+            await self.config.deployment_id.set(secrets.token_urlsafe(24))
+        try:
+            await self.initialize_jwt_auth()
+        except Exception:
+            log.exception("The CryptoWallet custom-auth signing key could not be initialized")
+        if await self.config.companion_enabled():
+            try:
+                await self.companion.start(
+                    await self.config.companion_host(),
+                    await self.config.companion_port(),
+                )
+            except Exception:
+                log.exception("The configured wallet companion listener could not start")
+
+    def cog_unload(self):
+        self.confirmation_processor_task.cancel()
+        self.usage_flush_task.cancel()
+        self.bot.loop.create_task(self.flush_provider_usage())
+        self.bot.loop.create_task(self.companion.stop())
+
+    async def tokenfactory_wallet_context(self, user) -> dict:
+        """Return the narrow public wallet identity needed by TokenFactory."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        if not profile.get("profile_id") or not account or not account.get("address"):
+            raise RuntimeError("The Base Sepolia wallet profile is incomplete.")
+        return {
+            "profile_id": str(profile["profile_id"]),
+            "owner_address": str(account["address"]),
+            "network": BASE_SEPOLIA.key,
+            "chain_id": BASE_SEPOLIA.chain_id,
+        }
+
+    async def tokenfactory_deployment_status(self) -> dict:
+        """Expose only the reviewed TokenFactory deployment state."""
+
+        return await self.wallet_provider.token_factory_deployment_status()
+
+    async def tokenfactory_deploy_pinned_factory(
+        self, user, creation_code: str, attempt_id: str
+    ) -> dict:
+        """Deploy only the provider-pinned TokenFactory artifact for this wallet user."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.deploy_token_factory(
+            profile, creation_code, attempt_id
+        )
+
+    async def tokenfactory_operation_status(
+        self, user, user_operation_hash: str
+    ) -> dict:
+        """Return the CDP state of a submitted factory deployment operation."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.token_factory_operation_status(
+            profile, user_operation_hash
+        )
+
+    async def tokenfactory_deploy_fixed_supply_token(
+        self, user, **parameters
+    ) -> dict:
+        """Submit one structured fixed-supply token deployment."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.deploy_fixed_supply_token(
+            profile, **parameters
+        )
+
+    async def tokenfactory_verify_fixed_supply_token(self, **parameters) -> dict:
+        """Verify one fixed-supply token through the pinned factory."""
+
+        return await self.wallet_provider.verify_fixed_supply_token(**parameters)
+
+    async def tokenfactory_verify_external_transaction(self, **parameters) -> dict:
+        """Verify one external wallet submitted the exact pinned factory call."""
+
+        return await self.wallet_provider.verify_external_fixed_supply_transaction(
+            **parameters
+        )
+
+    async def tokenfactory_create_external_handoff(
+        self, discord_user_id: int, draft: dict, request_id: str
+    ) -> tuple[str, int]:
+        """Create a protected handoff that requires no CDP wallet profile."""
+
+        return await self.create_tokenfactory_handoff(
+            discord_user_id, draft, request_id
+        )
+
+    async def tokenfactory_register_verified_token(self, user, token: dict) -> None:
+        """Add one factory-verified token to the shared community registry."""
+
+        contract = str(token["contract_address"]).lower()
+        async with self.config.token_registry() as registry:
+            entries = registry.setdefault(BASE_SEPOLIA.key, {})
+            existing = entries.get(contract)
+            if existing is not None:
+                if (
+                    str(existing.get("symbol")) != str(token["symbol"])
+                    or int(existing.get("decimals", -1)) != int(token["decimals"])
+                ):
+                    raise RuntimeError("The existing token registry entry conflicts with deployment.")
+                return
+            active = sum(
+                item.get("status") in {"community", "recognized"}
+                for item in entries.values()
+            )
+            if active >= 25:
+                raise RuntimeError("The Base Sepolia community token registry is full.")
+            entries[contract] = {
+                "contract_address": contract,
+                "symbol": str(token["symbol"]),
+                "name": str(token["name"]),
+                "decimals": int(token["decimals"]),
+                "status": "community",
+                "submitted_by": user.id,
+                "submitted_at": int(time.time()),
+                "source": "tokenfactory",
+            }
+
+    async def red_delete_data_for_user(self, *, requester, user_id: int):
+        """Revoke bot signing authority, then delete all Discord-side user data."""
+        user_config = self.config.user_from_id(user_id)
+        try:
+            profile = await user_config.profile()
+            if isinstance(profile, dict) and profile:
+                await self.wallet_provider.revoke_authorization(
+                    profile, BASE_SEPOLIA.key
+                )
+        except Exception as exc:
+            log.warning(
+                "Wallet delegation revocation failed during user-data deletion; "
+                "local deletion will continue: error_class=%s",
+                type(exc).__name__,
+            )
+        finally:
+            await user_config.clear()
+
+    async def discord_oauth_config(self) -> dict | None:
+        """Return complete OAuth configuration without storing its secret in cog config."""
+        tokens = await self.bot.get_shared_api_tokens("cryptowallet")
+        client_id = tokens.get("client_id")
+        client_secret = tokens.get("client_secret")
+        approval_base_url = await self.config.approval_base_url()
+        if not client_id or not client_secret or not approval_base_url:
+            return None
+        return {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": f"{approval_base_url}/oauth/callback",
+        }
+
+    def discord_application_id(self) -> int | None:
+        """Return the immutable Discord application ID for this bot process."""
+        application_id = getattr(self.bot, "application_id", None)
+        if application_id:
+            return int(application_id)
+        user = getattr(self.bot, "user", None)
+        if user is not None and getattr(user, "id", None):
+            return int(user.id)
+        return None
