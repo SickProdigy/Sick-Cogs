@@ -30,10 +30,13 @@ routes:
   an explicitly entered valid address receives it instead.
 
 The external route never sends a private key, seed phrase, or browser wallet session to the bot or
-website. After submission, the page supplies
-`tokenfactory deployment <transaction_hash> <recipient_address>`; the bot checks the successful
-transaction destination, zero ETH value, exact calldata, request ID, factory record, token metadata,
-total supply, and recipient balance before registration.
+website. After submission, the website reports the public transaction hash and recipient through
+the one-time relay. The bot polls outward, verifies the deployment automatically, and DMs the
+result. The page also supplies
+`tokenfactory deployment <transaction_hash> <recipient_address>` as a fallback if the bot reloads
+or automatic reporting is temporarily unavailable. Verification checks the successful transaction
+destination, zero ETH value, exact calldata, request ID, factory record, token metadata, total
+supply, and recipient balance before registration.
 
 Member deployment remains disabled and emergency-paused until the bot owner runs
 `tokenfactoryset deployment enable`. Enablement re-verifies the exact pinned factory on Base
