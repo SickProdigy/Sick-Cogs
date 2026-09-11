@@ -3,6 +3,7 @@ import json
 import secrets
 import time
 import uuid
+from urllib.parse import quote
 from pathlib import Path
 from redbot.core import Config, commands
 from redbot.core.bot import Red
@@ -17,7 +18,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -43,6 +44,57 @@ class TokenFactory(commands.Cog):
 
     async def save_draft(self, user, draft: TokenDraft) -> None:
         await self.config.user(user).deployment_draft.set(draft.to_dict())
+
+    async def resolve_discord_wallet_draft(self, user, draft: TokenDraft) -> TokenDraft:
+        context = await self._wallet_context_for_user(user)
+        resolved = TokenDraft(
+            creator_discord_id=draft.creator_discord_id,
+            name=draft.name,
+            symbol=draft.symbol,
+            decimals=draft.decimals,
+            supply_atomic=draft.supply_atomic,
+            wallet_profile_id=context["profile_id"],
+            owner_address=context["owner_address"],
+        )
+        await self.save_draft(user, resolved)
+        return resolved
+
+    async def create_external_deployment_link(self, user, draft: TokenDraft) -> str:
+        if not await self.deployment_available():
+            raise RuntimeError("Token deployment is disabled or emergency-paused.")
+        user_config = self.config.user(user)
+        pending = await user_config.pending_deployment()
+        if isinstance(pending, dict):
+            same_external_draft = (
+                pending.get("route") == "external"
+                and pending.get("draft") == draft.to_dict()
+                and pending.get("request_id")
+            )
+            if same_external_draft:
+                request_id = str(pending["request_id"])
+            elif pending.get("provider_status") not in {
+                "complete", "dropped", "failed"
+            }:
+                raise RuntimeError(
+                    "Another token deployment is already active. Verify or finish it first."
+                )
+            else:
+                request_id = "0x" + secrets.token_hex(32)
+        else:
+            request_id = "0x" + secrets.token_hex(32)
+        wallet = self._cryptowallet()
+        token, _ = await wallet.tokenfactory_create_external_handoff(
+            user.id, draft.to_dict(), request_id
+        )
+        await user_config.pending_deployment.set({
+            "route": "external",
+            "draft": draft.to_dict(),
+            "request_id": request_id,
+            "provider_status": "awaiting_external_wallet",
+            "submitted_at": int(time.time()),
+        })
+        base = str(await wallet.config.approval_base_url()).rstrip("/")
+        return f"{base}/tokenfactory.html#handoff={quote(token, safe='')}"
 
     @staticmethod
     def _factory_artifact() -> dict:
@@ -171,6 +223,62 @@ class TokenFactory(commands.Cog):
         })
         return result
 
+    async def verify_external_deployment(
+        self, user, transaction_hash: str, recipient: str
+    ) -> dict:
+        if not await self.deployment_available():
+            raise RuntimeError("Token deployment is disabled or emergency-paused.")
+        user_config = self.config.user(user)
+        pending = await user_config.pending_deployment()
+        if not isinstance(pending, dict) or pending.get("route") != "external":
+            raise RuntimeError("You have no external-wallet deployment awaiting verification.")
+        draft = TokenDraft.from_dict(pending["draft"])
+        if draft.creator_discord_id != user.id:
+            raise RuntimeError("The pending deployment belongs to another member.")
+        recipient = normalize_owner_address(recipient)
+        result = await self._cryptowallet().tokenfactory_verify_external_transaction(
+            transaction_hash=transaction_hash,
+            request_id=str(pending["request_id"]),
+            recipient=recipient,
+            name=draft.name,
+            symbol=draft.symbol,
+            decimals=draft.decimals,
+            supply_atomic=draft.supply_atomic,
+        )
+        pending.update({
+            "transaction_hash": transaction_hash.lower(),
+            "recipient": recipient,
+            "provider_status": result.get("provider_status", "pending"),
+        })
+        await user_config.pending_deployment.set(pending)
+        if not result.get("deployed"):
+            return result
+        resolved = TokenDraft(
+            creator_discord_id=draft.creator_discord_id,
+            name=draft.name, symbol=draft.symbol, decimals=draft.decimals,
+            supply_atomic=draft.supply_atomic, owner_address=recipient,
+        )
+        record = {
+            **resolved.to_dict(),
+            "request_id": str(pending["request_id"]),
+            "contract_address": result["token_address"],
+            "parameters_hash": result["parameters_hash"],
+            "transaction_hash": transaction_hash.lower(),
+            "signer_address": result["signer_address"],
+            "deployment_route": "external",
+            "deployed_at": int(time.time()),
+        }
+        async with user_config.deployed_tokens() as deployments:
+            if not any(item.get("request_id") == record["request_id"] for item in deployments):
+                deployments.append(record)
+        await self._cryptowallet().tokenfactory_register_verified_token(user, {
+            "contract_address": record["contract_address"],
+            "symbol": draft.symbol, "name": draft.name, "decimals": draft.decimals,
+        })
+        await user_config.pending_deployment.set(None)
+        await user_config.deployment_draft.set(None)
+        return {"deployed": True, **record}
+
     async def verify_token_deployment(self, user) -> dict:
         user_config = self.config.user(user)
         pending = await user_config.pending_deployment()
@@ -216,23 +324,16 @@ class TokenFactory(commands.Cog):
         await user_config.deployment_draft.set(None)
         return {"deployed": True, **record}
 
-    async def _wallet_context(self, ctx: commands.Context) -> dict | None:
+    async def _wallet_context_for_user(self, user) -> dict:
         wallet = self.bot.get_cog("CryptoWallet")
         integration = getattr(wallet, "tokenfactory_wallet_context", None)
         if integration is None:
-            await ctx.send("CryptoWallet must be loaded before creating a token draft.")
-            return None
-        try:
-            context = await integration(ctx.author)
-            return {
-                **context,
-                "owner_address": normalize_owner_address(context["owner_address"]),
-            }
-        except Exception:
-            await ctx.send(
-                "Your Base Sepolia wallet could not be prepared. Try `wallet` first, then retry."
-            )
-            return None
+            raise RuntimeError("CryptoWallet must be loaded for Discord Wallet deployment.")
+        context = await integration(user)
+        return {
+            **context,
+            "owner_address": normalize_owner_address(context["owner_address"]),
+        }
 
     @commands.guild_only()
     @commands.group(
@@ -245,35 +346,43 @@ class TokenFactory(commands.Cog):
     @tokenfactory.command(name="create", aliases=("card",))
     async def tokenfactory_create(self, ctx: commands.Context):
         """Open the interactive fixed-supply token form."""
-        wallet_context = await self._wallet_context(ctx)
-        if wallet_context is None:
-            return
         stored = await self.config.user(ctx.author).deployment_draft()
         draft = None
         if isinstance(stored, dict):
             try:
                 candidate = TokenDraft.from_dict(stored)
-                if (
-                    candidate.creator_discord_id == ctx.author.id
-                    and candidate.wallet_profile_id == wallet_context["profile_id"]
-                    and candidate.owner_address.lower()
-                    == wallet_context["owner_address"].lower()
-                ):
+                if candidate.creator_discord_id == ctx.author.id:
                     draft = candidate
             except (KeyError, TypeError, ValueError):
                 pass
         view = TokenFactoryDraftView(
-            self, ctx.author, wallet_context, draft,
+            self, ctx.author, draft,
             deployment_available=await self.deployment_available(),
         )
         await ctx.send(embed=view.embed(), view=view)
 
     @tokenfactory.command(name="deployment", aliases=("deploy-status", "verify"))
-    async def tokenfactory_deployment(self, ctx: commands.Context):
-        """Refresh and verify your current token deployment."""
+    async def tokenfactory_deployment(
+        self, ctx: commands.Context, transaction_hash: str | None = None,
+        recipient: str | None = None,
+    ):
+        """Verify a Discord-wallet deployment or an external transaction."""
 
         try:
-            result = await self.verify_token_deployment(ctx.author)
+            pending = await self.config.user(ctx.author).pending_deployment()
+            if isinstance(pending, dict) and pending.get("route") == "external":
+                if not transaction_hash or not recipient:
+                    await ctx.send(
+                        "After the external wallet submits, use "
+                        "`tokenfactory deployment <transaction_hash> <recipient_address>`. "
+                        "The protected page provides the exact command."
+                    )
+                    return
+                result = await self.verify_external_deployment(
+                    ctx.author, transaction_hash, recipient
+                )
+            else:
+                result = await self.verify_token_deployment(ctx.author)
         except Exception as exc:
             await ctx.send(f"Token deployment verification failed: {exc}")
             return

@@ -49,6 +49,18 @@ class TokenFactoryValidationTests(unittest.TestCase):
         )
         self.assertEqual(TokenDraft.from_dict(draft.to_dict()), draft)
 
+    def test_draft_can_be_created_before_a_wallet_route_is_selected(self):
+        draft = TokenDraft(
+            creator_discord_id=7,
+            name="Route Neutral",
+            symbol="RN",
+            decimals=6,
+            supply_atomic=1_000_000,
+        )
+        restored = TokenDraft.from_dict(draft.to_dict())
+        self.assertEqual(restored.wallet_profile_id, "")
+        self.assertEqual(restored.owner_address, "")
+
     def test_fixed_supply_encoder_matches_ethers_reference(self):
         encoded = _fixed_supply_token_data(
             "Sick Gaming Token",
