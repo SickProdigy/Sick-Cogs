@@ -40,6 +40,28 @@ function decodePart(value) {
   const encoded = value.replace(/-/g, "+").replace(/_/g, "/");
   return JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, "=")));
 }
+async function consumeHandoff() {
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const handle = fragment.get("handoff");
+  history.replaceState(null, "", location.pathname);
+  if (!handle || !/^[A-Za-z0-9_-]{32,128}$/.test(handle)) {
+    throw new Error("This deployment link is invalid, expired, or already used.");
+  }
+  const response = await fetch("./api/recovery-handoff.php", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {"Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify({operation: "consume", handoff: handle}),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.status !== "consumed" || typeof payload.jwt !== "string") {
+    throw new Error(
+      payload?.error?.message || "This deployment link is invalid, expired, or already used."
+    );
+  }
+  return payload.jwt;
+}
+
 async function verifyHandoff(token) {
   const [headerPart, claimsPart, signaturePart] = token.split(".");
   if (!signaturePart) throw new Error("This deployment link is malformed.");
@@ -134,9 +156,7 @@ copyButton.addEventListener("click", async () => {
 
 (async () => {
   try {
-    const fragment = new URLSearchParams(location.hash.slice(1));
-    const token = fragment.get("handoff"); history.replaceState(null, "", location.pathname);
-    if (!token) throw new Error("This deployment link is missing its handoff token.");
+    const token = await consumeHandoff();
     draft = await verifyHandoff(token);
     const scale = 10n ** BigInt(draft.decimals);
     const whole = BigInt(draft.supply_atomic) / scale;
