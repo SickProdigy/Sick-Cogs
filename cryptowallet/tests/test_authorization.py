@@ -1726,6 +1726,29 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
             f"/v2/evm/smart-accounts/{address}/user-operations/{operation_hash}",
         )
 
+    async def test_user_operation_send_includes_explicit_call_gas_limit(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"status": "pending"})
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        destination = "0xce0042b868300000d44a59004da54a005ffdcf9f"
+
+        await client.send_smart_account_user_operation(
+            "end-user-id",
+            address,
+            "project-id",
+            BASE_SEPOLIA.key,
+            destination,
+            0,
+            "attempt-id",
+            "0x1234",
+            override_gas_limit=2_000_000,
+        )
+
+        request = client._request.await_args
+        self.assertEqual(
+            request.kwargs["body"]["calls"][0]["overrideGasLimit"], "2000000"
+        )
+
     async def test_user_can_set_registered_token_as_canonical_default(self):
         stored = _MutableValue(None)
         user_config = SimpleNamespace(default_send_asset=stored)
