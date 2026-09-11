@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import struct
 
 import aiohttp
@@ -271,6 +272,32 @@ async def get_contract_code(address: str, network: str) -> str:
     return code.lower()
 
 
+async def get_factory_token_deployment(
+    factory: str, request_id: str, network: str
+) -> dict:
+    """Read the pinned factory's deployment(bytes32) record."""
+
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Factory deployment lookup is unavailable for this network.")
+    if not isinstance(request_id, str) or not re.fullmatch(r"0x[0-9a-fA-F]{64}", request_id):
+        raise BaseRpcError("The factory request ID is invalid.")
+    raw = await _rpc_with_urls(
+        rpc_urls,
+        "eth_call",
+        [{"to": factory, "data": "0xb40a41ce" + request_id[2:]}, "latest"],
+        network,
+    )
+    if not isinstance(raw, str) or not re.fullmatch(r"0x[0-9a-fA-F]{128}", raw):
+        raise BaseRpcError("The factory returned an invalid deployment record.")
+    token_word = raw[2:66]
+    parameters_hash = "0x" + raw[66:130].lower()
+    token_address = "0x" + token_word[-40:].lower()
+    if int(token_address, 16) == 0:
+        token_address = None
+    return {"token_address": token_address, "parameters_hash": parameters_hash}
+
+
 async def get_erc20_asset(
     contract: str, address: str, network: str, *, include_metadata: bool = False
 ) -> dict:
@@ -309,7 +336,19 @@ async def get_erc20_asset(
         raise BaseRpcError("The contract does not expose valid ERC-20 metadata.") from exc
     if decimals < 0 or decimals > 255 or not symbol or not name:
         raise BaseRpcError("The contract does not expose valid ERC-20 metadata.")
-    result.update({"decimals": decimals, "symbol": symbol[:16], "name": name[:64]})
+    raw_total_supply = await _rpc_with_urls(
+        rpc_urls, "eth_call", [{"to": contract, "data": "0x18160ddd"}, "latest"], network
+    )
+    try:
+        total_supply = int(str(raw_total_supply), 16)
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError("The token returned an invalid total supply.") from exc
+    result.update({
+        "decimals": decimals,
+        "symbol": symbol[:16],
+        "name": name[:64],
+        "total_supply_atomic": total_supply,
+    })
     return result
 
 

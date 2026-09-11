@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import secrets
+import time
 
 from redbot.core import commands
 
@@ -120,6 +121,52 @@ class CryptoWallet(
         return await self.wallet_provider.token_factory_operation_status(
             profile, user_operation_hash
         )
+
+    async def tokenfactory_deploy_fixed_supply_token(
+        self, user, **parameters
+    ) -> dict:
+        """Submit one structured fixed-supply token deployment."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.deploy_fixed_supply_token(
+            profile, **parameters
+        )
+
+    async def tokenfactory_verify_fixed_supply_token(self, **parameters) -> dict:
+        """Verify one fixed-supply token through the pinned factory."""
+
+        return await self.wallet_provider.verify_fixed_supply_token(**parameters)
+
+    async def tokenfactory_register_verified_token(self, user, token: dict) -> None:
+        """Add one factory-verified token to the shared community registry."""
+
+        contract = str(token["contract_address"]).lower()
+        async with self.config.token_registry() as registry:
+            entries = registry.setdefault(BASE_SEPOLIA.key, {})
+            existing = entries.get(contract)
+            if existing is not None:
+                if (
+                    str(existing.get("symbol")) != str(token["symbol"])
+                    or int(existing.get("decimals", -1)) != int(token["decimals"])
+                ):
+                    raise RuntimeError("The existing token registry entry conflicts with deployment.")
+                return
+            active = sum(
+                item.get("status") in {"community", "recognized"}
+                for item in entries.values()
+            )
+            if active >= 25:
+                raise RuntimeError("The Base Sepolia community token registry is full.")
+            entries[contract] = {
+                "contract_address": contract,
+                "symbol": str(token["symbol"]),
+                "name": str(token["name"]),
+                "decimals": int(token["decimals"]),
+                "status": "community",
+                "submitted_by": user.id,
+                "submitted_at": int(time.time()),
+                "source": "tokenfactory",
+            }
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""

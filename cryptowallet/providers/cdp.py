@@ -34,6 +34,7 @@ from .base_rpc import (
     BaseRpcError,
     get_contract_code,
     get_erc20_asset,
+    get_factory_token_deployment,
     get_native_balance as get_rpc_native_balance,
     get_solana_native_balance,
     get_solana_transaction_history,
@@ -56,6 +57,8 @@ TOKEN_FACTORY_CREATION_SHA256 = "8f8f4cd23e799be527a98bc723aa77695aa1addff5a805f
 TOKEN_FACTORY_RUNTIME_SHA256 = "d9cdd1effe5aac3b2bab44d78897fb27d4527f6ac964cdbc517e812da2bf20fb"
 TOKEN_FACTORY_SINGLETON_SHA256 = "687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
 TOKEN_FACTORY_DEPLOY_GAS_LIMIT = 2_000_000
+TOKEN_DEPLOY_GAS_LIMIT = 1_500_000
+TOKEN_CREATE_SELECTOR = "8b08cf96"
 
 
 def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
@@ -65,6 +68,49 @@ def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
     if amount_atomic <= 0 or amount_atomic >= 2 ** 256:
         raise ValueError("ERC-20 transfer amount is invalid")
     return "0xa9059cbb" + address[2:].lower().rjust(64, "0") + format(amount_atomic, "064x")
+
+
+
+
+def _abi_dynamic_text(value: str) -> str:
+    raw = value.encode("utf-8")
+    return format(len(raw), "064x") + raw.hex().ljust(((len(raw) + 31) // 32) * 64, "0")
+
+
+def _fixed_supply_token_data(
+    name: str,
+    symbol: str,
+    decimals: int,
+    supply_atomic: int,
+    recipient: str,
+    request_id: str,
+) -> str:
+    """Encode only the pinned factory's fixed-supply deployment method."""
+
+    name_tail = _abi_dynamic_text(name)
+    symbol_tail = _abi_dynamic_text(symbol)
+    address = normalize_evm_address(recipient)
+    if not name or len(name.encode("utf-8")) > 64:
+        raise ValueError("Invalid token name")
+    if not symbol or len(symbol.encode("utf-8")) > 10:
+        raise ValueError("Invalid token symbol")
+    if decimals < 0 or decimals > 18 or supply_atomic <= 0 or supply_atomic >= 2**256:
+        raise ValueError("Invalid fixed-supply token parameters")
+    if not re.fullmatch(r"0x[0-9a-fA-F]{64}", request_id or "") or int(request_id, 16) == 0:
+        raise ValueError("Invalid token deployment request ID")
+    name_offset = 6 * 32
+    symbol_offset = name_offset + len(name_tail) // 2
+    return (
+        "0x" + TOKEN_CREATE_SELECTOR
+        + format(name_offset, "064x")
+        + format(symbol_offset, "064x")
+        + format(decimals, "064x")
+        + format(supply_atomic, "064x")
+        + address[2:].lower().rjust(64, "0")
+        + request_id[2:].lower()
+        + name_tail
+        + symbol_tail
+    )
 
 
 def _sha256_bytecode(value: str) -> str:
@@ -735,6 +781,124 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve the factory deployment operation."
+            ) from exc
+
+    async def deploy_fixed_supply_token(
+        self,
+        profile: dict,
+        *,
+        name: str,
+        symbol: str,
+        decimals: int,
+        supply_atomic: int,
+        recipient: str,
+        request_id: str,
+        attempt_id: str,
+    ) -> dict:
+        """Submit one structured fixed-supply deployment to the pinned factory."""
+
+        state = await self.token_factory_deployment_status()
+        if not state.get("deployed"):
+            raise WalletProviderError("The pinned TokenFactory is not deployed.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        account = next(
+            (item for item in profile.get("accounts") or [] if item.get("network") == BASE_SEPOLIA.key),
+            None,
+        )
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            recipient = normalize_evm_address(recipient)
+            calldata = _fixed_supply_token_data(
+                name, symbol, decimals, supply_atomic, recipient, request_id
+            )
+        except ValueError as exc:
+            raise WalletProviderError("The fixed-supply deployment parameters are invalid.") from exc
+        if not provider_user_id or not profile_id or sender != recipient:
+            raise WalletProviderError("The wallet profile does not match this token deployment.")
+        delegation = await self.get_delegation_status(profile, BASE_SEPOLIA.key)
+        if not delegation.get("active"):
+            raise WalletProviderError(
+                "An active wallet authorization is required for token deployment."
+            )
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                provider_user_id,
+                sender,
+                credentials.project_id,
+                BASE_SEPOLIA.key,
+                TOKEN_FACTORY_ADDRESS,
+                0,
+                str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:tokenfactory:token:{attempt_id}")),
+                calldata,
+                override_gas_limit=TOKEN_DEPLOY_GAS_LIMIT,
+            )
+            status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            calls = result.get("calls") or []
+            if (
+                status not in {"pending", "signed", "broadcast", "complete"}
+                or not HASH_PATTERN.fullmatch(user_op_hash)
+                or not isinstance(calls, list)
+                or len(calls) != 1
+                or normalize_evm_address(str(calls[0].get("to") or "")) != TOKEN_FACTORY_ADDRESS
+                or int(calls[0].get("value", -1)) != 0
+                or str(calls[0].get("data") or "").lower() != calldata.lower()
+            ):
+                raise ValueError("CDP returned mismatched token deployment data")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            if transaction_hash and not HASH_PATTERN.fullmatch(transaction_hash):
+                raise ValueError("CDP returned an invalid transaction hash")
+            return {
+                "provider_status": status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                "request_id": request_id.lower(),
+            }
+        except (CdpApiError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely submit the fixed-supply token deployment."
+            ) from exc
+
+    async def verify_fixed_supply_token(
+        self, *, request_id: str, recipient: str, name: str, symbol: str,
+        decimals: int, supply_atomic: int,
+    ) -> dict:
+        """Verify the factory record and immutable public ERC-20 properties."""
+
+        try:
+            recipient = normalize_evm_address(recipient)
+            deployment = await get_factory_token_deployment(
+                TOKEN_FACTORY_ADDRESS, request_id, BASE_SEPOLIA.key
+            )
+            token = deployment["token_address"]
+            if not token:
+                return {"deployed": False}
+            asset = await get_erc20_asset(
+                token, recipient, BASE_SEPOLIA.key, include_metadata=True
+            )
+            if (
+                asset["name"] != name
+                or asset["symbol"] != symbol
+                or asset["decimals"] != decimals
+                or asset["amount_atomic"] != supply_atomic
+                or asset["total_supply_atomic"] != supply_atomic
+            ):
+                raise WalletProviderError(
+                    "The deployed token does not match its immutable draft."
+                )
+            return {
+                "deployed": True,
+                "token_address": token,
+                "parameters_hash": deployment["parameters_hash"],
+                **asset,
+            }
+        except BaseRpcError as exc:
+            raise WalletProviderError(
+                "Base Sepolia could not verify the token deployment."
             ) from exc
 
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
