@@ -33,6 +33,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
 - `coc` - Clash of Clans clan and war status utilities.
 - `dadjokes` - On-demand and scheduled random dad jokes.
+- `cryptowallet` - Provider-backed multichain testnet wallets with protected authorization, recovery, and sends.
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
@@ -41,6 +42,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
+- `tokenfactory` - Protected fixed-supply Base Sepolia token deployments through Discord or external wallets.
 - `wolfram` - Wolfram|Alpha text, image, and step-by-step query tools.
 
 Develop-only cogs and experiments are not part of the stable Index release.

@@ -19,7 +19,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.3.0"
+    __version__ = "1.0.0"
 
     def __init__(self, bot: Red):
         self.bot = bot

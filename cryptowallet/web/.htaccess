@@ -9,4 +9,3 @@ Options -Indexes
   RewriteRule ^session/?$ session.html [L]
   RewriteRule ^setup/?$ setup/index.php [L]
 </IfModule>
-
