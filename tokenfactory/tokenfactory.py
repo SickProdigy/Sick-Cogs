@@ -1,3 +1,4 @@
+import asyncio
 import discord
 import json
 import secrets
@@ -30,6 +31,7 @@ class TokenFactory(commands.Cog):
             pending_deployment=None,
             deployed_tokens=[],
         )
+        self.external_result_tasks = set()
         self.config.register_global(
             deployment_enabled=False,
             factory_address=None,
@@ -38,6 +40,10 @@ class TokenFactory(commands.Cog):
             pending_factory_operation=None,
             emergency_paused=True,
         )
+
+    def cog_unload(self):
+        for task in self.external_result_tasks:
+            task.cancel()
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         await self.config.user_from_id(user_id).clear()
@@ -104,6 +110,11 @@ class TokenFactory(commands.Cog):
             "provider_status": "awaiting_external_wallet",
             "submitted_at": int(time.time()),
         })
+        task = asyncio.create_task(
+            self._watch_external_deployment(user, handle, expires_at)
+        )
+        self.external_result_tasks.add(task)
+        task.add_done_callback(self.external_result_tasks.discard)
         base = str(await wallet.config.approval_base_url()).rstrip("/")
         return f"{base}/tokenfactory.html#handoff={quote(handle, safe='')}"
 
@@ -233,6 +244,34 @@ class TokenFactory(commands.Cog):
             "submitted_at": int(time.time()),
         })
         return result
+
+    async def _watch_external_deployment(
+        self, user, handle: str, expires_at: int
+    ) -> None:
+        wallet = self._cryptowallet()
+        while int(time.time()) <= expires_at + 30:
+            await asyncio.sleep(4)
+            try:
+                reported = await wallet.poll_tokenfactory_result(handle)
+            except Exception:
+                continue
+            if reported is None:
+                continue
+            try:
+                result = await self.verify_external_deployment(
+                    user, reported["transaction_hash"], reported["recipient"]
+                )
+                if not result.get("deployed"):
+                    await asyncio.sleep(4)
+                    continue
+                await user.send(
+                    f"Verified **{result['name']} ({result['symbol']})** at "
+                    f"`{result['contract_address']}` on Base Sepolia. It was added "
+                    "to the community token registry."
+                )
+            except Exception as exc:
+                await user.send(f"Token deployment verification failed: {exc}")
+            return
 
     async def verify_external_deployment(
         self, user, transaction_hash: str, recipient: str
