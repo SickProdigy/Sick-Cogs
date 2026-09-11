@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>External Token Deployment · SickGaming</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="card">
+    <p class="eyebrow">SickGaming TokenFactory</p>
+    <h1>Deploy with an external wallet</h1>
+    <p id="external-status">Loading protected deployment details…</p>
+    <dl id="external-details" hidden></dl>
+    <div id="external-controls" hidden>
+      <button id="connect-wallet" type="button">Connect external wallet</button>
+      <label for="token-recipient">Recipient address (optional)</label>
+      <input id="token-recipient" autocomplete="off" spellcheck="false"
+             placeholder="Blank sends the full supply to the signing wallet">
+      <p class="notice">The connected wallet signs the factory transaction and pays Base Sepolia gas. No wallet secret is sent to the bot or website.</p>
+      <button id="deploy-token" type="button" disabled>Review and deploy token</button>
+      <p id="external-result" role="status"></p>
+      <div id="verification-command" hidden>
+        <label for="verification-text">Verify in Discord after confirmation</label>
+        <div class="copy-row">
+          <input id="verification-text" readonly>
+          <button id="copy-verification" type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="tokenfactory.js" type="module"></script>
+</body>
+</html>

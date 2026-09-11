@@ -39,6 +39,7 @@ from .base_rpc import (
     get_solana_native_balance,
     get_solana_transaction_history,
     get_solana_transaction,
+    get_transaction,
     quote_solana_transfer,
     get_user_operation_receipt,
 )
@@ -862,6 +863,49 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "CDP could not safely submit the fixed-supply token deployment."
             ) from exc
+
+    async def verify_external_fixed_supply_transaction(
+        self, *, transaction_hash: str, request_id: str, recipient: str,
+        name: str, symbol: str, decimals: int, supply_atomic: int,
+    ) -> dict:
+        """Verify an external wallet submitted only the reviewed factory call."""
+
+        if not HASH_PATTERN.fullmatch(transaction_hash):
+            raise WalletProviderError("The external transaction hash is invalid.")
+        try:
+            recipient = normalize_evm_address(recipient)
+            expected_data = _fixed_supply_token_data(
+                name, symbol, decimals, supply_atomic, recipient, request_id
+            )
+            transaction = await get_transaction(transaction_hash, BASE_SEPOLIA.key)
+            if transaction is None or transaction.get("success") is None:
+                return {"deployed": False, "provider_status": "pending"}
+            if transaction.get("success") is not True:
+                raise WalletProviderError("The external deployment transaction failed on-chain.")
+            if (
+                normalize_evm_address(str(transaction.get("to_address") or ""))
+                != TOKEN_FACTORY_ADDRESS
+                or int(transaction.get("value_wei", -1)) != 0
+                or str(transaction.get("input_data") or "").lower()
+                != expected_data.lower()
+            ):
+                raise WalletProviderError(
+                    "The external transaction does not match the reviewed token draft."
+                )
+        except BaseRpcError as exc:
+            raise WalletProviderError(
+                "Base Sepolia could not verify the external deployment transaction."
+            ) from exc
+        verified = await self.verify_fixed_supply_token(
+            request_id=request_id, recipient=recipient, name=name, symbol=symbol,
+            decimals=decimals, supply_atomic=supply_atomic,
+        )
+        return {
+            **verified,
+            "provider_status": "complete" if verified.get("deployed") else "pending",
+            "transaction_hash": transaction_hash.lower(),
+            "signer_address": normalize_evm_address(transaction["from_address"]),
+        }
 
     async def verify_fixed_supply_token(
         self, *, request_id: str, recipient: str, name: str, symbol: str,

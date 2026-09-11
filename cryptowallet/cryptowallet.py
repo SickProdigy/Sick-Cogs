@@ -137,6 +137,22 @@ class CryptoWallet(
 
         return await self.wallet_provider.verify_fixed_supply_token(**parameters)
 
+    async def tokenfactory_verify_external_transaction(self, **parameters) -> dict:
+        """Verify one external wallet submitted the exact pinned factory call."""
+
+        return await self.wallet_provider.verify_external_fixed_supply_transaction(
+            **parameters
+        )
+
+    async def tokenfactory_create_external_handoff(
+        self, discord_user_id: int, draft: dict, request_id: str
+    ) -> tuple[str, int]:
+        """Create a protected handoff that requires no CDP wallet profile."""
+
+        return await self.create_tokenfactory_handoff(
+            discord_user_id, draft, request_id
+        )
+
     async def tokenfactory_register_verified_token(self, user, token: dict) -> None:
         """Add one factory-verified token to the shared community registry."""
 
