@@ -83,9 +83,10 @@ class TokenFactory(commands.Cog):
         else:
             request_id = "0x" + secrets.token_hex(32)
         wallet = self._cryptowallet()
-        token, _ = await wallet.tokenfactory_create_external_handoff(
+        token, expires_at = await wallet.tokenfactory_create_external_handoff(
             user.id, draft.to_dict(), request_id
         )
+        handle = await wallet.register_recovery_handoff(token, expires_at)
         await user_config.pending_deployment.set({
             "route": "external",
             "draft": draft.to_dict(),
@@ -94,7 +95,7 @@ class TokenFactory(commands.Cog):
             "submitted_at": int(time.time()),
         })
         base = str(await wallet.config.approval_base_url()).rstrip("/")
-        return f"{base}/tokenfactory.html#handoff={quote(token, safe='')}"
+        return f"{base}/tokenfactory.html#handoff={quote(handle, safe='')}"
 
     @staticmethod
     def _factory_artifact() -> dict:
