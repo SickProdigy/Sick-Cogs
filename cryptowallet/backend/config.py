@@ -27,6 +27,7 @@ def create_config(cog) -> Config:
         provider_paused=False,
         provider_usage={},
         token_registry={},
+        network_emojis={},
         send_limits_atomic={},
         delegation_duration_days=365,
         delegation_max_duration_days=365,
