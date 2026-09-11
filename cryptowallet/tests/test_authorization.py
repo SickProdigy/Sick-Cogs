@@ -276,6 +276,66 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         cog._wallet_embed.assert_awaited_once_with(ctx, profile, target)
         ctx.send.assert_awaited_once_with(embed="portfolio")
 
+    async def test_wallet_portfolio_groups_evm_address_and_hides_zero_tokens(self):
+        evm = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        solana = "C8xRWvc9D6QPtVWEZcwYBP3zvLegruFDshUwfYXBwqE5"
+        positive_contract = "0x" + "11" * 20
+        zero_contract = "0x" + "22" * 20
+        profile = {"accounts": [
+            {"network": BASE_SEPOLIA.key, "address": evm},
+            {"network": SOLANA_DEVNET.key, "address": solana},
+        ]}
+
+        async def native_balance(address, network):
+            return 5 if network == BASE_SEPOLIA.key else 0
+
+        async def discovered(address, network):
+            if network != BASE_SEPOLIA.key:
+                raise ValueError("discovery unavailable")
+            return []
+
+        async def registered(address, network, contract):
+            return {
+                "contract_address": contract,
+                "amount_atomic": 10 if contract == positive_contract else 0,
+                "decimals": 0,
+            }
+
+        cog = SimpleNamespace(
+            config=SimpleNamespace(token_registry=_Value({
+                BASE_SEPOLIA.key: {
+                    positive_contract: {
+                        "symbol": "OWNED", "decimals": 0, "status": "community"
+                    },
+                    zero_contract: {
+                        "symbol": "ZERO", "decimals": 0, "status": "community"
+                    },
+                }
+            })),
+            wallet_provider=SimpleNamespace(
+                get_native_balance=AsyncMock(side_effect=native_balance),
+                get_token_balances=AsyncMock(side_effect=discovered),
+                get_registered_token_asset=AsyncMock(side_effect=registered),
+            ),
+            _account_for_network=WalletCoreCommands._account_for_network,
+            _network_badge=WalletCoreCommands._network_badge,
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(display_name="Member"))
+        embed = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
+        rendered = "\n".join(
+            f"{field.name}\n{field.value}" for field in embed.fields
+        )
+
+        self.assertEqual(
+            sum(evm in field.value for field in embed.fields), 1
+        )
+        self.assertIn("EVM wallet", rendered)
+        self.assertIn("Solana wallet", rendered)
+        self.assertIn("OWNED", rendered)
+        self.assertNotIn("ZERO", rendered)
+        self.assertNotIn("Automatic token discovery", rendered)
+        self.assertNotIn("Arbitrum Sepolia balances", rendered)
+
     async def test_member_send_recipient_lazily_provisions_network_account(self):
         target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
         recipient = "0x1111111111111111111111111111111111111111"

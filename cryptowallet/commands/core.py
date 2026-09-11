@@ -85,75 +85,146 @@ class WalletCoreCommands:
         networks = [network] if network is not None else [
             item for item in NETWORKS.values() if item.testnet
         ]
+
+        evm_account = next(
+            (
+                self._account_for_network(profile, item.key)
+                for item in networks
+                if item.family is ChainFamily.EVM
+                and self._account_for_network(profile, item.key) is not None
+            ),
+            None,
+        )
+        if evm_account is not None:
+            address = str(evm_account.get("address") or "")
+            evm_networks = [
+                item for item in networks if item.family is ChainFamily.EVM
+            ]
+            network_badges = " · ".join(
+                f"{self._network_badge(item)} {item.name}" for item in evm_networks
+            )
+            embed.add_field(
+                name="EVM wallet",
+                value=(
+                    f"[{address}]({BASE_SEPOLIA.explorer_address_url(address)})\n"
+                    f"Supported: {network_badges}"
+                )[:1024],
+                inline=False,
+            )
+
+        solana_account = next(
+            (
+                self._account_for_network(profile, item.key)
+                for item in networks
+                if item.family is ChainFamily.SOLANA
+                and self._account_for_network(profile, item.key) is not None
+            ),
+            None,
+        )
+        if solana_account is not None:
+            solana_network = next(
+                item for item in networks if item.family is ChainFamily.SOLANA
+            )
+            address = str(solana_account.get("address") or "")
+            embed.add_field(
+                name=f"{self._network_badge(solana_network)} Solana wallet",
+                value=f"[{address}]({solana_network.explorer_address_url(address)})",
+                inline=False,
+            )
+
         for item in networks:
             account = self._account_for_network(profile, item.key)
-            if account is None:
+            if account is None or not item.supports(NetworkCapability.BALANCE):
                 continue
             address = str(account.get("address") or "")
-            explorer_address = item.explorer_address_url(address)
-            lines = [f"Wallet: [{address}]({explorer_address})"]
-            if item.supports(NetworkCapability.BALANCE):
+            native_balance = None
+            try:
+                native_balance = await self.wallet_provider.get_native_balance(
+                    address, item.key
+                )
+            except (ValueError, WalletProviderError):
+                pass
+
+            try:
+                discovered = await self.wallet_provider.get_token_balances(
+                    address, item.key
+                )
+            except (ValueError, WalletProviderError):
+                discovered = []
+            merged = {
+                str(token["contract_address"]).lower(): dict(token, status="indexed")
+                for token in discovered
+                if int(token.get("amount_atomic", 0) or 0) > 0
+            }
+            for contract, registered in (registry.get(item.key) or {}).items():
+                status = str(registered.get("status") or "community")
+                if status not in {"community", "recognized"}:
+                    continue
                 try:
-                    native_balance = await self.wallet_provider.get_native_balance(
-                        address, item.key
+                    asset = await self.wallet_provider.get_registered_token_asset(
+                        address, item.key, contract
                     )
-                    lines.append(
-                        f"{item.native_symbol}: **{format_atomic_amount(native_balance, item)}**"
-                    )
-                except (ValueError, WalletProviderError):
-                    lines.append(f"{item.native_symbol}: Temporarily unavailable")
-                try:
-                    tokens = await self.wallet_provider.get_token_balances(address, item.key)
-                except (ValueError, WalletProviderError):
-                    tokens = None
-                discovery_unavailable = tokens is None
-                merged = {
-                    str(token["contract_address"]).lower(): dict(token, status="indexed")
-                    for token in (tokens or [])
+                except WalletProviderError:
+                    continue
+                if int(asset.get("amount_atomic", 0) or 0) <= 0:
+                    continue
+                merged[contract.lower()] = {
+                    **asset,
+                    "symbol": str(registered.get("symbol") or "TOKEN"),
+                    "decimals": int(registered.get("decimals", 0)),
+                    "status": status,
                 }
-                for contract, registered in (registry.get(item.key) or {}).items():
-                    status = str(registered.get("status") or "community")
-                    if status not in {"community", "recognized"}:
-                        continue
-                    try:
-                        asset = await self.wallet_provider.get_registered_token_asset(
-                            address, item.key, contract
-                        )
-                    except WalletProviderError:
-                        continue
-                    merged[contract.lower()] = {
-                        **asset,
-                        "symbol": str(registered.get("symbol") or "TOKEN"),
-                        "decimals": int(registered.get("decimals", 0)),
-                        "status": status,
-                    }
-                tokens = list(merged.values())
-                if tokens:
-                    lines.append("Tokens (contract shown for safety):")
-                    for token in tokens[:6]:
-                        amount = format_atomic_amount(
-                            int(token["amount_atomic"]),
-                            item,
-                            decimals=int(token["decimals"]),
-                        )
-                        contract = str(token["contract_address"])
-                        short_contract = f"{contract[:8]}…{contract[-6:]}"
-                        marker = " ✅" if token.get("status") == "recognized" else ""
-                        lines.append(
-                            f"• {token['symbol']}{marker}: **{amount}** "
-                            f"([{short_contract}]({item.explorer_url}/token/{contract}))"
-                        )
-                    if len(tokens) > 6:
-                        lines.append(f"• {len(tokens) - 6} more indexed token(s)")
-                elif discovery_unavailable:
-                    lines.append("Automatic token discovery: Temporarily unavailable")
-            embed.add_field(name=item.name, value="\n".join(lines)[:1024], inline=False)
+
+            tokens = list(merged.values())
+            if network is None and not native_balance and not tokens:
+                continue
+            lines = []
+            if native_balance is None:
+                lines.append(f"{item.native_symbol}: Temporarily unavailable")
+            else:
+                lines.append(
+                    f"{item.native_symbol}: **{format_atomic_amount(native_balance, item)}**"
+                )
+            if tokens:
+                lines.append("Tokens:")
+                for token_asset in tokens[:6]:
+                    amount = format_atomic_amount(
+                        int(token_asset["amount_atomic"]),
+                        item,
+                        decimals=int(token_asset["decimals"]),
+                    )
+                    contract = str(token_asset["contract_address"])
+                    short_contract = f"{contract[:8]}…{contract[-6:]}"
+                    marker = " ✅" if token_asset.get("status") == "recognized" else ""
+                    lines.append(
+                        f"• {token_asset['symbol']}{marker}: **{amount}** "
+                        f"([{short_contract}]({item.explorer_url}/token/{contract}))"
+                    )
+                if len(tokens) > 6:
+                    lines.append(f"• {len(tokens) - 6} more token(s) with a balance")
+            embed.add_field(
+                name=f"{self._network_badge(item)} {item.name} balances",
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
+
         if not embed.fields:
             embed.description += " No enabled testnet accounts are available."
         embed.set_footer(
             text="Testnet assets only · Token names may be spoofed; verify contract addresses"
         )
         return embed
+
+    @staticmethod
+    def _network_badge(network) -> str:
+        return {
+            "base-sepolia": "🔵",
+            "ethereum-sepolia": "◆",
+            "arbitrum-sepolia": "🔷",
+            "polygon-amoy": "🟣",
+            "avalanche-fuji": "🔺",
+            "solana-devnet": "🟢",
+        }.get(network.key, "⛓️")
 
     @commands.group(
         name="wallet", aliases=("wallets", "cryptowallet"), invoke_without_command=True
