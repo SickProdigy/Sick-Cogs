@@ -169,6 +169,41 @@ class JwtAuthMixin:
             discord_user_id, profile, purpose="recovery"
         )
 
+    async def create_tokenfactory_handoff(
+        self, discord_user_id: int, draft: dict, request_id: str
+    ) -> tuple[str, int]:
+        """Sign a short-lived, CDP-independent external deployment handoff."""
+        configuration = await self.jwt_configuration()
+        if configuration is None:
+            raise RuntimeError("The protected companion signing key is not configured")
+        deployment_id = str(await self.config.deployment_id() or "")
+        application_id = getattr(self.bot.user, "id", None)
+        if not deployment_id or application_id is None:
+            raise RuntimeError("The protected companion identity is incomplete")
+        now = int(time.time())
+        expires_at = now + CLAIM_HANDOFF_LIFETIME_SECONDS
+        claims = {
+            "iss": configuration["issuer"],
+            "aud": configuration["audience"],
+            "sub": str(discord_user_id),
+            "iat": now,
+            "nbf": now,
+            "exp": expires_at,
+            "jti": secrets.token_urlsafe(18),
+            "sickwallet_purpose": "tokenfactory_external",
+            "sickwallet_deployment": deployment_id,
+            "sickwallet_application": str(application_id),
+            "sickwallet_discord_user": str(discord_user_id),
+            "sickwallet_tokenfactory": {**draft, "request_id": request_id},
+        }
+        token = jwt.encode(
+            claims,
+            configuration["private_key"],
+            algorithm="ES256",
+            headers={"kid": configuration["kid"], "typ": "JWT"},
+        )
+        return token, expires_at
+
     async def _create_wallet_handoff(
         self, discord_user_id: int, profile: dict, *, purpose: str,
         delegation_default_days: int | None = None,

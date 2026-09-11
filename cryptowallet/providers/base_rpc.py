@@ -392,6 +392,7 @@ async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict |
         to_address = transaction.get("to")
         block_hex = transaction.get("blockNumber")
         block_number = int(str(block_hex), 16) if block_hex is not None else None
+        input_data = str(transaction.get("input") or transaction.get("data") or "")
         receipt_status = receipt.get("status") if receipt else None
         success = int(str(receipt_status), 16) == 1 if receipt_status is not None else None
     except (KeyError, TypeError, ValueError) as exc:
@@ -409,6 +410,7 @@ async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict |
         "from_address": from_address,
         "to_address": str(to_address) if to_address is not None else None,
         "value_wei": value_wei,
+        "input_data": input_data,
         "block_number": block_number,
         "success": success,
         "wallet_transfers": wallet_transfers,
