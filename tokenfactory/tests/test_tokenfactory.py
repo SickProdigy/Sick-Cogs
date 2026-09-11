@@ -1,5 +1,8 @@
+import json
 import unittest
+from pathlib import Path
 
+from cryptowallet.providers.cdp import _singleton_deploy_data
 from ..models import TokenDraft
 from ..validation import (
     normalize_decimals,
@@ -45,6 +48,23 @@ class TokenFactoryValidationTests(unittest.TestCase):
             supply_atomic=1_000_000_000_000,
         )
         self.assertEqual(TokenDraft.from_dict(draft.to_dict()), draft)
+
+    def test_deployment_encoder_accepts_only_bundled_artifact(self):
+        artifact_path = (
+            Path(__file__).parents[1]
+            / "contracts"
+            / "artifact"
+            / "SickGamingTokenFactory.json"
+        )
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        calldata = _singleton_deploy_data(artifact["bytecode"])
+        self.assertTrue(calldata.startswith("0x4af63f02"))
+        self.assertEqual(calldata[10 + 64 : 10 + 128], "0" * 64)
+        mutated = artifact["bytecode"][:-2] + (
+            "00" if artifact["bytecode"][-2:] != "00" else "01"
+        )
+        with self.assertRaisesRegex(ValueError, "Unrecognized"):
+            _singleton_deploy_data(mutated)
 
 
 if __name__ == "__main__":

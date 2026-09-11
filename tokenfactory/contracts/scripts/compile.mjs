@@ -60,5 +60,13 @@ for (const [name, contract] of Object.entries(output.contracts[sourceName])) {
     path.join(buildDirectory, `${name}.json`),
     `${JSON.stringify(artifact, null, 2)}\n`,
   );
+  if (name === "SickGamingTokenFactory") {
+    const artifactDirectory = path.join(root, "artifact");
+    fs.mkdirSync(artifactDirectory, { recursive: true });
+    fs.writeFileSync(
+      path.join(artifactDirectory, `${name}.json`),
+      `${JSON.stringify(artifact, null, 2)}\n`,
+    );
+  }
   console.log(`${name} runtime code hash: ${artifact.runtimeCodeHash}`);
 }
