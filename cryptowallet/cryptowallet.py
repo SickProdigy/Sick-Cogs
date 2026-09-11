@@ -101,11 +101,25 @@ class CryptoWallet(
 
         return await self.wallet_provider.token_factory_deployment_status()
 
-    async def tokenfactory_deploy_pinned_factory(self, user, creation_code: str) -> dict:
+    async def tokenfactory_deploy_pinned_factory(
+        self, user, creation_code: str, attempt_id: str
+    ) -> dict:
         """Deploy only the provider-pinned TokenFactory artifact for this wallet user."""
 
         profile = await self.get_or_create_wallet_profile(user)
-        return await self.wallet_provider.deploy_token_factory(profile, creation_code)
+        return await self.wallet_provider.deploy_token_factory(
+            profile, creation_code, attempt_id
+        )
+
+    async def tokenfactory_operation_status(
+        self, user, user_operation_hash: str
+    ) -> dict:
+        """Return the CDP state of a submitted factory deployment operation."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.token_factory_operation_status(
+            profile, user_operation_hash
+        )
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""
