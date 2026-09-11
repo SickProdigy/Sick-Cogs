@@ -55,6 +55,7 @@ TOKEN_FACTORY_ADDRESS = "0xcba30318008035bb5a855a8684cea954d573c2c3"
 TOKEN_FACTORY_CREATION_SHA256 = "8f8f4cd23e799be527a98bc723aa77695aa1addff5a805f7c0971bfb8251dd45"
 TOKEN_FACTORY_RUNTIME_SHA256 = "d9cdd1effe5aac3b2bab44d78897fb27d4527f6ac964cdbc517e812da2bf20fb"
 TOKEN_FACTORY_SINGLETON_SHA256 = "687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
+TOKEN_FACTORY_DEPLOY_GAS_LIMIT = 2_000_000
 
 
 def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
@@ -648,6 +649,7 @@ class CdpWalletProvider(WalletProvider):
                     )
                 ),
                 calldata,
+                override_gas_limit=TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
             )
             status = str(result.get("status") or "")
             user_op_hash = str(result.get("userOpHash") or "")

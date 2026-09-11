@@ -385,15 +385,21 @@ class CdpApiClient:
         value_wei: int,
         idempotency_key: str,
         data: str = "0x",
+        override_gas_limit: int | None = None,
     ) -> dict:
         """Prepare, sign, and send one sponsored smart-account user operation."""
         path = (
             f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
             f"/evm/smart-accounts/{quote(address, safe='')}/send"
         )
+        call = {"to": to_address, "value": str(value_wei), "data": data}
+        if override_gas_limit is not None:
+            if override_gas_limit <= 0:
+                raise ValueError("override_gas_limit must be positive")
+            call["overrideGasLimit"] = str(override_gas_limit)
         body = {
             "network": network,
-            "calls": [{"to": to_address, "value": str(value_wei), "data": data}],
+            "calls": [call],
             "useCdpPaymaster": True,
         }
         return await self._request(
