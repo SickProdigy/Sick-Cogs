@@ -1,6 +1,7 @@
 import logging
 import re
 import uuid
+from hashlib import sha256
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
@@ -31,6 +32,7 @@ from ..core.validation import (
 from .base import WalletProvider, WalletProviderError
 from .base_rpc import (
     BaseRpcError,
+    get_contract_code,
     get_erc20_asset,
     get_native_balance as get_rpc_native_balance,
     get_solana_native_balance,
@@ -48,6 +50,11 @@ MAX_BALANCE_PAGES = 10
 PROVISIONING_IDEMPOTENCY_VERSION = 3
 HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
 log = logging.getLogger("red.sickcogs.cryptowallet")
+TOKEN_FACTORY_SINGLETON = "0xce0042b868300000d44a59004da54a005ffdcf9f"
+TOKEN_FACTORY_ADDRESS = "0xcba30318008035bb5a855a8684cea954d573c2c3"
+TOKEN_FACTORY_CREATION_SHA256 = "8f8f4cd23e799be527a98bc723aa77695aa1addff5a805f7c0971bfb8251dd45"
+TOKEN_FACTORY_RUNTIME_SHA256 = "d9cdd1effe5aac3b2bab44d78897fb27d4527f6ac964cdbc517e812da2bf20fb"
+TOKEN_FACTORY_SINGLETON_SHA256 = "687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
 
 
 def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
@@ -57,6 +64,23 @@ def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
     if amount_atomic <= 0 or amount_atomic >= 2 ** 256:
         raise ValueError("ERC-20 transfer amount is invalid")
     return "0xa9059cbb" + address[2:].lower().rjust(64, "0") + format(amount_atomic, "064x")
+
+
+def _sha256_bytecode(value: str) -> str:
+    if not isinstance(value, str) or not value.startswith("0x") or len(value) % 2:
+        raise ValueError("Invalid EVM bytecode")
+    return sha256(bytes.fromhex(value[2:])).hexdigest()
+
+
+def _singleton_deploy_data(creation_code: str) -> str:
+    """Encode only EIP-2470 deploy(bytes,bytes32) with the fixed zero salt."""
+
+    if _sha256_bytecode(creation_code) != TOKEN_FACTORY_CREATION_SHA256:
+        raise ValueError("Unrecognized TokenFactory creation bytecode")
+    raw = creation_code[2:].lower()
+    length = len(raw) // 2
+    padded = raw.ljust(((length + 31) // 32) * 64, "0")
+    return "0x4af63f02" + format(64, "064x") + "0" * 64 + format(length, "064x") + padded
 
 
 @dataclass(frozen=True, slots=True)
@@ -544,6 +568,108 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve delegation status. Try again later."
+            ) from exc
+
+    async def token_factory_deployment_status(self) -> dict:
+        """Verify the pinned singleton and deterministic TokenFactory destination."""
+
+        try:
+            singleton_code = await get_contract_code(
+                TOKEN_FACTORY_SINGLETON, BASE_SEPOLIA.key
+            )
+            factory_code = await get_contract_code(
+                TOKEN_FACTORY_ADDRESS, BASE_SEPOLIA.key
+            )
+            if _sha256_bytecode(singleton_code) != TOKEN_FACTORY_SINGLETON_SHA256:
+                raise WalletProviderError(
+                    "The Base Sepolia singleton deployer code does not match its pin."
+                )
+            if factory_code == "0x":
+                return {"deployed": False, "address": TOKEN_FACTORY_ADDRESS}
+            if _sha256_bytecode(factory_code) != TOKEN_FACTORY_RUNTIME_SHA256:
+                raise WalletProviderError(
+                    "Unexpected code exists at the deterministic TokenFactory address."
+                )
+            return {"deployed": True, "address": TOKEN_FACTORY_ADDRESS}
+        except BaseRpcError as exc:
+            raise WalletProviderError(
+                "Base Sepolia could not verify the TokenFactory deployment state."
+            ) from exc
+
+    async def deploy_token_factory(self, profile: dict, creation_code: str) -> dict:
+        """Submit exactly the pinned factory artifact through EIP-2470."""
+
+        state = await self.token_factory_deployment_status()
+        if state["deployed"]:
+            return {**state, "provider_status": "complete", "already_deployed": True}
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        try:
+            account_address = normalize_evm_address(
+                str((account or {}).get("address") or "")
+            )
+            calldata = _singleton_deploy_data(creation_code)
+        except ValueError as exc:
+            raise WalletProviderError(
+                "The TokenFactory deployment artifact or wallet is invalid."
+            ) from exc
+        if not provider_user_id or not profile_id:
+            raise WalletProviderError("The wallet profile is incomplete.")
+        delegation = await self.get_delegation_status(profile, BASE_SEPOLIA.key)
+        if not delegation.get("active"):
+            raise WalletProviderError(
+                "An active wallet authorization is required for factory deployment."
+            )
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                provider_user_id,
+                account_address,
+                credentials.project_id,
+                BASE_SEPOLIA.key,
+                TOKEN_FACTORY_SINGLETON,
+                0,
+                str(uuid.uuid5(uuid.NAMESPACE_URL, "sick-cogs:tokenfactory:factory:v1")),
+                calldata,
+            )
+            status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            calls = result.get("calls") or []
+            if (
+                status not in {"pending", "signed", "broadcast", "complete"}
+                or not HASH_PATTERN.fullmatch(user_op_hash)
+                or not isinstance(calls, list)
+                or len(calls) != 1
+                or normalize_evm_address(str(calls[0].get("to") or "")).lower()
+                != TOKEN_FACTORY_SINGLETON
+                or int(calls[0].get("value", -1)) != 0
+                or str(calls[0].get("data") or "").lower() != calldata.lower()
+            ):
+                raise ValueError("CDP returned mismatched factory deployment data")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            if transaction_hash and not HASH_PATTERN.fullmatch(transaction_hash):
+                raise ValueError("CDP returned an invalid transaction hash")
+            return {
+                "deployed": False,
+                "already_deployed": False,
+                "address": TOKEN_FACTORY_ADDRESS,
+                "provider_status": status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+            }
+        except (CdpApiError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely submit the pinned TokenFactory deployment."
             ) from exc
 
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
