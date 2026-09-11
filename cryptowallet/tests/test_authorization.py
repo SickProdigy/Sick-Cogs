@@ -58,6 +58,7 @@ from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
 from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
+    _read_bounded_content,
     build_solana_transfer_message,
     serialize_unsigned_solana_transfer,
 )
@@ -1710,6 +1711,19 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[4], contract)
         self.assertEqual(args[5], 0)
         self.assertEqual(args[7], calldata)
+
+    async def test_rpc_reader_collects_fragmented_json_body(self):
+        class FragmentedContent:
+            async def iter_chunked(self, size):
+                self.requested_size = size
+                yield b'{"jsonrpc":"2.0","result":"0x'
+                yield b'1234"}'
+
+        content = FragmentedContent()
+        raw = await _read_bounded_content(content, "Base Sepolia")
+
+        self.assertEqual(raw, b'{"jsonrpc":"2.0","result":"0x1234"}')
+        self.assertEqual(content.requested_size, 64 * 1024)
 
     async def test_user_operation_lookup_uses_documented_project_route(self):
         client = object.__new__(CdpApiClient)

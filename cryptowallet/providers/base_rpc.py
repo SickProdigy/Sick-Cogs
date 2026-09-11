@@ -443,6 +443,17 @@ async def _rpc(method: str, params: list):
     return await _rpc_with_urls(BASE_SEPOLIA_RPC_URLS, method, params, "Base Sepolia")
 
 
+async def _read_bounded_content(content, network: str) -> bytes:
+    """Collect a fragmented HTTP body without exceeding the response cap."""
+
+    raw = bytearray()
+    async for chunk in content.iter_chunked(64 * 1024):
+        raw.extend(chunk)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise BaseRpcError(f"{network} returned an oversized response.")
+    return bytes(raw)
+
+
 async def _rpc_with_urls(rpc_urls: tuple[str, ...], method: str, params: list, network: str):
     timeout = aiohttp.ClientTimeout(total=15)
     last_error = None
@@ -454,9 +465,7 @@ async def _rpc_with_urls(rpc_urls: tuple[str, ...], method: str, params: list, n
                     headers={"Content-Type": "application/json"},
                     json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
                 ) as response:
-                    raw = await response.content.read(MAX_RESPONSE_BYTES + 1)
-                    if len(raw) > MAX_RESPONSE_BYTES:
-                        raise BaseRpcError(f"{network} returned an oversized response.")
+                    raw = await _read_bounded_content(response.content, network)
                     payload = json.loads(raw.decode("utf-8"))
                     if (
                         response.status != 200
