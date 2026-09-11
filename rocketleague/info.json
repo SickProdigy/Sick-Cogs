@@ -1,16 +1,26 @@
 {
-    "author": ["SickProdigy"],
-    "description": "Look up supported Rocket League Championship Series tournament information from start.gg.",
+    "author": [
+        "SickProdigy"
+    ],
+    "description": "Post cached Rocket League Championship Series schedules from BLAST with supplemental start.gg lookups.",
     "disabled": false,
-    "end_user_data_statement": "This cog does not persistently store user data or metadata.",
+    "end_user_data_statement": "This cog stores guild announcement channel settings, cached public tournament information, and identifiers for schedule updates already delivered. It does not store member data.",
     "hidden": false,
-    "install_msg": "This cog uses the supported start.gg API for RLCS tournament information. As the bot owner, create a start.gg developer token and set it privately with `[p]set api startgg token,YOUR_TOKEN`. Then use `[p]rlcs upcoming` or `[p]rlcs event <start.gg URL or slug>`.",
+    "install_msg": "Use `[p]rlcsset channel #channel` to enable weekly cached RLCS schedule updates from BLAST. `[p]rlcs upcoming` reads that cache. A private start.gg token is optional and enables supplemental `[p]rlcs event <start.gg URL or slug>` lookups.",
     "min_bot_version": "3.5.0",
-    "permissions": ["embed_links"],
+    "permissions": [
+        "embed_links"
+    ],
     "name": "RocketLeague",
     "requirements": [],
-    "short": "Supported RLCS tournament lookups",
-    "tags": ["rocket league", "rlcs", "esports", "start.gg"],
+    "short": "Cached RLCS schedules and guild announcements",
+    "tags": [
+        "rocket league",
+        "rlcs",
+        "esports",
+        "blast",
+        "start.gg"
+    ],
     "type": "COG",
     "version": "1.0.0"
 }
