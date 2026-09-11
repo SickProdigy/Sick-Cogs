@@ -52,13 +52,21 @@ class TokenDetailsModal(discord.ui.Modal):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
         self.view_ref.draft = draft
+        self.view_ref.deploy.disabled = not self.view_ref.deployment_available
+        self.view_ref.deploy.label = (
+            "Review deployment" if self.view_ref.deployment_available
+            else "Deployment unavailable"
+        )
         await self.view_ref.cog.save_draft(self.view_ref.user, draft)
         await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
         await interaction.followup.send("Token deployment draft saved.", ephemeral=True)
 
 
 class TokenFactoryDraftView(discord.ui.View):
-    def __init__(self, cog: "TokenFactory", user, wallet_context: dict, draft=None):
+    def __init__(
+        self, cog: "TokenFactory", user, wallet_context: dict, draft=None,
+        *, deployment_available: bool = False,
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.user = user
@@ -66,6 +74,11 @@ class TokenFactoryDraftView(discord.ui.View):
         self.wallet_profile_id = wallet_context["profile_id"]
         self.owner_address = wallet_context["owner_address"]
         self.draft = draft
+        self.deployment_available = deployment_available
+        self.deploy.disabled = not (deployment_available and draft is not None)
+        self.deploy.label = (
+            "Review deployment" if deployment_available else "Deployment unavailable"
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -102,7 +115,11 @@ class TokenFactoryDraftView(discord.ui.View):
         embed.add_field(name="Token owner", value=f"`{self.owner_address}`", inline=False)
         embed.add_field(
             name="Deployment",
-            value="Unavailable until the reviewed factory contract is configured.",
+            value=(
+                "Ready for protected review and confirmation."
+                if self.deployment_available
+                else "Disabled or emergency-paused by the bot owner."
+            ),
             inline=False,
         )
         embed.set_footer(text="Testnet only · fixed supply · no bot mint or ownership authority")
@@ -112,11 +129,99 @@ class TokenFactoryDraftView(discord.ui.View):
     async def edit_details(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TokenDetailsModal(self))
 
-    @discord.ui.button(
-        label="Deployment unavailable", style=discord.ButtonStyle.secondary, disabled=True
-    )
+    @discord.ui.button(label="Review deployment", style=discord.ButtonStyle.success)
     async def deploy(self, interaction: discord.Interaction, button: discord.ui.Button):
-        return
+        if self.draft is None or not self.deployment_available:
+            await interaction.response.send_message(
+                "Token deployment is unavailable.", ephemeral=True
+            )
+            return
+        confirmation = TokenDeploymentConfirmView(self.cog, self.user, self.draft)
+        await interaction.response.send_message(
+            embed=confirmation.embed(), view=confirmation, ephemeral=True
+        )
+
+
+class TokenDeploymentConfirmView(discord.ui.View):
+    """Requester-bound final confirmation for one immutable token draft."""
+
+    def __init__(self, cog: "TokenFactory", user, draft: TokenDraft):
+        super().__init__(timeout=180)
+        self.cog = cog
+        self.user = user
+        self.user_id = user.id
+        self.draft = draft
+        self.processing = False
+
+    def embed(self) -> discord.Embed:
+        scale = 10**self.draft.decimals
+        whole, remainder = divmod(self.draft.supply_atomic, scale)
+        supply = str(whole)
+        if remainder:
+            supply += f".{remainder:0{self.draft.decimals}d}".rstrip("0")
+        embed = discord.Embed(
+            title="Confirm fixed-supply token deployment",
+            description=(
+                "Review every immutable field. Confirmation submits a sponsored Base "
+                "Sepolia operation and cannot be undone after confirmation."
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Token", value=f"{self.draft.name} ({self.draft.symbol})", inline=False)
+        embed.add_field(name="Fixed supply", value=supply, inline=True)
+        embed.add_field(name="Decimals", value=str(self.draft.decimals), inline=True)
+        embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        embed.add_field(name="Recipient", value=f"`{self.draft.owner_address}`", inline=False)
+        embed.add_field(
+            name="Authority",
+            value="No later minting, administrator, upgrade, or bot ownership.",
+            inline=False,
+        )
+        embed.set_footer(text="Testnet only · explicit confirmation · active wallet authorization required")
+        return embed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the member who reviewed this draft can deploy it.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Deploy test token", style=discord.ButtonStyle.danger, emoji="⚠️")
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "Token deployment is already being processed.", ephemeral=True
+            )
+            return
+        self.processing = True
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(view=self)
+        try:
+            result = await self.cog.submit_token_deployment(self.user, self.draft)
+        except Exception as exc:
+            await interaction.followup.send(f"Token deployment failed: {exc}", ephemeral=True)
+            return
+        if result.get("already_deployed"):
+            message = (
+                f"This token already exists at `{result['token_address']}`. "
+                "Run `tokenfactory deployment` to verify and record it."
+            )
+        else:
+            message = (
+                "Fixed-supply token deployment submitted. "
+                f"User operation: `{result['user_operation_hash']}`\n"
+                "Run `tokenfactory deployment` after confirmation."
+            )
+        await interaction.followup.send(message, ephemeral=True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Token deployment cancelled.", view=self)
 
 
 class FactoryDeploymentView(discord.ui.View):

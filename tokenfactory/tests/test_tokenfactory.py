@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from cryptowallet.providers.cdp import _singleton_deploy_data
+from cryptowallet.providers.cdp import _fixed_supply_token_data, _singleton_deploy_data
 from ..models import TokenDraft
 from ..validation import (
     normalize_decimals,
@@ -48,6 +48,30 @@ class TokenFactoryValidationTests(unittest.TestCase):
             supply_atomic=1_000_000_000_000,
         )
         self.assertEqual(TokenDraft.from_dict(draft.to_dict()), draft)
+
+    def test_fixed_supply_encoder_matches_ethers_reference(self):
+        encoded = _fixed_supply_token_data(
+            "Sick Gaming Token",
+            "SGT",
+            6,
+            1_000_000_250_000,
+            "0x1111111111111111111111111111111111111111",
+            "0x" + "22" * 32,
+        )
+        expected = (
+            "0x8b08cf96"
+            "00000000000000000000000000000000000000000000000000000000000000c0"
+            "0000000000000000000000000000000000000000000000000000000000000100"
+            "0000000000000000000000000000000000000000000000000000000000000006"
+            "000000000000000000000000000000000000000000000000000000e8d4a8e090"
+            "0000000000000000000000001111111111111111111111111111111111111111"
+            + "22" * 32
+            + "0000000000000000000000000000000000000000000000000000000000000011"
+            "5369636b2047616d696e6720546f6b656e000000000000000000000000000000"
+            "0000000000000000000000000000000000000000000000000000000000000003"
+            "5347540000000000000000000000000000000000000000000000000000000000"
+        )
+        self.assertEqual(encoded, expected)
 
     def test_deployment_encoder_accepts_only_bundled_artifact(self):
         artifact_path = (
