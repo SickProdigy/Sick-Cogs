@@ -59,7 +59,7 @@ class TokenFactory(commands.Cog):
                 )
                 pending.update(status)
                 await self.config.pending_factory_operation.set(pending)
-                if status["provider_status"] not in {"dropped", "failed"}:
+                if status["provider_status"] not in {"complete", "dropped", "failed"}:
                     raise RuntimeError(
                         "A factory deployment operation is already "
                         f"{status['provider_status']}: "
@@ -233,8 +233,11 @@ class TokenFactory(commands.Cog):
             )
             if transaction:
                 message += f" Transaction: `{transaction}`"
-            if status in {"dropped", "failed"}:
-                message += " A fresh deployment attempt is now allowed."
+            if status in {"complete", "dropped", "failed"}:
+                message += (
+                    " The operation did not install the pinned code; a fresh deployment "
+                    "attempt is now allowed."
+                )
             else:
                 message += " Do not submit another deployment yet."
             await ctx.send(message)
