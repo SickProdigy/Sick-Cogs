@@ -65,16 +65,26 @@ class TokenFactory(commands.Cog):
         user_config = self.config.user(user)
         pending = await user_config.pending_deployment()
         if isinstance(pending, dict):
-            same_external_draft = (
+            external_handoff_expired = (
                 pending.get("route") == "external"
+                and pending.get("provider_status") == "awaiting_external_wallet"
+                and int(pending.get("submitted_at", 0) or 0) + 3 * 60
+                <= int(time.time())
+            )
+            same_external_draft = (
+                not external_handoff_expired
+                and pending.get("route") == "external"
                 and pending.get("draft") == draft.to_dict()
                 and pending.get("request_id")
             )
             if same_external_draft:
                 request_id = str(pending["request_id"])
-            elif pending.get("provider_status") not in {
-                "complete", "dropped", "failed"
-            }:
+            elif (
+                not external_handoff_expired
+                and pending.get("provider_status") not in {
+                    "complete", "dropped", "failed"
+                }
+            ):
                 raise RuntimeError(
                     "Another token deployment is already active. Verify or finish it first."
                 )
