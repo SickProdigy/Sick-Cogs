@@ -1,5 +1,6 @@
 import discord
 import json
+import uuid
 from pathlib import Path
 from redbot.core import Config, commands
 from redbot.core.bot import Red
@@ -27,6 +28,7 @@ class TokenFactory(commands.Cog):
             factory_address=None,
             factory_runtime_code_hash=None,
             factory_version=None,
+            pending_factory_operation=None,
             emergency_paused=True,
         )
 
@@ -50,10 +52,38 @@ class TokenFactory(commands.Cog):
 
     async def deploy_pinned_factory(self, user, creation_code: str) -> dict:
         try:
-            return await self._cryptowallet().tokenfactory_deploy_pinned_factory(
-                user, creation_code
+            pending = await self.config.pending_factory_operation()
+            if isinstance(pending, dict) and pending.get("user_operation_hash"):
+                status = await self._cryptowallet().tokenfactory_operation_status(
+                    user, str(pending["user_operation_hash"])
+                )
+                pending.update(status)
+                await self.config.pending_factory_operation.set(pending)
+                if status["provider_status"] not in {"dropped", "failed"}:
+                    raise RuntimeError(
+                        "A factory deployment operation is already "
+                        f"{status['provider_status']}: "
+                        f"`{status['user_operation_hash']}`. Run "
+                        "`tokenfactoryset verifyfactory` instead."
+                    )
+            attempt_id = str(uuid.uuid4())
+            result = await self._cryptowallet().tokenfactory_deploy_pinned_factory(
+                user, creation_code, attempt_id
             )
+            if not result.get("already_deployed"):
+                await self.config.pending_factory_operation.set(
+                    {
+                        "attempt_id": attempt_id,
+                        "discord_user_id": user.id,
+                        "provider_status": result["provider_status"],
+                        "user_operation_hash": result["user_operation_hash"],
+                        "transaction_hash": result.get("transaction_hash"),
+                    }
+                )
+            return result
         except Exception as exc:
+            if isinstance(exc, RuntimeError):
+                raise
             raise RuntimeError(f"Pinned factory deployment failed: {exc}") from exc
 
     async def _wallet_context(self, ctx: commands.Context) -> dict | None:
@@ -173,13 +203,48 @@ class TokenFactory(commands.Cog):
             await ctx.send(f"Factory verification failed: {exc}")
             return
         if not state.get("deployed"):
-            await ctx.send("The pinned factory is not confirmed on Base Sepolia yet.")
+            pending = await self.config.pending_factory_operation()
+            if not isinstance(pending, dict) or not pending.get("user_operation_hash"):
+                await ctx.send(
+                    "The pinned factory is not confirmed and no tracked deployment "
+                    "operation exists. Run `tokenfactoryset deployfactory` to start one."
+                )
+                return
+            if pending.get("discord_user_id") != ctx.author.id:
+                await ctx.send(
+                    "The pinned factory is not confirmed. Its tracked operation belongs "
+                    "to another bot owner, so its CDP status was not queried."
+                )
+                return
+            try:
+                operation = await self._cryptowallet().tokenfactory_operation_status(
+                    ctx.author, str(pending["user_operation_hash"])
+                )
+            except Exception as exc:
+                await ctx.send(f"Factory operation status lookup failed: {exc}")
+                return
+            pending.update(operation)
+            await self.config.pending_factory_operation.set(pending)
+            status = operation["provider_status"]
+            transaction = operation.get("transaction_hash")
+            message = (
+                f"The pinned factory is not on-chain. CDP reports the tracked "
+                f"operation as **{status}**."
+            )
+            if transaction:
+                message += f" Transaction: `{transaction}`"
+            if status in {"dropped", "failed"}:
+                message += " A fresh deployment attempt is now allowed."
+            else:
+                message += " Do not submit another deployment yet."
+            await ctx.send(message)
             return
         await self.config.factory_address.set(state["address"])
         await self.config.factory_runtime_code_hash.set(
             "0xa4e867671846a61743568f19d897fb5ffe40ad9678c9c06e791ff45dad7136f7"
         )
         await self.config.factory_version.set("v1")
+        await self.config.pending_factory_operation.set(None)
         await ctx.send(
             f"Verified and recorded the pinned factory at `{state['address']}`. "
             "Token deployment remains emergency-paused until its separate flow is complete."
