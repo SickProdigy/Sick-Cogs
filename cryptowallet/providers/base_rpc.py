@@ -255,6 +255,22 @@ async def get_native_balance(address: str, network: str) -> int:
         raise BaseRpcError("The network returned an invalid native balance.") from exc
 
 
+async def get_contract_code(address: str, network: str) -> str:
+    """Return bounded EVM runtime bytecode for one reviewed address."""
+
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Contract-code lookup is unavailable for this network.")
+    code = await _rpc_with_urls(rpc_urls, "eth_getCode", [address, "latest"], network)
+    if not isinstance(code, str) or not code.startswith("0x"):
+        raise BaseRpcError("The network returned invalid contract bytecode.")
+    try:
+        bytes.fromhex(code[2:])
+    except ValueError as exc:
+        raise BaseRpcError("The network returned invalid contract bytecode.") from exc
+    return code.lower()
+
+
 async def get_erc20_asset(
     contract: str, address: str, network: str, *, include_metadata: bool = False
 ) -> dict:

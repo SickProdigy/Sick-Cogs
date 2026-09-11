@@ -96,6 +96,17 @@ class CryptoWallet(
             "chain_id": BASE_SEPOLIA.chain_id,
         }
 
+    async def tokenfactory_deployment_status(self) -> dict:
+        """Expose only the reviewed TokenFactory deployment state."""
+
+        return await self.wallet_provider.token_factory_deployment_status()
+
+    async def tokenfactory_deploy_pinned_factory(self, user, creation_code: str) -> dict:
+        """Deploy only the provider-pinned TokenFactory artifact for this wallet user."""
+
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.deploy_token_factory(profile, creation_code)
+
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""
         user_config = self.config.user_from_id(user_id)
