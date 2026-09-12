@@ -1,0 +1,100 @@
+{
+  "status": "prototype-pinned",
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "protocol": "clanker-v4",
+  "sdk": {
+    "repository": "https://github.com/clanker-devco/clanker-sdk",
+    "tag": "v4.2.19",
+    "commit": "4f4d2bbf41c7f10543559dc043c85f443a6d452e",
+    "sourceHashes": {
+      "src/abi/v4/Clanker.ts": "35c2bfc5fcc0a0706a921b84e2e9e803d0034eec87906ba3661d073b8940e3e3",
+      "src/config/clankerTokenV4.ts": "4a3d2a30f3805508cd06d91a0ce3795b84be98c12732a2781dc6ffa719e1d81c",
+      "src/utils/clankers.ts": "9906502072b8da2061039282cab731fa59c884bc2766eef435cbdb7739da8927"
+    }
+  },
+  "factory": {
+    "address": "0xE85A59c628F7d27878ACeB4bf3b35733630083a9",
+    "runtimeCodeSha256": "365456b7fae5f3d0f95eb1500426505f8a8a4a412fce23008792e1b7ff8b0b5f",
+    "function": "deployToken",
+    "selector": "0xdf40224a",
+    "stateMutability": "payable",
+    "canonicalSignature": "deployToken(((address,string,string,bytes32,string,string,string,uint256),(address,address,int24,int24,bytes),(address,address[],address[],uint16[],int24[],int24[],uint16[],bytes),(address,bytes),(address,uint256,uint16,bytes)[]))",
+    "input": {
+      "name": "deploymentConfig",
+      "type": "tuple",
+      "components": [
+        {
+          "name": "tokenConfig",
+          "type": "tuple",
+          "components": [
+            ["tokenAdmin", "address"],
+            ["name", "string"],
+            ["symbol", "string"],
+            ["salt", "bytes32"],
+            ["image", "string"],
+            ["metadata", "string"],
+            ["context", "string"],
+            ["originatingChainId", "uint256"]
+          ]
+        },
+        {
+          "name": "poolConfig",
+          "type": "tuple",
+          "components": [
+            ["hook", "address"],
+            ["pairedToken", "address"],
+            ["tickIfToken0IsClanker", "int24"],
+            ["tickSpacing", "int24"],
+            ["poolData", "bytes"]
+          ]
+        },
+        {
+          "name": "lockerConfig",
+          "type": "tuple",
+          "components": [
+            ["locker", "address"],
+            ["rewardAdmins", "address[]"],
+            ["rewardRecipients", "address[]"],
+            ["rewardBps", "uint16[]"],
+            ["tickLower", "int24[]"],
+            ["tickUpper", "int24[]"],
+            ["positionBps", "uint16[]"],
+            ["lockerData", "bytes"]
+          ]
+        },
+        {
+          "name": "mevModuleConfig",
+          "type": "tuple",
+          "components": [
+            ["mevModule", "address"],
+            ["mevModuleData", "bytes"]
+          ]
+        },
+        {
+          "name": "extensionConfigs",
+          "type": "tuple[]",
+          "components": [
+            ["extension", "address"],
+            ["msgValue", "uint256"],
+            ["extensionBps", "uint16"],
+            ["extensionData", "bytes"]
+          ]
+        }
+      ]
+    },
+    "output": ["tokenAddress", "address"]
+  },
+  "relatedContracts": {
+    "locker": "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f",
+    "vault": "0xcC80d1226F899a78fC2E459a1500A13C373CE0A5",
+    "airdrop": "0x5c68F1560a5913c176Fc5238038098970B567B19",
+    "devbuy": "0x691f97752E91feAcD7933F32a1FEdCeDae7bB59c",
+    "mevModule": "0x261fE99C4D0D41EE8d0e594D11aec740E8354ab0",
+    "feeLocker": "0x42A95190B4088C88Dd904d930c79deC1158bF09D",
+    "feeStaticHook": "0xDFcCcfBeef7F3Fc8b16027Ce6feACb48024068cC",
+    "feeStaticHookV2": "0x11b51DBC2f7F683b81CeDa83DC0078D57bA328cc",
+    "feeDynamicHook": "0xE63b0A59100698f379F9B577441A561bAF9828cc",
+    "feeDynamicHookV2": "0xBF4983dC0f2F8FE78C5cf8Fc621f294A993728Cc"
+  }
+}
