@@ -2033,6 +2033,22 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "binding"):
             await harness.clanker_intent_status(7, launch.intent_id, "0x" + "00" * 32)
 
+    async def test_public_clanker_status_rebinds_current_wallet_profile(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {"profile_id": launch.profile_id, "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
+        store = _ApprovalStore(); store.data[launch.intent_id] = {**launch.to_dict(), "status": "submitted"}
+        harness = SimpleNamespace(
+            get_or_create_wallet_profile=AsyncMock(return_value=profile),
+            clanker_intent_status=AsyncMock(return_value={"status": "submitted", "transaction_hash": None}),
+            config=SimpleNamespace(user=lambda user: SimpleNamespace(intents=store)),
+            _stored_clanker_intent=ClankerLifecycleMixin._stored_clanker_intent,
+        )
+        result = await CryptoWallet.clanker_internal_status(
+            harness, SimpleNamespace(id=7), launch.intent_id, launch.payload_hash
+        )
+        self.assertEqual(result["route"], "internal")
+        self.assertEqual(result["status"], "submitted")
+
     async def test_clanker_endpoint_submits_only_verified_pending_session(self):
         session = SimpleNamespace(discord_user_id=7, intent_id="intent", payload_hash="0x" + "12" * 32, purpose=ApprovalPurpose.CLANKER_DEPLOYMENT)
         cog = SimpleNamespace(

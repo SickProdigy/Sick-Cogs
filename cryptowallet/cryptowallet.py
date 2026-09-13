@@ -234,6 +234,28 @@ class CryptoWallet(
             "expires_at": min(intent.expires_at, int(time.time()) + 10 * 60),
         }
 
+    async def clanker_internal_status(
+        self, user, signing_intent_id: str, signing_payload_hash: str
+    ) -> dict:
+        """Return only persisted status for the requesting user exact Clanker intent."""
+        profile = await self.get_or_create_wallet_profile(user)
+        data = await self.clanker_intent_status(
+            int(user.id), signing_intent_id, signing_payload_hash
+        )
+        stored = await self.config.user(user).intents.get_raw(
+            signing_intent_id, default=None
+        )
+        intent = self._stored_clanker_intent(stored)
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_SEPOLIA.key), None)
+        if (
+            intent.profile_id != str(profile.get("profile_id") or "")
+            or intent.wallet_address != str((account or {}).get("address") or "").lower()
+        ):
+            raise RuntimeError("The current wallet profile no longer matches this Clanker intent.")
+        return {"route": "internal", "signing_intent_id": signing_intent_id,
+                "signing_payload_hash": signing_payload_hash.lower(), **data}
+
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""
         user_config = self.config.user_from_id(user_id)
