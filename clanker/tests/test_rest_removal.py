@@ -157,6 +157,24 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid Clanker approval binding"):
             await cog.create_internal_wallet_approval(SimpleNamespace(id=7), record)
 
+    async def test_internal_status_refresh_is_exactly_bound(self):
+        response = {"route": "internal", "signing_intent_id": "intent-1",
+                    "signing_payload_hash": "0x" + "12" * 32, "status": "submitted",
+                    "provider_status": "broadcast", "attempt_id": "attempt-1",
+                    "user_operation_hash": "0x" + "34" * 32,
+                    "transaction_hash": None, "block_number": None}
+        api = AsyncMock(return_value=response)
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_internal_status=api))
+        record = {"execution_route": "internal", "signing_intent_id": "intent-1",
+                  "signing_payload_hash": "0x" + "12" * 32}
+        user = SimpleNamespace(id=7)
+        self.assertEqual(await cog.refresh_internal_wallet_status(user, record), response)
+        api.assert_awaited_once_with(user, "intent-1", record["signing_payload_hash"])
+        response["signing_intent_id"] = "changed"
+        with self.assertRaisesRegex(RuntimeError, "invalid Clanker lifecycle"):
+            await cog.refresh_internal_wallet_status(user, record)
+
     async def test_external_verifier_requires_exact_created_token(self):
         tx_hash = "0x" + "ab" * 32
         sender, token = "0x" + "12" * 20, "0x" + "78" * 20

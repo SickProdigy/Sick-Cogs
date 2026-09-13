@@ -529,6 +529,30 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("CryptoWallet returned an invalid Clanker approval binding.")
         return result
 
+    async def refresh_internal_wallet_status(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Read one exactly bound persisted CryptoWallet lifecycle state."""
+        wallet = self.bot.get_cog("CryptoWallet")
+        get_status = getattr(wallet, "clanker_internal_status", None) if wallet else None
+        if not callable(get_status):
+            raise RuntimeError("CryptoWallet Clanker status is unavailable.")
+        intent_id = str(record.get("signing_intent_id") or "")
+        payload_hash = str(record.get("signing_payload_hash") or "")
+        if record.get("execution_route") != "internal" or not intent_id or not payload_hash:
+            raise RuntimeError("This launch has no bound internal-wallet lifecycle.")
+        result = await get_status(user, intent_id, payload_hash)
+        expected = {"route", "signing_intent_id", "signing_payload_hash", "status",
+                    "provider_status", "attempt_id", "user_operation_hash",
+                    "transaction_hash", "block_number"}
+        allowed = {"pending", "processing", "uncertain", "rejected", "expired",
+                   "submitted", "confirmed", "failed"}
+        if (not isinstance(result, dict) or set(result) != expected
+                or result.get("route") != "internal"
+                or result.get("signing_intent_id") != intent_id
+                or str(result.get("signing_payload_hash", "")).lower() != payload_hash.lower()
+                or result.get("status") not in allowed):
+            raise RuntimeError("CryptoWallet returned an invalid Clanker lifecycle state.")
+        return result
+
     async def mark_internal_approval(self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]) -> None:
         """Persist safe signer references without storing the one-time approval URL."""
 
@@ -783,6 +807,32 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send(f"Clanker could not start CryptoWallet approval: {exc}")
             return
         await ctx.send("I sent your protected CryptoWallet approval link by DM.")
+
+    @clanker.command(name="refresh")
+    async def clanker_refresh(self, ctx: commands.Context, launch_id: str):
+        """Refresh your persisted internal-wallet launch status after approval or restart."""
+        record = await self.get_launch_record(ctx.guild, launch_id)
+        if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
+            await ctx.send("No matching internal-wallet launch belongs to you.")
+            return
+        try:
+            result = await self.refresh_internal_wallet_status(ctx.author, record)
+            async with self.config.guild(ctx.guild).audit_log() as audit_log:
+                matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
+                if len(matches) != 1 or matches[0].get("execution_route") != "internal":
+                    raise RuntimeError("The launch record changed during status refresh.")
+                matches[0].update({
+                    "status": "internal_" + result["status"],
+                    "provider_status": result.get("provider_status"),
+                    "attempt_id": result.get("attempt_id"),
+                    "user_operation_hash": result.get("user_operation_hash"),
+                    "transaction_hash": result.get("transaction_hash"),
+                    "block_number": result.get("block_number"),
+                })
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(f"Clanker could not refresh CryptoWallet status: {exc}")
+            return
+        await ctx.send(f"CryptoWallet Clanker status: `{result['status']}`.")
 
     @clanker.command(name="external")
     async def clanker_external(self, ctx: commands.Context, launch_id: str):
