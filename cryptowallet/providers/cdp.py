@@ -895,6 +895,50 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not safely submit the Clanker deployment."
             ) from exc
 
+    async def clanker_operation_status(
+        self, profile: dict, intent: ClankerDeploymentIntent, user_operation_hash: str
+    ) -> dict:
+        """Refresh one Clanker operation and reject changed provider call data."""
+        if not HASH_PATTERN.fullmatch(user_operation_hash or ""):
+            raise WalletProviderError("The stored Clanker operation hash is invalid.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_SEPOLIA.key), None)
+        try:
+            address = normalize_evm_address(str((account or {}).get("address") or ""))
+        except ValueError as exc:
+            raise WalletProviderError("The stored Clanker wallet address is invalid.") from exc
+        if not provider_user_id or address != intent.wallet_address:
+            raise WalletProviderError("The wallet profile no longer matches the Clanker intent.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).get_smart_account_user_operation(
+                provider_user_id, address, user_operation_hash, credentials.project_id
+            )
+            status = str(result.get("status") or "")
+            returned_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls")
+            if (status not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                    or returned_hash.lower() != user_operation_hash.lower()
+                    or not HASH_PATTERN.fullmatch(returned_hash)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)):
+                raise ValueError("mismatched Clanker operation status")
+            if calls is not None:
+                if not isinstance(calls, list) or len(calls) != 1:
+                    raise ValueError("mismatched Clanker operation calls")
+                validate_clanker_deployment_call(intent, to=str(calls[0].get("to") or ""),
+                    value=int(calls[0].get("value", -1)), data=str(calls[0].get("data") or ""))
+            receipts = result.get("receipts") or []
+            block_number = int(receipts[0]["blockNumber"]) if receipts and receipts[0].get("blockNumber") is not None else None
+            return {"provider_status": status, "user_operation_hash": returned_hash.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                    "block_number": block_number}
+        except (CdpApiError, AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not refresh the Clanker operation.") from exc
+
     async def deploy_fixed_supply_token(
         self,
         profile: dict,

@@ -66,6 +66,7 @@ from ..core.validation import (
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
+from ..providers.clanker import clanker_deployment_calldata
 from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
@@ -2021,6 +2022,19 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             provider.submit_clanker_deployment.await_args.args[2], "attempt-1"
         )
 
+    async def test_submitted_status_refresh_persists_confirmation(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        provider = SimpleNamespace(clanker_operation_status=AsyncMock(return_value={
+            "provider_status": "complete", "user_operation_hash": "0x" + "11" * 32,
+            "transaction_hash": "0x" + "22" * 32, "block_number": 123}))
+        harness = _ClankerLifecycleHarness(launch, provider)
+        harness.store.data[launch.intent_id].update({"status": "submitted",
+            "user_operation_hash": "0x" + "11" * 32})
+        result = await harness.refresh_clanker_intent_status(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["block_number"], 123)
+        provider.clanker_operation_status.assert_awaited_once()
+
     async def test_status_and_rejection_are_bound_and_terminal(self):
         launch = StoredApprovalSessionTests._clanker_intent()
         harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
@@ -2039,7 +2053,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         store = _ApprovalStore(); store.data[launch.intent_id] = {**launch.to_dict(), "status": "submitted"}
         harness = SimpleNamespace(
             get_or_create_wallet_profile=AsyncMock(return_value=profile),
-            clanker_intent_status=AsyncMock(return_value={"status": "submitted", "transaction_hash": None}),
+            refresh_clanker_intent_status=AsyncMock(return_value={"status": "submitted", "transaction_hash": None}),
             config=SimpleNamespace(user=lambda user: SimpleNamespace(intents=store)),
             _stored_clanker_intent=ClankerLifecycleMixin._stored_clanker_intent,
         )
@@ -2132,6 +2146,23 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             prepared["to"], prepared["value"],
             prepared["idempotency_key"], prepared["data"],
         ))
+
+    async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {"profile_id": launch.profile_id, "provider_user_id": "provider-user",
+                   "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        data = clanker_deployment_calldata(launch)
+        client = SimpleNamespace(get_smart_account_user_operation=AsyncMock(return_value={
+            "status": "complete", "userOpHash": "0x" + "11" * 32,
+            "transactionHash": "0x" + "22" * 32,
+            "calls": [{"to": launch.factory, "value": "0", "data": data}],
+            "receipts": [{"blockNumber": 123}]}))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+        result = await provider.clanker_operation_status(profile, launch, "0x" + "11" * 32)
+        self.assertEqual(result["provider_status"], "complete")
+        self.assertEqual(result["block_number"], 123)
 
     async def test_rejects_changed_provider_call(self):
         launch = StoredApprovalSessionTests._clanker_intent()

@@ -239,7 +239,7 @@ class CryptoWallet(
     ) -> dict:
         """Return only persisted status for the requesting user exact Clanker intent."""
         profile = await self.get_or_create_wallet_profile(user)
-        data = await self.clanker_intent_status(
+        data = await self.refresh_clanker_intent_status(
             int(user.id), signing_intent_id, signing_payload_hash
         )
         stored = await self.config.user(user).intents.get_raw(

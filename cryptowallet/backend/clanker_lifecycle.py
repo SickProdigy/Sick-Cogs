@@ -223,3 +223,29 @@ class ClankerLifecycleMixin:
             data["status"] = IntentStatus.REJECTED.value
             data["provider_status"] = "rejected_by_user"
             return {"status": data["status"], "provider_status": data["provider_status"]}
+
+    async def refresh_clanker_intent_status(self, discord_user_id: int, intent_id: str, payload_hash: str) -> dict[str, Any]:
+        """Refresh a submitted Clanker intent from its persisted provider operation."""
+        current = await self.clanker_intent_status(discord_user_id, intent_id, payload_hash)
+        if current["status"] == IntentStatus.UNCERTAIN.value and current.get("attempt_id"):
+            await self.recover_uncertain_clanker_submission(
+                discord_user_id, intent_id, payload_hash, current["attempt_id"]
+            )
+            return await self.clanker_intent_status(discord_user_id, intent_id, payload_hash)
+        if current["status"] != IntentStatus.SUBMITTED.value:
+            return current
+        intent_data = await self.config.user_from_id(discord_user_id).intents.get_raw(intent_id, default=None)
+        intent = self._stored_clanker_intent(intent_data)
+        profile = await self.config.user_from_id(discord_user_id).profile()
+        if not isinstance(profile, dict) or not current.get("user_operation_hash"):
+            raise RuntimeError("The submitted Clanker operation cannot be refreshed.")
+        result = await self.wallet_provider.clanker_operation_status(profile, intent, current["user_operation_hash"])
+        provider_status = result["provider_status"]
+        status = (IntentStatus.CONFIRMED.value if provider_status == "complete" else
+                  IntentStatus.FAILED.value if provider_status in {"dropped", "failed"} else IntentStatus.SUBMITTED.value)
+        async with self.config.user_from_id(discord_user_id).intents() as intents:
+            stored = intents.get(intent_id)
+            if not isinstance(stored, dict) or stored.get("status") != IntentStatus.SUBMITTED.value or stored.get("user_operation_hash") != current["user_operation_hash"]:
+                raise RuntimeError("The Clanker lifecycle changed during refresh.")
+            stored.update({"status": status, **result})
+        return await self.clanker_intent_status(discord_user_id, intent_id, payload_hash)
