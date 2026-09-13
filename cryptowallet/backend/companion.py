@@ -76,6 +76,7 @@ class CompanionServer:
         app.router.add_get("/session", self.session_page)
         app.router.add_get("/assets/app.js", self.app_script)
         app.router.add_get("/app.js", self.app_script)
+        app.router.add_get("/clanker-external.js", self.clanker_external_script)
         app.router.add_get("/assets/cdp-wallet.js", self.cdp_wallet_script)
         app.router.add_get("/cdp-wallet.js", self.cdp_wallet_script)
         app.router.add_get("/recovery.js", self.recovery_script)
@@ -140,6 +141,9 @@ class CompanionServer:
 
     async def app_script(self, request: web.Request) -> web.Response:
         return self._static_response("app.js", "application/javascript")
+
+    async def clanker_external_script(self, request: web.Request) -> web.Response:
+        return self._static_response("clanker-external.js", "application/javascript")
 
     async def cdp_wallet_script(self, request: web.Request) -> web.Response:
         return self._static_response("cdp-wallet.js", "application/javascript")
