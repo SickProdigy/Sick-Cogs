@@ -1895,6 +1895,74 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first["data"].startswith("0xdf40224a"))
         provider.get_delegation_status.assert_awaited_with(profile, BASE_SEPOLIA.key)
 
+    async def test_submits_prepared_call_and_validates_provider_echo(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        prepared = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": BASE_SEPOLIA.key,
+                "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{
+                    "to": prepared["to"],
+                    "value": str(prepared["value"]),
+                    "data": prepared["data"],
+                }],
+            }
+        ))
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+
+        result = await provider.submit_clanker_deployment(
+            profile, launch, "attempt-1"
+        )
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        args = client.send_smart_account_user_operation.await_args.args
+        self.assertEqual(args[4:8], (
+            prepared["to"], prepared["value"],
+            prepared["idempotency_key"], prepared["data"],
+        ))
+
+    async def test_rejects_changed_provider_call(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        prepared = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": BASE_SEPOLIA.key,
+                "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{
+                    "to": prepared["to"],
+                    "value": "0",
+                    "data": prepared["data"][:-1] + ("1" if prepared["data"][-1] == "0" else "0"),
+                }],
+            }
+        ))
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+
+        with self.assertRaisesRegex(WalletProviderError, "safely submit"):
+            await provider.submit_clanker_deployment(profile, launch, "attempt-1")
+
     async def test_rejects_wrong_profile_or_inactive_delegation(self):
         launch = StoredApprovalSessionTests._clanker_intent()
         profile = {

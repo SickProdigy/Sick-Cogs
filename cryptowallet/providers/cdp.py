@@ -843,6 +843,58 @@ class CdpWalletProvider(WalletProvider):
             "payload_hash": intent.payload_hash,
         }
 
+    async def submit_clanker_deployment(
+        self, profile: dict, intent: ClankerDeploymentIntent, attempt_id: str
+    ) -> dict:
+        """Submit one prepared Clanker call and reject changed provider output."""
+
+        prepared = await self.prepare_clanker_deployment(profile, intent, attempt_id)
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                str(profile["provider_user_id"]),
+                prepared["from"],
+                credentials.project_id,
+                prepared["network"],
+                prepared["to"],
+                prepared["value"],
+                prepared["idempotency_key"],
+                prepared["data"],
+            )
+            status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls") or []
+            if (
+                str(result.get("network") or "") != BASE_SEPOLIA.key
+                or status not in {"pending", "signed", "broadcast", "complete"}
+                or not HASH_PATTERN.fullmatch(user_op_hash)
+                or transaction_hash is not None
+                and not HASH_PATTERN.fullmatch(transaction_hash)
+                or not isinstance(calls, list)
+                or len(calls) != 1
+            ):
+                raise ValueError("CDP returned invalid Clanker deployment metadata")
+            validate_clanker_deployment_call(
+                intent,
+                to=str(calls[0].get("to") or ""),
+                value=int(calls[0].get("value", -1)),
+                data=str(calls[0].get("data") or ""),
+            )
+            return {
+                "provider_status": status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                "intent_id": intent.intent_id.lower(),
+                "payload_hash": intent.payload_hash,
+            }
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely submit the Clanker deployment."
+            ) from exc
+
     async def deploy_fixed_supply_token(
         self,
         profile: dict,
