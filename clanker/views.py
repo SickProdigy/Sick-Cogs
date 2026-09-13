@@ -210,7 +210,6 @@ class ClankerDraftView(discord.ui.View):
         self.settings = settings
         self.user_id = ctx.author.id
         self.processing = False
-        self.live_confirmed = False
         self.draft: Dict[str, Any] = {
             "name": None,
             "symbol": None,
@@ -230,14 +229,14 @@ class ClankerDraftView(discord.ui.View):
     def is_ready(self) -> bool:
         return all(self.draft.get(key) for key in ("name", "symbol", "supply", "primary_beneficiary"))
 
-    def airdrop_submit_blocker(self) -> Optional[str]:
+    def airdrop_execution_blocker(self) -> Optional[str]:
         airdrop = self.draft.get("airdrop")
         if not airdrop:
             return None
         if airdrop.get("amount", 0) <= 0:
             return "Airdrop amount must be positive."
         if not airdrop.get("merkleRoot"):
-            return "Airdrop recipient lists need a Merkle root before live submission. Preview/export is available now."
+            return "Airdrop recipient lists need a Merkle root before execution. Preview/export is available now."
         return None
 
     def build_current_payload(self) -> Dict[str, Any]:
@@ -263,7 +262,7 @@ class ClankerDraftView(discord.ui.View):
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
             title="Clanker launch draft",
-            description="Fill the card, preview the payload, then submit when ready.",
+            description="Fill the card, preview the payload, then save the draft.",
             color=discord.Color.blurple(),
         )
         token = "Not set"
@@ -281,7 +280,7 @@ class ClankerDraftView(discord.ui.View):
         )
         airdrop = self.draft.get("airdrop")
         if airdrop:
-            status = "ready for submit" if airdrop.get("merkleRoot") else "preview only: Merkle root needed"
+            status = "ready for execution" if airdrop.get("merkleRoot") else "preview only: Merkle root needed"
             embed.add_field(
                 name="Airdrop",
                 value=(
@@ -293,47 +292,14 @@ class ClankerDraftView(discord.ui.View):
         else:
             embed.add_field(name="Airdrop", value="Disabled / optional", inline=False)
         embed.add_field(name="Status", value="Ready" if self.is_ready() else "Needs basics", inline=True)
-        if self.settings.get("submit_enabled"):
-            embed.add_field(
-                name="Live submit confirmation",
-                value="Armed for next submit click" if self.live_confirmed else "Required before live API call",
-                inline=True,
-            )
-        embed.set_footer(text="Base chain only · no private keys stored · airdrops allocate supply, rewards split LP/creator fees")
+        embed.set_footer(text="Base Sepolia only · no private keys stored · airdrops allocate supply, rewards split LP/creator fees")
         if self.draft.get("image_url"):
             embed.set_thumbnail(url=self.draft["image_url"])
         return embed
 
     async def refresh(self, interaction: discord.Interaction, message: str):
-        self.live_confirmed = False
         await interaction.response.edit_message(embed=self.embed(), view=self)
         await interaction.followup.send(message, ephemeral=True)
-
-    def live_confirmation_summary(self) -> str:
-        airdrop = self.draft.get("airdrop") or {}
-        lines = [
-            "Live Clanker API submission is enabled for this server.",
-            "Review this summary, then click **Submit Launch** again to send it.",
-            "",
-            f"Token: {self.draft.get('name')} (${self.draft.get('symbol')})",
-            f"Supply: {format_tokens(int(self.draft.get('supply') or 0))}",
-            f"Creator/token admin: {self.draft.get('primary_beneficiary')}",
-            f"Creator rewards: {10000 - int(self.settings['platform_bps'])} bps creator / {int(self.settings['platform_bps'])} bps platform",
-            f"Platform treasury: {self.settings.get('treasury_address')}",
-            f"API URL: {self.settings.get('api_base_url') or 'Not configured'}",
-        ]
-        if airdrop:
-            lines.extend(
-                [
-                    f"Airdrop amount: {format_tokens(int(airdrop.get('amount') or 0))}",
-                    f"Airdrop lockup: {int(airdrop.get('lockupDuration') or MIN_AIRDROP_LOCKUP_SECONDS)} seconds",
-                    f"Airdrop vesting: {int(airdrop.get('vestingDuration') or 0)} seconds",
-                    f"Airdrop Merkle root: {airdrop.get('merkleRoot') or 'Missing'}",
-                ]
-            )
-        else:
-            lines.append("Airdrop: disabled")
-        return "\n".join(lines)
 
     def disable_controls(self) -> None:
         for item in self.children:
@@ -359,62 +325,41 @@ class ClankerDraftView(discord.ui.View):
         payload = self.build_current_payload()
         await interaction.response.send_message(box(json.dumps(payload, indent=2)[:1800], lang="json"), ephemeral=True)
 
-    @discord.ui.button(label="Submit Launch", emoji="🚀", style=discord.ButtonStyle.success)
-    async def submit_launch(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Save Draft", emoji="💾", style=discord.ButtonStyle.success)
+    async def save_launch(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.processing:
-            await interaction.response.send_message("This launch draft is already being processed.", ephemeral=True)
+            await interaction.response.send_message(
+                "This launch draft is already being saved.", ephemeral=True
+            )
             return
         if not self.is_ready():
-            await interaction.response.send_message("Fill out token basics before submitting.", ephemeral=True)
+            await interaction.response.send_message(
+                "Fill out token basics before saving.", ephemeral=True
+            )
             return
         if not self.settings.get("treasury_address"):
-            await interaction.response.send_message("A bot owner must configure the SickGaming treasury address first.", ephemeral=True)
+            await interaction.response.send_message(
+                "A bot owner must configure the SickGaming treasury address first.",
+                ephemeral=True,
+            )
             return
-        blocker = self.airdrop_submit_blocker()
+        blocker = self.airdrop_execution_blocker()
         if blocker:
             await interaction.response.send_message(blocker, ephemeral=True)
-            return
-        if self.settings.get("submit_enabled") and not self.live_confirmed:
-            self.live_confirmed = True
-            await interaction.response.edit_message(embed=self.embed(), view=self)
-            await interaction.followup.send(self.live_confirmation_summary(), ephemeral=True)
             return
         self.processing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             payload = self.build_current_payload()
             record = self.cog.build_audit_record(interaction.user, payload)
-            if self.settings.get("submit_enabled"):
-                if self.settings.get("approval_required"):
-                    record["status"] = "pending_approval"
-                else:
-                    if not self.settings.get("api_base_url"):
-                        await interaction.followup.send("Submit mode is enabled but no Clanker API URL is configured.", ephemeral=True)
-                        return
-                    token = await self.cog.get_api_token()
-                    if not token:
-                        await interaction.followup.send("Submit mode is enabled but no Clanker API token is configured.", ephemeral=True)
-                        return
-                    try:
-                        record["api_response"] = await self.cog.submit_payload(self.settings["api_base_url"], token, payload)
-                        record["api_refs"] = self.cog.extract_api_references(record["api_response"])
-                        record["status"] = "submitted"
-                    except RuntimeError as exc:
-                        record["status"] = "failed"
-                        await self.cog.add_audit_record(self.ctx.guild, record)
-                        await self.cog.notify_approval_channel(self.ctx.guild, self.settings, record)
-                        await interaction.followup.send(str(exc), ephemeral=True)
-                        return
             await self.cog.add_audit_record(self.ctx.guild, record)
-            await self.cog.notify_approval_channel(self.ctx.guild, self.settings, record)
+            await self.cog.notify_approval_channel(
+                self.ctx.guild, self.settings, record
+            )
             self.disable_controls()
             await interaction.message.edit(embed=self.embed(), view=self)
-            messages = {
-                "submitted": "Clanker launch submitted.",
-                "pending_approval": "Clanker launch is pending owner approval before live submission.",
-            }
             await interaction.followup.send(
-                messages.get(record["status"], "Clanker launch prepared as a dry-run audit record."),
+                "Clanker launch draft saved. Wallet execution adapters are not connected yet.",
                 ephemeral=True,
             )
         finally:

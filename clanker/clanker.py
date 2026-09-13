@@ -4,19 +4,17 @@ import json
 import logging
 import secrets
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
-import aiohttp
 import discord
 from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
-from redbot.core.utils.chat_formatting import box
+from redbot.core.utils.chat_formatting import box, humanize_list
 
 from .constants import (
     BASE_CHAIN_ID,
     CONFIG_IDENTIFIER,
     DEFAULT_CLANKER_SUPPLY,
-    LEGACY_LIVE_SUBMISSION_AVAILABLE,
     MAX_AUDIT_RECORDS,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
@@ -37,21 +35,17 @@ log = logging.getLogger("red.Sick-Cogs.Clanker")
 
 
 class Clanker(ClankerAdminMixin, commands.Cog):
-    """Prepare and optionally submit Clanker token launch requests on Base."""
+    """Prepare and orchestrate Clanker token launch requests on Base Sepolia."""
 
     __author__ = ["SickProdigy"]
     __version__ = "0.1.0"
 
     default_guild = {
         "enabled": False,
-        "api_base_url": None,
-        "api_submit_path": "tokens",
-        "submit_enabled": False,
         "treasury_address": None,
         "platform_bps": 2000,
         "launch_channel_id": None,
         "approval_channel_id": None,
-        "approval_required": False,
         "allowed_role_id": None,
         "blocked_role_id": None,
         "launch_cooldown_seconds": 60,
@@ -70,30 +64,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**self.default_guild)
-        self.session: Optional[aiohttp.ClientSession] = None
         self.user_cooldowns: Dict[Tuple[int, int], datetime.datetime] = {}
 
     async def red_delete_data_for_user(self, **kwargs):
         """This cog stores no per-user profile data."""
         return
-
-    def cog_unload(self):
-        if self.session and not self.session.closed:
-            self.bot.loop.create_task(self.session.close())
-
-    async def get_session(self) -> aiohttp.ClientSession:
-        if self.session is None or self.session.closed:
-            timeout = aiohttp.ClientTimeout(total=45)
-            self.session = aiohttp.ClientSession(
-                timeout=timeout,
-                headers={"User-Agent": "Sick-Cogs-Clanker/0.1"},
-            )
-        return self.session
-
-    async def get_api_token(self) -> Optional[str]:
-        tokens = await self.bot.get_shared_api_tokens("clanker")
-        token = tokens.get("api_token") or tokens.get("token")
-        return token.strip() if token else None
 
     @staticmethod
     def validate_https_url(url: str) -> bool:
@@ -120,7 +95,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     ) -> Dict[str, Any]:
         payload = {
             "chainId": BASE_CHAIN_ID,
-            "chain": "base",
+            "chain": "base-sepolia",
             "symbol": symbol,
             "name": name.strip(),
             "supply": str(supply),
@@ -158,70 +133,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 payload["airdrop"]["admin"] = airdrop_admin
         return payload
 
-    async def submit_payload(
-        self,
-        api_base_url: str,
-        api_submit_path: str,
-        token: str,
-        payload: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        if not LEGACY_LIVE_SUBMISSION_AVAILABLE:
-            raise RuntimeError(
-                "Legacy Clanker REST submission is disabled during the protected "
-                "CryptoWallet integration."
-            )
-        endpoint = urljoin(api_base_url.rstrip("/") + "/", (api_submit_path or "tokens").lstrip("/"))
-        session = await self.get_session()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        async with session.post(endpoint, json=payload, headers=headers) as response:
-            text = await response.text()
-            if response.status >= 400:
-                raise RuntimeError(f"Clanker API returned HTTP {response.status}: {text[:500]}")
-            try:
-                return await response.json()
-            except aiohttp.ContentTypeError:
-                return {"raw": text}
-
     @staticmethod
     def new_launch_id(symbol: str) -> str:
         timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
         return f"{symbol.lower()}-{timestamp}-{secrets.token_hex(3)}"
-
-    @staticmethod
-    def extract_api_references(response: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Pull common launch references from a Clanker response without trusting one schema."""
-        if not isinstance(response, dict):
-            return {}
-        wanted = {
-            "id",
-            "requestId",
-            "launchId",
-            "tokenAddress",
-            "contractAddress",
-            "poolAddress",
-            "transactionHash",
-            "txHash",
-            "url",
-            "poolUrl",
-        }
-        found: Dict[str, Any] = {}
-
-        def visit(value: Any) -> None:
-            if isinstance(value, dict):
-                for key, child in value.items():
-                    if key in wanted and key not in found and child not in (None, ""):
-                        found[key] = child
-                    visit(child)
-            elif isinstance(value, list):
-                for child in value[:20]:
-                    visit(child)
-
-        visit(response)
-        return found
 
     @staticmethod
     def build_audit_record(
@@ -237,7 +152,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "requester_name": str(requester),
             "symbol": payload["symbol"],
             "name": payload["name"],
-            "chain": payload.get("chain", "base"),
+            "chain": payload.get("chain", "base-sepolia"),
             "supply": payload.get("supply"),
             "token_admin": payload.get("tokenAdmin"),
             "platform_treasury": payload["rewards"]["recipients"][1]["recipient"],
@@ -248,8 +163,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "airdrop_proofs": airdrop.get("merkleExport"),
             "payload": payload,
             "status": status,
-            "api_response": None,
-            "api_refs": {},
         }
 
     @staticmethod
@@ -259,10 +172,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         status = record.get("status", "unknown")
         symbol = record.get("symbol", "?")
         requester = record.get("requester_name", record.get("requester_id", "?"))
-        refs = record.get("api_refs") or {}
-        token_address = refs.get("tokenAddress") or refs.get("contractAddress")
-        suffix = f" · token {token_address}" if token_address else ""
-        return f"{launch_id} · {created} · {status} · ${symbol} by {requester}{suffix}"
+        return f"{launch_id} · {created} · {status} · ${symbol} by {requester}"
 
     async def check_launch_controls(self, ctx: commands.Context, settings: Dict[str, Any]) -> bool:
         launch_channel_id = settings.get("launch_channel_id")
@@ -343,7 +253,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.add_field(name="Token", value=f"{record.get('name', '?')} (${record.get('symbol', '?')})", inline=False)
         embed.add_field(name="Created", value=record.get("created_at", "unknown"), inline=False)
         embed.add_field(name="Requester", value=record.get("requester_name", record.get("requester_id", "?")), inline=True)
-        embed.add_field(name="Chain", value=record.get("chain", "base"), inline=True)
+        embed.add_field(name="Chain", value=record.get("chain", "base-sepolia"), inline=True)
         embed.add_field(name="Supply", value=str(record.get("supply", "unknown")), inline=True)
         embed.add_field(name="Creator/token admin", value=record.get("token_admin") or "unknown", inline=False)
         embed.add_field(
@@ -365,18 +275,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 ),
                 inline=False,
             )
-        refs = record.get("api_refs") or {}
-        if refs:
-            reference_lines = [f"{key}: {value}" for key, value in refs.items()]
-            embed.add_field(name="API references", value=box("\n".join(reference_lines)[:900]), inline=False)
-        elif record.get("api_response"):
-            embed.add_field(name="API response", value=box(str(record["api_response"])[:900]), inline=False)
-        if record.get("approved_at"):
-            embed.add_field(name="Approved/submitted", value=record["approved_at"], inline=False)
-        if record.get("rejected_at"):
-            embed.add_field(name="Rejected", value=record["rejected_at"], inline=True)
-            embed.add_field(name="Reason", value=record.get("rejection_reason") or "No reason provided.", inline=False)
-        embed.set_footer(text="Audit records are bounded per guild and do not contain API tokens or wallet secrets")
+        embed.set_footer(text="Bounded per-guild launch record · no wallet secrets")
         return embed
 
     async def get_launch_record(self, guild: discord.Guild, launch_id: str) -> Optional[Dict[str, Any]]:
@@ -388,40 +287,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return record
         return None
 
-    async def update_launch_record(self, guild: discord.Guild, launch_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        needle = launch_id.strip().lower()
-        async with self.config.guild(guild).audit_log() as audit_log:
-            for record in reversed(audit_log):
-                record_id = str(record.get("launch_id") or "").lower()
-                if record_id == needle or record_id.startswith(needle):
-                    record.update(updates)
-                    return dict(record)
-        return None
-
-    async def submit_approved_launch(self, guild: discord.Guild, settings: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
-        if not LEGACY_LIVE_SUBMISSION_AVAILABLE:
-            raise RuntimeError(
-                "Legacy Clanker REST submission is disabled during the protected "
-                "CryptoWallet integration."
-            )
-        if not settings.get("submit_enabled"):
-            raise RuntimeError("Clanker submit mode is disabled.")
-        if not settings.get("api_base_url"):
-            raise RuntimeError("Submit mode is enabled but no Clanker API URL is configured.")
-        token = await self.get_api_token()
-        if not token:
-            raise RuntimeError("Submit mode is enabled but no Clanker API token is configured.")
-        payload = record.get("payload")
-        if not isinstance(payload, dict):
-            raise RuntimeError("This launch record does not have a stored payload to submit.")
-        response = await self.submit_payload(settings["api_base_url"], settings.get("api_submit_path") or "tokens", token, payload)
-        return {
-            "status": "submitted",
-            "approved_at": utc_now(),
-            "api_response": response,
-            "api_refs": self.extract_api_references(response),
-        }
-
     @commands.guild_only()
     @commands.group(name="clanker", aliases=("clank",), invoke_without_command=True)
     async def clanker(self, ctx: commands.Context):
@@ -432,13 +297,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_status(self, ctx: commands.Context):
         """Show whether Clanker launch requests are enabled."""
         settings = await self.config.guild(ctx.guild).all()
-        token = await self.get_api_token()
         embed = discord.Embed(title="Clanker status", color=discord.Color.blue())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
-        embed.add_field(name="Submit mode", value=str(settings["submit_enabled"]), inline=True)
-        embed.add_field(name="API URL", value="Set" if settings["api_base_url"] else "Not set", inline=True)
-        embed.add_field(name="Submit path", value=settings.get("api_submit_path") or "tokens", inline=True)
-        embed.add_field(name="API token", value="Set" if token else "Not set", inline=True)
+        embed.add_field(name="Execution", value="Draft only · wallet adapters pending", inline=False)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
         launch_channel = ctx.guild.get_channel(settings.get("launch_channel_id") or 0)
@@ -447,7 +308,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         blocked_role = ctx.guild.get_role(settings.get("blocked_role_id") or 0)
         embed.add_field(name="Launch channel", value=launch_channel.mention if launch_channel else "Any", inline=True)
         embed.add_field(name="Approval/log channel", value=approval_channel.mention if approval_channel else "Not set", inline=True)
-        embed.add_field(name="Approval required", value=str(settings.get("approval_required", False)), inline=True)
         embed.add_field(name="Allowed role", value=allowed_role.mention if allowed_role else "Any", inline=True)
         embed.add_field(name="Blocked role", value=blocked_role.mention if blocked_role else "None", inline=True)
         embed.add_field(name="Launch cooldown", value=f"{int(settings.get('launch_cooldown_seconds') or 0)}s", inline=True)
@@ -462,7 +322,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=True,
         )
-        embed.set_footer(text="Base chain only · no private keys are stored by this cog")
+        embed.set_footer(text="Base Sepolia only · no private keys are stored by this cog")
         await ctx.send(embed=embed)
 
     @clanker.command(name="card", aliases=("create", "draft"))
@@ -552,49 +412,17 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         proof_export = settings.get("airdrop_proof_export")
         if proof_export and proof_export.get("root", "").lower() == str(record.get("airdrop_merkle_root") or "").lower():
             record["airdrop_proofs"] = proof_export
-        if settings["submit_enabled"]:
-            if settings.get("approval_required"):
-                record["status"] = "pending_approval"
-            else:
-                if not settings["api_base_url"]:
-                    await ctx.send("Submit mode is enabled but no Clanker API URL is configured.")
-                    return
-                token = await self.get_api_token()
-                if not token:
-                    await ctx.send("Submit mode is enabled but no Clanker API token is configured.")
-                    return
-                async with ctx.typing():
-                    try:
-                        record["api_response"] = await self.submit_payload(settings["api_base_url"], token, payload)
-                        record["api_refs"] = self.extract_api_references(record["api_response"])
-                        record["status"] = "submitted"
-                    except RuntimeError as exc:
-                        record["status"] = "failed"
-                        await self.add_audit_record(ctx.guild, record)
-                        await self.notify_approval_channel(ctx.guild, settings, record)
-                        await ctx.send(str(exc))
-                        return
         await self.add_audit_record(ctx.guild, record)
         await self.notify_approval_channel(ctx.guild, settings, record)
 
-        submitted = record["status"] == "submitted"
-        if record["status"] == "submitted":
-            title_status = "submitted"
-            description = None
-        elif record["status"] == "pending_approval":
-            title_status = "pending approval"
-            description = "Stored for owner approval before live Clanker submission."
-        else:
-            title_status = "prepared"
-            description = "Dry-run only. Enable submit mode after the API contract is reviewed."
         embed = discord.Embed(
-            title=f"Clanker launch {title_status}",
-            description=description,
-            color=discord.Color.green() if submitted else discord.Color.gold(),
+            title="Clanker launch draft prepared",
+            description="Saved for review; choose an execution wallet in a later step.",
+            color=discord.Color.gold(),
         )
         embed.add_field(name="Token", value=f"{payload['name']} (${payload['symbol']})", inline=False)
         embed.add_field(name="Supply", value=payload["supply"], inline=True)
-        embed.add_field(name="Chain", value="Base", inline=True)
+        embed.add_field(name="Chain", value="Base Sepolia", inline=True)
         embed.add_field(
             name="Beneficiaries",
             value=humanize_list([
@@ -614,8 +442,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 ),
                 inline=False,
             )
-        if submitted and record["api_response"]:
-            embed.add_field(name="API response", value=box(str(record["api_response"])[:900]), inline=False)
         await ctx.send(embed=embed)
 
     @clanker.command(name="audit")
@@ -668,52 +494,3 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "Generated Clanker airdrop proof export. Keep this with launch records for claimant tooling.",
             file=discord.File(io.BytesIO(content), filename=filename),
         )
-
-    @clanker.command(name="approve")
-    @checks.is_owner()
-    async def clanker_approve(self, ctx: commands.Context, launch_id: str):
-        """Approve and submit a pending Clanker launch record."""
-        settings = await self.config.guild(ctx.guild).all()
-        record = await self.get_launch_record(ctx.guild, launch_id)
-        if not record:
-            await ctx.send("No Clanker launch record matched that ID.")
-            return
-        if record.get("status") != "pending_approval":
-            await ctx.send(f"Launch `{record.get('launch_id', launch_id)}` is `{record.get('status', 'unknown')}`, not pending approval.")
-            return
-        async with ctx.typing():
-            try:
-                updates = await self.submit_approved_launch(ctx.guild, settings, record)
-            except RuntimeError as exc:
-                updates = {"status": "failed", "approved_at": utc_now(), "api_response": {"error": str(exc)}, "api_refs": {}}
-                updated = await self.update_launch_record(ctx.guild, launch_id, updates)
-                if updated:
-                    await self.notify_approval_channel(ctx.guild, settings, updated)
-                await ctx.send(str(exc))
-                return
-        updated = await self.update_launch_record(ctx.guild, launch_id, updates)
-        if not updated:
-            await ctx.send("Launch record disappeared before it could be updated.")
-            return
-        await self.notify_approval_channel(ctx.guild, settings, updated)
-        await ctx.send("Clanker launch approved and submitted.", embed=self.launch_record_embed(updated))
-
-    @clanker.command(name="reject")
-    @checks.is_owner()
-    async def clanker_reject(self, ctx: commands.Context, launch_id: str, *, reason: Optional[str] = None):
-        """Reject a pending Clanker launch record without submitting it."""
-        settings = await self.config.guild(ctx.guild).all()
-        record = await self.get_launch_record(ctx.guild, launch_id)
-        if not record:
-            await ctx.send("No Clanker launch record matched that ID.")
-            return
-        if record.get("status") != "pending_approval":
-            await ctx.send(f"Launch `{record.get('launch_id', launch_id)}` is `{record.get('status', 'unknown')}`, not pending approval.")
-            return
-        updates = {"status": "rejected", "rejected_at": utc_now(), "rejection_reason": reason or "No reason provided."}
-        updated = await self.update_launch_record(ctx.guild, launch_id, updates)
-        if not updated:
-            await ctx.send("Launch record disappeared before it could be updated.")
-            return
-        await self.notify_approval_channel(ctx.guild, settings, updated)
-        await ctx.send("Clanker launch rejected.", embed=self.launch_record_embed(updated))

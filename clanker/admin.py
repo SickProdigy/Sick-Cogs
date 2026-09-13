@@ -8,7 +8,6 @@ from redbot.core import checks, commands
 
 from .constants import (
     DEFAULT_CLANKER_SUPPLY,
-    LEGACY_LIVE_SUBMISSION_AVAILABLE,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
 )
@@ -39,56 +38,6 @@ class ClankerAdminMixin:
         """Enable or disable Clanker launch requests."""
         await self.config.guild(ctx.guild).enabled.set(enabled)
         await ctx.send(f"Clanker launch requests are now {'enabled' if enabled else 'disabled'}.")
-
-    @clankerset.command(name="submit")
-    async def clankerset_submit(self, ctx: commands.Context, enabled: bool):
-        """Keep legacy REST submission disabled during CryptoWallet migration."""
-        if enabled and not LEGACY_LIVE_SUBMISSION_AVAILABLE:
-            await self.config.guild(ctx.guild).submit_enabled.set(False)
-            await ctx.send(
-                "Legacy Clanker REST submission is permanently disabled. Launches remain "
-                "unsigned Base Sepolia drafts until the protected CryptoWallet deployment "
-                "intent passes security review."
-            )
-            return
-        await self.config.guild(ctx.guild).submit_enabled.set(False)
-        await ctx.send("Clanker launch mode set to dry-run/review only.")
-
-    @clankerset.command(name="apiurl")
-    async def clankerset_apiurl(self, ctx: commands.Context, api_base_url: str):
-        """Set the Clanker API base URL."""
-        api_base_url = api_base_url.strip().rstrip("/")
-        if not self.validate_https_url(api_base_url):
-            await ctx.send("API URL must be HTTPS.")
-            return
-        await self.config.guild(ctx.guild).api_base_url.set(api_base_url)
-        warning = ""
-        if api_base_url.rstrip("/") == "https://www.clanker.world/api":
-            warning = (
-                " Note: the public Clanker `/api/tokens` endpoint is read-only; "
-                "live submit needs a verified partner deployment API base URL."
-            )
-        await ctx.send(f"Clanker API URL saved.{warning}")
-
-    @clankerset.command(name="apipath")
-    async def clankerset_apipath(self, ctx: commands.Context, *, api_submit_path: str):
-        """Set the relative live-submit path under the configured Clanker API URL."""
-        api_submit_path = api_submit_path.strip().lstrip("/")
-        if not api_submit_path or api_submit_path.startswith(("http://", "https://")) or ".." in api_submit_path:
-            await ctx.send("API submit path must be a relative path such as `tokens` or `deployments/clanker`.")
-            return
-        await self.config.guild(ctx.guild).api_submit_path.set(api_submit_path)
-        await ctx.send(f"Clanker API submit path saved as `{api_submit_path}`.")
-
-    @clankerset.command(name="apitoken")
-    async def clankerset_apitoken(self, ctx: commands.Context, *, api_token: str):
-        """Set the Clanker API bearer token in shared API token storage."""
-        await self.bot.set_shared_api_tokens("clanker", api_token=api_token.strip())
-        try:
-            await ctx.message.delete()
-        except discord.HTTPException:
-            pass
-        await ctx.send("Clanker API token saved.")
 
     @clankerset.command(name="treasury")
     async def clankerset_treasury(self, ctx: commands.Context, treasury_address: str):
@@ -131,13 +80,6 @@ class ClankerAdminMixin:
         """Stop posting Clanker launch records to a configured channel."""
         await self.config.guild(ctx.guild).approval_channel_id.set(None)
         await ctx.send("Clanker approval/log channel cleared.")
-
-    @clankerset.command(name="requireapproval")
-    async def clankerset_requireapproval(self, ctx: commands.Context, enabled: bool):
-        """Require owner approval before live Clanker submissions."""
-        await self.config.guild(ctx.guild).approval_required.set(enabled)
-        mode = "require owner approval before live submission" if enabled else "allow direct live submission after confirmation"
-        await ctx.send(f"Clanker approval mode set to {mode}.")
 
     @clankerset.command(name="allowedrole")
     async def clankerset_allowedrole(self, ctx: commands.Context, role: discord.Role):

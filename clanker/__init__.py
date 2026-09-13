@@ -1,7 +1,7 @@
 from .clanker import Clanker
 
 __red_end_user_data_statement__ = (
-    "This cog stores guild Clanker API settings and token launch audit records. "
+    "This cog stores guild launch configuration and bounded token launch audit records. "
     "It does not store private keys, seed phrases, or user wallet credentials."
 )
 

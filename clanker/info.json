@@ -1,26 +1,16 @@
 {
     "author": ["SickProdigy"],
-    "description": "Prepare Clanker token launch drafts with an interactive Discord card, optional airdrops, and explicit safety controls.",
+    "description": "Prepare and orchestrate Base Sepolia Clanker token launches with interactive drafts, optional airdrops, and explicit wallet execution boundaries.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores guild Clanker API settings and token launch audit records. It does not store private keys, seed phrases, or user wallet credentials.",
+    "end_user_data_statement": "This cog stores guild launch configuration and bounded token launch audit records. It does not store private keys, seed phrases, API tokens, or wallet credentials.",
     "hidden": false,
-    "install_msg": "Configure with `[p]clankerset apiurl`, `[p]clankerset apipath`, `[p]clankerset apitoken`, `[p]clankerset treasury`, and `[p]clankerset enabled true`. Optional guild controls include `[p]clankerset channel`, `[p]clankerset approvalchannel`, `[p]clankerset requireapproval`, `[p]clankerset allowedrole`, `[p]clankerset blockedrole`, `[p]clankerset cooldown`, and `[p]clankerset dailymax`. Use `[p]clanker card` for the button/modal launch flow. Airdrop recipient rows can generate Merkle roots/proof exports with `[p]clankerset airdrop build` or the card airdrop modal without extra Python package dependencies. Launch requests default to review/dry-run and assign the creator 80% of rewards with a configurable 20% bot-owner platform cut until changed.",
+    "install_msg": "Configure `[p]clankerset treasury`, `[p]clankerset enabled true`, and any desired channel, role, cooldown, daily-limit, reward-split, or airdrop settings. Use `[p]clanker card` to create a Base Sepolia draft. Wallet execution adapters are still under development; the obsolete generic REST submission path has been removed.",
     "min_bot_version": "3.5.0",
-    "permissions": [
-        "embed_links",
-        "attach_files"
-    ],
+    "permissions": ["embed_links", "attach_files"],
     "name": "Clanker",
     "requirements": [],
-    "short": "Clanker token launch helper",
-    "tags": [
-        "clanker",
-        "base",
-        "tokens",
-        "crypto",
-        "nft",
-        "memes"
-    ],
+    "short": "Base Sepolia Clanker launch orchestrator",
+    "tags": ["clanker", "base", "tokens", "crypto", "memes"],
     "type": "COG",
     "version": "0.1.0"
 }
