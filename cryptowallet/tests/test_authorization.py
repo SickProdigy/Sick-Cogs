@@ -61,6 +61,7 @@ from ..core.validation import (
     parse_asset_amount,
     parse_native_amount,
 )
+from ..providers.base import WalletProviderError
 from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
 from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
@@ -1872,6 +1873,44 @@ class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
         }])
         self.assertEqual(format_atomic_amount(1_250_000, ETHEREUM_SEPOLIA, decimals=6), "1.25")
 
+
+
+class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepares_exact_call_without_provider_submission(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+
+        first = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        second = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["to"], launch.factory)
+        self.assertEqual(first["value"], 0)
+        self.assertTrue(first["data"].startswith("0xdf40224a"))
+        provider.get_delegation_status.assert_awaited_with(profile, BASE_SEPOLIA.key)
+
+    async def test_rejects_wrong_profile_or_inactive_delegation(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {
+            "profile_id": "wrong-profile",
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        with self.assertRaisesRegex(WalletProviderError, "does not match"):
+            await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+
+        profile["profile_id"] = launch.profile_id
+        provider.get_delegation_status = AsyncMock(return_value={"active": False})
+        with self.assertRaisesRegex(WalletProviderError, "authorization"):
+            await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
 
 
 class TokenSendTests(unittest.IsolatedAsyncioTestCase):

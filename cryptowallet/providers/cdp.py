@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from ..backend.auth import JWT_TOKEN_NAMESPACE
+from ..core.clanker import ClankerDeploymentIntent
 from ..core.models import (
     AccountType,
     IntentStatus,
@@ -30,6 +31,7 @@ from ..core.validation import (
     normalize_solana_signature,
 )
 from .base import WalletProvider, WalletProviderError
+from .clanker import clanker_deployment_calldata, validate_clanker_deployment_call
 from .base_rpc import (
     BaseRpcError,
     get_contract_code,
@@ -786,6 +788,60 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "CDP could not retrieve the factory deployment operation."
             ) from exc
+
+    async def prepare_clanker_deployment(
+        self, profile: dict, intent: ClankerDeploymentIntent, attempt_id: str
+    ) -> dict:
+        """Prepare, but never submit, one allowlisted Clanker deployment call."""
+
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        account = next(
+            (
+                item for item in profile.get("accounts") or []
+                if item.get("network") == BASE_SEPOLIA.key
+            ),
+            None,
+        )
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            calldata = clanker_deployment_calldata(intent)
+            validate_clanker_deployment_call(
+                intent, to=intent.factory, value=intent.expected_native_value_wei, data=calldata
+            )
+        except ValueError as exc:
+            raise WalletProviderError("The Clanker deployment intent is invalid.") from exc
+        if (
+            not provider_user_id
+            or profile_id != intent.profile_id
+            or sender != intent.wallet_address
+            or intent.token_admin != sender
+        ):
+            raise WalletProviderError(
+                "The wallet profile does not match this Clanker deployment."
+            )
+        delegation = await self.get_delegation_status(profile, BASE_SEPOLIA.key)
+        if not delegation.get("active"):
+            raise WalletProviderError(
+                "An active wallet authorization is required for Clanker deployment."
+            )
+        if not attempt_id:
+            raise WalletProviderError("A Clanker deployment attempt ID is required.")
+        return {
+            "network": BASE_SEPOLIA.key,
+            "from": sender,
+            "to": intent.factory,
+            "value": intent.expected_native_value_wei,
+            "data": calldata,
+            "idempotency_key": str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"sick-cogs:clanker:v1:{profile_id}:{intent.payload_hash}:{attempt_id}",
+                )
+            ),
+            "intent_id": intent.intent_id.lower(),
+            "payload_hash": intent.payload_hash,
+        }
 
     async def deploy_fixed_supply_token(
         self,
