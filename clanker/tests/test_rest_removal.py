@@ -2,6 +2,7 @@
 
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from ..clanker import Clanker
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
@@ -102,6 +103,48 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertEqual(record["operation"]["to"].lower(), "0xe85a59c628f7d27878aceb4bf3b35733630083a9")
         self.assertEqual(record["operation"]["value"], "0")
         self.assertTrue(record["operation"]["data"].startswith("0xdf40224a"))
+
+
+class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_passes_only_authoritative_launch_and_operation(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        response = {
+            "route": "internal", "launch_id": record["launch_id"],
+            "source_payload_hash": record["payload_hash"],
+            "signing_intent_id": "0x" + "12" * 32,
+            "signing_payload_hash": "0x" + "34" * 32,
+            "approval_url": "https://wallet.example/session/secret",
+            "expires_at": 4_000_000_000,
+        }
+        api = AsyncMock(return_value=response)
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_create_internal_approval=api))
+        user = SimpleNamespace(id=7)
+        self.assertEqual(await cog.create_internal_wallet_approval(user, record), response)
+        api.assert_awaited_once_with(user, record["intent"], record["operation"])
+
+    async def test_rejects_missing_wallet_and_changed_response_binding(self):
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: None)
+        with self.assertRaisesRegex(RuntimeError, "unavailable"):
+            await cog.create_internal_wallet_approval(SimpleNamespace(id=7), {})
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        bad = {"route": "internal", "launch_id": "changed",
+               "source_payload_hash": record["payload_hash"],
+               "signing_intent_id": "x", "signing_payload_hash": "y",
+               "approval_url": "https://wallet.example/session/secret",
+               "expires_at": 4_000_000_000}
+        cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_create_internal_approval=AsyncMock(return_value=bad)))
+        with self.assertRaisesRegex(RuntimeError, "invalid Clanker approval binding"):
+            await cog.create_internal_wallet_approval(SimpleNamespace(id=7), record)
 
 
 if __name__ == "__main__":

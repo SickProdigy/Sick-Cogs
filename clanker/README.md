@@ -46,7 +46,7 @@ The legacy text command also prepares a draft:
 [p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Neither path currently signs or broadcasts a transaction. Saved drafts will feed the internal-wallet and external-wallet adapters as those milestones are completed.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet adapter remains pending.
 
 ## Vaults
 
@@ -70,6 +70,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker status` — show draft and guild-control configuration.
 - `[p]clanker audit [limit]` — view recent launch records.
 - `[p]clanker launches [limit]` — list launch IDs.
+- `[p]clanker internal <launch_id>` — DM the requester a protected CryptoWallet approval link.
 - `[p]clanker launchinfo <launch_id>` — show one launch record.
 - `[p]clanker airdropproofs <launch_id>` — export generated proof metadata.
 - `[p]clankerset view` — show owner configuration.
