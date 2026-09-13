@@ -91,6 +91,16 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertEqual(Clanker.default_guild["vault_percentage"], 0)
         self.assertEqual(Clanker.default_guild["vault_lockup_seconds"], MIN_VAULT_LOCKUP_SECONDS)
 
+    def test_external_browser_assets_are_clanker_owned_and_upload_only(self):
+        root = __import__("pathlib").Path(__file__).resolve().parents[1]
+        script = (root / "web" / "external.js").read_text(encoding="utf-8")
+        page = (root / "web" / "external.html").read_text(encoding="utf-8")
+        self.assertIn("type=\"file\"", page)
+        self.assertIn("eth_sendTransaction", script)
+        self.assertIn("0xe85a59c628f7d27878aceb4bf3b35733630083a9", script)
+        self.assertNotIn("fetch(", script)
+        self.assertIn("external_wallet_url", Clanker.default_guild)
+
     def test_audit_record_does_not_store_provider_responses(self):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None, 0, 86400, 0, None, 7,

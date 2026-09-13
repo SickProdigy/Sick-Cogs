@@ -63,6 +63,20 @@ class ClankerAdminMixin:
         await self.config.guild(ctx.guild).platform_bps.set(basis_points)
         await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
 
+    @clankerset.command(name="externalurl")
+    async def clankerset_externalurl(self, ctx: commands.Context, url: Optional[str] = None):
+        """Set or clear the HTTPS page hosting Clanker external wallet assets."""
+        if url is None:
+            await self.config.guild(ctx.guild).external_wallet_url.set(None)
+            await ctx.send("Clanker external-wallet page URL cleared.")
+            return
+        normalized = url.strip().rstrip("/")
+        if not self.validate_https_url(normalized):
+            await ctx.send("External-wallet page URL must use HTTPS.")
+            return
+        await self.config.guild(ctx.guild).external_wallet_url.set(normalized)
+        await ctx.send("Clanker external-wallet page URL saved.")
+
     @clankerset.command(name="channel")
     async def clankerset_channel(self, ctx: commands.Context, channel: Optional[discord.TextChannel] = None):
         """Restrict Clanker launch creation to one channel; omit to use this channel."""

@@ -132,6 +132,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     default_guild = {
         "enabled": False,
         "treasury_address": None,
+        "external_wallet_url": None,
         "platform_bps": 2000,
         "launch_channel_id": None,
         "approval_channel_id": None,
@@ -587,6 +588,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=True,
         )
+        embed.add_field(name="External wallet page", value=settings.get("external_wallet_url") or "Not configured", inline=False)
         embed.add_field(
             name="Airdrop",
             value=(
@@ -803,14 +805,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if int(intent.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp()):
             await ctx.send("That immutable launch has expired; create and review a new draft.")
             return
+        external_url = str(await self.config.guild(ctx.guild).external_wallet_url() or "")
+        page_note = ((" Open " + external_url + " and upload the attached file.") if external_url
+                     else " Ask the bot owner for the hosted Clanker external-wallet page.")
         handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
                    "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
-                   "operation": operation}
+                   "operation": operation,
+                   "verification_command": f"{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>"}
         content = json.dumps(handoff, indent=2, sort_keys=True).encode("utf-8")
         try:
             await ctx.author.send(
-                "External Base Sepolia Clanker handoff. Review every field before submitting it with your wallet. "
-                f"After confirmation run `{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>`. ",
+                "External Base Sepolia Clanker handoff." + page_note +
+                " Review every field before submitting it with your wallet.",
                 file=discord.File(io.BytesIO(content), filename=f"clanker-{record['launch_id']}.json"),
             )
         except discord.Forbidden:
