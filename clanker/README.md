@@ -2,7 +2,7 @@
 
 Clanker prepares and orchestrates Clanker v4 token launches on Base Sepolia.
 
-The cog currently supports draft creation and review. The obsolete generic partner REST submission path and API-token configuration have been removed. Wallet execution will be added through two explicit adapters:
+The cog supports immutable draft creation, review, and two explicit Base Sepolia execution adapters. The obsolete generic partner REST submission path and API-token configuration have been removed:
 
 - protected signing with the requesting user’s CryptoWallet; and
 - a TokenFactory-style external-wallet handoff with exact transaction verification.
@@ -27,7 +27,7 @@ Clanker owns launch construction, field validation, previews, limits, audit reco
 [p]clankerset enabled true
 ```
 
-Clanker now constructs and stores the exact pinned `deployToken` operation with each immutable launch intent. The same operation will feed either protected CryptoWallet signing or the external-wallet handoff; neither adapter may alter its target, value, or calldata.
+Clanker constructs and stores the exact pinned `deployToken` operation with each immutable launch intent. The same operation feeds either protected CryptoWallet signing or the external-wallet handoff; neither adapter may alter its target, value, or calldata.
 
 Host `clanker/web/` as static HTTPS assets, then configure the exact `external.html` URL with `[p]clankerset externalurl <https-url>`. The page processes the DM attachment entirely in the browser; it has no relay endpoint and receives no wallet secrets.
 
@@ -94,6 +94,12 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clankerset vault ...` — manage vault allocation, lockup, vesting, recipient, and enablement.
 - `[p]clankerset airdrop ...` — manage default airdrop data and proof exports.
 - `[p]clankerset audit clear` — clear the guild audit log.
+
+## Base Sepolia acceptance
+
+Before treating either route as accepted, use a newly created draft and record its launch ID. For the internal route, approve through the OAuth-protected CryptoWallet page, then run `[p]clanker refresh <launch_id>` until the stored status is confirmed. For the external route, upload the DM handoff to the hosted static page, submit from the intended wallet, then run `[p]clanker verify <launch_id> <transaction_hash>`.
+
+For each route, retain only public evidence: launch ID, execution route, transaction hash, deployed token address, block number, and final status. Confirm the transaction is on chain ID 84532, calls the pinned factory with zero value and exact stored calldata, emits one matching `TokenCreated` event for the stored admin, and leaves deployed bytecode at the reported token address. Do not record approval URLs, browser cookies, OAuth state, provider credentials, private keys, or recovery material. A failed, rejected, expired, replayed, wrong-user, wrong-wallet, wrong-network, or mutated attempt must not become confirmed.
 
 ## Prototype boundary
 
