@@ -72,7 +72,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker launches [limit]` — list launch IDs.
 - `[p]clanker internal <launch_id>` — DM the requester a protected CryptoWallet approval link.
 - `[p]clanker external <launch_id>` — DM the requester the exact Base Sepolia operation.
-- `[p]clanker verify <launch_id> <transaction_hash>` — verify the external transaction and receipt.
+- `[p]clanker verify <launch_id> <transaction_hash>` — verify the exact transaction, TokenCreated event, and deployed bytecode.
 - `[p]clanker launchinfo <launch_id>` — show one launch record.
 - `[p]clanker airdropproofs <launch_id>` — export generated proof metadata.
 - `[p]clankerset view` — show owner configuration.

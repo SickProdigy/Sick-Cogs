@@ -46,6 +46,7 @@ BASE_SEPOLIA_RPCS = ("https://sepolia.base.org", "https://sepolia-preconf.base.o
 TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 MAX_RPC_BYTES = 1024 * 1024
+TOKEN_CREATED_TOPIC = "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"
 
 
 async def clanker_rpc(method: str, params: list[Any]) -> Any:
@@ -69,8 +70,8 @@ async def clanker_rpc(method: str, params: list[Any]) -> Any:
     raise RuntimeError("Base Sepolia transaction lookup is unavailable.") from last_error
 
 
-async def verify_external_operation(transaction_hash: str, operation: Dict[str, Any]) -> Dict[str, Any]:
-    """Verify one direct wallet call against the exact immutable operation."""
+async def verify_external_operation(transaction_hash: str, operation: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify one direct wallet call and its deployed token against immutable data."""
     if not TX_HASH_RE.fullmatch(str(transaction_hash)):
         raise ValueError("The external transaction hash is invalid.")
     expected = {"launch_id", "payload_hash", "chain_id", "to", "value", "data"}
@@ -100,8 +101,25 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
         raise ValueError("The external Clanker transaction failed on-chain.")
     if target != str(operation["to"]).lower() or value != int(operation["value"]) or calldata != str(operation["data"]).lower():
         raise ValueError("The external transaction does not match the immutable Clanker operation.")
+    logs = receipt.get("logs")
+    if not isinstance(logs, list):
+        raise RuntimeError("Base Sepolia returned malformed receipt logs.")
+    created = [item for item in logs if isinstance(item, dict)
+               and str(item.get("address", "")).lower() == str(operation["to"]).lower()
+               and isinstance(item.get("topics"), list) and len(item["topics"]) >= 3
+               and str(item["topics"][0]).lower() == TOKEN_CREATED_TOPIC]
+    if len(created) != 1:
+        raise ValueError("The receipt does not contain exactly one pinned Clanker TokenCreated event.")
+    token_address = "0x" + str(created[0]["topics"][1])[-40:].lower()
+    token_admin = "0x" + str(created[0]["topics"][2])[-40:].lower()
+    expected_admin = str((intent.get("token") or {}).get("admin") or "").lower()
+    if not ADDRESS_RE.fullmatch(token_address) or token_admin != expected_admin:
+        raise ValueError("The Clanker token event does not match the immutable launch admin.")
+    code = str(await clanker_rpc("eth_getCode", [token_address, "latest"]) or "").lower()
+    if code in {"", "0x", "0x0"}:
+        raise ValueError("The reported Clanker token has no deployed bytecode.")
     return {"verified": True, "status": "confirmed", "transaction_hash": returned_hash,
-            "signer_address": sender, "block_number": block_number}
+            "signer_address": sender, "block_number": block_number, "token_address": token_address}
 
 
 
@@ -816,9 +834,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         if record.get("status") not in {"awaiting_external_wallet", "external_pending"}:
             await ctx.send("That launch is not awaiting external-wallet verification.")
-            return
+        await ctx.send(f"Verified Clanker token `{result['token_address']}` in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
         try:
-            result = await verify_external_operation(transaction_hash, record["operation"])
+            result = await verify_external_operation(transaction_hash, record["operation"], record["intent"])
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send(f"External Clanker verification failed: {exc}")
             return
@@ -837,9 +855,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             matches[0].update({"status": "external_confirmed",
                 "transaction_hash": result["transaction_hash"],
                 "signer_address": result["signer_address"],
-                "block_number": result["block_number"]})
+                "block_number": result["block_number"],
+                "token_address": result["token_address"]})
         await ctx.send(f"Verified the exact Clanker operation in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
-
+        await ctx.send(f"Verified Clanker token `{result['token_address']}` in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
     @clanker.command(name="airdropproofs", aliases=("proofs", "airdropexport"))
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_airdropproofs(self, ctx: commands.Context, launch_id: str):
