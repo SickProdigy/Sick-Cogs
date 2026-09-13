@@ -91,15 +91,11 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertEqual(Clanker.default_guild["vault_percentage"], 0)
         self.assertEqual(Clanker.default_guild["vault_lockup_seconds"], MIN_VAULT_LOCKUP_SECONDS)
 
-    def test_external_browser_assets_are_clanker_owned_and_upload_only(self):
+    def test_external_browser_assets_are_owned_by_shared_companion(self):
         root = __import__("pathlib").Path(__file__).resolve().parents[1]
-        script = (root / "web" / "external.js").read_text(encoding="utf-8")
-        page = (root / "web" / "external.html").read_text(encoding="utf-8")
-        self.assertIn("type=\"file\"", page)
-        self.assertIn("eth_sendTransaction", script)
-        self.assertIn("0xe85a59c628f7d27878aceb4bf3b35733630083a9", script)
-        self.assertNotIn("fetch(", script)
-        self.assertIn("external_wallet_url", Clanker.default_guild)
+        self.assertFalse((root / "web").exists())
+        self.assertNotIn("external_wallet_url", Clanker.default_guild)
+        self.assertFalse(hasattr(Clanker, "clankerset_externalurl"))
 
     def test_audit_record_does_not_store_provider_responses(self):
         payload = Clanker.build_payload(
@@ -117,6 +113,20 @@ class LegacyRestRemovalTests(unittest.TestCase):
 
 
 class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
+    async def test_external_route_uses_cryptowallet_companion_url(self):
+        approval_base_url = AsyncMock(return_value="https://wallet.example/cryptowallet/")
+        wallet = SimpleNamespace(config=SimpleNamespace(approval_base_url=approval_base_url))
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: wallet if name == "CryptoWallet" else None)
+        self.assertEqual(
+            await cog.companion_session_url(),
+            "https://wallet.example/cryptowallet/session",
+        )
+        approval_base_url.assert_awaited_once()
+        cog.bot = SimpleNamespace(get_cog=lambda name: None)
+        with self.assertRaisesRegex(RuntimeError, "must be loaded"):
+            await cog.companion_session_url()
+
     async def test_passes_only_authoritative_launch_and_operation(self):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,

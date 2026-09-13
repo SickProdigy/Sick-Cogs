@@ -132,7 +132,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     default_guild = {
         "enabled": False,
         "treasury_address": None,
-        "external_wallet_url": None,
         "platform_bps": 2000,
         "launch_channel_id": None,
         "approval_channel_id": None,
@@ -169,6 +168,16 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def validate_https_url(url: str) -> bool:
         parsed = urlparse((url or "").strip())
         return parsed.scheme == "https" and bool(parsed.netloc)
+
+    async def companion_session_url(self) -> str:
+        """Return the single shared CryptoWallet companion session page."""
+        wallet = self.bot.get_cog("CryptoWallet")
+        if wallet is None or not hasattr(wallet, "config"):
+            raise RuntimeError("CryptoWallet must be loaded for the shared companion.")
+        base_url = str(await wallet.config.approval_base_url() or "").rstrip("/")
+        if not self.validate_https_url(base_url):
+            raise RuntimeError("The shared CryptoWallet companion URL is not configured.")
+        return base_url + "/session"
 
     @staticmethod
     def build_payload(
@@ -588,6 +597,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_status(self, ctx: commands.Context):
         """Show whether Clanker launch requests are enabled."""
         settings = await self.config.guild(ctx.guild).all()
+        try:
+            companion_url = await self.companion_session_url()
+        except RuntimeError:
+            companion_url = "Not configured"
         embed = discord.Embed(title="Clanker status", color=discord.Color.blue())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
         embed.add_field(name="Execution", value="Protected CryptoWallet or external-wallet handoff", inline=False)
@@ -612,7 +625,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=True,
         )
-        embed.add_field(name="External wallet page", value=settings.get("external_wallet_url") or "Not configured", inline=False)
+        embed.add_field(name="Shared companion", value=companion_url, inline=False)
         embed.add_field(
             name="Airdrop",
             value=(
@@ -855,9 +868,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if int(intent.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp()):
             await ctx.send("That immutable launch has expired; create and review a new draft.")
             return
-        external_url = str(await self.config.guild(ctx.guild).external_wallet_url() or "")
-        page_note = ((" Open " + external_url + " and upload the attached file.") if external_url
-                     else " Ask the bot owner for the hosted Clanker external-wallet page.")
+        try:
+            external_url = await self.companion_session_url()
+        except RuntimeError as exc:
+            await ctx.send(str(exc))
+            return
+        page_note = " Open " + external_url + " and upload the attached file."
         handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
                    "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
                    "operation": operation,

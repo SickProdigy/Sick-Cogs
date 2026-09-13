@@ -14,7 +14,7 @@ Clanker owns launch construction, field validation, previews, limits, audit reco
 ```text
 [p]clankerset treasury <0x...>
 [p]clankerset platformbps 2000
-[p]clankerset externalurl https://example.org/clanker/external.html
+[p]walletset approvalurl https://example.org/cryptowallet
 [p]clankerset channel #token-launches
 [p]clankerset approvalchannel #token-launch-log
 [p]clankerset allowedrole @Launchers
@@ -29,7 +29,7 @@ Clanker owns launch construction, field validation, previews, limits, audit reco
 
 Clanker constructs and stores the exact pinned `deployToken` operation with each immutable launch intent. The same operation feeds either protected CryptoWallet signing or the external-wallet handoff; neither adapter may alter its target, value, or calldata.
 
-Host `clanker/web/` as static HTTPS assets, then configure the exact `external.html` URL with `[p]clankerset externalurl <https-url>`. The page processes the DM attachment entirely in the browser; it has no relay endpoint and receives no wallet secrets.
+The external-wallet controls live on CryptoWallet’s shared companion session page. Configure that companion once with `[p]walletset approvalurl <https-url>`; Clanker reads the same base URL used by TokenFactory. The page processes the DM attachment entirely in the browser and receives no wallet secrets.
 
 The treasury receives the configured platform share of creator rewards. The default is 2000 bps (20%).
 
@@ -82,7 +82,6 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker airdropproofs <launch_id>` — export generated proof metadata.
 - `[p]clankerset view` — show owner configuration.
 - `[p]clankerset enabled <true|false>` — enable draft creation.
-- `[p]clankerset externalurl [https-url]` — configure or clear the hosted external-wallet page.
 - `[p]clankerset treasury <0x...>` — configure the platform treasury.
 - `[p]clankerset platformbps <0-10000>` — configure the reward split.
 - `[p]clankerset channel [#channel]` / `clearchannel` — manage the launch channel.
