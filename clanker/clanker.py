@@ -890,7 +890,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         if record.get("status") not in {"awaiting_external_wallet", "external_pending"}:
             await ctx.send("That launch is not awaiting external-wallet verification.")
-        await ctx.send(f"Verified Clanker token `{result['token_address']}` in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
+            return
+        bound_hash = str(record.get("transaction_hash") or "").lower()
+        if bound_hash and bound_hash != str(transaction_hash).lower():
+            await ctx.send("That launch is already bound to a different pending transaction.")
+            return
         try:
             result = await verify_external_operation(transaction_hash, record["operation"], record["intent"])
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
@@ -913,7 +917,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 "signer_address": result["signer_address"],
                 "block_number": result["block_number"],
                 "token_address": result["token_address"]})
-        await ctx.send(f"Verified the exact Clanker operation in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
         await ctx.send(f"Verified Clanker token `{result['token_address']}` in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
     @clanker.command(name="airdropproofs", aliases=("proofs", "airdropexport"))
     @checks.mod_or_permissions(manage_guild=True)
