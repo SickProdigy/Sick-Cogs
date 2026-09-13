@@ -26,6 +26,8 @@ Clanker owns launch construction, field validation, previews, limits, audit reco
 [p]clankerset enabled true
 ```
 
+Clanker now constructs and stores the exact pinned `deployToken` operation with each immutable launch intent. The same operation will feed either protected CryptoWallet signing or the external-wallet handoff; neither adapter may alter its target, value, or calldata.
+
 The treasury receives the configured platform share of creator rewards. The default is 2000 bps (20%).
 
 ## User flow

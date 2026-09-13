@@ -93,10 +93,15 @@ class LegacyRestRemovalTests(unittest.TestCase):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None, 0, 86400, 0, None, 7,
         )
-        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload)
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
         self.assertNotIn("api_response", record)
         self.assertNotIn("api_refs", record)
         self.assertEqual(record["status"], "dry_run")
+        self.assertEqual(record["payload_hash"], record["intent"]["payload_hash"])
+        self.assertEqual(record["operation"]["payload_hash"], record["payload_hash"])
+        self.assertEqual(record["operation"]["to"].lower(), "0xe85a59c628f7d27878aceb4bf3b35733630083a9")
+        self.assertEqual(record["operation"]["value"], "0")
+        self.assertTrue(record["operation"]["data"].startswith("0xdf40224a"))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,11 @@ from .constants import (
     MIN_VAULT_LOCKUP_SECONDS,
     SYMBOL_RE,
 )
-from .models import ClankerAirdrop, ClankerReward, ClankerVault, standard_base_sepolia_pool
+from .models import (
+    BASE_SEPOLIA_WETH, ClankerAirdrop, ClankerLaunchIntent, ClankerPool,
+    ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
+)
+from .operation import clanker_deployment_operation
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -189,6 +193,58 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return payload
 
     @staticmethod
+    def build_launch_intent(
+        guild_id: int, requester_id: int, launch_id: str, payload: Dict[str, Any],
+    ) -> ClankerLaunchIntent:
+        pool_data = payload["pool"]
+        fee_data = payload["fees"]
+        paired_token = pool_data["pairedToken"]
+        if paired_token == "WETH":
+            paired_token = BASE_SEPOLIA_WETH
+        pool = ClankerPool(
+            paired_token=paired_token,
+            tick_if_token0_is_clanker=int(pool_data["tickIfToken0IsClanker"]),
+            tick_spacing=int(pool_data["tickSpacing"]),
+            positions=tuple(
+                ClankerPoolPosition(
+                    int(item["tickLower"]), int(item["tickUpper"]),
+                    int(item["positionBps"]),
+                )
+                for item in pool_data["positions"]
+            ),
+            fee_type=str(fee_data["type"]),
+            clanker_fee_bps=int(fee_data["clankerFee"]),
+            paired_fee_bps=int(fee_data["pairedFee"]),
+        )
+        rewards = tuple(
+            ClankerReward(
+                str(item["admin"]), str(item["recipient"]), int(item["bps"]),
+                str(item["token"]),
+            )
+            for item in payload["rewards"]["recipients"]
+        )
+        vault_data = payload.get("vault")
+        vault = ClankerVault(
+            str(vault_data["recipient"]), int(vault_data["percentage"]),
+            int(vault_data["lockupDuration"]), int(vault_data["vestingDuration"]),
+        ) if vault_data else None
+        airdrop_data = payload.get("airdrop")
+        airdrop = ClankerAirdrop(
+            str(airdrop_data["admin"]), str(airdrop_data["merkleRoot"]),
+            int(airdrop_data["amount"]), int(airdrop_data["lockupDuration"]),
+            int(airdrop_data["vestingDuration"]),
+        ) if airdrop_data else None
+        created_at = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        return ClankerLaunchIntent.create(
+            launch_id=launch_id, guild_id=guild_id, requester_id=requester_id,
+            token_admin=str(payload["tokenAdmin"]), name=str(payload["name"]),
+            symbol=str(payload["symbol"]), image=str(payload.get("image") or ""),
+            metadata=payload.get("metadata") or {}, context=payload.get("context") or {},
+            pool=pool, rewards=rewards, vault=vault, airdrop=airdrop,
+            created_at=created_at, expires_at=created_at + 900,
+        )
+
+    @staticmethod
     def new_launch_id(symbol: str) -> str:
         timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
         return f"{symbol.lower()}-{timestamp}-{secrets.token_hex(3)}"
@@ -197,6 +253,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def build_audit_record(
         requester: Any,
         payload: Dict[str, Any],
+        guild_id: int,
         status: str = "dry_run",
     ) -> Dict[str, Any]:
         airdrop = payload.get("airdrop") or {}
@@ -207,8 +264,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             (item for item in rewards if str(item.get("admin") or "").lower() == token_admin), {}
         )
         platform_reward = next((item for item in reversed(rewards) if item is not creator_reward), {})
+        launch_id = Clanker.new_launch_id(payload["symbol"])
+        intent = Clanker.build_launch_intent(guild_id, requester.id, launch_id, payload)
+        operation = clanker_deployment_operation(intent)
         return {
-            "launch_id": Clanker.new_launch_id(payload["symbol"]),
+            "launch_id": launch_id,
+            "payload_hash": intent.payload_hash,
+            "intent": intent.to_dict(),
+            "operation": operation.to_dict(),
             "created_at": utc_now(),
             "requester_id": requester.id,
             "requester_name": str(requester),
@@ -496,7 +559,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         except ValueError as exc:
             await ctx.send(str(exc))
             return
-        record = self.build_audit_record(ctx.author, payload)
+        record = self.build_audit_record(ctx.author, payload, ctx.guild.id)
         proof_export = settings.get("airdrop_proof_export")
         if proof_export and proof_export.get("root", "").lower() == str(record.get("airdrop_merkle_root") or "").lower():
             record["airdrop_proofs"] = proof_export

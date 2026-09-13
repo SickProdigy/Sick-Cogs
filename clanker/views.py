@@ -365,7 +365,7 @@ class ClankerDraftView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             payload = self.build_current_payload()
-            record = self.cog.build_audit_record(interaction.user, payload)
+            record = self.cog.build_audit_record(interaction.user, payload, self.ctx.guild.id)
             await self.cog.add_audit_record(self.ctx.guild, record)
             await self.cog.notify_approval_channel(
                 self.ctx.guild, self.settings, record

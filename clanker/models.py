@@ -16,11 +16,13 @@ CLANKER_LAUNCH_KIND = "clanker-v4-launch"
 CLANKER_NETWORK = "base-sepolia"
 CLANKER_CHAIN_ID = 84532
 CLANKER_FACTORY = "0xE85A59c628F7d27878ACeB4bf3b35733630083a9"
+BASE_SEPOLIA_WETH = "0x4200000000000000000000000000000000000006"
 MIN_AIRDROP_TOKENS = DEFAULT_CLANKER_SUPPLY * 25 // 10_000
 MAX_AIRDROP_TOKENS = DEFAULT_CLANKER_SUPPLY * 90 // 100
 ZERO_SALT = "0x" + "00" * 32
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 BYTES32_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+LAUNCH_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 SYMBOL_RE = re.compile(r"^[A-Z0-9]{2,12}$")
 FEE_PREFERENCES = frozenset({"Both", "Paired", "Clanker"})
 
@@ -139,7 +141,7 @@ def standard_base_sepolia_pool() -> ClankerPool:
     """Return the pinned SDK standard Base Sepolia WETH pool."""
 
     return ClankerPool(
-        paired_token="0x4200000000000000000000000000000000000006",
+        paired_token=BASE_SEPOLIA_WETH,
         tick_if_token0_is_clanker=-230_400,
         tick_spacing=200,
         positions=(ClankerPoolPosition(-230_400, -120_000, 10_000),),
@@ -235,10 +237,13 @@ class ClankerLaunchIntent:
         if self.version != CLANKER_LAUNCH_VERSION or self.kind != CLANKER_LAUNCH_KIND:
             raise ValueError("Unsupported Clanker launch version or kind.")
         if self.network != CLANKER_NETWORK or self.chain_id != CLANKER_CHAIN_ID:
-            raise ValueError("Clanker launchs are restricted to Base Sepolia.")
+            raise ValueError("Clanker launches are restricted to Base Sepolia.")
         if self.factory != CLANKER_FACTORY.lower():
             raise ValueError("Clanker launch targets an unreviewed factory.")
-        _bytes32(self.launch_id, "Launch ID", allow_zero=False)
+        launch_id = str(self.launch_id or "").strip().lower()
+        if not LAUNCH_ID_RE.fullmatch(launch_id):
+            raise ValueError("Launch ID contains unsupported characters or length.")
+        object.__setattr__(self, "launch_id", launch_id)
         if min(self.guild_id, self.requester_id) <= 0:
             raise ValueError("Guild and requester IDs must be positive.")
         name = " ".join(str(self.name or "").strip().split())
