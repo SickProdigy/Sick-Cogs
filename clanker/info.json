@@ -4,7 +4,7 @@
     "disabled": false,
     "end_user_data_statement": "This cog stores guild launch configuration and bounded token launch audit records. It does not store private keys, seed phrases, API tokens, or wallet credentials.",
     "hidden": false,
-    "install_msg": "Configure `[p]clankerset treasury`, `[p]clankerset enabled true`, and any desired channel, role, cooldown, daily-limit, reward-split, vault, or airdrop settings. Use `[p]clanker card` to create a Base Sepolia draft. Wallet execution adapters are still under development; the obsolete generic REST submission path has been removed.",
+    "install_msg": "Configure `[p]clankerset treasury`, `[p]clankerset enabled true`, and any desired channel, role, cooldown, daily-limit, reward-split, vault, or airdrop settings. Use `[p]clanker card` to create a Base Sepolia draft. Use `[p]clanker internal` for protected CryptoWallet approval or `[p]clanker external` for a requester-bound external operation; the obsolete generic REST path remains removed.",
     "min_bot_version": "3.5.0",
     "permissions": ["embed_links", "attach_files"],
     "name": "Clanker",

@@ -2,9 +2,12 @@ import datetime
 import io
 import json
 import logging
+import re
 import secrets
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+import aiohttp
 
 import discord
 from redbot.core import Config, checks, commands
@@ -38,6 +41,68 @@ from .admin import ClankerAdminMixin
 from .views import ClankerDraftView
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
+
+BASE_SEPOLIA_RPCS = ("https://sepolia.base.org", "https://sepolia-preconf.base.org")
+TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
+ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+MAX_RPC_BYTES = 1024 * 1024
+
+
+async def clanker_rpc(method: str, params: list[Any]) -> Any:
+    """Call bounded public Base Sepolia RPC endpoints."""
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    timeout = aiohttp.ClientTimeout(total=15)
+    last_error = None
+    for url in BASE_SEPOLIA_RPCS:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as response:
+                    raw = await response.content.read(MAX_RPC_BYTES + 1)
+                    if response.status != 200 or len(raw) > MAX_RPC_BYTES:
+                        raise RuntimeError("invalid RPC response")
+                    body = json.loads(raw.decode("utf-8"))
+                    if body.get("error") or "result" not in body:
+                        raise RuntimeError("RPC request rejected")
+                    return body["result"]
+        except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError, RuntimeError) as exc:
+            last_error = exc
+    raise RuntimeError("Base Sepolia transaction lookup is unavailable.") from last_error
+
+
+async def verify_external_operation(transaction_hash: str, operation: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify one direct wallet call against the exact immutable operation."""
+    if not TX_HASH_RE.fullmatch(str(transaction_hash)):
+        raise ValueError("The external transaction hash is invalid.")
+    expected = {"launch_id", "payload_hash", "chain_id", "to", "value", "data"}
+    if set(operation) != expected or int(operation["chain_id"]) != BASE_CHAIN_ID:
+        raise ValueError("The stored Clanker operation is invalid.")
+    transaction = await clanker_rpc("eth_getTransactionByHash", [transaction_hash])
+    receipt = await clanker_rpc("eth_getTransactionReceipt", [transaction_hash])
+    chain_id = await clanker_rpc("eth_chainId", [])
+    if int(str(chain_id), 16) != BASE_CHAIN_ID:
+        raise RuntimeError("The RPC endpoint is not Base Sepolia.")
+    if transaction is None or receipt is None:
+        return {"verified": False, "status": "pending", "transaction_hash": transaction_hash.lower()}
+    try:
+        returned_hash = str(transaction["hash"]).lower()
+        sender = str(transaction["from"]).lower()
+        target = str(transaction["to"]).lower()
+        value = int(str(transaction["value"]), 16)
+        calldata = str(transaction.get("input") or transaction.get("data") or "").lower()
+        success = int(str(receipt["status"]), 16) == 1
+        receipt_hash = str(receipt["transactionHash"]).lower()
+        block_number = int(str(receipt["blockNumber"]), 16)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("Base Sepolia returned malformed transaction data.") from exc
+    if not ADDRESS_RE.fullmatch(sender) or returned_hash != transaction_hash.lower() or receipt_hash != returned_hash:
+        raise RuntimeError("Base Sepolia returned mismatched transaction identity.")
+    if not success:
+        raise ValueError("The external Clanker transaction failed on-chain.")
+    if target != str(operation["to"]).lower() or value != int(operation["value"]) or calldata != str(operation["data"]).lower():
+        raise ValueError("The external transaction does not match the immutable Clanker operation.")
+    return {"verified": True, "status": "confirmed", "transaction_hash": returned_hash,
+            "signer_address": sender, "block_number": block_number}
+
 
 
 class Clanker(ClankerAdminMixin, commands.Cog):
@@ -482,7 +547,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         settings = await self.config.guild(ctx.guild).all()
         embed = discord.Embed(title="Clanker status", color=discord.Color.blue())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
-        embed.add_field(name="Execution", value="Drafts plus protected CryptoWallet approval", inline=False)
+        embed.add_field(name="Execution", value="Protected CryptoWallet or external-wallet handoff", inline=False)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
         launch_channel = ctx.guild.get_channel(settings.get("launch_channel_id") or 0)
@@ -698,6 +763,82 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send(f"Clanker could not start CryptoWallet approval: {exc}")
             return
         await ctx.send("I sent your protected CryptoWallet approval link by DM.")
+
+    @clanker.command(name="external")
+    async def clanker_external(self, ctx: commands.Context, launch_id: str):
+        """DM the requester the exact transaction for an external wallet."""
+        record = await self.get_launch_record(ctx.guild, launch_id)
+        if not record:
+            await ctx.send("No Clanker launch record matched that ID.")
+            return
+        if int(record.get("requester_id", 0)) != int(ctx.author.id):
+            await ctx.send("Only the launch requester can choose its execution wallet.")
+            return
+        if record.get("status") != "dry_run":
+            await ctx.send("That launch has already entered an execution route.")
+            return
+        operation = record.get("operation")
+        intent = record.get("intent")
+        if not isinstance(operation, dict) or not isinstance(intent, dict):
+            await ctx.send("That launch does not contain an immutable external-wallet operation.")
+            return
+        if int(intent.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp()):
+            await ctx.send("That immutable launch has expired; create and review a new draft.")
+            return
+        handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
+                   "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
+                   "operation": operation}
+        content = json.dumps(handoff, indent=2, sort_keys=True).encode("utf-8")
+        try:
+            await ctx.author.send(
+                "External Base Sepolia Clanker handoff. Review every field before submitting it with your wallet. "
+                f"After confirmation run `{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>`. ",
+                file=discord.File(io.BytesIO(content), filename=f"clanker-{record['launch_id']}.json"),
+            )
+        except discord.Forbidden:
+            await ctx.send("I could not DM the external-wallet handoff. Enable DMs and try again.")
+            return
+        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
+            if len(matches) != 1 or matches[0].get("status") != "dry_run":
+                await ctx.send("The launch changed before its external route could be saved.")
+                return
+            matches[0]["status"] = "awaiting_external_wallet"
+            matches[0]["execution_route"] = "external"
+        await ctx.send("I sent the exact external-wallet operation and verification command by DM.")
+
+    @clanker.command(name="verify")
+    async def clanker_verify(self, ctx: commands.Context, launch_id: str, transaction_hash: str):
+        """Verify an external Base Sepolia transaction against the saved operation."""
+        record = await self.get_launch_record(ctx.guild, launch_id)
+        if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
+            await ctx.send("No matching external-wallet launch belongs to you.")
+            return
+        if record.get("status") not in {"awaiting_external_wallet", "external_pending"}:
+            await ctx.send("That launch is not awaiting external-wallet verification.")
+            return
+        try:
+            result = await verify_external_operation(transaction_hash, record["operation"])
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(f"External Clanker verification failed: {exc}")
+            return
+        if not result["verified"]:
+            async with self.config.guild(ctx.guild).audit_log() as audit_log:
+                for item in audit_log:
+                    if str(item.get("launch_id")) == str(record["launch_id"]):
+                        item["status"] = "external_pending"
+                        item["transaction_hash"] = result["transaction_hash"]
+            await ctx.send("That transaction is still pending a Base Sepolia receipt. Try verification again shortly.")
+            return
+        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
+            if len(matches) != 1:
+                raise RuntimeError("The launch record changed during verification.")
+            matches[0].update({"status": "external_confirmed",
+                "transaction_hash": result["transaction_hash"],
+                "signer_address": result["signer_address"],
+                "block_number": result["block_number"]})
+        await ctx.send(f"Verified the exact Clanker operation in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
 
     @clanker.command(name="airdropproofs", aliases=("proofs", "airdropexport"))
     @checks.mod_or_permissions(manage_guild=True)

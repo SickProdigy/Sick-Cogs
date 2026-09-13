@@ -2,8 +2,9 @@
 
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+from .. import clanker as clanker_module
 from ..clanker import Clanker
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
@@ -145,6 +146,36 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_create_internal_approval=AsyncMock(return_value=bad)))
         with self.assertRaisesRegex(RuntimeError, "invalid Clanker approval binding"):
             await cog.create_internal_wallet_approval(SimpleNamespace(id=7), record)
+
+    async def test_external_verifier_requires_exact_confirmed_operation(self):
+        tx_hash = "0x" + "ab" * 32
+        sender = "0x" + "12" * 20
+        operation = {"launch_id": "launch", "payload_hash": "0x" + "34" * 32,
+                     "chain_id": 84532, "to": "0x" + "56" * 20,
+                     "value": "0", "data": "0xdf40224a00"}
+        responses = [{"hash": tx_hash, "from": sender, "to": operation["to"],
+                      "value": "0x0", "input": operation["data"]},
+                     {"status": "0x1", "transactionHash": tx_hash, "blockNumber": "0x10"},
+                     "0x14a34"]
+        with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
+            result = await clanker_module.verify_external_operation(tx_hash, operation)
+        self.assertTrue(result["verified"])
+        self.assertEqual(result["signer_address"], sender)
+        self.assertEqual(result["block_number"], 16)
+
+        responses[0]["input"] = "0xdeadbeef"
+        with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
+            with self.assertRaisesRegex(ValueError, "immutable Clanker operation"):
+                await clanker_module.verify_external_operation(tx_hash, operation)
+
+    async def test_external_verifier_reports_missing_receipt_as_pending(self):
+        tx_hash = "0x" + "ab" * 32
+        operation = {"launch_id": "launch", "payload_hash": "0x" + "34" * 32,
+                     "chain_id": 84532, "to": "0x" + "56" * 20,
+                     "value": "0", "data": "0xdf40224a00"}
+        with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=[None, None, "0x14a34"])):
+            result = await clanker_module.verify_external_operation(tx_hash, operation)
+        self.assertEqual(result["status"], "pending")
 
 
 if __name__ == "__main__":
