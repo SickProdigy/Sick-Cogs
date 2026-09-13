@@ -1,5 +1,6 @@
 import html
 import json
+import secrets
 import time
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
@@ -82,6 +83,7 @@ class CompanionServer:
         app.router.add_get("/styles.css", self.styles)
         app.router.add_get("/health", self.health)
         app.router.add_get("/session/{token}", self.begin_session)
+        app.router.add_post("/api/v1/clanker", self.api_clanker)
         app.router.add_get("/oauth/callback", self.oauth_callback)
         app.router.add_get("/api/v1/session", self.api_session)
         app.router.add_post("/api/v1/auth/token", self.api_auth_token)
@@ -268,6 +270,39 @@ class CompanionServer:
         return web.json_response(
             {"data": {**result, "claimed_at": claimed_at}}, headers=SECURITY_HEADERS
         )
+
+    async def api_clanker(self, request: web.Request) -> web.Response:
+        """Approve, reject, or read one OAuth-verified Clanker deployment."""
+        authenticated, code = await self.cog.verify_companion_request(request)
+        if not authenticated:
+            return api_error(code, "Website server authentication failed.", status=401)
+        session = await self.cog.resolve_browser_session(request.cookies.get(BROWSER_COOKIE, ""))
+        if session is None or session.purpose.value != "clanker_deployment" or not session.intent_id or not session.payload_hash:
+            return api_error("clanker_unavailable", "A valid Clanker approval session is required.", status=401)
+        if request.content_type != "application/json":
+            return api_error("invalid_request", "A JSON request is required.", status=415)
+        try:
+            body = json.loads((await request.read()).decode("utf-8"))
+            action = str(body.get("action") or "")
+            if action == "approve":
+                if await self.cog.config.provider_paused() or await self.cog.config.user_from_id(session.discord_user_id).security_locked():
+                    return api_error("clanker_paused", "Clanker signing is paused or security locked.", status=423)
+                current = await self.cog.clanker_intent_status(session.discord_user_id, session.intent_id, session.payload_hash)
+                if current["status"] == "uncertain" and current.get("attempt_id"):
+                    result = await self.cog.recover_uncertain_clanker_submission(session.discord_user_id, session.intent_id, session.payload_hash, current["attempt_id"])
+                elif current["status"] == "pending":
+                    result = await self.cog.submit_claimed_clanker_intent(session.discord_user_id, session.intent_id, session.payload_hash, secrets.token_urlsafe(24))
+                else:
+                    result = current
+            elif action == "reject":
+                result = await self.cog.reject_clanker_intent(session.discord_user_id, session.intent_id, session.payload_hash)
+            elif action == "status":
+                result = await self.cog.clanker_intent_status(session.discord_user_id, session.intent_id, session.payload_hash)
+            else:
+                return api_error("invalid_action", "Approve, reject, or status is required.", status=400)
+        except (UnicodeDecodeError, json.JSONDecodeError, RuntimeError, WalletProviderError):
+            return api_error("clanker_rejected", "The Clanker operation could not be safely processed.", status=409)
+        return web.json_response({"data": result}, headers=SECURITY_HEADERS)
 
     async def api_jwks(self, request: web.Request) -> web.Response:
         """Return the public custom-auth key through an authenticated website proxy."""

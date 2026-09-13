@@ -202,3 +202,24 @@ class ClankerLifecycleMixin:
                 discord_user_id, intent, attempt_id
             )
             raise
+
+    async def clanker_intent_status(self, discord_user_id: int, intent_id: str, payload_hash: str) -> dict[str, Any]:
+        """Return bounded persisted status for one exactly bound Clanker intent."""
+        data = await self.config.user_from_id(discord_user_id).intents.get_raw(intent_id, default=None)
+        intent = self._stored_clanker_intent(data)
+        if intent.discord_user_id != discord_user_id or intent.intent_id != intent_id or intent.payload_hash != str(payload_hash).lower():
+            raise RuntimeError("The Clanker deployment binding no longer matches.")
+        return {key: ((data.get("status") or IntentStatus.PENDING.value) if key == "status" else data.get(key)) for key in ("status", "provider_status", "attempt_id", "user_operation_hash", "transaction_hash", "block_number")}
+
+    async def reject_clanker_intent(self, discord_user_id: int, intent_id: str, payload_hash: str) -> dict[str, Any]:
+        """Atomically reject only a still-pending protected Clanker intent."""
+        async with self.config.user_from_id(discord_user_id).intents() as intents:
+            data = intents.get(intent_id)
+            intent = self._stored_clanker_intent(data)
+            if intent.discord_user_id != discord_user_id or intent.payload_hash != str(payload_hash).lower():
+                raise RuntimeError("The Clanker deployment binding no longer matches.")
+            if (data.get("status") or IntentStatus.PENDING.value) != IntentStatus.PENDING.value:
+                raise RuntimeError("This Clanker deployment is no longer pending.")
+            data["status"] = IntentStatus.REJECTED.value
+            data["provider_status"] = "rejected_by_user"
+            return {"status": data["status"], "provider_status": data["provider_status"]}

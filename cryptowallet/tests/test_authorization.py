@@ -1,3 +1,4 @@
+from pathlib import Path
 import base64
 import copy
 import time
@@ -16,6 +17,7 @@ from redbot.core import commands
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
 from ..backend.clanker_lifecycle import ClankerLifecycleMixin
+from ..backend.companion import CompanionServer
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
@@ -2018,6 +2020,43 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             provider.submit_clanker_deployment.await_args.args[2], "attempt-1"
         )
+
+    async def test_status_and_rejection_are_bound_and_terminal(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+        status = await harness.clanker_intent_status(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(status["status"], IntentStatus.PENDING.value)
+        rejected = await harness.reject_clanker_intent(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(rejected["status"], IntentStatus.REJECTED.value)
+        with self.assertRaisesRegex(RuntimeError, "no longer pending"):
+            await harness.reject_clanker_intent(7, launch.intent_id, launch.payload_hash)
+        with self.assertRaisesRegex(RuntimeError, "binding"):
+            await harness.clanker_intent_status(7, launch.intent_id, "0x" + "00" * 32)
+
+    async def test_clanker_endpoint_submits_only_verified_pending_session(self):
+        session = SimpleNamespace(discord_user_id=7, intent_id="intent", payload_hash="0x" + "12" * 32, purpose=ApprovalPurpose.CLANKER_DEPLOYMENT)
+        cog = SimpleNamespace(
+            verify_companion_request=AsyncMock(return_value=(True, "ok")),
+            resolve_browser_session=AsyncMock(return_value=session),
+            clanker_intent_status=AsyncMock(return_value={"status": "pending"}),
+            submit_claimed_clanker_intent=AsyncMock(return_value={"status": "submitted"}),
+            config=SimpleNamespace(provider_paused=_Value(False), user_from_id=lambda user_id: SimpleNamespace(security_locked=_Value(False))),
+        )
+        request = SimpleNamespace(cookies={"__Secure-sickwallet-session": "x" * 40}, content_type="application/json", read=AsyncMock(return_value=b"{\"action\":\"approve\"}"))
+        response = await CompanionServer(cog).api_clanker(request)
+        self.assertEqual(response.status, 200)
+        cog.submit_claimed_clanker_intent.assert_awaited_once()
+        self.assertEqual(cog.submit_claimed_clanker_intent.await_args.args[:3], (7, "intent", session.payload_hash))
+
+    def test_clanker_browser_controls_and_proxy_are_present(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "session.html").read_text(encoding="utf-8")
+        script = (root / "web" / "app.js").read_text(encoding="utf-8")
+        proxy = (root / "web" / "api" / "clanker.php").read_text(encoding="utf-8")
+        self.assertIn("approve-clanker", page)
+        self.assertIn("api/clanker.php", script)
+        self.assertIn("/api/v1/clanker", proxy)
+        self.assertNotIn("access_token", proxy)
 
 
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):

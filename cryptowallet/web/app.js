@@ -9,6 +9,10 @@ const authorizationButton = document.querySelector("#authorize-wallet");
 const authorizationStatus = document.querySelector("#authorization-status");
 const authorizationDays = document.querySelector("#authorization-days");
 const authorizationDurationHelp = document.querySelector("#authorization-duration-help");
+const clankerControls = document.querySelector("#clanker-controls");
+const clankerApprove = document.querySelector("#approve-clanker");
+const clankerReject = document.querySelector("#reject-clanker");
+const clankerStatus = document.querySelector("#clanker-status");
 const noticeElement = document.querySelector("#session-notice");
 let handoffToken = null;
 
@@ -118,6 +122,29 @@ function renderClanker(clanker) {
   }
 }
 
+async function clankerAction(action) {
+  const response = await fetch("api/clanker.php", {method: "POST", credentials: "same-origin",
+    headers: {"Content-Type": "application/json", Accept: "application/json"},
+    body: JSON.stringify({action})});
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.data) throw new Error(body.error?.message || "The Clanker operation could not be processed.");
+  return body.data;
+}
+function configureClanker(session) {
+  if (!session.clanker || !clankerControls || !clankerApprove || !clankerReject || !clankerStatus) return;
+  clankerControls.hidden = false;
+  clankerApprove.addEventListener("click", async () => {
+    clankerApprove.disabled = true; clankerReject.disabled = true; clankerStatus.textContent = "Submitting the exact reviewed operation…";
+    try { const value = await clankerAction("approve"); clankerStatus.textContent = "Clanker deployment status: " + value.status + (value.transaction_hash ? "; transaction " + value.transaction_hash : ""); }
+    catch (error) { clankerStatus.textContent = error instanceof Error ? error.message : "Clanker approval failed."; }
+  });
+  clankerReject.addEventListener("click", async () => {
+    clankerApprove.disabled = true; clankerReject.disabled = true;
+    try { await clankerAction("reject"); clankerStatus.textContent = "Clanker launch rejected. No transaction was submitted."; }
+    catch (error) { clankerStatus.textContent = error instanceof Error ? error.message : "Clanker rejection failed."; }
+  });
+}
+
 function configureAuthorization(session) {
   if (
     session.purpose !== "authorize" ||
@@ -188,6 +215,7 @@ if (statusElement && detailsElement) {
         addDetail("Intent", session.transaction.intent_id);
       }
       if (session.clanker) renderClanker(session.clanker);
+      configureClanker(session);
       detailsElement.hidden = false;
       configureAuthorization(session);
     })

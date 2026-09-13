@@ -123,10 +123,10 @@ Static files can be served by the companion, the SickGaming web server, or a fut
 
 No API key, OAuth client secret, wallet secret, signing key, or private user material may be embedded in `web/`.
 
-### Deferred private companion API
+### Protected companion API
 
-The repository retains a versioned browser-session and response contract for future use. If that
-workflow is deliberately enabled on a private or loopback deployment, the protected flow is:
+The repository provides a versioned browser-session contract. When
+workflow is enabled behind the authenticated HTTPS PHP proxy, the protected flow is:
 
 ```text
 GET /cryptowallet/session/<one-time-token>
@@ -160,8 +160,8 @@ Error envelope:
 The browser cookie is distinct from the OAuth state token, marked `Secure`, `HttpOnly`, and
 `SameSite=Strict`, scoped to the configured companion path, and expires with the approval session.
 
-This is not the active authorization/export path and is not yet the finished SickGaming two-server
-contract. Keep it disabled unless the complete authenticated deployment is being tested.
+Clanker approval is active only through this paired-server and OAuth-verified session
+contract. Keep the loopback listener private behind the authenticated HTTPS proxy.
 
 ### Website-server authentication v1
 
