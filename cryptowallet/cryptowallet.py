@@ -2,6 +2,7 @@ import asyncio
 import logging
 import secrets
 import time
+from urllib.parse import quote
 
 from redbot.core import commands
 
@@ -18,6 +19,8 @@ from .backend.config import WalletConfigMixin, create_config
 from .backend.provisioning import WalletProvisioningMixin
 from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
+from .core.clanker import signing_intent_from_clanker_launch
+from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_SEPOLIA
 from .providers import CdpWalletProvider
 
@@ -185,6 +188,51 @@ class CryptoWallet(
                 "submitted_at": int(time.time()),
                 "source": "tokenfactory",
             }
+
+    async def clanker_create_internal_approval(
+        self, user, launch: dict, operation: dict
+    ) -> dict:
+        """Create a protected approval for one independently verified Clanker launch."""
+
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        user_config = self.config.user(user)
+        if await user_config.security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if int(launch.get("requester_id", 0)) != int(user.id):
+            raise ValueError("Clanker requester does not match the signing wallet user.")
+
+        profile = await self.get_or_create_wallet_profile(user)
+        account = next((item for item in profile.get("accounts") or [] if item.get("network") == BASE_SEPOLIA.key), None)
+        deployment_id = await self.config.deployment_id()
+        application_id = self.discord_application_id()
+        base_url = str(await self.config.approval_base_url() or "").rstrip("/")
+        if not all((profile.get("profile_id"), account, account.get("address") if account else None, deployment_id, application_id, base_url)):
+            raise RuntimeError("CryptoWallet approval identity or routing is incomplete.")
+
+        intent = signing_intent_from_clanker_launch(
+            launch, operation, deployment_id=str(deployment_id),
+            discord_application_id=int(application_id),
+            profile_id=str(profile["profile_id"]), wallet_address=str(account["address"]),
+        )
+        validate_clanker_deployment_call(
+            intent, to=str(operation["to"]), value=int(operation["value"]),
+            data=str(operation["data"]),
+        )
+        delegation = await self.wallet_provider.get_delegation_status(profile, BASE_SEPOLIA.key)
+        if not delegation.get("active"):
+            raise RuntimeError("CryptoWallet signing authorization is not active.")
+
+        token = await self.create_clanker_approval_session(intent)
+        return {
+            "route": "internal",
+            "launch_id": str(launch["launch_id"]),
+            "source_payload_hash": str(launch["payload_hash"]).lower(),
+            "signing_intent_id": intent.intent_id,
+            "signing_payload_hash": intent.payload_hash,
+            "approval_url": f"{base_url}/session/{quote(token, safe='')}",
+            "expires_at": min(intent.expires_at, int(time.time()) + 10 * 60),
+        }
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         """Revoke bot signing authority, then delete all Discord-side user data."""

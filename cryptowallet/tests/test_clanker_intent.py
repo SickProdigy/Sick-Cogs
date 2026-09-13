@@ -59,6 +59,33 @@ def make_intent(**overrides):
     return ClankerDeploymentIntent.create(**values)
 
 
+def make_source_launch():
+    source = {
+        "version": 1, "kind": "clanker-v4-launch",
+        "launch_id": "0x" + "34" * 32, "guild_id": "100",
+        "requester_id": "7", "network": "base-sepolia", "chain_id": 84532,
+        "factory": MODULE.CLANKER_FACTORY, "supply_tokens": "100000000000",
+        "expected_native_value_wei": "0", "created_at": 1_700_000_000,
+        "expires_at": 1_700_000_600,
+        "token": {"admin": WALLET, "name": "Test Clanker", "symbol": "CLANK",
+                  "image": "https://example.test/clank.png", "salt": MODULE.ZERO_SALT,
+                  "metadata": {"description": "test", "socialMediaUrls": []},
+                  "context": {"interface": "SickGamingBot", "platform": "discord"}},
+        "pool": {"paired_token": WETH, "tick_if_token0_is_clanker": -230400,
+                 "tick_spacing": 200, "positions": [{"tick_lower": -230400,
+                 "tick_upper": -120000, "position_bps": 10000}]},
+        "fees": {"type": "static", "clanker_bps": 100, "paired_bps": 100},
+        "rewards": [{"admin": WALLET, "recipient": WALLET, "bps": 8000, "token": "Both"},
+                    {"admin": TREASURY, "recipient": TREASURY, "bps": 2000, "token": "Both"}],
+        "vault": None, "airdrop": None,
+    }
+    encoded = json.dumps(source, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    source["payload_hash"] = "0x" + MODULE.hashlib.sha256(encoded).hexdigest()
+    operation = {"launch_id": source["launch_id"], "payload_hash": source["payload_hash"],
+                 "chain_id": 84532, "to": MODULE.CLANKER_FACTORY, "value": "0", "data": "0x00"}
+    return source, operation
+
+
 class ClankerIntentTests(unittest.TestCase):
     def test_canonical_hash_is_stable_across_mapping_order(self):
         first = make_intent(metadata={"z": 1, "a": {"b": 2, "a": 1}})
@@ -132,6 +159,40 @@ class ClankerIntentTests(unittest.TestCase):
         self.assertEqual(payload["expected_native_value_wei"], "0")
         self.assertEqual(payload["estimated_gas_fee_wei"], "0")
         self.assertEqual(payload["discord_user_id"], "7")
+
+    def test_translates_and_binds_clanker_owned_launch(self):
+        launch, operation = make_source_launch()
+        intent = MODULE.signing_intent_from_clanker_launch(
+            launch, operation, deployment_id="deployment-1",
+            discord_application_id=42, profile_id="profile-7", wallet_address=WALLET,
+        )
+        self.assertEqual(intent.discord_user_id, 7)
+        self.assertEqual(intent.wallet_address, WALLET.lower())
+        self.assertRegex(intent.intent_id, r"^0x[0-9a-f]{64}$")
+
+    def test_rejects_tampered_source_launch(self):
+        launch, operation = make_source_launch()
+        launch["token"]["name"] = "Tampered"
+        with self.assertRaisesRegex(ValueError, "source launch payload hash"):
+            MODULE.signing_intent_from_clanker_launch(
+                launch, operation, deployment_id="deployment-1",
+                discord_application_id=42, profile_id="profile-7", wallet_address=WALLET,
+            )
+
+    def test_rejects_wrong_operation_binding_or_signer(self):
+        launch, operation = make_source_launch()
+        operation["value"] = "1"
+        with self.assertRaisesRegex(ValueError, "immutable launch binding"):
+            MODULE.signing_intent_from_clanker_launch(
+                launch, operation, deployment_id="deployment-1",
+                discord_application_id=42, profile_id="profile-7", wallet_address=WALLET,
+            )
+        launch, operation = make_source_launch()
+        with self.assertRaisesRegex(ValueError, "signing policy"):
+            MODULE.signing_intent_from_clanker_launch(
+                launch, operation, deployment_id="deployment-1",
+                discord_application_id=42, profile_id="profile-7", wallet_address=TREASURY,
+            )
 
 
 if __name__ == "__main__":

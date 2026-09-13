@@ -411,3 +411,89 @@ class ClankerDeploymentIntent:
 
     def to_dict(self) -> dict[str, Any]:
         return {**self.canonical_payload(), "payload_hash": self.payload_hash}
+
+
+def signing_intent_from_clanker_launch(
+    launch: Mapping[str, Any], operation: Mapping[str, Any], *,
+    deployment_id: str, discord_application_id: int, profile_id: str,
+    wallet_address: str,
+) -> ClankerDeploymentIntent:
+    """Independently validate and bind a Clanker-owned launch for signing."""
+
+    expected_launch_fields = {
+        "version", "kind", "launch_id", "guild_id", "requester_id", "network",
+        "chain_id", "factory", "supply_tokens", "expected_native_value_wei",
+        "created_at", "expires_at", "token", "pool", "fees", "rewards",
+        "vault", "airdrop", "payload_hash",
+    }
+    if set(launch) != expected_launch_fields:
+        raise ValueError("Clanker launch fields do not match the reviewed signer schema.")
+    canonical = dict(launch)
+    supplied_hash = str(canonical.pop("payload_hash") or "").lower()
+    computed_hash = "0x" + hashlib.sha256(json.dumps(
+        canonical, ensure_ascii=False, allow_nan=False, separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")).hexdigest()
+    if supplied_hash != computed_hash:
+        raise ValueError("Clanker source launch payload hash does not match its contents.")
+    if set(operation) != {"launch_id", "payload_hash", "chain_id", "to", "value", "data"}:
+        raise ValueError("Clanker operation fields do not match the reviewed signer schema.")
+    if (
+        str(operation["launch_id"]).lower() != str(launch["launch_id"]).lower()
+        or str(operation["payload_hash"]).lower() != supplied_hash
+        or int(operation["chain_id"]) != CLANKER_CHAIN_ID
+        or str(operation["to"]).lower() != CLANKER_FACTORY.lower()
+        or int(operation["value"]) != 0
+        or not re.fullmatch(r"0x[0-9a-fA-F]+", str(operation["data"]))
+    ):
+        raise ValueError("Clanker operation does not match its immutable launch binding.")
+    token = launch["token"]
+    pool = launch["pool"]
+    fees = launch["fees"]
+    signer = _address(wallet_address, "Signing wallet")
+    if (
+        int(launch["version"]) != 1
+        or str(launch["kind"]) != "clanker-v4-launch"
+        or str(launch["network"]) != CLANKER_NETWORK
+        or int(launch["chain_id"]) != CLANKER_CHAIN_ID
+        or str(launch["factory"]).lower() != CLANKER_FACTORY.lower()
+        or int(launch["supply_tokens"]) != CLANKER_TOKEN_SUPPLY
+        or int(launch["requester_id"]) <= 0
+        or str(token["admin"]).lower() != signer
+    ):
+        raise ValueError("Clanker launch is outside the internal-wallet signing policy.")
+    intent_id = "0x" + hashlib.sha256(
+        f"clanker-signing-v1:{str(launch['launch_id']).lower()}:{supplied_hash}".encode("utf-8")
+    ).hexdigest()
+    vault_data = launch.get("vault")
+    airdrop_data = launch.get("airdrop")
+    return ClankerDeploymentIntent.create(
+        intent_id=intent_id, deployment_id=deployment_id,
+        discord_application_id=discord_application_id, guild_id=int(launch["guild_id"]),
+        discord_user_id=int(launch["requester_id"]), profile_id=profile_id,
+        wallet_address=signer, token_admin=str(token["admin"]),
+        name=str(token["name"]), symbol=str(token["symbol"]),
+        image=str(token.get("image") or ""), salt=str(token.get("salt") or ZERO_SALT),
+        metadata=token.get("metadata") or {}, context=token.get("context") or {},
+        pool=ClankerPool(
+            str(pool["paired_token"]), int(pool["tick_if_token0_is_clanker"]),
+            int(pool["tick_spacing"]), tuple(
+                ClankerPoolPosition(int(item["tick_lower"]), int(item["tick_upper"]), int(item["position_bps"]))
+                for item in pool["positions"]
+            ), str(fees["type"]), int(fees["clanker_bps"]), int(fees["paired_bps"]),
+        ),
+        rewards=tuple(ClankerReward(
+            str(item["admin"]), str(item["recipient"]), int(item["bps"]), str(item["token"])
+        ) for item in launch["rewards"]),
+        vault=ClankerVault(
+            str(vault_data["recipient"]), int(vault_data["percentage"]),
+            int(vault_data["lockup_seconds"]), int(vault_data["vesting_seconds"]),
+        ) if vault_data else None,
+        airdrop=ClankerAirdrop(
+            str(airdrop_data["admin"]), str(airdrop_data["merkle_root"]),
+            int(airdrop_data["amount_tokens"]), int(airdrop_data["lockup_seconds"]),
+            int(airdrop_data["vesting_seconds"]),
+        ) if airdrop_data else None,
+        expected_native_value_wei=0, estimated_gas_fee_wei=0,
+        created_at=int(launch["created_at"]), expires_at=int(launch["expires_at"]),
+    )
