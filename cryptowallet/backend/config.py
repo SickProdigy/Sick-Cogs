@@ -2,7 +2,8 @@ import time
 
 from redbot.core import Config
 
-from ..core.models import IntentStatus
+from ..core.clanker import ClankerDeploymentIntent
+from ..core.models import ApprovalPurpose, IntentStatus
 from ..core.networks import DEFAULT_NETWORK, NETWORKS
 
 CONFIG_IDENTIFIER = 9365048217
@@ -77,6 +78,7 @@ class WalletConfigMixin:
             "expires_at": session.expires_at,
             "identity_verified": True,
             "transaction": None,
+            "clanker": None,
         }
         if not session.intent_id:
             return payload
@@ -84,6 +86,32 @@ class WalletConfigMixin:
             session.intent_id, default=None
         )
         if data is None:
+            return payload
+        if session.purpose is ApprovalPurpose.CLANKER_DEPLOYMENT:
+            try:
+                intent = ClankerDeploymentIntent.from_dict(data)
+            except (KeyError, TypeError, ValueError):
+                return payload
+            network = NETWORKS.get(intent.network)
+            if network is None:
+                return payload
+            payload["clanker"] = {
+                "intent_id": intent.intent_id,
+                "payload_hash": intent.payload_hash,
+                "network": intent.network,
+                "network_name": network.name,
+                "chain_id": intent.chain_id,
+                "wallet_address": intent.wallet_address,
+                "factory": intent.factory,
+                "expected_native_value_wei": str(intent.expected_native_value_wei),
+                "estimated_gas_fee_wei": str(intent.estimated_gas_fee_wei),
+                "expires_at": intent.expires_at,
+                "token": intent.canonical_payload()["token"],
+                "pool": intent.pool.to_dict(),
+                "rewards": [item.to_dict() for item in intent.rewards],
+                "vault": intent.vault.to_dict() if intent.vault else None,
+                "airdrop": intent.airdrop.to_dict() if intent.airdrop else None,
+            }
             return payload
         network = NETWORKS.get(str(data.get("network") or ""))
         if network is None:

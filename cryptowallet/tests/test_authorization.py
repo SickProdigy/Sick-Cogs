@@ -20,6 +20,7 @@ from ..backend.confirmation import (
     ConfirmationProcessorMixin,
 )
 from ..backend.sessions import ApprovalSessionMixin
+from ..backend.config import WalletConfigMixin
 from ..backend.usage import ProviderUsageMixin
 from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
@@ -983,6 +984,25 @@ class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
         stored = harness.config.intent_stores[7].data[intent.intent_id]
         stored["token"]["name"] = "Tampered"
         self.assertIsNone(await harness.resolve_approval_session(token))
+
+    async def test_clanker_companion_payload_displays_exact_intent(self):
+        harness = _SessionHarness()
+        intent = self._clanker_intent(estimated_gas_fee_wei=12345)
+        token = await harness.create_clanker_approval_session(intent)
+        browser_token = await harness.establish_browser_session(token, 7)
+        session = await harness.resolve_browser_session(browser_token)
+        payload = await WalletConfigMixin.companion_session_payload(harness, session)
+
+        self.assertIsNone(payload["transaction"])
+        clanker = payload["clanker"]
+        self.assertEqual(clanker["network"], "base-sepolia")
+        self.assertEqual(clanker["chain_id"], 84532)
+        self.assertEqual(clanker["wallet_address"], intent.wallet_address)
+        self.assertEqual(clanker["factory"], intent.factory)
+        self.assertEqual(clanker["token"]["name"], intent.name)
+        self.assertEqual(clanker["rewards"][0]["bps"], 10_000)
+        self.assertEqual(clanker["estimated_gas_fee_wei"], "12345")
+        self.assertEqual(clanker["payload_hash"], intent.payload_hash)
 
     async def test_clanker_mutation_prevents_browser_session_creation(self):
         harness = _SessionHarness()

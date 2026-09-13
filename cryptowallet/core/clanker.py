@@ -216,6 +216,7 @@ class ClankerDeploymentIntent:
     vault: ClankerVault | None = None
     airdrop: ClankerAirdrop | None = None
     expected_native_value_wei: int = 0
+    estimated_gas_fee_wei: int = 0
     salt: str = ZERO_SALT
     version: int = CLANKER_INTENT_VERSION
     kind: str = CLANKER_INTENT_KIND
@@ -259,6 +260,8 @@ class ClankerDeploymentIntent:
             raise ValueError("Clanker intent expiry must follow its creation time.")
         if self.expected_native_value_wei != 0:
             raise ValueError("Prototype Clanker intents do not permit a developer buy or native value.")
+        if self.estimated_gas_fee_wei < 0:
+            raise ValueError("Estimated Clanker gas fee cannot be negative.")
         extension_percentage = (self.vault.percentage if self.vault else 0)
         if self.airdrop:
             extension_percentage += (self.airdrop.amount_tokens * 100 + CLANKER_TOKEN_SUPPLY - 1) // CLANKER_TOKEN_SUPPLY
@@ -350,6 +353,7 @@ class ClankerDeploymentIntent:
                 if data.get("airdrop") else None
             ),
             expected_native_value_wei=int(data.get("expected_native_value_wei", 0)),
+            estimated_gas_fee_wei=int(data.get("estimated_gas_fee_wei", 0)),
             created_at=int(data["created_at"]),
             expires_at=int(data["expires_at"]),
             version=int(data["version"]),
@@ -377,6 +381,7 @@ class ClankerDeploymentIntent:
             "chain_id": self.chain_id,
             "factory": self.factory,
             "expected_native_value_wei": str(self.expected_native_value_wei),
+            "estimated_gas_fee_wei": str(self.estimated_gas_fee_wei),
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "token": {

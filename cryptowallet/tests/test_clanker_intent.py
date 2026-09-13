@@ -130,6 +130,7 @@ class ClankerIntentTests(unittest.TestCase):
         intent = make_intent()
         payload = json.loads(intent.canonical_bytes())
         self.assertEqual(payload["expected_native_value_wei"], "0")
+        self.assertEqual(payload["estimated_gas_fee_wei"], "0")
         self.assertEqual(payload["discord_user_id"], "7")
 
 
