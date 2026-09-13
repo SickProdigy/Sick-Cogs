@@ -158,6 +158,13 @@ class CryptoWallet(
             discord_user_id, draft, request_id
         )
 
+    async def clanker_create_external_handoff(
+        self, discord_user_id: int, handoff: dict
+    ) -> tuple[str, int]:
+        """Create a protected companion handoff without wallet signer authority."""
+
+        return await self.create_clanker_external_handoff(discord_user_id, handoff)
+
     async def tokenfactory_register_verified_token(self, user, token: dict) -> None:
         """Add one factory-verified token to the shared community registry."""
 

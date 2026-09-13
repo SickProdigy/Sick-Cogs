@@ -736,6 +736,33 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
 
+    async def test_clanker_external_handoff_is_signed_but_has_no_signer_authority(self):
+        harness = _JwtHarness(self.configuration)
+        handoff = {
+            "version": 1, "kind": "clanker-v4-external-handoff",
+            "requester_id": "7", "expires_at": int(time.time()) + 120,
+            "intent": {"launch_id": "launch", "payload_hash": "0x" + "34" * 32,
+                       "expires_at": int(time.time()) + 120},
+            "operation": {"chain_id": 84532, "to": "0x" + "12" * 20,
+                          "value": "0", "data": "0xdf40224a00",
+                          "launch_id": "launch", "payload_hash": "0x" + "34" * 32},
+            "verification_command": "!clanker verify launch <transaction_hash>",
+        }
+        token, expires_at = await harness.create_clanker_external_handoff(7, handoff)
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "clanker_external")
+        self.assertEqual(claims["sickwallet_clanker"], handoff)
+        self.assertEqual(claims["sickwallet_discord_user"], "7")
+        self.assertNotIn("sickwallet_accounts", claims)
+        self.assertNotIn("sickwallet_address", claims)
+        self.assertEqual(expires_at, handoff["expires_at"])
+        handoff["requester_id"] = "8"
+        with self.assertRaisesRegex(ValueError, "binding"):
+            await harness.create_clanker_external_handoff(7, handoff)
+
     async def test_authorization_handoff_accepts_requested_default_days(self):
         harness = _JwtHarness(self.configuration)
         token, _ = await harness.create_authorization_handoff(
@@ -2085,11 +2112,13 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         external = (root / "web" / "clanker-external.js").read_text(encoding="utf-8")
         proxy = (root / "web" / "api" / "clanker.php").read_text(encoding="utf-8")
         self.assertIn("approve-clanker", page)
-        self.assertIn("external-clanker-file", page)
+        self.assertNotIn("type=\"file\"", page)
         self.assertIn("clanker-external.js", page)
         self.assertIn("eth_sendTransaction", external)
         self.assertIn("0xe85a59c628f7d27878aceb4bf3b35733630083a9", external)
-        self.assertNotIn("fetch(", external)
+        self.assertIn("api/recovery-handoff.php", external)
+        self.assertIn("clanker_external", external)
+        self.assertIn("crypto.subtle.verify", external)
         self.assertIn("api/clanker.php", script)
         self.assertIn("/api/v1/clanker", proxy)
         self.assertNotIn("access_token", proxy)

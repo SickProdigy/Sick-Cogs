@@ -61,7 +61,11 @@ function decodeHandoff() {
 }
 
 async function loadSession() {
-  if (window.location.hash.includes("handoff=")) return decodeHandoff();
+  if (window.location.hash.includes("handoff=")) {
+    const candidate = new URLSearchParams(window.location.hash.slice(1)).get("handoff") || "";
+    if (candidate.split(".").length === 3) return decodeHandoff();
+    throw new Error("Protected external-wallet handoff loading below.");
+  }
   const response = await fetch("api/session.php", {
     method: "GET",
     credentials: "same-origin",
