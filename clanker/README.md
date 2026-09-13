@@ -49,7 +49,7 @@ The legacy text command also prepares a draft:
 [p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound operation file and verifies the submitted transaction directly against Base Sepolia.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 
 ## Vaults
@@ -96,7 +96,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 
 ## Base Sepolia acceptance
 
-Before treating either route as accepted, use a newly created draft and record its launch ID. For the internal route, approve through the OAuth-protected CryptoWallet page, then run `[p]clanker refresh <launch_id>` until the stored status is confirmed. For the external route, upload the DM handoff to the hosted static page, submit from the intended wallet, then run `[p]clanker verify <launch_id> <transaction_hash>`.
+Before treating either route as accepted, use a newly created draft and record its launch ID. For the internal route, approve through the OAuth-protected CryptoWallet page, then run `[p]clanker refresh <launch_id>` until the stored status is confirmed. For the external route, open the short-lived DM companion link, submit from the intended wallet, then run `[p]clanker verify <launch_id> <transaction_hash>`.
 
 For each route, retain only public evidence: launch ID, execution route, transaction hash, deployed token address, block number, and final status. Confirm the transaction is on chain ID 84532, calls the pinned factory with zero value and exact stored calldata, emits one matching `TokenCreated` event for the stored admin, and leaves deployed bytecode at the reported token address. Do not record approval URLs, browser cookies, OAuth state, provider credentials, private keys, or recovery material. A failed, rejected, expired, replayed, wrong-user, wrong-wallet, wrong-network, or mutated attempt must not become confirmed.
 

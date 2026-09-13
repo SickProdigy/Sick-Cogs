@@ -127,6 +127,25 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "must be loaded"):
             await cog.companion_session_url()
 
+    async def test_external_handoff_uses_opaque_shared_relay_handle(self):
+        create = AsyncMock(return_value=("signed-token", 1_800_000_000))
+        register = AsyncMock(return_value="h" * 43)
+        approval_base_url = AsyncMock(return_value="https://wallet.example/cryptowallet")
+        wallet = SimpleNamespace(
+            config=SimpleNamespace(approval_base_url=approval_base_url),
+            clanker_create_external_handoff=create,
+            register_recovery_handoff=register,
+        )
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: wallet if name == "CryptoWallet" else None)
+        user = SimpleNamespace(id=7)
+        handoff = {"kind": "clanker-v4-external-handoff"}
+        link = await cog.create_external_wallet_handoff(user, handoff)
+        self.assertTrue(link.startswith("https://wallet.example/cryptowallet/session"))
+        self.assertTrue(link.endswith("h" * 43))
+        create.assert_awaited_once_with(7, handoff)
+        register.assert_awaited_once_with("signed-token", 1_800_000_000)
+
     async def test_passes_only_authoritative_launch_and_operation(self):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,

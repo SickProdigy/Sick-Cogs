@@ -5,7 +5,7 @@ import logging
 import re
 import secrets
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import aiohttp
 
@@ -178,6 +178,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not self.validate_https_url(base_url):
             raise RuntimeError("The shared CryptoWallet companion URL is not configured.")
         return base_url + "/session"
+    async def create_external_wallet_handoff(self, user: Any, handoff: Dict[str, Any]) -> str:
+        """Register one Clanker-owned operation with the shared companion relay."""
+        wallet = self.bot.get_cog("CryptoWallet")
+        create = getattr(wallet, "clanker_create_external_handoff", None) if wallet else None
+        register = getattr(wallet, "register_recovery_handoff", None) if wallet else None
+        if not callable(create) or not callable(register):
+            raise RuntimeError("CryptoWallet shared companion handoff support is unavailable.")
+        token, expires_at = await create(int(user.id), handoff)
+        handle = await register(token, int(expires_at))
+        if not isinstance(handle, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", handle):
+            raise RuntimeError("CryptoWallet returned an invalid companion handoff.")
+        return await self.companion_session_url() + "#handoff=" + quote(handle, safe="")
 
     @staticmethod
     def build_payload(
@@ -868,25 +880,22 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if int(intent.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp()):
             await ctx.send("That immutable launch has expired; create and review a new draft.")
             return
-        try:
-            external_url = await self.companion_session_url()
-        except RuntimeError as exc:
-            await ctx.send(str(exc))
-            return
-        page_note = " Open " + external_url + " and upload the attached file."
         handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
                    "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
-                   "operation": operation,
+                   "intent": intent, "operation": operation,
                    "verification_command": f"{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>"}
-        content = json.dumps(handoff, indent=2, sort_keys=True).encode("utf-8")
         try:
+            external_url = await self.create_external_wallet_handoff(ctx.author, handoff)
             await ctx.author.send(
-                "External Base Sepolia Clanker handoff." + page_note +
-                " Review every field before submitting it with your wallet.",
-                file=discord.File(io.BytesIO(content), filename=f"clanker-{record['launch_id']}.json"),
+                "Review and submit your exact Base Sepolia Clanker operation here:\n"
+                + external_url
+                + "\nThis protected link is short-lived and bound to your launch."
             )
         except discord.Forbidden:
             await ctx.send("I could not DM the external-wallet handoff. Enable DMs and try again.")
+            return
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(f"Clanker could not create the external-wallet handoff: {exc}")
             return
         async with self.config.guild(ctx.guild).audit_log() as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
