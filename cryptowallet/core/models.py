@@ -26,6 +26,7 @@ class ApprovalPurpose(str, Enum):
     RECOVERY = "recovery"
     SECURITY = "security"
     TRANSACTION = "transaction"
+    CLANKER_DEPLOYMENT = "clanker_deployment"
 
 
 class ApprovalStatus(str, Enum):
@@ -178,6 +179,11 @@ class ApprovalSession:
     expires_at: int
     status: ApprovalStatus = ApprovalStatus.PENDING
     intent_id: str | None = None
+    guild_id: int | None = None
+    profile_id: str | None = None
+    wallet_address: str | None = None
+    network: str | None = None
+    payload_hash: str | None = None
     consumed_at: int | None = None
     browser_token_digest: str | None = None
 
@@ -192,6 +198,11 @@ class ApprovalSession:
             "expires_at": self.expires_at,
             "status": self.status.value,
             "intent_id": self.intent_id,
+            "guild_id": self.guild_id,
+            "profile_id": self.profile_id,
+            "wallet_address": self.wallet_address,
+            "network": self.network,
+            "payload_hash": self.payload_hash,
             "consumed_at": self.consumed_at,
             "browser_token_digest": self.browser_token_digest,
         }
@@ -211,6 +222,11 @@ class ApprovalSession:
             expires_at=int(data["expires_at"]),
             status=ApprovalStatus(data.get("status", ApprovalStatus.PENDING.value)),
             intent_id=data.get("intent_id"),
+            guild_id=(int(data["guild_id"]) if data.get("guild_id") is not None else None),
+            profile_id=data.get("profile_id"),
+            wallet_address=data.get("wallet_address"),
+            network=data.get("network"),
+            payload_hash=data.get("payload_hash"),
             consumed_at=data.get("consumed_at"),
             browser_token_digest=data.get("browser_token_digest"),
         )

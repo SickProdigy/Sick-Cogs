@@ -29,6 +29,9 @@ from ..commands.views import WalletAuthorizationView, WalletIntentView, WalletRe
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
 from ..commands.admin import WalletAdminCommands
+from ..core.clanker import (
+    ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
+)
 from ..core.models import (
     ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
 )
@@ -170,14 +173,20 @@ class _SessionConfig:
     def __init__(self, deployment_id="deployment"):
         self.deployment_id = _Value(deployment_id)
         self.stores = {}
+        self.intent_stores = {}
 
     def user_from_id(self, user_id):
-        store = self.stores.setdefault(int(user_id), _ApprovalStore())
-        return SimpleNamespace(approval_sessions=store)
+        user_id = int(user_id)
+        store = self.stores.setdefault(user_id, _ApprovalStore())
+        intent_store = self.intent_stores.setdefault(user_id, _ApprovalStore())
+        return SimpleNamespace(approval_sessions=store, intents=intent_store)
 
     async def all_users(self):
         return {
-            user_id: {"approval_sessions": store.data}
+            user_id: {
+                "approval_sessions": store.data,
+                "intents": self.intent_stores.setdefault(user_id, _ApprovalStore()).data,
+            }
             for user_id, store in self.stores.items()
         }
 
@@ -881,6 +890,35 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _clanker_intent(**overrides):
+        wallet = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        values = {
+            "intent_id": "0x" + "12" * 32,
+            "deployment_id": "deployment",
+            "discord_application_id": 42,
+            "guild_id": 100,
+            "discord_user_id": 7,
+            "profile_id": "profile-7",
+            "wallet_address": wallet,
+            "token_admin": wallet,
+            "name": "Approval Test",
+            "symbol": "APPROVE",
+            "image": "",
+            "metadata": {},
+            "context": {"interface": "SickGamingBot"},
+            "pool": ClankerPool(
+                "0x4200000000000000000000000000000000000006",
+                -230400, 200,
+                (ClankerPoolPosition(-230400, -120000, 10_000),),
+            ),
+            "rewards": (ClankerReward(wallet, wallet, 10_000),),
+            "created_at": int(time.time()),
+            "expires_at": int(time.time()) + 300,
+        }
+        values.update(overrides)
+        return ClankerDeploymentIntent.create(**values)
+
     async def test_malformed_or_unknown_session_token_is_rejected(self):
         harness = _SessionHarness()
         self.assertIsNone(await harness.resolve_approval_session("short"))
@@ -921,6 +959,46 @@ class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
         token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
         harness.application_id = 99
         self.assertIsNone(await harness.resolve_approval_session(token))
+
+    async def test_clanker_session_requires_complete_bindings(self):
+        harness = _SessionHarness()
+        with self.assertRaisesRegex(RuntimeError, "complete immutable bindings"):
+            await harness.create_approval_session(
+                7, ApprovalPurpose.CLANKER_DEPLOYMENT, "0x" + "12" * 32
+            )
+
+    async def test_clanker_session_binds_and_verifies_stored_intent(self):
+        harness = _SessionHarness()
+        intent = self._clanker_intent()
+        token = await harness.create_clanker_approval_session(intent)
+        resolved = await harness.resolve_approval_session(token)
+        self.assertIsNotNone(resolved)
+        self.assertIs(resolved.purpose, ApprovalPurpose.CLANKER_DEPLOYMENT)
+        self.assertEqual(resolved.guild_id, intent.guild_id)
+        self.assertEqual(resolved.profile_id, intent.profile_id)
+        self.assertEqual(resolved.wallet_address, intent.wallet_address)
+        self.assertEqual(resolved.payload_hash, intent.payload_hash)
+        self.assertLessEqual(resolved.expires_at, intent.expires_at)
+
+        stored = harness.config.intent_stores[7].data[intent.intent_id]
+        stored["token"]["name"] = "Tampered"
+        self.assertIsNone(await harness.resolve_approval_session(token))
+
+    async def test_clanker_mutation_prevents_browser_session_creation(self):
+        harness = _SessionHarness()
+        intent = self._clanker_intent()
+        token = await harness.create_clanker_approval_session(intent)
+        harness.config.intent_stores[7].data[intent.intent_id]["profile_id"] = "wrong"
+        self.assertIsNone(await harness.establish_browser_session(token, 7))
+
+    async def test_clanker_browser_session_rejects_post_approval_mutation(self):
+        harness = _SessionHarness()
+        intent = self._clanker_intent()
+        token = await harness.create_clanker_approval_session(intent)
+        browser_token = await harness.establish_browser_session(token, 7)
+        self.assertIsNotNone(browser_token)
+        harness.config.intent_stores[7].data[intent.intent_id]["guild_id"] = "101"
+        self.assertIsNone(await harness.resolve_browser_session(browser_token))
 
 
 class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
