@@ -15,6 +15,7 @@ from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
+from ..backend.clanker_lifecycle import ClankerLifecycleMixin
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
@@ -983,8 +984,20 @@ class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(resolved.expires_at, intent.expires_at)
 
         stored = harness.config.intent_stores[7].data[intent.intent_id]
+        self.assertEqual(stored["status"], IntentStatus.PENDING.value)
         stored["token"]["name"] = "Tampered"
         self.assertIsNone(await harness.resolve_approval_session(token))
+
+    async def test_clanker_session_never_overwrites_lifecycle_state(self):
+        harness = _SessionHarness()
+        intent = self._clanker_intent()
+        await harness.create_clanker_approval_session(intent)
+        stored = harness.config.intent_stores[7].data[intent.intent_id]
+        stored["status"] = IntentStatus.PROCESSING.value
+
+        with self.assertRaisesRegex(RuntimeError, "entered its lifecycle"):
+            await harness.create_clanker_approval_session(intent)
+        self.assertEqual(stored["status"], IntentStatus.PROCESSING.value)
 
     async def test_clanker_companion_payload_displays_exact_intent(self):
         harness = _SessionHarness()
@@ -1873,6 +1886,138 @@ class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
         }])
         self.assertEqual(format_atomic_amount(1_250_000, ETHEREUM_SEPOLIA, decimals=6), "1.25")
 
+
+
+class _ClankerLifecycleHarness(ClankerLifecycleMixin):
+    def __init__(self, intent, provider):
+        self.store = _ApprovalStore()
+        self.store.data[intent.intent_id] = intent.to_dict()
+        profile = {
+            "profile_id": intent.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": intent.network, "address": intent.wallet_address}],
+        }
+        self.config = SimpleNamespace(
+            user_from_id=lambda user_id: SimpleNamespace(
+                intents=self.store, profile=_Value(profile)
+            )
+        )
+        self.wallet_provider = provider
+
+
+class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_atomic_claim_rejects_replay(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+
+        claimed = await harness.begin_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1",
+            now=launch.created_at,
+        )
+        self.assertEqual(claimed, launch)
+        self.assertEqual(
+            harness.store.data[launch.intent_id]["status"],
+            IntentStatus.PROCESSING.value,
+        )
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2",
+                now=launch.created_at,
+            )
+
+    async def test_expired_intent_is_terminal(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+        with self.assertRaisesRegex(RuntimeError, "expired"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-1",
+                now=launch.expires_at,
+            )
+        self.assertEqual(
+            harness.store.data[launch.intent_id]["status"],
+            IntentStatus.EXPIRED.value,
+        )
+
+    async def test_submission_persists_acknowledgement_and_blocks_retry(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        result = {
+            "provider_status": "broadcast",
+            "user_operation_hash": "0x" + "1" * 64,
+            "transaction_hash": None,
+            "intent_id": launch.intent_id,
+            "payload_hash": launch.payload_hash,
+        }
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(return_value=result)
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+
+        stored = await harness.submit_claimed_clanker_intent(
+            7, launch.intent_id, launch.payload_hash, "attempt-1"
+        )
+        self.assertEqual(stored["status"], IntentStatus.SUBMITTED.value)
+        self.assertEqual(stored["user_operation_hash"], result["user_operation_hash"])
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.submit_claimed_clanker_intent(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+        provider.submit_clanker_deployment.assert_awaited_once()
+
+    async def test_ambiguous_provider_failure_becomes_uncertain(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(
+                side_effect=WalletProviderError("connection ended")
+            )
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+
+        with self.assertRaises(WalletProviderError):
+            await harness.submit_claimed_clanker_intent(
+                7, launch.intent_id, launch.payload_hash, "attempt-1"
+            )
+        stored = harness.store.data[launch.intent_id]
+        self.assertEqual(stored["status"], IntentStatus.UNCERTAIN.value)
+        self.assertEqual(stored["provider_status"], "unknown")
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+
+    async def test_uncertain_recovery_reuses_only_original_attempt(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        result = {
+            "provider_status": "broadcast",
+            "user_operation_hash": "0x" + "2" * 64,
+            "transaction_hash": None,
+            "intent_id": launch.intent_id,
+            "payload_hash": launch.payload_hash,
+        }
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(return_value=result)
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+        await harness.begin_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1",
+            now=launch.created_at,
+        )
+        await harness.mark_clanker_submission_uncertain(
+            7, launch, "attempt-1"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be safely reclaimed"):
+            await harness.recover_uncertain_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+        stored = await harness.recover_uncertain_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1"
+        )
+
+        self.assertEqual(stored["status"], IntentStatus.SUBMITTED.value)
+        provider.submit_clanker_deployment.assert_awaited_once()
+        self.assertEqual(
+            provider.submit_clanker_deployment.await_args.args[2], "attempt-1"
+        )
 
 
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):

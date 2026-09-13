@@ -3,7 +3,7 @@ import secrets
 import time
 
 from ..core.clanker import CLANKER_NETWORK, ClankerDeploymentIntent
-from ..core.models import ApprovalPurpose, ApprovalSession, ApprovalStatus
+from ..core.models import ApprovalPurpose, ApprovalSession, ApprovalStatus, IntentStatus
 
 APPROVAL_LIFETIME_SECONDS = 10 * 60
 MAX_STORED_APPROVALS = 10
@@ -75,9 +75,21 @@ class ApprovalSessionMixin:
             raise RuntimeError("Clanker intent does not belong to this wallet deployment")
         async with self.config.user_from_id(intent.discord_user_id).intents() as intents:
             existing = intents.get(intent.intent_id)
-            if existing is not None and existing != intent.to_dict():
-                raise RuntimeError("A different Clanker intent already uses this ID")
-            intents[intent.intent_id] = intent.to_dict()
+            if existing is not None:
+                try:
+                    existing_intent = ClankerDeploymentIntent.from_dict(existing)
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise RuntimeError(
+                        "The stored Clanker intent is invalid"
+                    ) from exc
+                if existing_intent != intent:
+                    raise RuntimeError("A different Clanker intent already uses this ID")
+                if existing.get("status", IntentStatus.PENDING.value) != IntentStatus.PENDING.value:
+                    raise RuntimeError("This Clanker intent has already entered its lifecycle")
+            else:
+                intents[intent.intent_id] = {
+                    **intent.to_dict(), "status": IntentStatus.PENDING.value
+                }
         return await self.create_approval_session(
             intent.discord_user_id,
             ApprovalPurpose.CLANKER_DEPLOYMENT,

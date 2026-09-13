@@ -12,6 +12,7 @@ from .backend import (
     JwtAuthMixin,
     RecoveryRelayMixin,
 )
+from .backend.clanker_lifecycle import ClankerLifecycleMixin
 from .backend.confirmation import ConfirmationProcessorMixin
 from .backend.config import WalletConfigMixin, create_config
 from .backend.provisioning import WalletProvisioningMixin
@@ -25,6 +26,7 @@ log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 class CryptoWallet(
     ProviderUsageMixin,
+    ClankerLifecycleMixin,
     ConfirmationProcessorMixin,
     WalletCommands,
     WalletAdminCommands,
