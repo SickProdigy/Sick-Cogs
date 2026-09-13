@@ -198,7 +198,15 @@ class ClankerAirdropModal(discord.ui.Modal):
 
 
 class ClankerDraftView(discord.ui.View):
-    def __init__(self, cog: "Clanker", ctx: commands.Context, settings: Dict[str, Any]):
+    def __init__(
+        self,
+        cog: "Clanker",
+        ctx: commands.Context,
+        settings: Dict[str, Any],
+        *,
+        symbol: Optional[str] = None,
+        name: Optional[str] = None,
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.ctx = ctx
@@ -206,8 +214,8 @@ class ClankerDraftView(discord.ui.View):
         self.user_id = ctx.author.id
         self.processing = False
         self.draft: Dict[str, Any] = {
-            "name": None,
-            "symbol": None,
+            "name": name,
+            "symbol": symbol,
             "supply": DEFAULT_CLANKER_SUPPLY,
             "primary_beneficiary": None,
             "image_url": None,

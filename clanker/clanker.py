@@ -599,11 +599,41 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return record
         return None
 
+    async def _open_clanker_card(
+        self, ctx: commands.Context, symbol: Optional[str] = None, name: Optional[str] = None
+    ) -> None:
+        settings = await self.config.guild(ctx.guild).all()
+        if not settings["enabled"]:
+            await ctx.send("Clanker launch requests are disabled in this server.")
+            return
+        if not settings["treasury_address"]:
+            await ctx.send("A bot owner must configure the SickGaming treasury address first.")
+            return
+        if not await self.check_launch_controls(ctx, settings):
+            return
+        normalized_symbol = None
+        if symbol is not None:
+            normalized_symbol = symbol.strip().upper().lstrip("$")
+            if not SYMBOL_RE.fullmatch(normalized_symbol):
+                await ctx.send("Token symbols must be 2-12 uppercase letters or numbers.")
+                return
+        normalized_name = name.strip() if name else None
+        if normalized_name and len(normalized_name.encode("utf-8")) > 64:
+            await ctx.send("Token names must be 1-64 UTF-8 bytes.")
+            return
+        view = ClankerDraftView(self, ctx, settings, symbol=normalized_symbol, name=normalized_name)
+        await ctx.send(embed=view.embed(), view=view)
+
     @commands.guild_only()
     @commands.group(name="clanker", aliases=("clank",), invoke_without_command=True)
-    async def clanker(self, ctx: commands.Context):
-        """Create and inspect Clanker token launch requests."""
-        await ctx.send_help()
+    async def clanker(
+        self, ctx: commands.Context, symbol: Optional[str] = None, *, name: Optional[str] = None
+    ):
+        """Open a Clanker launch draft, optionally prefilled with a ticker and name."""
+        if symbol is None:
+            await ctx.send_help()
+            return
+        await self._open_clanker_card(ctx, symbol, name)
 
     @clanker.command(name="status")
     async def clanker_status(self, ctx: commands.Context):
@@ -653,17 +683,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="card", aliases=("create", "draft"))
     async def clanker_card(self, ctx: commands.Context):
         """Open an interactive launch-card draft with optional airdrops."""
-        settings = await self.config.guild(ctx.guild).all()
-        if not settings["enabled"]:
-            await ctx.send("Clanker launch requests are disabled in this server.")
-            return
-        if not settings["treasury_address"]:
-            await ctx.send("A bot owner must configure the SickGaming treasury address first.")
-            return
-        if not await self.check_launch_controls(ctx, settings):
-            return
-        view = ClankerDraftView(self, ctx, settings)
-        await ctx.send(embed=view.embed(), view=view)
+        await self._open_clanker_card(ctx)
 
     @clanker.command(name="launch")
     async def clanker_launch(

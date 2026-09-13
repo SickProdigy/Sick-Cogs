@@ -112,6 +112,37 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertTrue(record["operation"]["data"].startswith("0xdf40224a"))
 
 
+class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shortcut_normalizes_and_prefills_symbol_and_name(self):
+        settings = {"enabled": True, "treasury_address": TREASURY}
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
+        )
+        cog.check_launch_controls = AsyncMock(return_value=True)
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock())
+        fake_view = SimpleNamespace(embed=lambda: "prefilled-embed")
+        with patch.object(clanker_module, "ClankerDraftView", return_value=fake_view) as view_type:
+            await cog._open_clanker_card(ctx, "sgbt", "SickGaming Bot Token")
+        view_type.assert_called_once_with(
+            cog, ctx, settings, symbol="SGBT", name="SickGaming Bot Token"
+        )
+        ctx.send.assert_awaited_once_with(embed="prefilled-embed", view=fake_view)
+
+    async def test_shortcut_rejects_invalid_symbol_before_opening_view(self):
+        settings = {"enabled": True, "treasury_address": TREASURY}
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
+        )
+        cog.check_launch_controls = AsyncMock(return_value=True)
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock())
+        with patch.object(clanker_module, "ClankerDraftView") as view_type:
+            await cog._open_clanker_card(ctx, "x", None)
+        view_type.assert_not_called()
+        ctx.send.assert_awaited_once_with("Token symbols must be 2-12 uppercase letters or numbers.")
+
+
 class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_external_route_uses_cryptowallet_companion_url(self):
         approval_base_url = AsyncMock(return_value="https://wallet.example/cryptowallet/")

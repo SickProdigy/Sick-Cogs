@@ -35,11 +35,13 @@ The treasury receives the configured platform share of creator rewards. The defa
 
 ## User flow
 
-Open the interactive draft card:
+Open a prefilled interactive draft card with the friendly shortcut:
 
 ```text
-[p]clanker card
+[p]clank SGBT "SickGaming Bot Token"
 ```
+
+The ticker is uppercased automatically. The token name is optional, so `[p]clank SGBT` opens the same form with only the ticker prefilled. `[p]clanker card` remains available as an empty administrative draft.
 
 The requester can enter token basics, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. The card is requester-bound so another member cannot edit or save it.
 
@@ -69,7 +71,8 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 
 ## Commands
 
-- `[p]clanker card` — open the interactive draft flow.
+- `[p]clank <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
+- `[p]clanker card` — open an empty interactive draft flow.
 - `[p]clanker launch ...` — prepare a draft with the text command.
 - `[p]clanker status` — show draft and guild-control configuration.
 - `[p]clanker audit [limit]` — view recent launch records.
