@@ -20,6 +20,9 @@ Clanker owns launch construction, field validation, previews, limits, audit reco
 [p]clankerset blockedrole @Blocked
 [p]clankerset cooldown 60
 [p]clankerset dailymax 3
+[p]clankerset vault percentage 10
+[p]clankerset vault lockup 604800
+[p]clankerset vault enabled true
 [p]clankerset enabled true
 ```
 
@@ -33,19 +36,23 @@ Open the interactive draft card:
 [p]clanker card
 ```
 
-The requester can enter token basics, optional details, and an optional airdrop; preview the current payload; and save a bounded guild launch record. The card is requester-bound so another member cannot edit or save it.
+The requester can enter token basics, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. The card is requester-bound so another member cannot edit or save it.
 
 The legacy text command also prepares a draft:
 
 ```text
-[p]clanker launch TICKER "Token Name" 100000000000 0xCreatorAddress
+[p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Neither path currently signs or broadcasts a transaction. Saved drafts will feed the internal-wallet and external-wallet adapters as those milestones are completed.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Neither path currently signs or broadcasts a transaction. Saved drafts will feed the internal-wallet and external-wallet adapters as those milestones are completed.
+
+## Vaults
+
+Owner-configured vault defaults allocate a whole percentage of the fixed supply. Clanker v4 requires at least a seven-day lockup, supports optional linear vesting, and defaults the recipient to the launch token admin. Vault plus airdrop allocations cannot exceed 90% of supply.
 
 ## Airdrops
 
-Airdrop rows may use fixed whole-token amounts or percentages of the configured supply:
+Airdrop rows may use fixed whole-token amounts or percentages of the fixed supply:
 
 ```text
 0x1111111111111111111111111111111111111111=1%
@@ -73,6 +80,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clankerset blockedrole <@role>` / `clearblockedrole` — manage blocked access.
 - `[p]clankerset cooldown <seconds>` — configure the per-user draft cooldown.
 - `[p]clankerset dailymax <number>` — configure the rolling daily draft limit.
+- `[p]clankerset vault ...` — manage vault allocation, lockup, vesting, recipient, and enablement.
 - `[p]clankerset airdrop ...` — manage default airdrop data and proof exports.
 - `[p]clankerset audit clear` — clear the guild audit log.
 

@@ -9,6 +9,7 @@ from .constants import (
     DEFAULT_CLANKER_SUPPLY,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
+    MIN_VAULT_LOCKUP_SECONDS,
     SYMBOL_RE,
 )
 from .helpers import (
@@ -32,18 +33,13 @@ class ClankerBasicsModal(discord.ui.Modal):
         self.name_input = discord.ui.TextInput(
             label="Token name",
             default=view.draft.get("name") or "",
-            max_length=80,
+            max_length=64,
         )
         self.symbol_input = discord.ui.TextInput(
             label="Symbol / ticker",
             default=view.draft.get("symbol") or "",
             min_length=2,
             max_length=12,
-        )
-        self.supply_input = discord.ui.TextInput(
-            label="Supply",
-            default=str(view.draft.get("supply") or DEFAULT_CLANKER_SUPPLY),
-            max_length=24,
         )
         self.creator_input = discord.ui.TextInput(
             label="Creator wallet / token admin",
@@ -56,21 +52,18 @@ class ClankerBasicsModal(discord.ui.Modal):
             required=False,
             max_length=300,
         )
-        for item in (self.name_input, self.symbol_input, self.supply_input, self.creator_input, self.image_input):
+        for item in (self.name_input, self.symbol_input, self.creator_input, self.image_input):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
             symbol = str(self.symbol_input.value).strip().upper().lstrip("$")
-            supply = int(str(self.supply_input.value).replace(",", "").replace("_", "").strip())
             creator = str(self.creator_input.value).strip()
             image_url = str(self.image_input.value).strip()
             if not SYMBOL_RE.fullmatch(symbol):
                 raise ValueError("Token symbols must be 2-12 uppercase letters or numbers.")
             if not str(self.name_input.value).strip():
                 raise ValueError("Token name is required.")
-            if supply <= 0 or supply > 10**18:
-                raise ValueError("Supply must be between 1 and 1e18 tokens.")
             if not is_eth_address(creator):
                 raise ValueError("Creator wallet must be a valid EVM address.")
             if image_url and not self.view_ref.cog.validate_https_url(image_url):
@@ -82,7 +75,7 @@ class ClankerBasicsModal(discord.ui.Modal):
             {
                 "name": str(self.name_input.value).strip(),
                 "symbol": symbol,
-                "supply": supply,
+                "supply": DEFAULT_CLANKER_SUPPLY,
                 "primary_beneficiary": creator,
                 "image_url": image_url or None,
             }
@@ -178,7 +171,9 @@ class ClankerAirdropModal(discord.ui.Modal):
             lockup = normalize_seconds(
                 str(self.lockup_input.value),
                 MIN_AIRDROP_LOCKUP_SECONDS,
+    MIN_VAULT_LOCKUP_SECONDS,
                 MIN_AIRDROP_LOCKUP_SECONDS,
+    MIN_VAULT_LOCKUP_SECONDS,
             )
             vesting = normalize_seconds(str(self.vesting_input.value), 0, 0)
             validate_airdrop_total(total_amount, supply)
@@ -244,7 +239,6 @@ class ClankerDraftView(discord.ui.View):
         return self.cog.build_payload(
             self.draft["symbol"],
             self.draft["name"],
-            int(self.draft["supply"]),
             self.draft["primary_beneficiary"],
             self.settings["treasury_address"],
             int(self.settings["platform_bps"]),
@@ -257,6 +251,11 @@ class ClankerDraftView(discord.ui.View):
             self.user_id,
             self.draft.get("image_url"),
             self.draft.get("description"),
+            bool(self.settings.get("vault_enabled")),
+            int(self.settings.get("vault_percentage") or 0),
+            int(self.settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
+            int(self.settings.get("vault_vesting_seconds") or 0),
+            self.settings.get("vault_recipient"),
         )
 
     def embed(self) -> discord.Embed:
@@ -269,7 +268,7 @@ class ClankerDraftView(discord.ui.View):
         if self.draft.get("name") or self.draft.get("symbol"):
             token = f"{self.draft.get('name') or 'Unnamed'} (${self.draft.get('symbol') or '?'})"
         embed.add_field(name="Token", value=token, inline=False)
-        embed.add_field(name="Supply", value=format_tokens(int(self.draft.get("supply") or DEFAULT_CLANKER_SUPPLY)), inline=True)
+        embed.add_field(name="Supply", value=f"{format_tokens(DEFAULT_CLANKER_SUPPLY)} (fixed v4)", inline=True)
         embed.add_field(name="Creator wallet", value=self.draft.get("primary_beneficiary") or "Not set", inline=False)
         embed.add_field(name="Image", value="Set" if self.draft.get("image_url") else "Not set", inline=True)
         embed.add_field(name="Description", value="Set" if self.draft.get("description") else "Not set", inline=True)
@@ -278,6 +277,17 @@ class ClankerDraftView(discord.ui.View):
             value=f"Creator {10000 - int(self.settings['platform_bps'])} bps / platform {int(self.settings['platform_bps'])} bps",
             inline=False,
         )
+        if self.settings.get("vault_enabled"):
+            vault_percentage = int(self.settings.get("vault_percentage") or 0)
+            vault_lockup = int(self.settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS)
+            vault_recipient = self.settings.get("vault_recipient") or self.draft.get("primary_beneficiary") or "token admin"
+            embed.add_field(
+                name="Vault",
+                value=f"{vault_percentage}% · lock {vault_lockup}s · recipient {vault_recipient}",
+                inline=False,
+            )
+        else:
+            embed.add_field(name="Vault", value="Disabled / optional", inline=False)
         airdrop = self.draft.get("airdrop")
         if airdrop:
             status = "ready for execution" if airdrop.get("merkleRoot") else "preview only: Merkle root needed"
@@ -322,7 +332,11 @@ class ClankerDraftView(discord.ui.View):
         if not self.is_ready():
             await interaction.response.send_message("Fill out token basics before previewing the payload.", ephemeral=True)
             return
-        payload = self.build_current_payload()
+        try:
+            payload = self.build_current_payload()
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
         await interaction.response.send_message(box(json.dumps(payload, indent=2)[:1800], lang="json"), ephemeral=True)
 
     @discord.ui.button(label="Save Draft", emoji="💾", style=discord.ButtonStyle.success)
@@ -362,6 +376,8 @@ class ClankerDraftView(discord.ui.View):
                 "Clanker launch draft saved. Wallet execution adapters are not connected yet.",
                 ephemeral=True,
             )
+        except ValueError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
         finally:
             self.processing = False
 

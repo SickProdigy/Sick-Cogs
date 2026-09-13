@@ -18,8 +18,10 @@ from .constants import (
     MAX_AUDIT_RECORDS,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
+    MIN_VAULT_LOCKUP_SECONDS,
     SYMBOL_RE,
 )
+from .models import ClankerAirdrop, ClankerReward, ClankerVault, standard_base_sepolia_pool
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -50,6 +52,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "blocked_role_id": None,
         "launch_cooldown_seconds": 60,
         "daily_max_per_user": 0,
+        "vault_enabled": False,
+        "vault_percentage": 0,
+        "vault_lockup_seconds": MIN_VAULT_LOCKUP_SECONDS,
+        "vault_vesting_seconds": 0,
+        "vault_recipient": None,
         "airdrop_enabled": False,
         "airdrop_merkle_root": None,
         "airdrop_amount": 0,
@@ -79,7 +86,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def build_payload(
         symbol: str,
         name: str,
-        supply: int,
         primary_beneficiary: str,
         platform_address: str,
         platform_bps: int,
@@ -92,45 +98,94 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         requester_id: int,
         image_url: Optional[str] = None,
         description: Optional[str] = None,
+        vault_enabled: bool = False,
+        vault_percentage: int = 0,
+        vault_lockup_seconds: int = MIN_VAULT_LOCKUP_SECONDS,
+        vault_vesting_seconds: int = 0,
+        vault_recipient: Optional[str] = None,
     ) -> Dict[str, Any]:
+        clean_name = " ".join(str(name or "").strip().split())
+        clean_symbol = str(symbol or "").strip().upper().lstrip("$")
+        if not clean_name or len(clean_name.encode("utf-8")) > 64:
+            raise ValueError("Token name must contain 1 through 64 UTF-8 bytes.")
+        if not SYMBOL_RE.fullmatch(clean_symbol):
+            raise ValueError("Token symbol must contain 2 through 12 uppercase letters or numbers.")
+        if not is_eth_address(primary_beneficiary):
+            raise ValueError("Token admin must be a valid EVM address.")
+        if not is_eth_address(platform_address):
+            raise ValueError("Platform treasury must be a valid EVM address.")
+        if image_url and not Clanker.validate_https_url(image_url):
+            raise ValueError("Image URL must be HTTPS.")
+        if not 0 <= platform_bps <= 10_000:
+            raise ValueError("Platform reward bps must be from 0 through 10000.")
+        recipients = []
+        creator_bps = 10_000 - platform_bps
+        if creator_bps:
+            recipients.append(ClankerReward(
+                primary_beneficiary, primary_beneficiary, creator_bps,
+            ).to_dict())
+        if platform_bps:
+            recipients.append(ClankerReward(
+                platform_address, platform_address, platform_bps,
+            ).to_dict())
+        pool = standard_base_sepolia_pool()
         payload = {
+            "name": clean_name,
+            "symbol": clean_symbol,
+            "image": image_url or "",
             "chainId": BASE_CHAIN_ID,
-            "chain": "base-sepolia",
-            "symbol": symbol,
-            "name": name.strip(),
-            "supply": str(supply),
-            "description": description or "",
-            "imageUrl": image_url or "",
-            "requesterDiscordId": str(requester_id),
-            "tokenAdmin": primary_beneficiary,
-            "rewards": {
-                "recipients": [
-                    {
-                        "admin": primary_beneficiary,
-                        "recipient": primary_beneficiary,
-                        "bps": 10000 - platform_bps,
-                        "token": "Both",
-                    },
-                    {
-                        "admin": platform_address,
-                        "recipient": platform_address,
-                        "bps": platform_bps,
-                        "token": "Both",
-                    },
-                ]
+            "tokenAdmin": primary_beneficiary.lower(),
+            "metadata": {"description": description or ""},
+            "context": {
+                "interface": "SickGamingBot", "platform": "discord",
+                "id": str(requester_id),
             },
+            "pool": {
+                "pairedToken": "WETH",
+                "tickIfToken0IsClanker": pool.tick_if_token0_is_clanker,
+                "tickSpacing": pool.tick_spacing,
+                "positions": [{
+                    "tickLower": item.tick_lower, "tickUpper": item.tick_upper,
+                    "positionBps": item.position_bps,
+                } for item in pool.positions],
+            },
+            "fees": {
+                "type": pool.fee_type, "clankerFee": pool.clanker_fee_bps,
+                "pairedFee": pool.paired_fee_bps,
+            },
+            "rewards": {"recipients": recipients},
         }
+        vault = None
+        if vault_enabled:
+            vault = ClankerVault(
+                vault_recipient or primary_beneficiary, vault_percentage,
+                vault_lockup_seconds, vault_vesting_seconds,
+            )
+            payload["vault"] = {
+                "percentage": vault_percentage,
+                "lockupDuration": vault_lockup_seconds,
+                "vestingDuration": vault_vesting_seconds,
+                "recipient": vault.recipient,
+            }
+        airdrop = None
         if airdrop_enabled and airdrop_merkle_root and airdrop_amount > 0:
-            validate_airdrop_total(airdrop_amount, supply)
+            validate_airdrop_total(airdrop_amount, DEFAULT_CLANKER_SUPPLY)
+            airdrop = ClankerAirdrop(
+                airdrop_admin or primary_beneficiary, airdrop_merkle_root,
+                airdrop_amount, airdrop_lockup_seconds, airdrop_vesting_seconds,
+            )
             payload["airdrop"] = {
-                "merkleRoot": airdrop_merkle_root,
+                "admin": airdrop.admin,
+                "merkleRoot": airdrop.merkle_root,
                 "amount": airdrop_amount,
                 "lockupDuration": airdrop_lockup_seconds,
+                "vestingDuration": airdrop_vesting_seconds,
             }
-            if airdrop_vesting_seconds > 0:
-                payload["airdrop"]["vestingDuration"] = airdrop_vesting_seconds
-            if airdrop_admin:
-                payload["airdrop"]["admin"] = airdrop_admin
+        extension_bps = vault.percentage * 100 if vault else 0
+        if airdrop:
+            extension_bps += (airdrop.amount_tokens * 10_000 + DEFAULT_CLANKER_SUPPLY - 1) // DEFAULT_CLANKER_SUPPLY
+        if extension_bps > 9_000:
+            raise ValueError("Clanker vault and airdrop allocations cannot exceed 90% of supply.")
         return payload
 
     @staticmethod
@@ -145,6 +200,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         status: str = "dry_run",
     ) -> Dict[str, Any]:
         airdrop = payload.get("airdrop") or {}
+        vault = payload.get("vault") or {}
+        rewards = payload["rewards"]["recipients"]
+        token_admin = str(payload.get("tokenAdmin") or "").lower()
+        creator_reward = next(
+            (item for item in rewards if str(item.get("admin") or "").lower() == token_admin), {}
+        )
+        platform_reward = next((item for item in reversed(rewards) if item is not creator_reward), {})
         return {
             "launch_id": Clanker.new_launch_id(payload["symbol"]),
             "created_at": utc_now(),
@@ -152,12 +214,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "requester_name": str(requester),
             "symbol": payload["symbol"],
             "name": payload["name"],
-            "chain": payload.get("chain", "base-sepolia"),
-            "supply": payload.get("supply"),
+            "chain": "base-sepolia",
+            "supply": str(DEFAULT_CLANKER_SUPPLY),
             "token_admin": payload.get("tokenAdmin"),
-            "platform_treasury": payload["rewards"]["recipients"][1]["recipient"],
-            "creator_bps": payload["rewards"]["recipients"][0]["bps"],
-            "platform_bps": payload["rewards"]["recipients"][1]["bps"],
+            "platform_treasury": platform_reward.get("recipient"),
+            "creator_bps": creator_reward.get("bps", 0),
+            "platform_bps": platform_reward.get("bps", 0),
+            "vault_percentage": vault.get("percentage", 0),
+            "vault_recipient": vault.get("recipient"),
             "airdrop_amount": airdrop.get("amount", 0),
             "airdrop_merkle_root": airdrop.get("merkleRoot"),
             "airdrop_proofs": airdrop.get("merkleExport"),
@@ -262,6 +326,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             inline=False,
         )
         embed.add_field(name="Platform treasury", value=record.get("platform_treasury") or "unknown", inline=False)
+        if record.get("vault_percentage"):
+            embed.add_field(
+                name="Vault",
+                value=(
+                    f"{record.get('vault_percentage')}% of supply · "
+                    f"recipient {record.get('vault_recipient') or 'token admin'}"
+                ),
+                inline=False,
+            )
         if record.get("airdrop_amount"):
             proof_export = record.get("airdrop_proofs") or {}
             proof_note = ""
@@ -314,6 +387,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         daily_max = int(settings.get("daily_max_per_user") or 0)
         embed.add_field(name="Daily max", value=str(daily_max) if daily_max else "Unlimited", inline=True)
         embed.add_field(
+            name="Vault",
+            value=(
+                f"{settings['vault_percentage']}% · lock {settings['vault_lockup_seconds']}s"
+                if settings.get("vault_enabled") else "Disabled"
+            ),
+            inline=True,
+        )
+        embed.add_field(
             name="Airdrop",
             value=(
                 f"{settings['airdrop_amount']} tokens · lock {settings['airdrop_lockup_seconds']}s"
@@ -346,7 +427,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         ctx: commands.Context,
         symbol: str,
         name: str,
-        supply: commands.Range[int, 1, 10**18],
         primary_beneficiary: str,
         image_url: Optional[str] = None,
         *,
@@ -366,8 +446,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not SYMBOL_RE.fullmatch(symbol):
             await ctx.send("Token symbols must be 2-12 uppercase letters or numbers.")
             return
-        if not name.strip() or len(name.strip()) > 80:
-            await ctx.send("Token names must be 1-80 characters.")
+        if not name.strip() or len(name.strip().encode("utf-8")) > 64:
+            await ctx.send("Token names must be 1-64 UTF-8 bytes.")
             return
         if not is_eth_address(primary_beneficiary):
             await ctx.send("Primary beneficiary must be a valid EVM address.")
@@ -391,23 +471,31 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 await ctx.send("Configured airdrop admin must be a valid EVM address.")
                 return
 
-        payload = self.build_payload(
-            symbol,
-            name,
-            supply,
-            primary_beneficiary,
-            settings["treasury_address"],
-            int(settings["platform_bps"]),
-            bool(settings["airdrop_enabled"]),
-            settings["airdrop_merkle_root"],
-            int(settings["airdrop_amount"]),
-            int(settings["airdrop_lockup_seconds"]),
-            int(settings["airdrop_vesting_seconds"]),
-            settings["airdrop_admin"],
-            ctx.author.id,
-            image_url,
-            description,
-        )
+        try:
+            payload = self.build_payload(
+                symbol,
+                name,
+                primary_beneficiary,
+                settings["treasury_address"],
+                int(settings["platform_bps"]),
+                bool(settings["airdrop_enabled"]),
+                settings["airdrop_merkle_root"],
+                int(settings["airdrop_amount"]),
+                int(settings["airdrop_lockup_seconds"]),
+                int(settings["airdrop_vesting_seconds"]),
+                settings["airdrop_admin"],
+                ctx.author.id,
+                image_url,
+                description,
+                bool(settings.get("vault_enabled")),
+                int(settings.get("vault_percentage") or 0),
+                int(settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
+                int(settings.get("vault_vesting_seconds") or 0),
+                settings.get("vault_recipient"),
+            )
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
         record = self.build_audit_record(ctx.author, payload)
         proof_export = settings.get("airdrop_proof_export")
         if proof_export and proof_export.get("root", "").lower() == str(record.get("airdrop_merkle_root") or "").lower():
@@ -421,13 +509,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             color=discord.Color.gold(),
         )
         embed.add_field(name="Token", value=f"{payload['name']} (${payload['symbol']})", inline=False)
-        embed.add_field(name="Supply", value=payload["supply"], inline=True)
+        embed.add_field(name="Supply", value=str(DEFAULT_CLANKER_SUPPLY), inline=True)
         embed.add_field(name="Chain", value="Base Sepolia", inline=True)
         embed.add_field(
             name="Beneficiaries",
             value=humanize_list([
-                f"Creator {payload['rewards']['recipients'][0]['bps']} bps",
-                f"Bot owner {payload['rewards']['recipients'][1]['bps']} bps",
+                f"Creator {record['creator_bps']} bps",
+                f"Bot owner {record['platform_bps']} bps",
             ]),
             inline=False,
         )

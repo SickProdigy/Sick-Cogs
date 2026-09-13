@@ -8,6 +8,8 @@ from redbot.core import checks, commands
 
 from .constants import (
     DEFAULT_CLANKER_SUPPLY,
+    MAX_EXTENSION_PERCENTAGE,
+    MIN_VAULT_LOCKUP_SECONDS,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
 )
@@ -18,6 +20,12 @@ from .helpers import (
     parse_airdrop_lines,
     validate_airdrop_total,
 )
+
+
+def validate_extension_allocations(vault_percentage: int, airdrop_amount: int) -> None:
+    airdrop_bps = (airdrop_amount * 10_000 + DEFAULT_CLANKER_SUPPLY - 1) // DEFAULT_CLANKER_SUPPLY
+    if vault_percentage * 100 + airdrop_bps > MAX_EXTENSION_PERCENTAGE * 100:
+        raise ValueError("Clanker vault and airdrop allocations cannot exceed 90% of supply.")
 
 
 class ClankerAdminMixin:
@@ -123,6 +131,76 @@ class ClankerAdminMixin:
         await self.config.guild(ctx.guild).daily_max_per_user.set(launches)
         await ctx.send("Clanker daily launch limit disabled." if launches == 0 else f"Clanker daily launch limit set to {launches} per user.")
 
+    @clankerset.group(name="vault")
+    async def clankerset_vault(self, ctx: commands.Context):
+        """Manage optional token vault defaults."""
+        pass
+
+    @clankerset_vault.command(name="enabled")
+    async def clankerset_vault_enabled(self, ctx: commands.Context, enabled: bool):
+        """Enable or disable the configured token vault."""
+        if enabled:
+            settings = await self.config.guild(ctx.guild).all()
+            percentage = int(settings.get("vault_percentage") or 0)
+            if percentage < 1:
+                await ctx.send("Set a vault percentage from 1 through 90 before enabling it.")
+                return
+            try:
+                validate_extension_allocations(
+                    percentage, int(settings.get("airdrop_amount") or 0)
+                    if settings.get("airdrop_enabled") else 0,
+                )
+            except ValueError as exc:
+                await ctx.send(str(exc))
+                return
+        await self.config.guild(ctx.guild).vault_enabled.set(enabled)
+        state = "enabled" if enabled else "disabled"
+        await ctx.send(f"Vault defaults are now {state}.")
+
+    @clankerset_vault.command(name="percentage")
+    async def clankerset_vault_percentage(self, ctx: commands.Context, percentage: commands.Range[int, 1, 90]):
+        """Set the whole-token-supply percentage allocated to the vault."""
+        settings = await self.config.guild(ctx.guild).all()
+        try:
+            validate_extension_allocations(
+                percentage, int(settings.get("airdrop_amount") or 0)
+                if settings.get("airdrop_enabled") else 0,
+            )
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
+        await self.config.guild(ctx.guild).vault_percentage.set(percentage)
+        await ctx.send(f"Vault allocation set to {percentage}% of the fixed supply.")
+
+    @clankerset_vault.command(name="lockup")
+    async def clankerset_vault_lockup(self, ctx: commands.Context, seconds: int):
+        """Set vault lockup seconds; Clanker v4 requires at least seven days."""
+        if seconds < MIN_VAULT_LOCKUP_SECONDS or seconds > 315360000:
+            await ctx.send("Vault lockup must be between 604800 and 315360000 seconds.")
+            return
+        await self.config.guild(ctx.guild).vault_lockup_seconds.set(seconds)
+        await ctx.send(f"Vault lockup set to {seconds} seconds.")
+
+    @clankerset_vault.command(name="vesting")
+    async def clankerset_vault_vesting(self, ctx: commands.Context, seconds: commands.Range[int, 0, 315360000]):
+        """Set optional vault vesting seconds; zero disables vesting."""
+        await self.config.guild(ctx.guild).vault_vesting_seconds.set(seconds)
+        await ctx.send(f"Vault vesting set to {seconds} seconds.")
+
+    @clankerset_vault.command(name="recipient")
+    async def clankerset_vault_recipient(self, ctx: commands.Context, recipient: Optional[str] = None):
+        """Set the vault recipient; omit it to default to the token admin."""
+        if not recipient:
+            await self.config.guild(ctx.guild).vault_recipient.set(None)
+            await ctx.send("Vault recipient cleared; launches will use the token admin.")
+            return
+        recipient = recipient.strip()
+        if not is_eth_address(recipient):
+            await ctx.send("Vault recipient must be a valid EVM address.")
+            return
+        await self.config.guild(ctx.guild).vault_recipient.set(recipient)
+        await ctx.send("Vault recipient saved.")
+
     @clankerset.group(name="airdrop")
     async def clankerset_airdrop(self, ctx: commands.Context):
         """Manage optional airdrop defaults for launch requests."""
@@ -131,6 +209,17 @@ class ClankerAdminMixin:
     @clankerset_airdrop.command(name="enabled")
     async def clankerset_airdrop_enabled(self, ctx: commands.Context, enabled: bool):
         """Enable or disable a configured Clanker airdrop."""
+        if enabled:
+            settings = await self.config.guild(ctx.guild).all()
+            try:
+                validate_extension_allocations(
+                    int(settings.get("vault_percentage") or 0)
+                    if settings.get("vault_enabled") else 0,
+                    int(settings.get("airdrop_amount") or 0),
+                )
+            except ValueError as exc:
+                await ctx.send(str(exc))
+                return
         await self.config.guild(ctx.guild).airdrop_enabled.set(enabled)
         await ctx.send(f"Airdrop defaults are now {'enabled' if enabled else 'disabled'}.")
 
@@ -146,16 +235,18 @@ class ClankerAdminMixin:
         await ctx.send("Airdrop Merkle root saved. Any previously generated proof export was cleared because this root was set manually.")
 
     @clankerset_airdrop.command(name="build")
-    async def clankerset_airdrop_build(self, ctx: commands.Context, supply: int, *, recipient_rows: str):
+    async def clankerset_airdrop_build(self, ctx: commands.Context, *, recipient_rows: str):
         """Build and store an airdrop Merkle root/proof export from recipient rows."""
-        if supply <= 0 or supply > 10**18:
-            await ctx.send("Supply must be between 1 and 1e18 tokens.")
-            return
         try:
-            recipients, total_amount = parse_airdrop_lines(recipient_rows, supply)
+            recipients, total_amount = parse_airdrop_lines(recipient_rows, DEFAULT_CLANKER_SUPPLY)
             if not recipients:
                 raise ValueError("At least one recipient row is required.")
-            validate_airdrop_total(total_amount, supply)
+            validate_airdrop_total(total_amount, DEFAULT_CLANKER_SUPPLY)
+            settings = await self.config.guild(ctx.guild).all()
+            validate_extension_allocations(
+                int(settings.get("vault_percentage") or 0)
+                if settings.get("vault_enabled") else 0, total_amount,
+            )
             export = build_airdrop_merkle_tree(recipients)
         except (ValueError, RuntimeError) as exc:
             await ctx.send(str(exc))
@@ -190,6 +281,11 @@ class ClankerAdminMixin:
         if amount:
             try:
                 validate_airdrop_total(amount, DEFAULT_CLANKER_SUPPLY)
+                settings = await self.config.guild(ctx.guild).all()
+                validate_extension_allocations(
+                    int(settings.get("vault_percentage") or 0)
+                    if settings.get("vault_enabled") else 0, amount,
+                )
             except ValueError as exc:
                 await ctx.send(str(exc))
                 return

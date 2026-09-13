@@ -132,11 +132,6 @@ class ClankerPool:
             "tick_if_token0_is_clanker": self.tick_if_token0_is_clanker,
             "tick_spacing": self.tick_spacing,
             "positions": [item.to_dict() for item in self.positions],
-            "fees": {
-                "type": self.fee_type,
-                "clanker_bps": self.clanker_fee_bps,
-                "paired_bps": self.paired_fee_bps,
-            },
         }
 
 
@@ -293,7 +288,7 @@ class ClankerLaunchIntent:
 
         token = data.get("token") or {}
         pool = data.get("pool") or {}
-        fees = pool.get("fees") or {}
+        fees = data.get("fees") or {}
         supplied_hash = str(data.get("payload_hash") or "").lower()
         intent = cls.create(
             launch_id=str(data["launch_id"]),
@@ -388,6 +383,11 @@ class ClankerLaunchIntent:
                 "context": json.loads(self.context_json),
             },
             "pool": self.pool.to_dict(),
+            "fees": {
+                "type": self.pool.fee_type,
+                "clanker_bps": self.pool.clanker_fee_bps,
+                "paired_bps": self.pool.paired_fee_bps,
+            },
             "rewards": [item.to_dict() for item in self.rewards],
             "vault": self.vault.to_dict() if self.vault else None,
             "airdrop": self.airdrop.to_dict() if self.airdrop else None,
