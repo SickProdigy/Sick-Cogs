@@ -86,6 +86,20 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertEqual(creator["recipient"], creator_treasury.lower())
         self.assertEqual(creator["bps"], 8000)
 
+    def test_route_neutral_draft_preserves_null_wallet_placeholders(self):
+        payload = Clanker.build_draft_payload(
+            "TEST", "Test Token", None, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7, creator_reward_recipient=None,
+        )
+        self.assertIsNone(payload["tokenAdmin"])
+        self.assertIsNone(payload["rewards"]["recipients"][0]["admin"])
+        self.assertIsNone(payload["rewards"]["recipients"][0]["recipient"])
+        self.assertEqual(payload["rewards"]["recipients"][1]["recipient"], TREASURY.lower())
+        record = Clanker.build_draft_record(SimpleNamespace(id=7), payload, 100)
+        self.assertIsNone(record["intent"])
+        self.assertIsNone(record["operation"])
+        self.assertIsNone(record["payload_hash"])
+
     def test_zero_share_reward_entries_are_omitted(self):
         creator_only = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 0, False, None, 0, 86400, 0, None, 7,
@@ -143,9 +157,9 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
             await cog._open_clanker_card(ctx, "sgbt", "SickGaming Bot Token")
         view_type.assert_called_once_with(
             cog, ctx, settings, symbol="SGBT", name="SickGaming Bot Token",
-            creator_address=WALLET,
+            creator_address=None,
         )
-        resolve.assert_awaited_once_with(ctx.author)
+        resolve.assert_not_awaited()
         ctx.send.assert_awaited_once_with(embed="prefilled-embed", view=fake_view)
 
     async def test_shortcut_rejects_invalid_symbol_before_opening_view(self):
@@ -188,7 +202,7 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
             guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
         )
         refreshed = await cog.prepare_draft_execution(
-            SimpleNamespace(id=100), SimpleNamespace(id=7), launch_id
+            SimpleNamespace(id=100), SimpleNamespace(id=7), launch_id, WALLET
         )
         self.assertEqual(refreshed["launch_id"], launch_id)
         self.assertEqual(refreshed["payload"], payload)

@@ -1,3 +1,4 @@
+import copy
 import datetime
 import io
 import json
@@ -236,13 +237,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         recipients = []
         creator_bps = 10_000 - platform_bps
         if creator_bps:
-            recipients.append(ClankerReward(
+            creator_reward = ClankerReward(
                 primary_beneficiary, creator_treasury, creator_bps,
-            ).to_dict())
+            ).to_dict()
+            recipients.append(creator_reward)
         if platform_bps:
-            recipients.append(ClankerReward(
+            platform_reward = ClankerReward(
                 platform_address, platform_address, platform_bps,
-            ).to_dict())
+            ).to_dict()
+            recipients.append(platform_reward)
         pool = standard_base_sepolia_pool()
         payload = {
             "name": clean_name,
@@ -304,8 +307,39 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return payload
 
     @staticmethod
+    def build_draft_payload(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """Build a route-neutral payload, preserving omitted wallet roles as JSON null."""
+        primary = args[2] if len(args) > 2 else kwargs.get("primary_beneficiary")
+        creator_recipient = kwargs.get("creator_reward_recipient")
+        platform = args[3] if len(args) > 3 else kwargs.get("platform_address")
+        fallback = primary or platform
+        draft_args = list(args)
+        if len(draft_args) > 2:
+            draft_args[2] = fallback
+        else:
+            kwargs["primary_beneficiary"] = fallback
+        kwargs["creator_reward_recipient"] = creator_recipient or fallback
+        payload = Clanker.build_payload(*draft_args, **kwargs)
+        platform_bps = int(args[4] if len(args) > 4 else kwargs["platform_bps"])
+        creator_bps = 10_000 - platform_bps
+        if not primary:
+            payload["tokenAdmin"] = None
+            if creator_bps:
+                payload["rewards"]["recipients"][0]["admin"] = None
+            vault_recipient = args[18] if len(args) > 18 else kwargs.get("vault_recipient")
+            if payload.get("vault") and not vault_recipient:
+                payload["vault"]["recipient"] = None
+            airdrop_admin = args[10] if len(args) > 10 else kwargs.get("airdrop_admin")
+            if payload.get("airdrop") and not airdrop_admin:
+                payload["airdrop"]["admin"] = None
+        if not creator_recipient and creator_bps:
+            payload["rewards"]["recipients"][0]["recipient"] = None
+        return payload
+
+    @staticmethod
     def build_launch_intent(
         guild_id: int, requester_id: int, launch_id: str, payload: Dict[str, Any],
+        *, created_at: Optional[int] = None, expires_at: Optional[int] = None,
     ) -> ClankerLaunchIntent:
         pool_data = payload["pool"]
         fee_data = payload["fees"]
@@ -345,14 +379,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             int(airdrop_data["amount"]), int(airdrop_data["lockupDuration"]),
             int(airdrop_data["vestingDuration"]),
         ) if airdrop_data else None
-        created_at = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        created_at = int(created_at or datetime.datetime.now(datetime.timezone.utc).timestamp())
+        expires_at = int(expires_at or created_at + 900)
         return ClankerLaunchIntent.create(
             launch_id=launch_id, guild_id=guild_id, requester_id=requester_id,
             token_admin=str(payload["tokenAdmin"]), name=str(payload["name"]),
             symbol=str(payload["symbol"]), image=str(payload.get("image") or ""),
             metadata=payload.get("metadata") or {}, context=payload.get("context") or {},
             pool=pool, rewards=rewards, vault=vault, airdrop=airdrop,
-            created_at=created_at, expires_at=created_at + 900,
+            created_at=created_at, expires_at=expires_at,
         )
 
     @staticmethod
@@ -402,6 +437,33 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "airdrop_proofs": airdrop.get("merkleExport"),
             "payload": payload,
             "status": status,
+        }
+
+    @staticmethod
+    def build_draft_record(requester: Any, payload: Dict[str, Any], guild_id: int) -> Dict[str, Any]:
+        """Persist a route-neutral template without creating an expiring transaction."""
+        rewards = payload["rewards"]["recipients"]
+        token_admin = str(payload.get("tokenAdmin") or "").lower()
+        creator = next((item for item in rewards if item.get("admin") is None or (token_admin and str(item.get("admin") or "").lower() == token_admin)), {})
+        platform = next((item for item in reversed(rewards) if item is not creator), {})
+        platform_bps = int(platform.get("bps", 0))
+        return {
+            "launch_id": Clanker.new_launch_id(payload["symbol"]),
+            "payload_hash": None, "intent": None, "operation": None,
+            "created_at": utc_now(), "requester_id": requester.id,
+            "requester_name": str(requester), "symbol": payload["symbol"],
+            "name": payload["name"], "chain": "base-sepolia",
+            "supply": str(DEFAULT_CLANKER_SUPPLY), "token_admin": payload.get("tokenAdmin"),
+            "platform_treasury": platform.get("recipient"),
+            "creator_bps": creator.get("bps", 0),
+            "creator_reward_recipient": creator.get("recipient"),
+            "platform_bps": platform.get("bps", 0),
+            "vault_percentage": (payload.get("vault") or {}).get("percentage", 0),
+            "vault_recipient": (payload.get("vault") or {}).get("recipient"),
+            "airdrop_amount": (payload.get("airdrop") or {}).get("amount", 0),
+            "airdrop_merkle_root": (payload.get("airdrop") or {}).get("merkleRoot"),
+            "airdrop_proofs": (payload.get("airdrop") or {}).get("merkleExport"),
+            "payload": copy.deepcopy(payload), "status": "dry_run",
         }
 
     @staticmethod
@@ -612,7 +674,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return None
 
     async def prepare_draft_execution(
-        self, guild: discord.Guild, user: Any, launch_id: str
+        self, guild: discord.Guild, user: Any, launch_id: str, signer_address: Optional[str]
     ) -> Dict[str, Any]:
         """Issue a fresh immutable execution window for an unchanged saved draft."""
         async with self.config.guild(guild).audit_log() as audit_log:
@@ -620,17 +682,86 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if len(matches) != 1:
                 raise RuntimeError("The saved Clanker draft is missing or ambiguous.")
             record = matches[0]
-            if record.get("status") != "dry_run" or int(record.get("requester_id", 0)) != int(user.id):
+            if record.get("status") not in {"dry_run", "awaiting_external_wallet", "external_pending"} or int(record.get("requester_id", 0)) != int(user.id):
                 raise RuntimeError("The saved Clanker draft cannot enter a new execution route.")
-            payload = record.get("payload")
+            payload = copy.deepcopy(record.get("payload"))
             if not isinstance(payload, dict):
                 raise RuntimeError("The saved Clanker draft has no immutable payload.")
-            intent = self.build_launch_intent(guild.id, user.id, launch_id, payload)
+            needs_signer = payload.get("tokenAdmin") is None or any(
+                item.get("admin") is None or item.get("recipient") is None
+                for item in (payload.get("rewards") or {}).get("recipients", [])
+            ) or (bool(payload.get("vault")) and payload["vault"].get("recipient") is None) or (bool(payload.get("airdrop")) and payload["airdrop"].get("admin") is None)
+            if needs_signer and not is_eth_address(str(signer_address or "")):
+                raise RuntimeError("This draft needs a valid execution wallet to resolve its blank wallet fields.")
+            signer_address = str(signer_address or "").lower()
+            if payload.get("tokenAdmin") is None:
+                payload["tokenAdmin"] = signer_address.lower()
+            recipients = (payload.get("rewards") or {}).get("recipients") or []
+            platform_treasury = str(record.get("platform_treasury") or "").lower()
+            for reward in recipients:
+                is_platform = (str(reward.get("admin") or "").lower() == platform_treasury
+                               and str(reward.get("recipient") or "").lower() == platform_treasury)
+                if not is_platform:
+                    if reward.get("admin") is None:
+                        reward["admin"] = signer_address
+                    if reward.get("recipient") is None:
+                        reward["recipient"] = signer_address
+            if payload.get("vault") and payload["vault"].get("recipient") is None:
+                payload["vault"]["recipient"] = signer_address
+            if payload.get("airdrop") and payload["airdrop"].get("admin") is None:
+                payload["airdrop"]["admin"] = signer_address
+            intent = self.build_launch_intent(
+                guild.id, user.id, launch_id, payload,
+                created_at=record.get("execution_created_at"),
+                expires_at=record.get("execution_expires_at"),
+            )
             operation = clanker_deployment_operation(intent)
+            record["payload"] = payload
+            record["token_admin"] = payload["tokenAdmin"]
+            creator_reward = next((item for item in recipients if not (str(item.get("admin") or "").lower() == platform_treasury and str(item.get("recipient") or "").lower() == platform_treasury)), {})
+            record["creator_reward_recipient"] = creator_reward.get("recipient")
             record["payload_hash"] = intent.payload_hash
             record["intent"] = intent.to_dict()
             record["operation"] = operation.to_dict()
             return dict(record)
+
+    def build_external_template(self, guild_id: int, requester_id: int, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a signed browser template whose null wallet roles default to its signer."""
+        source = copy.deepcopy(record["payload"])
+        fallback = str(record.get("platform_treasury") or "")
+        materialized = copy.deepcopy(source)
+        if materialized.get("tokenAdmin") is None:
+            materialized["tokenAdmin"] = fallback
+        platform_treasury = fallback.lower()
+        for reward in materialized["rewards"]["recipients"]:
+            is_platform = (str(reward.get("admin") or "").lower() == platform_treasury and str(reward.get("recipient") or "").lower() == platform_treasury)
+            if not is_platform:
+                if reward.get("admin") is None:
+                    reward["admin"] = fallback
+                if reward.get("recipient") is None:
+                    reward["recipient"] = fallback
+        if materialized.get("vault") and materialized["vault"].get("recipient") is None:
+            materialized["vault"]["recipient"] = fallback
+        if materialized.get("airdrop") and materialized["airdrop"].get("admin") is None:
+            materialized["airdrop"]["admin"] = fallback
+        intent = self.build_launch_intent(
+            guild_id, requester_id, str(record["launch_id"]), materialized,
+            created_at=int(record["execution_created_at"]),
+            expires_at=int(record["execution_expires_at"]),
+        ).to_dict()
+        intent["payload_hash"] = None
+        if source.get("tokenAdmin") is None:
+            intent["token"]["admin"] = None
+        for index, reward in enumerate(source["rewards"]["recipients"]):
+            if reward.get("admin") is None:
+                intent["rewards"][index]["admin"] = None
+            if reward.get("recipient") is None:
+                intent["rewards"][index]["recipient"] = None
+        if source.get("vault") and source["vault"].get("recipient") is None:
+            intent["vault"]["recipient"] = None
+        if source.get("airdrop") and source["airdrop"].get("admin") is None:
+            intent["airdrop"]["admin"] = None
+        return intent
 
     async def _open_clanker_card(
         self, ctx: commands.Context, symbol: Optional[str] = None, name: Optional[str] = None
@@ -655,15 +786,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("Token names must be 1-64 UTF-8 bytes.")
             return
         creator_address = None
-        wallet = self.bot.get_cog("CryptoWallet")
-        resolve_address = getattr(wallet, "clanker_requester_address", None) if wallet else None
-        if callable(resolve_address):
-            try:
-                candidate = await resolve_address(ctx.author)
-                if is_eth_address(str(candidate)):
-                    creator_address = str(candidate)
-            except (ValueError, RuntimeError):
-                pass
         view = ClankerDraftView(
             self, ctx, settings, symbol=normalized_symbol, name=normalized_name,
             creator_address=creator_address,
@@ -916,8 +1038,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("That launch has already entered an execution route.")
             return
         try:
+            wallet = self.bot.get_cog("CryptoWallet")
+            resolve_address = getattr(wallet, "clanker_requester_address", None) if wallet else None
+            if not callable(resolve_address):
+                raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
+            signer_address = await resolve_address(ctx.author)
             record = await self.prepare_draft_execution(
-                ctx.guild, ctx.author, str(record["launch_id"])
+                ctx.guild, ctx.author, str(record["launch_id"]), signer_address
             )
             result = await self.create_internal_wallet_approval(ctx.author, record)
             await ctx.author.send("Review and approve your Base Sepolia Clanker launch here:\n" + result["approval_url"] + "\nThis protected link is short-lived and bound to your Discord account.")
@@ -969,18 +1096,20 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if record.get("status") != "dry_run":
             await ctx.send("That launch has already entered an execution route.")
             return
+        execution_created_at = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        execution_expires_at = execution_created_at + 900
+        template_record = {**record, "execution_created_at": execution_created_at,
+                           "execution_expires_at": execution_expires_at}
         try:
-            record = await self.prepare_draft_execution(
-                ctx.guild, ctx.author, str(record["launch_id"])
+            intent_template = self.build_external_template(
+                ctx.guild.id, ctx.author.id, template_record
             )
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send(f"Clanker could not prepare the saved draft: {exc}")
             return
-        operation = record["operation"]
-        intent = record["intent"]
-        handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
-                   "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
-                   "intent": intent, "operation": operation,
+        handoff = {"version": 1, "kind": "clanker-v4-external-template",
+                   "requester_id": str(ctx.author.id), "expires_at": execution_expires_at,
+                   "intent": intent_template, "operation": None,
                    "verification_command": f"{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>"}
         try:
             external_url = await self.create_external_wallet_handoff(ctx.author, handoff)
@@ -1002,6 +1131,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return
             matches[0]["status"] = "awaiting_external_wallet"
             matches[0]["execution_route"] = "external"
+            matches[0]["execution_created_at"] = execution_created_at
+            matches[0]["execution_expires_at"] = execution_expires_at
+            matches[0]["intent_template"] = intent_template
         await ctx.send("I sent the exact external-wallet operation and verification command by DM.")
 
     @clanker.command(name="verify")
@@ -1019,6 +1151,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("That launch is already bound to a different pending transaction.")
             return
         try:
+            if not record.get("operation") or not record.get("intent"):
+                transaction = await clanker_rpc("eth_getTransactionByHash", [transaction_hash])
+                signer_address = str((transaction or {}).get("from") or "")
+                if not is_eth_address(signer_address):
+                    raise RuntimeError("The external transaction signer is not available yet.")
+                record = await self.prepare_draft_execution(
+                    ctx.guild, ctx.author, str(record["launch_id"]), signer_address
+                )
             result = await verify_external_operation(transaction_hash, record["operation"], record["intent"])
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send(f"External Clanker verification failed: {exc}")
