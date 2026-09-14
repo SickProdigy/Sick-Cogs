@@ -2111,6 +2111,9 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         script = (root / "web" / "app.js").read_text(encoding="utf-8")
         external = (root / "web" / "clanker-external.js").read_text(encoding="utf-8")
         proxy = (root / "web" / "api" / "clanker.php").read_text(encoding="utf-8")
+        rewrites = (root / "web" / ".htaccess").read_text(encoding="utf-8")
+        session_start = (root / "web" / "api" / "session-start.php").read_text(encoding="utf-8")
+        oauth_callback = (root / "web" / "api" / "oauth-callback.php").read_text(encoding="utf-8")
         self.assertIn("approve-clanker", page)
         self.assertNotIn("type=\"file\"", page)
         self.assertIn("clanker-external.js", page)
@@ -2122,6 +2125,11 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("api/clanker.php", script)
         self.assertIn("/api/v1/clanker", proxy)
         self.assertNotIn("access_token", proxy)
+        self.assertIn("session-start.php?token=", rewrites)
+        self.assertIn("oauth-callback.php", rewrites)
+        self.assertIn("sickwallet_forward_browser_response", session_start)
+        self.assertIn("sickwallet_forward_browser_response", oauth_callback)
+        self.assertNotIn("client_secret", session_start + oauth_callback)
 
 
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
