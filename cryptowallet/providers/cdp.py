@@ -815,7 +815,6 @@ class CdpWalletProvider(WalletProvider):
             not provider_user_id
             or profile_id != intent.profile_id
             or sender != intent.wallet_address
-            or intent.token_admin != sender
         ):
             raise WalletProviderError(
                 "The wallet profile does not match this Clanker deployment."

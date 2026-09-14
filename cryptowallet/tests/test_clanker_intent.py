@@ -118,12 +118,11 @@ class ClankerIntentTests(unittest.TestCase):
         payload["token"]["name"] = "copy-only"
         self.assertEqual(intent.name, "Test Clanker")
 
-    def test_rejects_mainnet_foreign_factory_value_and_wrong_admin(self):
+    def test_rejects_mainnet_foreign_factory_and_value(self):
         invalid = (
             {"network": "base", "chain_id": 8453},
             {"factory": TREASURY},
             {"expected_native_value_wei": 1},
-            {"token_admin": TREASURY},
         )
         for values in invalid:
             with self.assertRaises(ValueError):
@@ -179,7 +178,7 @@ class ClankerIntentTests(unittest.TestCase):
                 discord_application_id=42, profile_id="profile-7", wallet_address=WALLET,
             )
 
-    def test_rejects_wrong_operation_binding_or_signer(self):
+    def test_rejects_wrong_operation_binding_and_allows_separate_admin(self):
         launch, operation = make_source_launch()
         operation["value"] = "1"
         with self.assertRaisesRegex(ValueError, "immutable launch binding"):
@@ -188,11 +187,12 @@ class ClankerIntentTests(unittest.TestCase):
                 discord_application_id=42, profile_id="profile-7", wallet_address=WALLET,
             )
         launch, operation = make_source_launch()
-        with self.assertRaisesRegex(ValueError, "signing policy"):
-            MODULE.signing_intent_from_clanker_launch(
-                launch, operation, deployment_id="deployment-1",
-                discord_application_id=42, profile_id="profile-7", wallet_address=TREASURY,
-            )
+        intent = MODULE.signing_intent_from_clanker_launch(
+            launch, operation, deployment_id="deployment-1",
+            discord_application_id=42, profile_id="profile-7", wallet_address=TREASURY,
+        )
+        self.assertEqual(intent.wallet_address, TREASURY.lower())
+        self.assertEqual(intent.token_admin, WALLET.lower())
 
 
 if __name__ == "__main__":

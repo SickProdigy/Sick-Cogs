@@ -242,8 +242,6 @@ class ClankerDeploymentIntent:
             raise ValueError("Deployment and wallet profile identity are required.")
         if min(self.discord_application_id, self.guild_id, self.discord_user_id) <= 0:
             raise ValueError("Discord application, guild, and user IDs must be positive.")
-        if self.wallet_address != self.token_admin:
-            raise ValueError("Prototype token admin must be the requesting CryptoWallet address.")
         name = " ".join(str(self.name or "").strip().split())
         symbol = str(self.symbol or "").strip().upper().lstrip("$")
         if not name or len(name.encode("utf-8")) > 64:
@@ -459,7 +457,6 @@ def signing_intent_from_clanker_launch(
         or str(launch["factory"]).lower() != CLANKER_FACTORY.lower()
         or int(launch["supply_tokens"]) != CLANKER_TOKEN_SUPPLY
         or int(launch["requester_id"]) <= 0
-        or str(token["admin"]).lower() != signer
     ):
         raise ValueError("Clanker launch is outside the internal-wallet signing policy.")
     intent_id = "0x" + hashlib.sha256(
