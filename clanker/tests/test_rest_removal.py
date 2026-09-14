@@ -143,6 +143,54 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("Token symbols must be 2-12 uppercase letters or numbers.")
 
 
+class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
+    def make_cog_and_context(self, records, author_id=7):
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=AsyncMock(return_value=records))
+        )
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=100), author=SimpleNamespace(id=author_id), send=AsyncMock()
+        )
+        return cog, ctx
+
+    async def test_drafts_lists_only_requesters_unsubmitted_records(self):
+        records = [
+            {"launch_id": "mine-draft", "status": "dry_run", "requester_id": 7},
+            {"launch_id": "other-draft", "status": "dry_run", "requester_id": 8},
+            {"launch_id": "mine-launch", "status": "awaiting_external_wallet", "requester_id": 7},
+        ]
+        cog, ctx = self.make_cog_and_context(records)
+        await Clanker.clanker_drafts.callback(cog, ctx, 10)
+        output = ctx.send.await_args.args[0]
+        self.assertIn("mine-draft", output)
+        self.assertNotIn("other-draft", output)
+        self.assertNotIn("mine-launch", output)
+
+    async def test_launches_excludes_unsubmitted_drafts(self):
+        records = [
+            {"launch_id": "saved-draft", "status": "dry_run"},
+            {"launch_id": "submitted-launch", "status": "awaiting_external_wallet"},
+        ]
+        cog, ctx = self.make_cog_and_context(records)
+        await Clanker.clanker_launches.callback(cog, ctx, 10)
+        output = ctx.send.await_args.args[0]
+        self.assertIn("submitted-launch", output)
+        self.assertNotIn("saved-draft", output)
+
+    async def test_draft_detail_is_requester_bound(self):
+        record = {"launch_id": "draft-id", "status": "dry_run", "requester_id": 7}
+        cog, ctx = self.make_cog_and_context([record])
+        cog.get_launch_record = AsyncMock(return_value=record)
+        with patch.object(Clanker, "launch_record_embed", return_value="draft-embed"):
+            await Clanker.clanker_draft.callback(cog, ctx, "draft-id")
+        ctx.send.assert_awaited_once_with(embed="draft-embed")
+        ctx.send.reset_mock()
+        ctx.author.id = 8
+        await Clanker.clanker_draft.callback(cog, ctx, "draft-id")
+        ctx.send.assert_awaited_once_with("No saved Clanker draft of yours matched that ID.")
+
+
 class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_external_route_uses_cryptowallet_companion_url(self):
         approval_base_url = AsyncMock(return_value="https://wallet.example/cryptowallet/")

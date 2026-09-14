@@ -680,7 +680,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.set_footer(text="Base Sepolia only · no private keys are stored by this cog")
         await ctx.send(embed=embed)
 
-    @clanker.command(name="card", aliases=("create", "draft"))
+    @clanker.command(name="card", aliases=("create",))
     async def clanker_card(self, ctx: commands.Context):
         """Open an interactive launch-card draft with optional airdrops."""
         await self._open_clanker_card(ctx)
@@ -807,15 +807,43 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         lines = [self.launch_record_line(r) for r in reversed(audit_log[-limit:])]
         await ctx.send(box("\n".join(lines)))
 
+    @clanker.command(name="drafts")
+    async def clanker_drafts(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
+        """List the requesting users saved, unsubmitted drafts."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        drafts = [
+            record for record in audit_log
+            if record.get("status") == "dry_run" and record.get("requester_id") == ctx.author.id
+        ]
+        if not drafts:
+            await ctx.send("You have no saved Clanker drafts.")
+            return
+        lines = [self.launch_record_line(record) for record in reversed(drafts[-limit:])]
+        await ctx.send(box("\n".join(lines)))
+
+    @clanker.command(name="draft")
+    async def clanker_draft(self, ctx: commands.Context, launch_id: str):
+        """Show one of the requesting users saved drafts."""
+        record = await self.get_launch_record(ctx.guild, launch_id)
+        if (
+            not record
+            or record.get("status") != "dry_run"
+            or record.get("requester_id") != ctx.author.id
+        ):
+            await ctx.send("No saved Clanker draft of yours matched that ID.")
+            return
+        await ctx.send(embed=self.launch_record_embed(record))
+
     @clanker.command(name="launches", aliases=("history", "records"))
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
-        """List recent Clanker launch records with their launch IDs."""
+        """List recent Clanker records that entered an execution route."""
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
-        if not audit_log:
-            await ctx.send("No Clanker launch requests have been recorded.")
+        launches = [record for record in audit_log if record.get("status") != "dry_run"]
+        if not launches:
+            await ctx.send("No Clanker drafts have entered an execution route.")
             return
-        lines = [self.launch_record_line(r) for r in reversed(audit_log[-limit:])]
+        lines = [self.launch_record_line(record) for record in reversed(launches[-limit:])]
         await ctx.send(box("\n".join(lines)))
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
