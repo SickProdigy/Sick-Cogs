@@ -206,6 +206,7 @@ class ClankerDraftView(discord.ui.View):
         *,
         symbol: Optional[str] = None,
         name: Optional[str] = None,
+        creator_address: Optional[str] = None,
     ):
         super().__init__(timeout=900)
         self.cog = cog
@@ -217,7 +218,7 @@ class ClankerDraftView(discord.ui.View):
             "name": name,
             "symbol": symbol,
             "supply": DEFAULT_CLANKER_SUPPLY,
-            "primary_beneficiary": None,
+            "primary_beneficiary": creator_address,
             "image_url": None,
             "description": None,
             "airdrop": None,
@@ -380,8 +381,12 @@ class ClankerDraftView(discord.ui.View):
             )
             self.disable_controls()
             await interaction.message.edit(embed=self.embed(), view=self)
+            launch_id = str(record["launch_id"])
+            prefix = self.ctx.clean_prefix
             await interaction.followup.send(
-                "Clanker launch draft saved. Wallet execution adapters are not connected yet.",
+                f"Clanker draft saved as `{launch_id}`. It remains resumable until you choose "
+                f"an execution wallet.\nCryptoWallet: `{prefix}clanker internal {launch_id}`"
+                f"\nExternal wallet: `{prefix}clanker external {launch_id}`",
                 ephemeral=True,
             )
         except ValueError as exc:

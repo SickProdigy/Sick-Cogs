@@ -120,13 +120,20 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
             guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
         )
         cog.check_launch_controls = AsyncMock(return_value=True)
+        resolve = AsyncMock(return_value=WALLET)
+        cog.bot = SimpleNamespace(
+            get_cog=lambda name: SimpleNamespace(clanker_requester_address=resolve)
+            if name == "CryptoWallet" else None
+        )
         ctx = SimpleNamespace(guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock())
         fake_view = SimpleNamespace(embed=lambda: "prefilled-embed")
         with patch.object(clanker_module, "ClankerDraftView", return_value=fake_view) as view_type:
             await cog._open_clanker_card(ctx, "sgbt", "SickGaming Bot Token")
         view_type.assert_called_once_with(
-            cog, ctx, settings, symbol="SGBT", name="SickGaming Bot Token"
+            cog, ctx, settings, symbol="SGBT", name="SickGaming Bot Token",
+            creator_address=WALLET,
         )
+        resolve.assert_awaited_once_with(ctx.author)
         ctx.send.assert_awaited_once_with(embed="prefilled-embed", view=fake_view)
 
     async def test_shortcut_rejects_invalid_symbol_before_opening_view(self):
@@ -136,11 +143,46 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
             guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
         )
         cog.check_launch_controls = AsyncMock(return_value=True)
+        cog.bot = SimpleNamespace(get_cog=lambda name: None)
         ctx = SimpleNamespace(guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock())
         with patch.object(clanker_module, "ClankerDraftView") as view_type:
             await cog._open_clanker_card(ctx, "x", None)
         view_type.assert_not_called()
         ctx.send.assert_awaited_once_with("Token symbols must be 2-12 uppercase letters or numbers.")
+
+
+class AsyncAuditLog:
+    def __init__(self, records):
+        self.records = records
+
+    async def __aenter__(self):
+        return self.records
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_saved_draft_gets_fresh_execution_window(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None, 0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        launch_id = record["launch_id"]
+        record["intent"]["expires_at"] = 2
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        refreshed = await cog.prepare_draft_execution(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), launch_id
+        )
+        self.assertEqual(refreshed["launch_id"], launch_id)
+        self.assertEqual(refreshed["payload"], payload)
+        self.assertGreater(refreshed["intent"]["expires_at"], refreshed["intent"]["created_at"])
+        self.assertEqual(refreshed["payload_hash"], refreshed["intent"]["payload_hash"])
+        self.assertEqual(refreshed["operation"]["payload_hash"], refreshed["payload_hash"])
 
 
 class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):

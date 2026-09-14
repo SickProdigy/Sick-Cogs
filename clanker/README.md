@@ -43,7 +43,7 @@ Open a prefilled interactive draft card with the friendly shortcut:
 
 The ticker is uppercased automatically. The token name is optional, so `[p]clank SGBT` opens the same form with only the ticker prefilled. `[p]clanker card` remains available as an empty administrative draft.
 
-The requester can enter token basics, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. The card is requester-bound so another member cannot edit or save it.
+The requester can enter token basics, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. When CryptoWallet is loaded, its Discord-bound public Base Sepolia address is prefilled as the editable creator/token-admin default. The card is requester-bound so another member cannot edit or save it.
 
 The legacy text command also prepares a draft:
 
@@ -51,7 +51,7 @@ The legacy text command also prepares a draft:
 [p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 
 ## Vaults

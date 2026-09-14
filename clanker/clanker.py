@@ -599,6 +599,27 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return record
         return None
 
+    async def prepare_draft_execution(
+        self, guild: discord.Guild, user: Any, launch_id: str
+    ) -> Dict[str, Any]:
+        """Issue a fresh immutable execution window for an unchanged saved draft."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The saved Clanker draft is missing or ambiguous.")
+            record = matches[0]
+            if record.get("status") != "dry_run" or int(record.get("requester_id", 0)) != int(user.id):
+                raise RuntimeError("The saved Clanker draft cannot enter a new execution route.")
+            payload = record.get("payload")
+            if not isinstance(payload, dict):
+                raise RuntimeError("The saved Clanker draft has no immutable payload.")
+            intent = self.build_launch_intent(guild.id, user.id, launch_id, payload)
+            operation = clanker_deployment_operation(intent)
+            record["payload_hash"] = intent.payload_hash
+            record["intent"] = intent.to_dict()
+            record["operation"] = operation.to_dict()
+            return dict(record)
+
     async def _open_clanker_card(
         self, ctx: commands.Context, symbol: Optional[str] = None, name: Optional[str] = None
     ) -> None:
@@ -621,7 +642,20 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if normalized_name and len(normalized_name.encode("utf-8")) > 64:
             await ctx.send("Token names must be 1-64 UTF-8 bytes.")
             return
-        view = ClankerDraftView(self, ctx, settings, symbol=normalized_symbol, name=normalized_name)
+        creator_address = None
+        wallet = self.bot.get_cog("CryptoWallet")
+        resolve_address = getattr(wallet, "clanker_requester_address", None) if wallet else None
+        if callable(resolve_address):
+            try:
+                candidate = await resolve_address(ctx.author)
+                if is_eth_address(str(candidate)):
+                    creator_address = str(candidate)
+            except (ValueError, RuntimeError):
+                pass
+        view = ClankerDraftView(
+            self, ctx, settings, symbol=normalized_symbol, name=normalized_name,
+            creator_address=creator_address,
+        )
         await ctx.send(embed=view.embed(), view=view)
 
     @commands.guild_only()
@@ -870,6 +904,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("That launch has already entered an execution route.")
             return
         try:
+            record = await self.prepare_draft_execution(
+                ctx.guild, ctx.author, str(record["launch_id"])
+            )
             result = await self.create_internal_wallet_approval(ctx.author, record)
             await ctx.author.send("Review and approve your Base Sepolia Clanker launch here:\n" + result["approval_url"] + "\nThis protected link is short-lived and bound to your Discord account.")
             await self.mark_internal_approval(ctx.guild, str(record["launch_id"]), result)
@@ -920,14 +957,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if record.get("status") != "dry_run":
             await ctx.send("That launch has already entered an execution route.")
             return
-        operation = record.get("operation")
-        intent = record.get("intent")
-        if not isinstance(operation, dict) or not isinstance(intent, dict):
-            await ctx.send("That launch does not contain an immutable external-wallet operation.")
+        try:
+            record = await self.prepare_draft_execution(
+                ctx.guild, ctx.author, str(record["launch_id"])
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(f"Clanker could not prepare the saved draft: {exc}")
             return
-        if int(intent.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp()):
-            await ctx.send("That immutable launch has expired; create and review a new draft.")
-            return
+        operation = record["operation"]
+        intent = record["intent"]
         handoff = {"version": 1, "kind": "clanker-v4-external-handoff",
                    "requester_id": str(ctx.author.id), "expires_at": intent.get("expires_at"),
                    "intent": intent, "operation": operation,
