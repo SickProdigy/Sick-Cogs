@@ -211,6 +211,29 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed["operation"]["payload_hash"], refreshed["payload_hash"])
 
 
+class InternalApprovalRetryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pending_internal_approval_can_reissue_same_binding(self):
+        record = {
+            "launch_id": "test-launch", "status": "awaiting_cryptowallet_approval",
+            "execution_route": "internal", "signing_intent_id": "intent-1",
+            "signing_payload_hash": "0x" + "12" * 32,
+        }
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog([record]))
+        )
+        result = {
+            "signing_intent_id": "intent-1",
+            "signing_payload_hash": "0x" + "12" * 32,
+            "expires_at": 4_000_000_000,
+        }
+        await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", result)
+        self.assertEqual(record["approval_expires_at"], 4_000_000_000)
+        bad = {**result, "signing_intent_id": "changed"}
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", bad)
+
+
 class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
     def make_cog_and_context(self, records, author_id=7):
         cog = Clanker.__new__(Clanker)
