@@ -327,7 +327,7 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_external_verifier_requires_exact_created_token(self):
         tx_hash = "0x" + "ab" * 32
-        sender, token = "0x" + "12" * 20, "0x" + "78" * 20
+        sender, token = WALLET, "0x" + "78" * 20
         operation = {"launch_id": "launch", "payload_hash": "0x" + "34" * 32,
                      "chain_id": 84532, "to": "0x" + "56" * 20,
                      "value": "0", "data": "0xdf40224a00"}
@@ -342,6 +342,11 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
             result = await clanker_module.verify_external_operation(tx_hash, operation, intent)
         self.assertEqual(result["token_address"], token)
+        transaction["from"] = TREASURY
+        with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
+            with self.assertRaisesRegex(ValueError, "signer must match"):
+                await clanker_module.verify_external_operation(tx_hash, operation, intent)
+        transaction["from"] = sender
         transaction["input"] = "0xdeadbeef"
         with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
             with self.assertRaisesRegex(ValueError, "immutable Clanker operation"):

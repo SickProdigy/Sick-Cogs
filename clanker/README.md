@@ -51,7 +51,7 @@ The legacy text command also prepares a draft:
 [p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. For the prototype external route, the connected transaction signer must equal the saved creator/token-admin address; delegated deployment to a different administrator is not implicit. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 
 ## Vaults

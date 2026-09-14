@@ -101,6 +101,9 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
         raise ValueError("The external Clanker transaction failed on-chain.")
     if target != str(operation["to"]).lower() or value != int(operation["value"]) or calldata != str(operation["data"]).lower():
         raise ValueError("The external transaction does not match the immutable Clanker operation.")
+    expected_admin = str((intent.get("token") or {}).get("admin") or "").lower()
+    if not ADDRESS_RE.fullmatch(expected_admin) or sender != expected_admin:
+        raise ValueError("The external signer must match the immutable creator and token administrator.")
     logs = receipt.get("logs")
     if not isinstance(logs, list):
         raise RuntimeError("Base Sepolia returned malformed receipt logs.")
@@ -112,7 +115,6 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
         raise ValueError("The receipt does not contain exactly one pinned Clanker TokenCreated event.")
     token_address = "0x" + str(created[0]["topics"][1])[-40:].lower()
     token_admin = "0x" + str(created[0]["topics"][2])[-40:].lower()
-    expected_admin = str((intent.get("token") or {}).get("admin") or "").lower()
     if not ADDRESS_RE.fullmatch(token_address) or token_admin != expected_admin:
         raise ValueError("The Clanker token event does not match the immutable launch admin.")
     code = str(await clanker_rpc("eth_getCode", [token_address, "latest"]) or "").lower()
