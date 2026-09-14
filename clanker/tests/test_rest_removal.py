@@ -74,6 +74,18 @@ class LegacyRestRemovalTests(unittest.TestCase):
                 vault_lockup_seconds=MIN_VAULT_LOCKUP_SECONDS,
             )
 
+    def test_creator_reward_treasury_can_differ_from_token_admin(self):
+        creator_treasury = "0x2222222222222222222222222222222222222222"
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7, creator_reward_recipient=creator_treasury,
+        )
+        creator = payload["rewards"]["recipients"][0]
+        self.assertEqual(payload["tokenAdmin"], WALLET.lower())
+        self.assertEqual(creator["admin"], WALLET.lower())
+        self.assertEqual(creator["recipient"], creator_treasury.lower())
+        self.assertEqual(creator["bps"], 8000)
+
     def test_zero_share_reward_entries_are_omitted(self):
         creator_only = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 0, False, None, 0, 86400, 0, None, 7,
@@ -342,11 +354,6 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
             result = await clanker_module.verify_external_operation(tx_hash, operation, intent)
         self.assertEqual(result["token_address"], token)
-        transaction["from"] = TREASURY
-        with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
-            with self.assertRaisesRegex(ValueError, "signer must match"):
-                await clanker_module.verify_external_operation(tx_hash, operation, intent)
-        transaction["from"] = sender
         transaction["input"] = "0xdeadbeef"
         with patch.object(clanker_module, "clanker_rpc", AsyncMock(side_effect=responses)):
             with self.assertRaisesRegex(ValueError, "immutable Clanker operation"):

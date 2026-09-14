@@ -46,26 +46,34 @@ class ClankerBasicsModal(discord.ui.Modal):
             default=view.draft.get("primary_beneficiary") or "",
             max_length=42,
         )
+        self.creator_treasury_input = discord.ui.TextInput(
+            label="Creator reward treasury",
+            default=view.draft.get("creator_reward_recipient") or view.draft.get("primary_beneficiary") or "",
+            max_length=42,
+        )
         self.image_input = discord.ui.TextInput(
             label="Image URL (optional HTTPS)",
             default=view.draft.get("image_url") or "",
             required=False,
             max_length=300,
         )
-        for item in (self.name_input, self.symbol_input, self.creator_input, self.image_input):
+        for item in (self.name_input, self.symbol_input, self.creator_input, self.creator_treasury_input, self.image_input):
             self.add_item(item)
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
             symbol = str(self.symbol_input.value).strip().upper().lstrip("$")
             creator = str(self.creator_input.value).strip()
+            creator_treasury = str(self.creator_treasury_input.value).strip()
             image_url = str(self.image_input.value).strip()
             if not SYMBOL_RE.fullmatch(symbol):
                 raise ValueError("Token symbols must be 2-12 uppercase letters or numbers.")
             if not str(self.name_input.value).strip():
                 raise ValueError("Token name is required.")
             if not is_eth_address(creator):
-                raise ValueError("Creator wallet must be a valid EVM address.")
+                raise ValueError("Token administrator must be a valid EVM address.")
+            if not is_eth_address(creator_treasury):
+                raise ValueError("Creator reward treasury must be a valid EVM address.")
             if image_url and not self.view_ref.cog.validate_https_url(image_url):
                 raise ValueError("Image URL must be HTTPS.")
         except ValueError as exc:
@@ -77,6 +85,7 @@ class ClankerBasicsModal(discord.ui.Modal):
                 "symbol": symbol,
                 "supply": DEFAULT_CLANKER_SUPPLY,
                 "primary_beneficiary": creator,
+                "creator_reward_recipient": creator_treasury,
                 "image_url": image_url or None,
             }
         )
@@ -219,6 +228,7 @@ class ClankerDraftView(discord.ui.View):
             "symbol": symbol,
             "supply": DEFAULT_CLANKER_SUPPLY,
             "primary_beneficiary": creator_address,
+            "creator_reward_recipient": creator_address,
             "image_url": None,
             "description": None,
             "airdrop": None,
@@ -231,7 +241,7 @@ class ClankerDraftView(discord.ui.View):
         return False
 
     def is_ready(self) -> bool:
-        return all(self.draft.get(key) for key in ("name", "symbol", "supply", "primary_beneficiary"))
+        return all(self.draft.get(key) for key in ("name", "symbol", "supply", "primary_beneficiary", "creator_reward_recipient"))
 
     def airdrop_execution_blocker(self) -> Optional[str]:
         airdrop = self.draft.get("airdrop")
@@ -265,6 +275,7 @@ class ClankerDraftView(discord.ui.View):
             int(self.settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
             int(self.settings.get("vault_vesting_seconds") or 0),
             self.settings.get("vault_recipient"),
+            creator_reward_recipient=self.draft.get("creator_reward_recipient"),
         )
 
     def embed(self) -> discord.Embed:
@@ -278,7 +289,7 @@ class ClankerDraftView(discord.ui.View):
             token = f"{self.draft.get('name') or 'Unnamed'} (${self.draft.get('symbol') or '?'})"
         embed.add_field(name="Token", value=token, inline=False)
         embed.add_field(name="Supply", value=f"{format_tokens(DEFAULT_CLANKER_SUPPLY)} (fixed v4)", inline=True)
-        embed.add_field(name="Creator wallet", value=self.draft.get("primary_beneficiary") or "Not set", inline=False)
+        embed.add_field(name="Token administrator", value=self.draft.get("primary_beneficiary") or "Not set", inline=False)
         embed.add_field(name="Image", value="Set" if self.draft.get("image_url") else "Not set", inline=True)
         embed.add_field(name="Description", value="Set" if self.draft.get("description") else "Not set", inline=True)
         embed.add_field(

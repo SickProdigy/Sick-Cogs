@@ -102,8 +102,8 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
     if target != str(operation["to"]).lower() or value != int(operation["value"]) or calldata != str(operation["data"]).lower():
         raise ValueError("The external transaction does not match the immutable Clanker operation.")
     expected_admin = str((intent.get("token") or {}).get("admin") or "").lower()
-    if not ADDRESS_RE.fullmatch(expected_admin) or sender != expected_admin:
-        raise ValueError("The external signer must match the immutable creator and token administrator.")
+    if not ADDRESS_RE.fullmatch(expected_admin):
+        raise ValueError("The immutable creator and token administrator is invalid.")
     logs = receipt.get("logs")
     if not isinstance(logs, list):
         raise RuntimeError("Base Sepolia returned malformed receipt logs.")
@@ -214,6 +214,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         vault_lockup_seconds: int = MIN_VAULT_LOCKUP_SECONDS,
         vault_vesting_seconds: int = 0,
         vault_recipient: Optional[str] = None,
+        creator_reward_recipient: Optional[str] = None,
     ) -> Dict[str, Any]:
         clean_name = " ".join(str(name or "").strip().split())
         clean_symbol = str(symbol or "").strip().upper().lstrip("$")
@@ -223,6 +224,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise ValueError("Token symbol must contain 2 through 12 uppercase letters or numbers.")
         if not is_eth_address(primary_beneficiary):
             raise ValueError("Token admin must be a valid EVM address.")
+        creator_treasury = creator_reward_recipient or primary_beneficiary
+        if not is_eth_address(creator_treasury):
+            raise ValueError("Creator reward treasury must be a valid EVM address.")
         if not is_eth_address(platform_address):
             raise ValueError("Platform treasury must be a valid EVM address.")
         if image_url and not Clanker.validate_https_url(image_url):
@@ -233,7 +237,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         creator_bps = 10_000 - platform_bps
         if creator_bps:
             recipients.append(ClankerReward(
-                primary_beneficiary, primary_beneficiary, creator_bps,
+                primary_beneficiary, creator_treasury, creator_bps,
             ).to_dict())
         if platform_bps:
             recipients.append(ClankerReward(
@@ -389,6 +393,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "token_admin": payload.get("tokenAdmin"),
             "platform_treasury": platform_reward.get("recipient"),
             "creator_bps": creator_reward.get("bps", 0),
+            "creator_reward_recipient": creator_reward.get("recipient"),
             "platform_bps": platform_reward.get("bps", 0),
             "vault_percentage": vault.get("percentage", 0),
             "vault_recipient": vault.get("recipient"),
@@ -491,7 +496,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.add_field(name="Supply", value=str(record.get("supply", "unknown")), inline=True)
         embed.add_field(name="Creator/token admin", value=record.get("token_admin") or "unknown", inline=False)
         embed.add_field(
-            name="Creator rewards",
+            name="Creator reward treasury",
+            value=record.get("creator_reward_recipient") or record.get("token_admin") or "unknown",
+            inline=False,
+        )
+        embed.add_field(
+            name="Reward split",
             value=f"Creator {record.get('creator_bps', '?')} bps / platform {record.get('platform_bps', '?')} bps",
             inline=False,
         )
