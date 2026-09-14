@@ -74,8 +74,6 @@ Pair and verify:
 `pair.php` stores credentials atomically with mode `0600`. Neither script runs through the web
 SAPI. To rotate, pair again. To revoke, run `[p]walletset unpair` and delete the credential file.
 
-The public token bootstrap (`/cryptowallet/session/<token>`) and OAuth callback routes are handled by `web/api/session-start.php` and `web/api/oauth-callback.php`; they forward only the allowlisted browser flow to the private cog endpoint and relay its redirect/session cookie.
-
 The public `web/api/session.php` endpoint requires `SICKWALLET_SERVER_LIBRARY` to point to this
 directory's `companion.php`. It validates the browser-session cookie and forwards it through a
 freshly signed server-to-cog request. The installation credential never enters the browser.
