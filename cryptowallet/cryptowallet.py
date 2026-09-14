@@ -196,6 +196,15 @@ class CryptoWallet(
                 "source": "tokenfactory",
             }
 
+    async def clanker_requester_address(self, user) -> str:
+        """Return the requesting user's public Base Sepolia wallet address."""
+        profile = await self.get_or_create_wallet_profile(user)
+        account = self._account_for_network(profile, BASE_SEPOLIA.key)
+        address = str(account.get("address") or "") if account else ""
+        if not address:
+            raise RuntimeError("CryptoWallet has no Base Sepolia address for this user.")
+        return address
+
     async def clanker_create_internal_approval(
         self, user, launch: dict, operation: dict
     ) -> dict:
