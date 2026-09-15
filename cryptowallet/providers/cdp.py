@@ -31,7 +31,10 @@ from ..core.validation import (
     normalize_solana_signature,
 )
 from .base import WalletProvider, WalletProviderError
-from .clanker import clanker_deployment_calldata, validate_clanker_deployment_call
+from .clanker import (
+    clanker_collect_rewards_call, clanker_deployment_calldata,
+    validate_clanker_collect_rewards_call, validate_clanker_deployment_call,
+)
 from .base_rpc import (
     BaseRpcError,
     get_contract_code,
@@ -789,6 +792,53 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "CDP could not retrieve the factory deployment operation."
             ) from exc
+
+    async def submit_clanker_reward_collection(
+        self, profile: dict, token: str, token_admin: str, attempt_id: str
+    ) -> dict:
+        """Submit one reviewed, per-token Clanker reward collection."""
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_SEPOLIA.key), None)
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            admin = normalize_evm_address(token_admin)
+            call = clanker_collect_rewards_call(normalize_evm_address(token))
+        except ValueError as exc:
+            raise WalletProviderError("The Clanker reward request is invalid.") from exc
+        if not provider_user_id or sender.lower() != admin.lower():
+            raise WalletProviderError("The CryptoWallet signer is not this token administrator.")
+        if not (await self.get_delegation_status(profile, BASE_SEPOLIA.key)).get("active"):
+            raise WalletProviderError("An active wallet authorization is required to collect rewards.")
+        if not attempt_id:
+            raise WalletProviderError("A reward collection attempt ID is required.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:clanker:collect:{sender}:{token.lower()}:{attempt_id}"))
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                provider_user_id, sender, credentials.project_id, BASE_SEPOLIA.key,
+                str(call["to"]), 0, key, str(call["data"]),
+            )
+            status = str(result.get("status") or "")
+            operation_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls") or []
+            if (status not in {"pending", "signed", "broadcast", "complete"}
+                    or not HASH_PATTERN.fullmatch(operation_hash)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
+                    or not isinstance(calls, list) or len(calls) != 1):
+                raise ValueError("invalid reward collection acknowledgement")
+            validate_clanker_collect_rewards_call(
+                token, to=str(calls[0].get("to") or ""),
+                value=int(calls[0].get("value", -1)),
+                data=str(calls[0].get("data") or ""),
+            )
+            return {"provider_status": status, "user_operation_hash": operation_hash.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None}
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not safely collect Clanker rewards.") from exc
 
     async def prepare_clanker_deployment(
         self, profile: dict, intent: ClankerDeploymentIntent, attempt_id: str

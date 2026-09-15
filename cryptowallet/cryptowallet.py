@@ -141,6 +141,15 @@ class CryptoWallet(
             discord_user_id, draft, request_id
         )
 
+    async def clanker_collect_rewards(
+        self, user, *, token: str, token_admin: str, attempt_id: str
+    ) -> dict:
+        """Collect rewards for one token only after CryptoWallet admin verification."""
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.submit_clanker_reward_collection(
+            profile, token, token_admin, attempt_id
+        )
+
     async def clanker_create_external_handoff(
         self, discord_user_id: int, handoff: dict
     ) -> tuple[str, int]:

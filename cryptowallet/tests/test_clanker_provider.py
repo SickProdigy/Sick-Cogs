@@ -51,6 +51,16 @@ class ClankerProviderTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(data.encode()).hexdigest(), "269141abacf2e4e53e8b69edea1d0c78ed76ce93498de8e61ded1d82377b9a45")
         provider.validate_clanker_deployment_call(launch, to=core.CLANKER_FACTORY, value=0, data=data)
 
+    def test_reward_collection_is_pinned_to_one_token(self):
+        token = "0x2222222222222222222222222222222222222222"
+        call = provider.clanker_collect_rewards_call(token)
+        self.assertEqual(call["to"], provider.LP_LOCKER)
+        self.assertEqual(call["value"], 0)
+        self.assertEqual(call["data"][:10], "0x5763dbd0")
+        provider.validate_clanker_collect_rewards_call(token, **call)
+        with self.assertRaises(ValueError):
+            provider.validate_clanker_collect_rewards_call(WALLET, **call)
+
     def test_rejects_changed_target_value_or_data(self):
         launch = intent()
         data = provider.clanker_deployment_calldata(launch)

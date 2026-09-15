@@ -16,6 +16,39 @@ MEV_MODULE = "0x261fE99C4D0D41EE8d0e594D11aec740E8354ab0"
 STATIC_FEE_HOOK_V2 = "0x11b51DBC2f7F683b81CeDa83DC0078D57bA328cc"
 ZERO_ADDRESS = "0x" + "00" * 20
 FEE_PREFERENCE = {"Both": 0, "Paired": 1, "Clanker": 2}
+FEE_LOCKER = "0x42A95190B4088C88Dd904d930c79deC1158bF09D"
+LP_LOCKER = LOCKER
+COLLECT_REWARDS_SELECTOR = "5763dbd0"
+
+
+def _address_word(address: str) -> str:
+    raw = str(address).lower()
+    if len(raw) != 42 or not raw.startswith("0x"):
+        raise ValueError("Invalid reward address.")
+    int(raw[2:], 16)
+    return raw[2:].rjust(64, "0")
+
+
+def clanker_collect_rewards_call(token: str) -> dict[str, object]:
+    """Build the sole allowlisted per-token collection call."""
+    return {
+        "to": LP_LOCKER,
+        "value": 0,
+        "data": "0x" + COLLECT_REWARDS_SELECTOR + _address_word(token),
+    }
+
+
+def validate_clanker_collect_rewards_call(
+    token: str, *, to: str, value: int, data: str
+) -> None:
+    expected = clanker_collect_rewards_call(token)
+    if (
+        str(to).lower() != str(expected["to"]).lower()
+        or int(value) != 0
+        or str(data).lower() != str(expected["data"]).lower()
+    ):
+        raise ValueError("Clanker reward collection call does not match the reviewed token.")
+
 
 
 @dataclass(frozen=True, slots=True)

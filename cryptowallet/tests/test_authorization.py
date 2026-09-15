@@ -2048,6 +2048,36 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             {"override_gas_limit": 8_000_000},
         )
 
+    async def test_collects_only_reviewed_token_for_matching_admin(self):
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        token = "0x2222222222222222222222222222222222222222"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": admin}
+        ]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        data = "0x5763dbd0" + token[2:].rjust(64, "0")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(return_value={
+            "status": "broadcast", "userOpHash": "0x" + "1" * 64,
+            "calls": [{"to": "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f",
+                       "value": "0", "data": data}],
+        }))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+
+        result = await provider.submit_clanker_reward_collection(
+            profile, token, admin, "attempt-1"
+        )
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        args = client.send_smart_account_user_operation.await_args.args
+        self.assertEqual(args[4], "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f")
+        self.assertEqual(args[7], data)
+        with self.assertRaisesRegex(WalletProviderError, "not this token administrator"):
+            await provider.submit_clanker_reward_collection(
+                profile, token, "0x3333333333333333333333333333333333333333", "attempt-2"
+            )
+
     async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
         launch = ClankerIntentFixtures.clanker_intent()
         profile = {"profile_id": launch.profile_id, "provider_user_id": "provider-user",
