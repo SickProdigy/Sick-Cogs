@@ -1163,13 +1163,15 @@ class ClankerVerifiedView(discord.ui.View):
             draft_view = ClankerDraftView(self.cog, self.ctx, self.settings)
             draft_view.draft = copy.deepcopy(self.draft)
             self.disable_controls()
-            await interaction.message.edit(embed=draft_view.embed(), view=draft_view)
+            await interaction.edit_original_response(
+                embed=draft_view.embed(), view=draft_view
+            )
             await interaction.followup.send(
                 "Returned to editing. The previous verification was discarded; verify "
                 "again after making changes.",
                 ephemeral=True,
             )
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         finally:
             self.processing = False
