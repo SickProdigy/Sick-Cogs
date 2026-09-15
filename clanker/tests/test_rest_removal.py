@@ -367,6 +367,43 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["signing_intent_id"], result["intent_id"])
 
 
+class ClankerRedIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_user_deletion_anonymizes_retained_audit_records(self):
+        records = [
+            {"requester_id": 7, "requester_name": "Member", "launch_ref": "nmt"},
+            {"requester_id": 8, "requester_name": "Other"},
+        ]
+        guild_config = SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            all_guilds=AsyncMock(return_value={100: {}}),
+            guild_from_id=lambda guild_id: guild_config,
+        )
+        await cog.red_delete_data_for_user(requester="discord_deleted_user", user_id=7)
+        self.assertEqual(records[0]["requester_id"], 0)
+        self.assertEqual(records[0]["requester_name"], "Deleted User")
+        self.assertNotIn("launch_ref", records[0])
+        self.assertEqual(records[1]["requester_id"], 8)
+
+    async def test_confirmation_dm_card_includes_clanker_link_without_channel_card(self):
+        token = "0x" + "ab" * 20
+        record = {
+            "launch_id": "nmt-long", "launch_ref": "nmt",
+            "status": "internal_failed", "token_address": token,
+            "symbol": "NMT", "name": "Nice Meme Token",
+        }
+        user = SimpleNamespace(send=AsyncMock())
+        cog = Clanker.__new__(Clanker)
+        cog.get_launch_record = AsyncMock(return_value=record)
+        await cog._deliver_internal_result(
+            SimpleNamespace(), user, "nmt-long", {"status": "failed"}
+        )
+        embed = user.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Clanker launch nmt")
+        rendered = "\n".join(str(field.value) for field in embed.fields)
+        self.assertIn(f"https://www.clanker.world/clanker/{token}", rendered)
+
+
 class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
     def make_cog_and_context(self, records, author_id=7):
         cog = Clanker.__new__(Clanker)

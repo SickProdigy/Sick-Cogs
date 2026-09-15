@@ -232,9 +232,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self.confirmation_tasks.add(task)
         task.add_done_callback(self.confirmation_tasks.discard)
 
-    async def red_delete_data_for_user(self, **kwargs):
-        """This cog stores no per-user profile data."""
-        return
+    async def red_delete_data_for_user(self, *, requester, user_id: int):
+        """Remove the Discord identity attached to retained guild audit records."""
+        for guild_id in (await self.config.all_guilds()):
+            async with self.config.guild_from_id(guild_id).audit_log() as audit_log:
+                for record in audit_log:
+                    if int(record.get("requester_id", 0) or 0) == int(user_id):
+                        record["requester_id"] = 0
+                        record["requester_name"] = "Deleted User"
+                        record.pop("launch_ref", None)
 
     @staticmethod
     def validate_https_url(url: str) -> bool:
@@ -681,7 +687,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @staticmethod
     def launch_record_embed(record: Dict[str, Any]) -> discord.Embed:
-        title = f"Clanker launch {record.get('launch_id', 'legacy')}"
+        title = f"Clanker launch {record.get('launch_ref') or record.get('launch_id', 'legacy')}"
         embed = discord.Embed(title=title, color=discord.Color.blue())
         embed.add_field(name="Status", value=record.get("status", "unknown"), inline=True)
         embed.add_field(name="Token", value=f"{record.get('name', '?')} (${record.get('symbol', '?')})", inline=False)
@@ -1001,7 +1007,17 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.color = color
         tx_hash = record.get("transaction_hash")
         if record.get("token_address"):
-            embed.add_field(name="Token contract", value=f"[{record['token_address']}](https://sepolia.basescan.org/address/{record['token_address']})", inline=False)
+            token_address = record["token_address"]
+            embed.add_field(
+                name="Token contract",
+                value=f"[{token_address}](https://sepolia.basescan.org/address/{token_address})",
+                inline=False,
+            )
+            embed.add_field(
+                name="Clanker",
+                value=f"[View token on Clanker](https://www.clanker.world/clanker/{token_address})",
+                inline=False,
+            )
         if tx_hash:
             embed.add_field(name="Transaction", value=f"[{tx_hash}](https://sepolia.basescan.org/tx/{tx_hash})", inline=False)
         if record.get("user_operation_hash"):
@@ -1011,13 +1027,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             embed.set_thumbnail(url=image_url)
         channel_id = int(record.get("confirmation_channel_id", 0) or 0)
         message_id = int(record.get("confirmation_message_id", 0) or 0)
+        if channel_id and message_id:
+            try:
+                channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+                message = await channel.fetch_message(message_id)
+                await message.edit(embed=embed, view=None)
+            except discord.HTTPException:
+                log.exception("Could not update Clanker confirmation card %s", launch_id)
         try:
-            channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
-            message = await channel.fetch_message(message_id)
-            await message.edit(embed=embed, view=None)
             await user.send(embed=embed)
         except discord.HTTPException:
-            log.exception("Could not deliver Clanker confirmation %s", launch_id)
+            log.exception("Could not DM Clanker confirmation card %s", launch_id)
+
 
     async def get_launch_record(self, guild: discord.Guild, launch_id: str) -> Optional[Dict[str, Any]]:
         audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
