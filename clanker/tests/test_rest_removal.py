@@ -601,6 +601,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Starter example: 10% Supply Percentage, 6m Lockup", fields["Vault · optional"])
         self.assertIn("m = 30-day months", fields["Vault · optional"])
         modal = ClankerVaultModal(view)
+        self.assertEqual(modal.percentage_input.default, "10")
         self.assertEqual(modal.lockup_input.default, "6m")
         self.assertEqual(modal.vesting_input.default, "")
         self.assertIn("Blank = full unlock", modal.vesting_input.placeholder)

@@ -155,8 +155,8 @@ class ClankerVaultModal(discord.ui.Modal):
         self.view_ref = view
         vault = view.draft.get("vault") or {}
         self.percentage_input = discord.ui.TextInput(
-            label="Supply percentage (blank disables)", default=str(vault.get("percentage") or ""),
-            placeholder="Starter example: 10", required=False, max_length=2,
+            label="Supply percentage (blank disables)", default=str(vault.get("percentage") or 10),
+            placeholder="Enter 1-90; clear to disable", required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
             label="Lockup duration (min 7d; d/w/m/y)",
