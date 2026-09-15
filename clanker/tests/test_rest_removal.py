@@ -262,6 +262,44 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         self.assertIn("no wallet gas charge", fields["Gas payment"])
 
 
+class LaunchReceiptDisplayTests(unittest.TestCase):
+    def test_confirmed_receipt_prioritizes_human_readable_launch_details(self):
+        record = {
+            "launch_id": "nmt-20260915005422-e6fc01",
+            "launch_ref": "nmt-fc01",
+            "status": "internal_confirmed",
+            "symbol": "NMT",
+            "name": "Nikki Minaje Twatt",
+            "created_at": "2026-09-15T00:54:22+00:00",
+            "supply": "100000000000",
+            "requester_name": "sickprodigy",
+            "token_admin": WALLET,
+            "creator_reward_recipient": WALLET,
+            "creator_bps": 8000,
+            "platform_bps": 2000,
+            "platform_treasury": WALLET,
+            "token_address": "0x7a97de41b37f23bb94aa1652f0d1979060c1cf72",
+            "transaction_hash": "0x" + "ab" * 32,
+            "user_operation_hash": "0x" + "cd" * 32,
+        }
+        embed = Clanker.launch_record_embed(record)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(embed.title, "\u2705 $NMT launched \u2022 nmt-fc01")
+        self.assertEqual(embed.description, "Nikki Minaje Twatt")
+        self.assertEqual(fields["Status"], "\u2705 Confirmed")
+        self.assertEqual(fields["Network"], "Base Sepolia")
+        self.assertEqual(fields["Supply"], "100,000,000,000")
+        self.assertTrue(fields["Created"].startswith("<t:"))
+        self.assertIn("0x7a97de\u2026c1cf72", fields["Token contract"])
+        self.assertIn("View on Clanker", fields["Launch links"])
+        self.assertIn("View transaction", fields["Launch links"])
+        self.assertIn("80%", fields["Creator rewards"])
+        self.assertIn("20%", fields["Platform rewards"])
+        self.assertNotIn(record["user_operation_hash"], fields["Technical reference"])
+        self.assertIn("0xcdcdcdcd\u2026cdcdcdcd", fields["Technical reference"])
+        self.assertEqual(embed.footer.text, "Requested by sickprodigy \u00b7 Base Sepolia testnet")
+
+
 class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
     async def test_verified_launch_passes_only_bound_intent_and_operation(self):
         payload = Clanker.build_payload(
@@ -399,7 +437,7 @@ class ClankerRedIntegrationTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(), user, "nmt-long", {"status": "failed"}
         )
         embed = user.send.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "Clanker launch nmt")
+        self.assertEqual(embed.title, "Clanker launch • nmt")
         rendered = "\n".join(str(field.value) for field in embed.fields)
         self.assertIn(f"https://www.clanker.world/clanker/{token}", rendered)
 

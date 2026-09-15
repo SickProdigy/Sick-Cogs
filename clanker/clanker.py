@@ -753,32 +753,89 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @staticmethod
     def launch_record_embed(record: Dict[str, Any]) -> discord.Embed:
-        title = f"Clanker launch {record.get('launch_ref') or record.get('launch_id', 'legacy')}"
-        embed = discord.Embed(title=title, color=discord.Color.blue())
-        embed.add_field(name="Status", value=record.get("status", "unknown"), inline=True)
-        embed.add_field(name="Token", value=f"{record.get('name', '?')} (${record.get('symbol', '?')})", inline=False)
-        embed.add_field(name="Created", value=record.get("created_at", "unknown"), inline=False)
-        embed.add_field(name="Requester", value=record.get("requester_name", record.get("requester_id", "?")), inline=True)
-        embed.add_field(name="Chain", value=record.get("chain", "base-sepolia"), inline=True)
-        embed.add_field(name="Supply", value=str(record.get("supply", "unknown")), inline=True)
-        embed.add_field(name="Creator/token admin", value=record.get("token_admin") or "unknown", inline=False)
+        """Render a readable launch receipt while retaining its audit facts."""
+        reference = record.get("launch_ref") or record.get("launch_id", "legacy")
+        status = str(record.get("status") or "unknown")
+        symbol = str(record.get("symbol") or "?").upper()
+        confirmed = status in {"internal_confirmed", "external_confirmed"}
+        title = (
+            "\u2705 $" + symbol + " launched \u2022 " + str(reference)
+            if confirmed else "Clanker launch \u2022 " + str(reference)
+        )
+        embed = discord.Embed(
+            title=title,
+            description=str(record.get("name") or "Unnamed token"),
+            color=discord.Color.green() if confirmed else discord.Color.blue(),
+        )
+
+        def address_link(value: Any) -> str:
+            address = str(value or "")
+            if not ADDRESS_RE.fullmatch(address):
+                return "Not set"
+            compact = address[:8] + "\u2026" + address[-6:]
+            return "[{}](https://sepolia.basescan.org/address/{})".format(compact, address)
+
+        def bps(value: Any) -> str:
+            try:
+                amount = int(value)
+            except (TypeError, ValueError):
+                return "Unknown"
+            return "{:g}%".format(amount / 100)
+
+        embed.add_field(name="Status", value=Clanker.launch_status_label(status), inline=True)
+        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        try:
+            supply = "{:,}".format(int(record.get("supply")))
+        except (TypeError, ValueError):
+            supply = str(record.get("supply") or "Unknown")
+        embed.add_field(name="Supply", value=supply, inline=True)
+
+        created = str(record.get("created_at") or "")
+        try:
+            moment = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+            created = "{} ({})".format(
+                discord.utils.format_dt(moment, style="f"),
+                discord.utils.format_dt(moment, style="R"),
+            )
+        except ValueError:
+            created = created or "Unknown"
+        embed.add_field(name="Created", value=created, inline=False)
+
+        token_address = record.get("token_address")
+        transaction_hash = record.get("transaction_hash")
+        if token_address:
+            embed.add_field(name="Token contract", value=address_link(token_address), inline=False)
+            links = ["[View on Clanker](https://www.clanker.world/clanker/{})".format(token_address)]
+            if transaction_hash:
+                links.append("[View transaction](https://sepolia.basescan.org/tx/{})".format(transaction_hash))
+            embed.add_field(name="Launch links", value=" \u00b7 ".join(links), inline=False)
+        elif transaction_hash:
+            embed.add_field(
+                name="Transaction",
+                value="[View on BaseScan](https://sepolia.basescan.org/tx/{})".format(transaction_hash),
+                inline=False,
+            )
+
+        embed.add_field(name="Token administrator", value=address_link(record.get("token_admin")), inline=False)
+        creator_treasury = record.get("creator_reward_recipient") or record.get("token_admin")
         embed.add_field(
-            name="Creator reward treasury",
-            value=record.get("creator_reward_recipient") or record.get("token_admin") or "unknown",
+            name="Creator rewards",
+            value="{} \u2192 {}".format(bps(record.get("creator_bps")), address_link(creator_treasury)),
             inline=False,
         )
         embed.add_field(
-            name="Reward split",
-            value=f"Creator {record.get('creator_bps', '?')} bps / platform {record.get('platform_bps', '?')} bps",
+            name="Platform rewards",
+            value="{} \u2192 {}".format(
+                bps(record.get("platform_bps")), address_link(record.get("platform_treasury"))
+            ),
             inline=False,
         )
-        embed.add_field(name="Platform treasury", value=record.get("platform_treasury") or "unknown", inline=False)
         if record.get("vault_percentage"):
             embed.add_field(
                 name="Vault",
-                value=(
-                    f"{record.get('vault_percentage')}% of supply · "
-                    f"recipient {record.get('vault_recipient') or 'token admin'}"
+                value="{}% of supply \u2192 {}".format(
+                    record.get("vault_percentage"),
+                    address_link(record.get("vault_recipient") or record.get("token_admin")),
                 ),
                 inline=False,
             )
@@ -786,16 +843,22 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             proof_export = record.get("airdrop_proofs") or {}
             proof_note = ""
             if proof_export:
-                proof_note = f"\n{proof_export.get('recipient_count', 0)} generated proofs · {proof_export.get('schema', 'unknown schema')}"
+                proof_note = " \u00b7 {} generated proofs".format(proof_export.get("recipient_count", 0))
             embed.add_field(
                 name="Airdrop",
-                value=(
-                    f"{record.get('airdrop_amount')} tokens · "
-                    f"root {record.get('airdrop_merkle_root') or 'missing'}{proof_note}"
-                ),
+                value="{:,} tokens{}".format(int(record.get("airdrop_amount")), proof_note),
                 inline=False,
             )
-        embed.set_footer(text="Bounded per-guild launch record · no wallet secrets")
+        operation_hash = str(record.get("user_operation_hash") or "")
+        if operation_hash:
+            compact_operation = operation_hash[:10] + "\u2026" + operation_hash[-8:]
+            embed.add_field(
+                name="Technical reference",
+                value="User operation " + chr(96) + compact_operation + chr(96),
+                inline=False,
+            )
+        requester = record.get("requester_name", record.get("requester_id", "?"))
+        embed.set_footer(text="Requested by {} \u00b7 Base Sepolia testnet".format(requester))
         return embed
 
     async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
@@ -1021,23 +1084,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed = self.launch_record_embed(record)
         color = discord.Color.green() if record["status"] == "internal_confirmed" else discord.Color.red()
         embed.color = color
-        tx_hash = record.get("transaction_hash")
-        if record.get("token_address"):
-            token_address = record["token_address"]
-            embed.add_field(
-                name="Token contract",
-                value=f"[{token_address}](https://sepolia.basescan.org/address/{token_address})",
-                inline=False,
-            )
-            embed.add_field(
-                name="Clanker",
-                value=f"[View token on Clanker](https://www.clanker.world/clanker/{token_address})",
-                inline=False,
-            )
-        if tx_hash:
-            embed.add_field(name="Transaction", value=f"[{tx_hash}](https://sepolia.basescan.org/tx/{tx_hash})", inline=False)
-        if record.get("user_operation_hash"):
-            embed.add_field(name="User operation", value=f"`{record['user_operation_hash']}`", inline=False)
         image_url = (record.get("payload") or {}).get("image")
         if image_url:
             embed.set_thumbnail(url=image_url)
