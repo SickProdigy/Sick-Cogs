@@ -521,7 +521,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
     async def test_dismiss_hides_inactive_attempt_but_retains_audit_record(self):
         record = {
             "launch_id": "nmt-long-fc01", "launch_ref": "nmt-fc01",
-            "status": "internal_uncertain", "requester_id": 7, "symbol": "NMT",
+            "status": "internal_failed", "requester_id": 7, "symbol": "NMT",
         }
         records = [record]
         cog = Clanker.__new__(Clanker)
@@ -548,8 +548,55 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
             guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
         )
         await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
-        self.assertIn("Confirmed", ctx.send.await_args.args[0])
+        self.assertIn("confirmed", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
+
+    async def test_dismiss_rejects_uncertain_launch_that_may_be_submitted(self):
+        record = {
+            "launch_id": "nmt-uncertain", "status": "internal_uncertain",
+            "requester_id": 7, "symbol": "NMT",
+        }
+        cog = Clanker.__new__(Clanker)
+        cog.get_user_launch_record = AsyncMock(return_value=record)
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
+        )
+        await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
+        self.assertIn("uncertain", ctx.send.await_args.args[0])
+        self.assertNotIn("dismissed_by_requester", record)
+
+    async def test_delete_user_drafts_removes_only_owned_unsubmitted_records(self):
+        records = [
+            {"launch_id": "editable", "status": "dry_run", "requester_id": 7},
+            {"launch_id": "verified", "status": "verified", "requester_id": 7},
+            {"launch_id": "submitted", "status": "internal_uncertain", "requester_id": 7},
+        ]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        deleted = await cog.delete_user_drafts(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), ["editable", "verified"]
+        )
+        self.assertEqual(deleted, 2)
+        self.assertEqual([item["launch_id"] for item in records], ["submitted"])
+
+    async def test_delete_user_drafts_rejects_submitted_or_foreign_records_atomically(self):
+        records = [
+            {"launch_id": "mine", "status": "dry_run", "requester_id": 7},
+            {"launch_id": "submitted", "status": "internal_submitted", "requester_id": 7},
+            {"launch_id": "foreign", "status": "verified", "requester_id": 8},
+        ]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        for launch_id in ("submitted", "foreign"):
+            with self.assertRaisesRegex(RuntimeError, "unsubmitted drafts"):
+                await cog.delete_user_drafts(
+                    SimpleNamespace(id=100), SimpleNamespace(id=7), [launch_id]
+                )
+        self.assertEqual(len(records), 3)
 
     async def test_compact_references_are_scoped_to_requester(self):
         records = [

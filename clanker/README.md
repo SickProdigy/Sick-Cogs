@@ -73,6 +73,8 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker status` — show draft and guild-control configuration.
 - `[p]clanker drafts [limit]` — show readable unsubmitted drafts and reopen editable or verified cards from a requester-bound selector.
 - `[p]clanker draft <launch_id>` — show one of your saved drafts by compact reference.
+- `[p]clanker draftremove <launch_id>` — review and confirm deletion of one unsubmitted draft.
+- `[p]clanker draftsremoveall` — review and confirm deletion of all your unsubmitted drafts; launch activity is never included.
 - `[p]clanker launches [limit]` — list your records and reopen any submitted launch card from its requester-bound selector.
 - A confirmed launch card’s **Rewards** button opens a private, one-coin gas review. **Collect this coin** submits only that token’s collection call through a CryptoWallet signer matching the immutable token administrator.
 - `[p]clanker claimall` — DM a paginated portfolio review, select tokens to collect, and review a WETH-profitable treasury-wide withdrawal separately.

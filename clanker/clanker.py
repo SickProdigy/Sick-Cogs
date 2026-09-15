@@ -48,8 +48,8 @@ from .helpers import (
 )
 from .admin import ClankerAdminMixin
 from .views import (
-    ClankerClaimAllView, ClankerDraftHistoryView, ClankerDraftView,
-    ClankerLaunchHistoryView,
+    ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
+    ClankerDraftView, ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
 )
 
@@ -1558,6 +1558,26 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         ]
         return exact[-1] if len(exact) == 1 else None
 
+    async def delete_user_drafts(
+        self, guild: discord.Guild, user: Any, launch_ids: List[str],
+    ) -> int:
+        """Delete only requester-owned records that never entered a wallet route."""
+        requested = {str(item) for item in launch_ids}
+        if not requested:
+            raise ValueError("No Clanker drafts were selected.")
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [(index, item) for index, item in enumerate(audit_log)
+                       if str(item.get("launch_id")) in requested]
+            if len(matches) != len(requested):
+                raise RuntimeError("One or more selected drafts no longer exist.")
+            if any(int(item.get("requester_id", 0)) != int(user.id)
+                   or item.get("status") not in {"dry_run", "verified"}
+                   for _, item in matches):
+                raise RuntimeError("Only your unsubmitted drafts can be deleted.")
+            for index, _ in reversed(matches):
+                del audit_log[index]
+            return len(matches)
+
     async def replace_saved_draft(
         self, guild: discord.Guild, user: Any, launch_id: str,
         replacement: Dict[str, Any],
@@ -1894,6 +1914,49 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         await ctx.send(embed=self.launch_record_embed(record))
 
+    @clanker.command(name="draftremove", aliases=("removedraft", "deletedraft"))
+    async def clanker_draftremove(self, ctx: commands.Context, launch_id: str):
+        """Review deletion of one requester-owned unsubmitted draft."""
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
+        if not record or record.get("status") not in {"dry_run", "verified"}:
+            await ctx.send("No removable Clanker draft of yours matched that reference.")
+            return
+        reference = record.get("launch_ref") or launch_id
+        embed = discord.Embed(
+            title="Delete Clanker draft?",
+            description=(
+                "**$" + "{} • {}**\nThis draft has not entered a wallet route. "
+                "Deletion is permanent and does not affect any on-chain token."
+            ).format(str(record.get("symbol") or "?").upper(), reference),
+            color=discord.Color.red(),
+        )
+        await ctx.send(embed=embed, view=ClankerDeleteDraftsView(
+            self, ctx.guild, ctx.author.id, [str(record["launch_id"])]
+        ))
+
+    @clanker.command(name="draftsremoveall", aliases=("removealldrafts", "deletedrafts"))
+    async def clanker_draftsremoveall(self, ctx: commands.Context):
+        """Review deletion of all requester-owned unsubmitted drafts."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        drafts = [item for item in audit_log
+                  if int(item.get("requester_id", 0)) == int(ctx.author.id)
+                  and item.get("status") in {"dry_run", "verified"}]
+        if not drafts:
+            await ctx.send("You have no unsubmitted Clanker drafts to delete.")
+            return
+        embed = discord.Embed(
+            title="Delete all Clanker drafts?",
+            description=(
+                "This will permanently delete **{}** unsubmitted draft{}. "
+                "Submitted, pending, uncertain, failed, and confirmed launch activity "
+                "cannot be removed by this action."
+            ).format(len(drafts), "" if len(drafts) == 1 else "s"),
+            color=discord.Color.red(),
+        )
+        await ctx.send(embed=embed, view=ClankerDeleteDraftsView(
+            self, ctx.guild, ctx.author.id, [str(item["launch_id"]) for item in drafts]
+        ))
+
     @clanker.command(name="launches", aliases=("history", "records"))
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
         """List recent Clanker records that entered an execution route."""
@@ -1919,14 +1982,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not record:
             await ctx.send("No matching Clanker launch belongs to you.")
             return
-        dismissible = {
-            "awaiting_cryptowallet_approval", "internal_failed", "internal_uncertain",
-            "awaiting_external_wallet",
-        }
+        dismissible = {"awaiting_cryptowallet_approval", "internal_failed"}
         if record.get("status") not in dismissible:
             await ctx.send(
-                "Only failed, uncertain, or abandoned approval attempts can be dismissed. "
-                "Confirmed and actively submitted launches remain visible."
+                "Only failed internal attempts or approvals that were never submitted can "
+                "be dismissed. Pending, uncertain, external-wallet, and confirmed launches "
+                "always remain visible."
             )
             return
         internal_id = str(record.get("launch_id") or "")

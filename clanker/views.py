@@ -450,6 +450,73 @@ def draft_values_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+class ClankerDeleteDraftButton(discord.ui.Button):
+    def __init__(self, cog: "Clanker", guild: Any, user_id: int, launch_id: str):
+        super().__init__(label="Delete draft", emoji="🗑️", style=discord.ButtonStyle.danger, row=1)
+        self.cog = cog
+        self.guild = guild
+        self.user_id = int(user_id)
+        self.launch_id = str(launch_id)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Only the draft owner can delete it.", ephemeral=True)
+            return
+        try:
+            deleted = await self.cog.delete_user_drafts(self.guild, interaction.user, [self.launch_id])
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        embed = discord.Embed(
+            title="Clanker draft deleted",
+            description="Deleted {} unsubmitted draft. Nothing was sent to a wallet.".format(deleted),
+            color=discord.Color.red(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
+class ClankerDeleteDraftsView(discord.ui.View):
+    def __init__(self, cog: "Clanker", guild: Any, user_id: int, launch_ids: list[str]):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.user_id = int(user_id)
+        self.launch_ids = list(launch_ids)
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the draft owner can confirm this deletion.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Delete all drafts", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message("Draft deletion is already running.", ephemeral=True)
+            return
+        self.processing = True
+        try:
+            deleted = await self.cog.delete_user_drafts(self.guild, interaction.user, self.launch_ids)
+            embed = discord.Embed(
+                title="Clanker drafts deleted",
+                description="Deleted {} unsubmitted draft{}. Nothing was sent to a wallet.".format(
+                    deleted, "" if deleted == 1 else "s"
+                ),
+                color=discord.Color.red(),
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            self.processing = False
+            await interaction.response.send_message(str(exc), ephemeral=True)
+
+    @discord.ui.button(label="Keep drafts", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Draft deletion canceled.", embed=None, view=None)
+
+
 class ClankerDraftSelect(discord.ui.Select):
     def __init__(self, parent: "ClankerDraftHistoryView"):
         self.parent_view = parent
@@ -486,6 +553,10 @@ class ClankerDraftSelect(discord.ui.Select):
                 saved_record=record,
             )
             view.draft = draft
+        view.add_item(ClankerDeleteDraftButton(
+            self.parent_view.cog, self.parent_view.ctx.guild,
+            self.parent_view.user_id, str(record["launch_id"]),
+        ))
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 
