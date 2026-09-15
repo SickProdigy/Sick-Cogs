@@ -1220,11 +1220,11 @@ class ClankerVerifiedView(discord.ui.View):
                 return
             self.record["status"] = "internal_" + result["status"]
             self.disable_controls()
-            await interaction.message.edit(embed=self.embed(), view=self)
             if result["status"] == "submitted":
                 await self.cog.schedule_internal_confirmation(
                     self.ctx.guild, interaction.user, self.record, interaction.message
                 )
+            await interaction.edit_original_response(embed=self.embed(), view=self)
             detail = result.get("transaction_hash") or result.get("user_operation_hash")
             if result["status"] == "uncertain":
                 message = (
@@ -1238,9 +1238,9 @@ class ClankerVerifiedView(discord.ui.View):
                     + (f" Operation: `{detail}`" if detail else "")
                 )
             await interaction.followup.send(message, ephemeral=True)
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException) as exc:
             await interaction.followup.send(
-                f"Clanker launch was not submitted: {exc}", ephemeral=True
+                f"Clanker launch could not finish its Discord response: {exc}", ephemeral=True
             )
         finally:
             self.processing = False

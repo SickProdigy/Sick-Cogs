@@ -1435,15 +1435,19 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     async def schedule_internal_confirmation(
         self, guild: discord.Guild, user: Any, record: Dict[str, Any],
-        message: discord.Message,
+        message: Optional[discord.Message] = None,
     ) -> None:
-        """Persist the result-card destination and track one submitted launch."""
+        """Track one submitted launch and persist only a public result-card destination."""
         async with self.config.guild(guild).audit_log() as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
             if len(matches) != 1 or matches[0].get("status") != "internal_submitted":
                 return
-            matches[0]["confirmation_channel_id"] = int(message.channel.id)
-            matches[0]["confirmation_message_id"] = int(message.id)
+            is_ephemeral = bool(
+                message and getattr(getattr(message, "flags", None), "ephemeral", False)
+            )
+            if message is not None and not is_ephemeral:
+                matches[0]["confirmation_channel_id"] = int(message.channel.id)
+                matches[0]["confirmation_message_id"] = int(message.id)
         self._start_confirmation_task(
             guild.id, int(user.id), str(record["launch_id"])
         )

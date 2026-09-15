@@ -426,6 +426,27 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
                 SimpleNamespace(id=100), SimpleNamespace(id=7), "submitted", payload
             )
 
+    async def test_ephemeral_launch_starts_tracking_without_message_destination(self):
+        record = {
+            "launch_id": "test-launch", "status": "internal_submitted",
+            "requester_id": 7,
+        }
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(
+                audit_log=lambda: AsyncAuditLog(records)
+            )
+        )
+        cog._start_confirmation_task = unittest.mock.Mock()
+        message = SimpleNamespace(flags=SimpleNamespace(ephemeral=True))
+        await cog.schedule_internal_confirmation(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), record, message
+        )
+        self.assertNotIn("confirmation_channel_id", record)
+        self.assertNotIn("confirmation_message_id", record)
+        cog._start_confirmation_task.assert_called_once_with(100, 7, "test-launch")
+
     async def test_authorization_request_keeps_verified_record_launchable(self):
         record = {"launch_id": "test-launch", "status": "verified"}
         cog = Clanker.__new__(Clanker)
