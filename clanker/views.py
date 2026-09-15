@@ -1469,7 +1469,7 @@ class ClankerDraftView(discord.ui.View):
             verified_view = ClankerVerifiedView(
                 self.cog, self.ctx, record, self.settings, self.draft
             )
-            await interaction.message.edit(
+            await interaction.edit_original_response(
                 embed=verified_view.embed(), view=verified_view
             )
             await interaction.followup.send(
@@ -1477,7 +1477,7 @@ class ClankerDraftView(discord.ui.View):
                 "button. Any changes require a new card.",
                 ephemeral=True,
             )
-        except (ValueError, RuntimeError) as exc:
+        except (ValueError, RuntimeError, discord.HTTPException) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         finally:
             self.processing = False
