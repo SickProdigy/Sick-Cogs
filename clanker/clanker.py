@@ -53,6 +53,16 @@ MAX_RPC_BYTES = 1024 * 1024
 TOKEN_CREATED_TOPIC = "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"
 
 
+async def _read_bounded_rpc_content(content: Any) -> bytes:
+    """Collect a fragmented RPC response without exceeding the response cap."""
+    raw = bytearray()
+    async for chunk in content.iter_chunked(64 * 1024):
+        raw.extend(chunk)
+        if len(raw) > MAX_RPC_BYTES:
+            raise RuntimeError("oversized RPC response")
+    return bytes(raw)
+
+
 async def clanker_rpc(method: str, params: list[Any]) -> Any:
     """Call bounded public Base Sepolia RPC endpoints."""
     payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
@@ -62,8 +72,8 @@ async def clanker_rpc(method: str, params: list[Any]) -> Any:
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
-                    raw = await response.content.read(MAX_RPC_BYTES + 1)
-                    if response.status != 200 or len(raw) > MAX_RPC_BYTES:
+                    raw = await _read_bounded_rpc_content(response.content)
+                    if response.status != 200:
                         raise RuntimeError("invalid RPC response")
                     body = json.loads(raw.decode("utf-8"))
                     if body.get("error") or "result" not in body:

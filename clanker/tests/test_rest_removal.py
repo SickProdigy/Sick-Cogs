@@ -140,6 +140,28 @@ class LegacyRestRemovalTests(unittest.TestCase):
         self.assertTrue(record["operation"]["data"].startswith("0xdf40224a"))
 
 
+class RpcResponseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_reader_collects_fragmented_json_to_eof(self):
+        class FragmentedContent:
+            async def iter_chunked(self, size):
+                self.requested_size = size
+                for chunk in (b"{\"jsonrpc\":", b"\"2.0\",\"result\":", b"{}}"):
+                    yield chunk
+
+        content = FragmentedContent()
+        raw = await clanker_module._read_bounded_rpc_content(content)
+        self.assertEqual(raw, b"{\"jsonrpc\":\"2.0\",\"result\":{}}")
+        self.assertEqual(content.requested_size, 64 * 1024)
+
+    async def test_bounded_reader_rejects_oversized_response(self):
+        class OversizedContent:
+            async def iter_chunked(self, size):
+                yield b"x" * (clanker_module.MAX_RPC_BYTES + 1)
+
+        with self.assertRaisesRegex(RuntimeError, "oversized RPC response"):
+            await clanker_module._read_bounded_rpc_content(OversizedContent())
+
+
 class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
     async def test_shortcut_normalizes_and_prefills_symbol_and_name(self):
         settings = {"enabled": True, "treasury_address": TREASURY}
