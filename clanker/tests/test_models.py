@@ -61,6 +61,7 @@ class ClankerIntentTests(unittest.TestCase):
             make_intent(pool=ClankerPool(WETH, -230400, 200, (ClankerPoolPosition(-230400, -120000, 10_000),), clanker_fee_bps=101)),
             make_intent(vault=ClankerVault(WALLET, 10, 604800)),
             make_intent(airdrop=ClankerAirdrop(WALLET, "0x" + "ab" * 32, 250_000_000, 86400)),
+            make_intent(expected_native_value_wei=10**16),
         )
         for changed in mutations:
             self.assertNotEqual(original.payload_hash, changed.payload_hash)
@@ -79,7 +80,7 @@ class ClankerIntentTests(unittest.TestCase):
         invalid = (
             {"network": "base", "chain_id": 8453},
             {"factory": TREASURY},
-            {"expected_native_value_wei": 1},
+            {"expected_native_value_wei": 10**18 + 1},
             {"supply_tokens": DEFAULT_CLANKER_SUPPLY - 1},
         )
         for values in invalid:

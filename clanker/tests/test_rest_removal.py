@@ -1133,5 +1133,41 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_launch_fee_falls_back_to_reviewed_ceiling(self):
+        cog = Clanker.__new__(Clanker)
+        operation = {"to": TREASURY, "data": "0x1234", "value": "0"}
+        with patch.object(
+            clanker_module, "clanker_rpc",
+            AsyncMock(side_effect=["0x64", RuntimeError("simulation reverted")]),
+        ):
+            estimate = await cog.estimate_launch_network_fee(operation, WALLET)
+        self.assertEqual(estimate["estimate_kind"], "safety_ceiling")
+        self.assertEqual(estimate["estimated_gas"], 8_000_000)
+        self.assertEqual(estimate["estimated_fee_wei"], 800_000_000)
+
+    async def test_block_timestamp_uses_confirmed_block(self):
+        cog = Clanker.__new__(Clanker)
+        rpc = AsyncMock(return_value={"timestamp": "0x64"})
+        with patch.object(clanker_module, "clanker_rpc", rpc):
+            self.assertEqual(await cog._block_timestamp(123), 100)
+        rpc.assert_awaited_once_with("eth_getBlockByNumber", ["0x7b", False])
+
+    def test_receipt_shows_exact_vault_release_schedule(self):
+        record = {
+            "launch_id": "test", "launch_ref": "test", "status": "internal_confirmed",
+            "symbol": "TEST", "name": "Test Token", "created_at": "2026-09-15T00:00:00+00:00",
+            "supply": "100000000000", "requester_name": "tester", "token_admin": WALLET,
+            "creator_bps": 8000, "platform_bps": 2000, "platform_treasury": TREASURY,
+            "vault_percentage": 10, "vault_recipient": WALLET, "block_timestamp": 100,
+            "payload": {"vault": {"percentage": 10, "lockupDuration": 604800,
+                                   "vestingDuration": 2592000, "recipient": WALLET}},
+        }
+        fields = {field.name: field.value for field in Clanker.launch_record_embed(record).fields}
+        self.assertIn("10% (10,000,000,000)", fields["Vault"])
+        self.assertIn("Vesting starts: <t:604900:F>", fields["Vault"])
+        self.assertIn("Fully released: <t:3196900:F>", fields["Vault"])
+
+
 if __name__ == "__main__":
     unittest.main()

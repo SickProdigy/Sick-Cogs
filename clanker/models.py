@@ -260,8 +260,8 @@ class ClankerLaunchIntent:
             raise ValueError("Clanker reward bps must sum to 10000.")
         if self.created_at <= 0 or self.expires_at <= self.created_at:
             raise ValueError("Clanker intent expiry must follow its creation time.")
-        if self.expected_native_value_wei != 0:
-            raise ValueError("Prototype Clanker intents do not permit a developer buy or native value.")
+        if not 0 <= self.expected_native_value_wei <= 10**18:
+            raise ValueError("Creator buy-in must be from 0 through 1 ETH.")
         if self.supply_tokens != DEFAULT_CLANKER_SUPPLY:
             raise ValueError("Clanker v4 launches use the fixed 100 billion token supply.")
         extension_percentage = (self.vault.percentage if self.vault else 0)

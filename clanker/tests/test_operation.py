@@ -42,6 +42,20 @@ class ClankerProviderTests(unittest.TestCase):
         self.assertEqual(operation.data, data)
         self.assertEqual(operation.payload_hash, launch.payload_hash)
 
+    def test_builds_bounded_official_developer_buy_extension(self):
+        value = 10**16
+        launch = intent(expected_native_value_wei=value)
+        operation = provider.clanker_deployment_operation(launch)
+        self.assertEqual(operation.value, value)
+        self.assertIn(provider.DEVBUY[2:].lower(), operation.data.lower())
+        provider.validate_clanker_deployment_call(
+            launch, to=core.CLANKER_FACTORY, value=value, data=operation.data
+        )
+        with self.assertRaises(ValueError):
+            provider.validate_clanker_deployment_call(
+                launch, to=core.CLANKER_FACTORY, value=0, data=operation.data
+            )
+
     def test_rejects_changed_target_value_or_data(self):
         launch = intent()
         data = provider.clanker_deployment_calldata(launch)

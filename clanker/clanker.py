@@ -62,6 +62,20 @@ MAX_RPC_BYTES = 1024 * 1024
 TOKEN_CREATED_TOPIC = "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"
 
 
+def _format_vault_duration(seconds: int) -> str:
+    amount = int(seconds or 0)
+    if amount == 0:
+        return "None"
+    for singular, plural, size in (
+        ("year", "years", 31536000), ("month", "months", 2592000),
+        ("week", "weeks", 604800), ("day", "days", 86400), ("hour", "hours", 3600),
+    ):
+        if amount % size == 0:
+            count = amount // size
+            return "{} {}".format(count, singular if count == 1 else plural)
+    return "{:,} seconds".format(amount)
+
+
 async def _read_bounded_rpc_content(content: Any) -> bytes:
     """Collect a fragmented RPC response without exceeding the response cap."""
     raw = bytearray()
@@ -377,6 +391,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         vault_vesting_seconds: int = 0,
         vault_recipient: Optional[str] = None,
         creator_reward_recipient: Optional[str] = None,
+        expected_native_value_wei: int = 0,
     ) -> Dict[str, Any]:
         clean_name = " ".join(str(name or "").strip().split())
         clean_symbol = str(symbol or "").strip().upper().lstrip("$")
@@ -395,6 +410,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise ValueError("Image URL must be HTTPS.")
         if not 0 <= platform_bps <= 10_000:
             raise ValueError("Platform reward bps must be from 0 through 10000.")
+        if not 0 <= int(expected_native_value_wei) <= 10**18:
+            raise ValueError("Creator buy-in must be from 0 through 1 ETH.")
         recipients = []
         creator_bps = 10_000 - platform_bps
         if creator_bps:
@@ -434,6 +451,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             },
             "rewards": {"recipients": recipients},
         }
+        if int(expected_native_value_wei):
+            payload["devBuy"] = {
+                "ethAmountWei": str(int(expected_native_value_wei)),
+                "recipient": primary_beneficiary.lower(),
+                "amountOutMin": "0",
+            }
         vault = None
         if vault_enabled:
             vault = ClankerVault(
@@ -493,6 +516,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             airdrop_admin = args[10] if len(args) > 10 else kwargs.get("airdrop_admin")
             if payload.get("airdrop") and not airdrop_admin:
                 payload["airdrop"]["admin"] = None
+            if payload.get("devBuy"):
+                payload["devBuy"]["recipient"] = None
         if not creator_recipient and creator_bps:
             payload["rewards"]["recipients"][0]["recipient"] = None
         return payload
@@ -548,6 +573,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             symbol=str(payload["symbol"]), image=str(payload.get("image") or ""),
             metadata=payload.get("metadata") or {}, context=payload.get("context") or {},
             pool=pool, rewards=rewards, vault=vault, airdrop=airdrop,
+            expected_native_value_wei=int((payload.get("devBuy") or {}).get("ethAmountWei") or 0),
             created_at=created_at, expires_at=expires_at,
         )
 
@@ -877,14 +903,36 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             inline=False,
         )
         if record.get("vault_percentage"):
-            embed.add_field(
-                name="Vault",
-                value="{}% of supply \u2192 {}".format(
-                    record.get("vault_percentage"),
-                    address_link(record.get("vault_recipient") or record.get("token_admin")),
-                ),
-                inline=False,
-            )
+            vault = (record.get("payload") or {}).get("vault") or {}
+            percentage = int(record.get("vault_percentage") or vault.get("percentage") or 0)
+            vaulted_supply = int(record.get("supply") or 0) * percentage // 100
+            lockup_seconds = int(vault.get("lockupDuration") or 0)
+            vesting_seconds = int(vault.get("vestingDuration") or 0)
+            vault_lines = [
+                "Supply Percentage: {}% ({:,})".format(percentage, vaulted_supply),
+                "Vault time: {}".format(_format_vault_duration(lockup_seconds)),
+            ]
+            block_timestamp = record.get("block_timestamp")
+            if block_timestamp is not None:
+                release_start = int(block_timestamp) + lockup_seconds
+                if vesting_seconds:
+                    fully_released = release_start + vesting_seconds
+                    vault_lines.extend([
+                        "Vesting: {}".format(_format_vault_duration(vesting_seconds)),
+                        "Vesting starts: <t:{}:F> (<t:{}:R>)".format(release_start, release_start),
+                        "Fully released: <t:{}:F> (<t:{}:R>)".format(fully_released, fully_released),
+                    ])
+                else:
+                    vault_lines.extend([
+                        "Vesting: Full unlock after vault time",
+                        "Release date: <t:{}:F> (<t:{}:R>)".format(release_start, release_start),
+                    ])
+            else:
+                vault_lines.append("Release date: Waiting for confirmed block time")
+            vault_lines.append("Recipient: {}".format(
+                address_link(record.get("vault_recipient") or record.get("token_admin"))
+            ))
+            embed.add_field(name="Vault", value="\n".join(vault_lines), inline=False)
         if record.get("airdrop_amount"):
             proof_export = record.get("airdrop_proofs") or {}
             proof_note = ""
@@ -1495,6 +1543,48 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return
             await asyncio.sleep(delay)
 
+    async def _block_timestamp(self, block_number: int) -> int:
+        block = await clanker_rpc("eth_getBlockByNumber", [hex(int(block_number)), False])
+        if not isinstance(block, dict) or not block.get("timestamp"):
+            raise RuntimeError("The confirmed Base Sepolia block timestamp is unavailable.")
+        timestamp = int(str(block["timestamp"]), 16)
+        if timestamp <= 0:
+            raise RuntimeError("The confirmed Base Sepolia block timestamp is invalid.")
+        return timestamp
+
+    async def _backfill_vault_timestamps(
+        self, guild: discord.Guild, records: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        missing = [
+            record for record in records
+            if record.get("vault_percentage") and record.get("block_number")
+            and not record.get("block_timestamp")
+            and record.get("status") in {"internal_confirmed", "external_confirmed"}
+        ]
+        resolved: Dict[str, int] = {}
+        for record in missing:
+            try:
+                resolved[str(record["launch_id"])] = await self._block_timestamp(
+                    int(record["block_number"])
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                log.exception("Could not backfill Clanker vault timestamp %s", record.get("launch_id"))
+        if not resolved:
+            return records
+        async with self.config.guild(guild).audit_log() as audit_log:
+            for record in audit_log:
+                timestamp = resolved.get(str(record.get("launch_id")))
+                if timestamp:
+                    record["block_timestamp"] = timestamp
+        refreshed = []
+        for record in records:
+            item = copy.deepcopy(record)
+            timestamp = resolved.get(str(item.get("launch_id")))
+            if timestamp:
+                item["block_timestamp"] = timestamp
+            refreshed.append(item)
+        return refreshed
+
     async def _track_external_confirmation(
         self, guild_id: int, user_id: int, launch_id: str
     ) -> None:
@@ -1520,6 +1610,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if not result["verified"]:
                 await asyncio.sleep(delay)
                 continue
+            try:
+                block_timestamp = await self._block_timestamp(result["block_number"])
+            except (TypeError, ValueError, RuntimeError):
+                log.exception("Could not resolve Clanker block timestamp %s", launch_id)
+                block_timestamp = None
             async with self.config.guild(guild).audit_log() as audit_log:
                 match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
                 match.update({
@@ -1527,6 +1622,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     "transaction_hash": result["transaction_hash"],
                     "signer_address": result["signer_address"],
                     "block_number": result["block_number"],
+                    "block_timestamp": block_timestamp,
                     "token_address": result["token_address"],
                 })
                 record = copy.deepcopy(match)
@@ -1589,6 +1685,17 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     )
                     match.update(verified)
                 record.update(verified)
+                try:
+                    block_timestamp = await self._block_timestamp(verified["block_number"])
+                    async with self.config.guild(guild).audit_log() as audit_log:
+                        match = next(
+                            item for item in audit_log
+                            if str(item.get("launch_id")) == launch_id
+                        )
+                        match["block_timestamp"] = block_timestamp
+                    record["block_timestamp"] = block_timestamp
+                except (KeyError, TypeError, ValueError, RuntimeError):
+                    log.exception("Could not resolve Clanker block timestamp %s", launch_id)
             except (KeyError, TypeError, ValueError, RuntimeError):
                 log.exception("Could not verify confirmed Clanker receipt %s", launch_id)
                 async with self.config.guild(guild).audit_log() as audit_log:
@@ -1693,7 +1800,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 get_terms = getattr(wallet, "clanker_execution_terms", None) if wallet else None
                 if not callable(get_terms):
                     raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
-                terms = get_terms()
+                terms = get_terms(int((record.get("payload", {}).get("devBuy") or {}).get("ethAmountWei") or 0))
                 if not isinstance(terms, dict):
                     raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
                 record["execution_terms"] = terms
@@ -1816,7 +1923,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             needs_signer = payload.get("tokenAdmin") is None or any(
                 item.get("admin") is None or item.get("recipient") is None
                 for item in (payload.get("rewards") or {}).get("recipients", [])
-            ) or (bool(payload.get("vault")) and payload["vault"].get("recipient") is None) or (bool(payload.get("airdrop")) and payload["airdrop"].get("admin") is None)
+            ) or (bool(payload.get("vault")) and payload["vault"].get("recipient") is None) or (bool(payload.get("airdrop")) and payload["airdrop"].get("admin") is None) or (bool(payload.get("devBuy")) and payload["devBuy"].get("recipient") is None)
             if needs_signer and not is_eth_address(str(signer_address or "")):
                 raise RuntimeError("This draft needs a valid execution wallet to resolve its blank wallet fields.")
             signer_address = str(signer_address or "").lower()
@@ -1836,6 +1943,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 payload["vault"]["recipient"] = signer_address
             if payload.get("airdrop") and payload["airdrop"].get("admin") is None:
                 payload["airdrop"]["admin"] = signer_address
+            if payload.get("devBuy") and payload["devBuy"].get("recipient") is None:
+                payload["devBuy"]["recipient"] = signer_address
             intent = self.build_launch_intent(
                 guild.id, user.id, launch_id, payload,
                 created_at=record.get("execution_created_at"),
@@ -1861,16 +1970,24 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "data": str(operation["data"]),
             "value": hex(int(operation.get("value", 0))),
         }
-        estimated_gas_raw, gas_price_raw = await asyncio.gather(
-            clanker_rpc("eth_estimateGas", [call]),
-            clanker_rpc("eth_gasPrice", []),
-        )
-        estimated_gas = int(str(estimated_gas_raw), 16)
+        gas_price_raw = await clanker_rpc("eth_gasPrice", [])
         gas_price_wei = int(str(gas_price_raw), 16)
+        try:
+            estimated_gas_raw = await clanker_rpc("eth_estimateGas", [call])
+            estimated_gas = int(str(estimated_gas_raw), 16)
+            estimate_kind = "simulation"
+        except (TypeError, ValueError, RuntimeError) as exc:
+            estimated_gas = 8_000_000
+            estimate_kind = "safety_ceiling"
+            log.warning(
+                "Clanker launch gas simulation failed; using the reviewed gas ceiling (%s)",
+                type(exc).__name__,
+            )
         return {
             "estimated_gas": estimated_gas,
             "gas_price_wei": gas_price_wei,
             "estimated_fee_wei": estimated_gas * gas_price_wei,
+            "estimate_kind": estimate_kind,
         }
 
     async def mark_draft_verified(
@@ -2185,6 +2302,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         Shows launch attempts that entered an internal or external wallet route.
         """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        audit_log = await self._backfill_vault_timestamps(ctx.guild, audit_log)
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}

@@ -1,5 +1,6 @@
 import copy
 import json
+from decimal import Decimal, InvalidOperation
 import re
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -150,10 +151,34 @@ class ClankerDetailsModal(discord.ui.Modal):
             required=False,
             max_length=500,
         )
+        buy_wei = int(view.draft.get("creator_buy_in_wei") or 0)
+        self.creator_buy_in_input = discord.ui.TextInput(
+            label="Creator buy-in ETH (optional)",
+            default=(format(Decimal(buy_wei) / Decimal(10**18), "f") if buy_wei else ""),
+            placeholder="Blank = no buy-in; example: 0.01",
+            required=False,
+            max_length=24,
+        )
         self.add_item(self.description_input)
+        self.add_item(self.creator_buy_in_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        raw_buy = str(self.creator_buy_in_input.value or "").strip()
+        try:
+            buy = Decimal(raw_buy or "0")
+            if not buy.is_finite() or buy < 0 or buy > Decimal("1"):
+                raise ValueError
+            buy_wei = int(buy * Decimal(10**18))
+            if buy != Decimal(buy_wei) / Decimal(10**18):
+                raise ValueError
+        except (InvalidOperation, ValueError):
+            await interaction.response.send_message(
+                "Creator buy-in must be 0-1 ETH with no more than 18 decimal places.",
+                ephemeral=True,
+            )
+            return
         self.view_ref.draft["description"] = str(self.description_input.value).strip() or None
+        self.view_ref.draft["creator_buy_in_wei"] = buy_wei
         await self.view_ref.refresh(interaction, "Optional details saved.")
 
 
@@ -593,6 +618,7 @@ def draft_values_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "creator_reward_recipient": creator.get("recipient"),
         "image_url": payload.get("image") or None,
         "description": (payload.get("metadata") or {}).get("description") or None,
+        "creator_buy_in_wei": int((payload.get("devBuy") or {}).get("ethAmountWei") or 0),
         "vault": copy.deepcopy(payload.get("vault")),
         "airdrop": ({
             "recipients": [],
@@ -1059,12 +1085,17 @@ class ClankerVerifiedView(discord.ui.View):
         estimate = record.get("network_fee_estimate") or {}
         estimated_gas = int(estimate.get("estimated_gas") or 0)
         estimated_fee_wei = int(estimate.get("estimated_fee_wei") or 0)
-        network_cost = (
-            "{} (estimated for {:,} gas)".format(
+        estimate_kind = str(estimate.get("estimate_kind") or "simulation")
+        if estimated_fee_wei and estimate_kind == "safety_ceiling":
+            network_cost = "{} maximum at the current gas price ({:,} gas safety ceiling)".format(
                 format_eth_wei(estimated_fee_wei), estimated_gas
             )
-            if estimated_fee_wei else "Estimate unavailable"
-        )
+        elif estimated_fee_wei:
+            network_cost = "{} (estimated for {:,} gas)".format(
+                format_eth_wei(estimated_fee_wei), estimated_gas
+            )
+        else:
+            network_cost = "Current gas price unavailable; launch is blocked until it can be checked"
         creator_buy_in_wei = int(terms["native_value_wei"])
         wallet_gas_wei = 0 if terms["gas_sponsored"] else estimated_fee_wei
         wallet_total = (
@@ -1115,6 +1146,20 @@ class ClankerVerifiedView(discord.ui.View):
             value=format_eth_wei(creator_buy_in_wei) + " · ETH used to buy tokens at launch",
             inline=False,
         )
+        if creator_buy_in_wei:
+            expires_at = int((record.get("intent") or {}).get("expires_at") or 0)
+            protection = [
+                "Recipient: {}".format(payload["tokenAdmin"]),
+                "Route: Official Clanker v4 direct WETH developer buy",
+                "Minimum token output: Not exposed for the direct WETH route",
+            ]
+            if expires_at:
+                protection.append(
+                    "Approval deadline: <t:{}:F> (<t:{}:R>)".format(expires_at, expires_at)
+                )
+            embed.add_field(
+                name="Buy-in review", value="\n".join(protection), inline=False
+            )
         embed.add_field(
             name="Gas fee",
             value=(
@@ -1281,6 +1326,7 @@ class ClankerDraftView(discord.ui.View):
             "creator_reward_recipient": creator_address,
             "image_url": None,
             "description": None,
+            "creator_buy_in_wei": 0,
             "vault": ({
                 "percentage": int(settings.get("vault_percentage") or 0),
                 "lockupDuration": int(settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
@@ -1332,6 +1378,7 @@ class ClankerDraftView(discord.ui.View):
             int((self.draft.get("vault") or {}).get("vestingDuration") or 0),
             (self.draft.get("vault") or {}).get("recipient"),
             creator_reward_recipient=self.draft.get("creator_reward_recipient"),
+            expected_native_value_wei=int(self.draft.get("creator_buy_in_wei") or 0),
         )
 
     def embed(self) -> discord.Embed:
@@ -1348,6 +1395,12 @@ class ClankerDraftView(discord.ui.View):
         embed.add_field(name="Token administrator", value=self.draft.get("primary_beneficiary") or "Signer wallet (resolved at execution)", inline=False)
         embed.add_field(name="Image", value="Set" if self.draft.get("image_url") else "Not set", inline=True)
         embed.add_field(name="Description", value="Set" if self.draft.get("description") else "Not set", inline=True)
+        buy_wei = int(self.draft.get("creator_buy_in_wei") or 0)
+        embed.add_field(
+            name="Creator buy-in",
+            value=(format_eth_wei(buy_wei) if buy_wei else "None"),
+            inline=True,
+        )
         embed.add_field(
             name="Creator rewards",
             value=f"Creator {10000 - int(self.settings['platform_bps'])} bps / platform {int(self.settings['platform_bps'])} bps",
@@ -1474,7 +1527,7 @@ class ClankerDraftView(discord.ui.View):
             get_terms = getattr(wallet, "clanker_execution_terms", None)
             if not callable(get_terms):
                 raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
-            execution_terms = get_terms()
+            execution_terms = get_terms(int((payload.get("devBuy") or {}).get("ethAmountWei") or 0))
             if not isinstance(execution_terms, dict):
                 raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
             record["execution_terms"] = execution_terms
