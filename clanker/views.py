@@ -255,13 +255,17 @@ class ClankerTreasuryWithdrawalView(discord.ui.View):
 class ClankerRewardReviewView(discord.ui.View):
     """Owner-bound controls for one coin; never performs a portfolio sweep."""
 
-    def __init__(self, cog: "Clanker", record: Dict[str, Any], user_id: int, guild_id: int):
+    def __init__(
+        self, cog: "Clanker", record: Dict[str, Any], user_id: int, guild_id: int,
+        *, has_deposited_balances: bool = True,
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.record = copy.deepcopy(record)
         self.user_id = int(user_id)
         self.guild_id = int(guild_id)
         self.processing = False
+        self.review_withdrawal.disabled = not has_deposited_balances
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -271,7 +275,7 @@ class ClankerRewardReviewView(discord.ui.View):
         )
         return False
 
-    @discord.ui.button(label="Collect this coin", emoji="📥", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Collect via CryptoWallet", emoji="📥", style=discord.ButtonStyle.success)
     async def collect(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.processing:
             await interaction.response.send_message("This collection is already processing.", ephemeral=True)
@@ -298,7 +302,7 @@ class ClankerRewardReviewView(discord.ui.View):
         lines.append("No treasury-wide deposited rewards were withdrawn.")
         await interaction.followup.send(chr(10).join(lines), ephemeral=True)
 
-    @discord.ui.button(label="Use external wallet", emoji="🌐", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Collect via external wallet", emoji="🌐", style=discord.ButtonStyle.secondary)
     async def external(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -309,7 +313,7 @@ class ClankerRewardReviewView(discord.ui.View):
         await interaction.followup.send("Open this protected one-time link to collect this token with its administrator wallet:"
                                         + chr(10) + url, ephemeral=True)
 
-    @discord.ui.button(label="Review treasury withdrawal", emoji="📋", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Withdraw deposited balances", emoji="📋", style=discord.ButtonStyle.secondary)
     async def review_withdrawal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
@@ -749,7 +753,8 @@ class ClankerLaunchSelect(discord.ui.Select):
         view = None
         if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
             view = ClankerReceiptRewardsView(
-                self.parent_view.cog, record, self.parent_view.ctx.guild.id
+                self.parent_view.cog, record, self.parent_view.ctx.guild.id,
+                self.parent_view,
             )
         elif status == "awaiting_cryptowallet_approval":
             view = ClankerApprovalResumeView(
@@ -761,8 +766,12 @@ class ClankerLaunchSelect(discord.ui.Select):
                 self.parent_view.cog, self.parent_view.ctx, record,
                 self.parent_view.settings,
             )
-        await interaction.response.send_message(
-            embed=self.parent_view.cog.launch_record_embed(record), view=view, ephemeral=True
+        if view is None:
+            view = discord.ui.View(timeout=900)
+        if not any(isinstance(item, ClankerBackToLaunchesButton) for item in view.children):
+            view.add_item(ClankerBackToLaunchesButton(self.parent_view))
+        await interaction.response.edit_message(
+            embed=self.parent_view.cog.launch_record_embed(record), view=view
         )
 
 
@@ -790,31 +799,56 @@ class ClankerLaunchHistoryView(discord.ui.View):
         return False
 
 
+class ClankerBackToLaunchesButton(discord.ui.Button):
+    def __init__(self, history_view: "ClankerLaunchHistoryView"):
+        super().__init__(label="Back to launch activity", emoji="↩️", style=discord.ButtonStyle.secondary, row=4)
+        self.history_view = history_view
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            embed=self.history_view.cog.launch_list_embed(
+                list(reversed(self.history_view.records)),
+                list(reversed(self.history_view.records)),
+            ),
+            view=self.history_view,
+        )
+
+
 class ClankerReceiptRewardsView(discord.ui.View):
     """Open a private reward preflight scoped to one confirmed launch."""
 
-    def __init__(self, cog: "Clanker", record: Dict[str, Any], guild_id: int):
+    def __init__(
+        self, cog: "Clanker", record: Dict[str, Any], guild_id: int,
+        history_view: Optional["ClankerLaunchHistoryView"] = None,
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.record = copy.deepcopy(record)
         self.guild_id = int(guild_id)
+        self.history_view = history_view
+        if history_view is not None:
+            self.add_item(ClankerBackToLaunchesButton(history_view))
 
     @discord.ui.button(label="Rewards", emoji="\U0001f4b0", style=discord.ButtonStyle.primary)
     async def rewards(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
         try:
-            embed = await self.cog.reward_preflight_embed([self.record], portfolio=False)
+            embed, snapshot = await self.cog.reward_preflight_embed(
+                [self.record], portfolio=False, include_snapshot=True
+            )
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await interaction.followup.send(
                 "Clanker rewards are temporarily unavailable: {}".format(exc),
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(
-            embed=embed,
-            view=ClankerRewardReviewView(self.cog, self.record, interaction.user.id, self.guild_id),
-            ephemeral=True,
+        view = ClankerRewardReviewView(
+            self.cog, self.record, interaction.user.id, self.guild_id,
+            has_deposited_balances=bool(snapshot.get("treasuries")),
         )
+        if self.history_view is not None:
+            view.add_item(ClankerBackToLaunchesButton(self.history_view))
+        await interaction.message.edit(embed=embed, view=view)
 
 
 class ClankerVerifiedView(discord.ui.View):

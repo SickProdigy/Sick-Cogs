@@ -8,8 +8,8 @@ from .. import clanker as clanker_module
 from ..clanker import Clanker
 from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
                      ClankerDraftHistoryView, ClankerFailedLaunchView,
-                     ClankerLaunchHistoryView,
-                     ClankerVerifiedView)
+                     ClankerLaunchHistoryView, ClankerReceiptRewardsView,
+                     ClankerRewardReviewView, ClankerVerifiedView)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -577,6 +577,36 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Keep draft", single_labels)
         self.assertIn("Delete all drafts", bulk_labels)
         self.assertIn("Keep drafts", bulk_labels)
+
+    def test_reward_controls_label_alternative_routes_and_disable_empty_withdrawal(self):
+        view = ClankerRewardReviewView(
+            SimpleNamespace(), {"launch_id": "nmt"}, 7, 100,
+            has_deposited_balances=False,
+        )
+        controls = {item.label: item for item in view.children}
+        self.assertIn("Collect via CryptoWallet", controls)
+        self.assertIn("Collect via external wallet", controls)
+        self.assertIn("Withdraw deposited balances", controls)
+        self.assertTrue(controls["Withdraw deposited balances"].disabled)
+        self.assertFalse(controls["Collect via CryptoWallet"].disabled)
+        self.assertFalse(controls["Collect via external wallet"].disabled)
+
+    def test_reopened_receipt_has_persistent_back_navigation(self):
+        cog = SimpleNamespace(
+            launch_status_label=lambda status: status,
+            launch_list_embed=lambda records, audit: "history",
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), guild=SimpleNamespace(id=100))
+        record = {
+            "launch_id": "nmt-long", "launch_ref": "nmt",
+            "symbol": "NMT", "status": "internal_confirmed",
+            "token_address": "0x" + "ab" * 20,
+        }
+        history = ClankerLaunchHistoryView(cog, ctx, [record], {})
+        receipt = ClankerReceiptRewardsView(cog, record, 100, history)
+        labels = [item.label for item in receipt.children]
+        self.assertIn("Rewards", labels)
+        self.assertIn("Back to launch activity", labels)
 
     def test_awaiting_approval_view_has_resume_control_without_refresh(self):
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))

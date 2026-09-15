@@ -895,17 +895,22 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return embed
 
     async def reward_preflight_embed(
-        self, records: List[Dict[str, Any]], *, portfolio: bool, offset: int = 0
-    ) -> discord.Embed:
+        self, records: List[Dict[str, Any]], *, portfolio: bool, offset: int = 0,
+        include_snapshot: bool = False,
+    ) -> Any:
         """Build a public-data reward and gas review without submitting transactions."""
         snapshot = await reward_preflight(records, clanker_rpc)
         launches = snapshot["launches"]
         if not launches:
             raise RuntimeError("No confirmed Clanker launches were found.")
         title = "Clanker reward portfolio" if portfolio else "Clanker rewards \u2022 " + launches[0]["reference"]
-        description = "Public on-chain balances only. Nothing has been collected or claimed."
+        description = "Public on-chain balances only. Nothing has been collected or withdrawn."
         if not portfolio:
-            description = "This private review is scoped only to $" + launches[0]["symbol"] + ". Nothing has been collected or claimed."
+            description = (
+                "Two-step rewards for $" + launches[0]["symbol"] + ": collect new LP fees "
+                "using either wallet route, then withdraw balances after they are deposited. "
+                "Nothing has been submitted from this card."
+            )
         embed = discord.Embed(
             title=title, description=description, color=discord.Color.gold()
         )
@@ -959,10 +964,19 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             page = offset // 10 + 1
             pages = (len(launches) + 9) // 10
             embed.add_field(name="Portfolio page", value="{} of {} · {} total launches".format(page, pages, len(launches)), inline=False)
+        if not snapshot["treasuries"] and not portfolio:
+            embed.add_field(
+                name="Withdrawal availability",
+                value=(
+                    "No deposited balances are currently withdrawable. Collection may still "
+                    "discover new LP fees; choose only one collection route."
+                ),
+                inline=False,
+            )
         embed.set_footer(
-            text="Collect this coin is token-scoped · deposited WETH withdrawals are treasury-wide"
+            text="Collection is token-scoped · deposited balance withdrawals are treasury-wide"
         )
-        return embed
+        return (embed, snapshot) if include_snapshot else embed
 
     async def external_reward_handoff(
         self, user: Any, record: Dict[str, Any], guild_id: int
