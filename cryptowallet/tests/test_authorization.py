@@ -2144,6 +2144,25 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(first["data"].startswith("0xdf40224a"))
         provider.get_delegation_status.assert_awaited_with(profile, BASE_SEPOLIA.key)
 
+    async def test_accepts_checksum_case_for_bound_wallet_address(self):
+        launch = StoredApprovalSessionTests._clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{
+                "network": BASE_SEPOLIA.key,
+                "address": "0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            }],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+
+        prepared = await provider.prepare_clanker_deployment(
+            profile, launch, "attempt-checksum"
+        )
+
+        self.assertEqual(prepared["from"], launch.wallet_address)
+
     async def test_submits_prepared_call_and_validates_provider_echo(self):
         launch = StoredApprovalSessionTests._clanker_intent()
         profile = {

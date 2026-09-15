@@ -804,7 +804,9 @@ class CdpWalletProvider(WalletProvider):
             None,
         )
         try:
-            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            sender = normalize_evm_address(
+                str((account or {}).get("address") or "")
+            ).lower()
             calldata = clanker_deployment_calldata(intent)
             validate_clanker_deployment_call(
                 intent, to=intent.factory, value=intent.expected_native_value_wei, data=calldata
