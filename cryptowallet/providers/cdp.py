@@ -806,7 +806,7 @@ class CdpWalletProvider(WalletProvider):
         try:
             sender = normalize_evm_address(
                 str((account or {}).get("address") or "")
-            ).lower()
+            )
             calldata = clanker_deployment_calldata(intent)
             validate_clanker_deployment_call(
                 intent, to=intent.factory, value=intent.expected_native_value_wei, data=calldata
@@ -816,7 +816,7 @@ class CdpWalletProvider(WalletProvider):
         if (
             not provider_user_id
             or profile_id != intent.profile_id
-            or sender != intent.wallet_address
+            or sender.lower() != intent.wallet_address.lower()
         ):
             raise WalletProviderError(
                 "The wallet profile does not match this Clanker deployment."
@@ -913,7 +913,10 @@ class CdpWalletProvider(WalletProvider):
             address = normalize_evm_address(str((account or {}).get("address") or ""))
         except ValueError as exc:
             raise WalletProviderError("The stored Clanker wallet address is invalid.") from exc
-        if not provider_user_id or address != intent.wallet_address:
+        if (
+            not provider_user_id
+            or address.lower() != intent.wallet_address.lower()
+        ):
             raise WalletProviderError("The wallet profile no longer matches the Clanker intent.")
         credentials = await self.credentials()
         if credentials is None:

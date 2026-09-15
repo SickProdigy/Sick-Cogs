@@ -2161,7 +2161,8 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             profile, launch, "attempt-checksum"
         )
 
-        self.assertEqual(prepared["from"], launch.wallet_address)
+        self.assertEqual(prepared["from"], profile["accounts"][0]["address"])
+        self.assertEqual(prepared["from"].lower(), launch.wallet_address)
 
     async def test_submits_prepared_call_and_validates_provider_echo(self):
         launch = StoredApprovalSessionTests._clanker_intent()
