@@ -1116,11 +1116,6 @@ class ClankerVerifiedView(discord.ui.View):
             inline=False,
         )
         embed.add_field(
-            name="Estimated total from your wallet",
-            value=wallet_total + " · creator buy-in + wallet-paid gas",
-            inline=False,
-        )
-        embed.add_field(
             name="Gas fee",
             value=(
                 "Network fee: {}\nYour gas charge: {}".format(
@@ -1129,6 +1124,11 @@ class ClankerVerifiedView(discord.ui.View):
                     if terms["gas_sponsored"] else network_cost,
                 )
             ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Estimated total from your wallet",
+            value=wallet_total + " · creator buy-in + wallet-paid gas",
             inline=False,
         )
         embed.add_field(

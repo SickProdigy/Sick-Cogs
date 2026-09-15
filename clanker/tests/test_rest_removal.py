@@ -289,6 +289,12 @@ class VerifiedCardDisplayTests(unittest.TestCase):
             SimpleNamespace(), ctx, record, {}, {}
         ).embed()
         fields = {field.name: field.value for field in embed.fields}
+        field_names = [field.name for field in embed.fields]
+        self.assertLess(field_names.index("Creator buy-in"), field_names.index("Gas fee"))
+        self.assertLess(
+            field_names.index("Gas fee"),
+            field_names.index("Estimated total from your wallet"),
+        )
         self.assertEqual(fields["Token administrator"], WALLET.lower())
         self.assertEqual(fields["Creator reward recipient"], WALLET.lower())
         self.assertEqual(fields["Creator reward share"], "8000 bps")
