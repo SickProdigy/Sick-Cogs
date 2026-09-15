@@ -51,6 +51,17 @@ def format_vault_duration(seconds: int) -> str:
     return str(amount // 86400) + "d"
 
 
+def describe_vault_duration(seconds: int) -> str:
+    amount = int(seconds or 0)
+    for singular, plural, size in (("year", "years", 31536000), ("month", "months", 2592000),
+                                   ("week", "weeks", 604800), ("day", "days", 86400),
+                                   ("hour", "hours", 3600)):
+        if amount and amount % size == 0:
+            count = amount // size
+            return "{} {}".format(count, singular if count == 1 else plural)
+    return format_vault_duration(amount)
+
+
 class ClankerBasicsModal(discord.ui.Modal):
     def __init__(self, view: "ClankerDraftView"):
         super().__init__(title="Clanker token basics")
@@ -148,12 +159,12 @@ class ClankerVaultModal(discord.ui.Modal):
             placeholder="Starter example: 10", required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
-            label="Lockup (minimum 7d)",
+            label="Lockup duration (minimum 7d)",
             default=format_vault_duration(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS),
             placeholder="7d, 2w, 6m, or 1y", max_length=10,
         )
         self.vesting_input = discord.ui.TextInput(
-            label="Vesting (optional)",
+            label="Vesting duration (optional)",
             default=format_vault_duration(vault.get("vestingDuration") or 0),
             placeholder="Gradual unlock: none, 30d, 6m, or 1y", max_length=10,
         )
@@ -1075,13 +1086,15 @@ class ClankerVerifiedView(discord.ui.View):
         if vault:
             vaulted_tokens = DEFAULT_CLANKER_SUPPLY * int(vault["percentage"]) // 100
             vesting = (
-                format_vault_duration(vault.get("vestingDuration") or 0)
+                describe_vault_duration(vault.get("vestingDuration") or 0)
                 if vault.get("vestingDuration") else "none (full unlock after lockup)"
             )
-            vault_summary = "{}% ({}) → {} · Lockup: {} · Vesting: {}".format(
-                vault["percentage"], format_tokens(vaulted_tokens), vault["recipient"],
-                format_vault_duration(vault["lockupDuration"]), vesting,
-            )
+            vault_summary = chr(10).join((
+                "Supply Percentage: {}% ({})".format(vault["percentage"], format_tokens(vaulted_tokens)),
+                "Lockup: {}".format(describe_vault_duration(vault["lockupDuration"])),
+                "Vesting: {}".format(vesting),
+                "Recipient: {}".format(vault["recipient"]),
+            ))
         embed.add_field(name="Vault", value=vault_summary, inline=False)
         airdrop = payload.get("airdrop")
         embed.add_field(
@@ -1316,22 +1329,25 @@ class ClankerDraftView(discord.ui.View):
             recipient = vault.get("recipient") or self.draft.get("primary_beneficiary") or "signer wallet"
             vesting = int(vault.get("vestingDuration") or 0)
             vaulted_tokens = DEFAULT_CLANKER_SUPPLY * int(vault["percentage"]) // 100
-            detail = "{}% ({}) · Lockup: {}".format(
-                vault["percentage"], format_tokens(vaulted_tokens),
-                format_vault_duration(vault["lockupDuration"]),
+            vesting_text = (
+                describe_vault_duration(vesting) if vesting
+                else "none (full unlock after lockup)"
             )
-            if vesting:
-                detail += " · Vesting: {}".format(format_vault_duration(vesting))
-            else:
-                detail += " · Vesting: none (full unlock after lockup)"
-            embed.add_field(name="Vault", value=detail + " · recipient " + recipient, inline=False)
+            detail = chr(10).join((
+                "Supply Percentage: {}% ({})".format(vault["percentage"], format_tokens(vaulted_tokens)),
+                "Lockup: {}".format(describe_vault_duration(vault["lockupDuration"])),
+                "Vesting: {}".format(vesting_text),
+                "Recipient: {}".format(recipient),
+            ))
+            embed.add_field(name="Vault", value=detail, inline=False)
         else:
             embed.add_field(
                 name="Vault · optional",
                 value=(
                     "Reserves part of the supply so it cannot circulate immediately. "
-                    "Starter example: 10% locked 30d. Add gradual release when team or "
-                    "treasury tokens should unlock over time."
+                    "Starter example: 10% Supply Percentage, 30d Lockup.\n"
+                    "10% of the supply will be vaulted and locked for 30 days. Vesting is "
+                    "optional and releases it gradually after the lockup."
                 ),
                 inline=False,
             )

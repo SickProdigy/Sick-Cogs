@@ -582,13 +582,16 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         )
         fields = {field.name: field.value for field in view.embed().fields}
         self.assertIn("Reserves part of the supply", fields["Vault · optional"])
-        self.assertIn("Starter example: 10% locked 30d", fields["Vault · optional"])
+        self.assertIn("Starter example: 10% Supply Percentage, 30d Lockup", fields["Vault · optional"])
         view.draft["vault"] = {"percentage": 10, "lockupDuration": 2592000,
                                  "vestingDuration": 7776000, "recipient": None}
         fields = {field.name: field.value for field in view.embed().fields}
-        self.assertIn("10% (10,000,000,000)", fields["Vault"])
-        self.assertIn("Lockup: 1m", fields["Vault"])
-        self.assertIn("Vesting: 3m", fields["Vault"])
+        self.assertEqual(fields["Vault"].splitlines(), [
+            "Supply Percentage: 10% (10,000,000,000)",
+            "Lockup: 1 month",
+            "Vesting: 3 months",
+            "Recipient: signer wallet",
+        ])
 
     def test_vault_durations_use_human_units(self):
         self.assertEqual(parse_vault_duration("7d"), 604800)
