@@ -48,8 +48,8 @@ from .helpers import (
 )
 from .admin import ClankerAdminMixin
 from .views import (
-    ClankerClaimAllView, ClankerDraftView, ClankerReceiptRewardsView,
-    ClankerTreasuryWithdrawalView,
+    ClankerClaimAllView, ClankerDraftView, ClankerLaunchHistoryView,
+    ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
 )
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
@@ -1704,6 +1704,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if symbol is None:
             await ctx.send_help()
             return
+        if str(ctx.invoked_with).lower() != "clank":
+            await ctx.send(
+                "Unknown Clanker command. To create a token, use "
+                "`!clank <symbol> [token name]` or "
+                "`!clanker launch <symbol> [token name]`."
+            )
+            return
         await self._open_clanker_card(ctx, symbol, name)
 
     @clanker.command(name="status")
@@ -1761,111 +1768,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self,
         ctx: commands.Context,
         symbol: str,
-        name: str,
-        primary_beneficiary: str,
-        image_url: Optional[str] = None,
         *,
-        description: Optional[str] = None,
+        name: Optional[str] = None,
     ):
-        """Prepare a Clanker token launch request."""
-        settings = await self.config.guild(ctx.guild).all()
-        if not settings["enabled"]:
-            await ctx.send("Clanker launch requests are disabled in this server.")
-            return
-        if not settings["treasury_address"]:
-            await ctx.send("A bot owner must configure the SickGaming treasury address first.")
-            return
-        if not await self.check_launch_controls(ctx, settings):
-            return
-        symbol = symbol.strip().upper().lstrip("$")
-        if not SYMBOL_RE.fullmatch(symbol):
-            await ctx.send("Token symbols must be 2-12 uppercase letters or numbers.")
-            return
-        if not name.strip() or len(name.strip().encode("utf-8")) > 64:
-            await ctx.send("Token names must be 1-64 UTF-8 bytes.")
-            return
-        if not is_eth_address(primary_beneficiary):
-            await ctx.send("Primary beneficiary must be a valid EVM address.")
-            return
-        if image_url and not self.validate_https_url(image_url):
-            await ctx.send("Image URL must be an HTTPS URL. Upload the image somewhere stable first.")
-            return
-        if description and len(description) > 500:
-            await ctx.send("Description must be 500 characters or less.")
-            return
-        if settings["airdrop_enabled"]:
-            merkle_root = settings["airdrop_merkle_root"]
-            if not merkle_root or not MERKLE_ROOT_RE.fullmatch(merkle_root):
-                await ctx.send("Airdrop is enabled but no valid 32-byte Merkle root is configured.")
-                return
-            if int(settings["airdrop_amount"]) <= 0:
-                await ctx.send("Airdrop is enabled but the airdrop amount is not configured.")
-                return
-            airdrop_admin = settings["airdrop_admin"]
-            if airdrop_admin and not is_eth_address(airdrop_admin):
-                await ctx.send("Configured airdrop admin must be a valid EVM address.")
-                return
-
-        try:
-            payload = self.build_payload(
-                symbol,
-                name,
-                primary_beneficiary,
-                settings["treasury_address"],
-                int(settings["platform_bps"]),
-                bool(settings["airdrop_enabled"]),
-                settings["airdrop_merkle_root"],
-                int(settings["airdrop_amount"]),
-                int(settings["airdrop_lockup_seconds"]),
-                int(settings["airdrop_vesting_seconds"]),
-                settings["airdrop_admin"],
-                ctx.author.id,
-                image_url,
-                description,
-                bool(settings.get("vault_enabled")),
-                int(settings.get("vault_percentage") or 0),
-                int(settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
-                int(settings.get("vault_vesting_seconds") or 0),
-                settings.get("vault_recipient"),
-            )
-        except ValueError as exc:
-            await ctx.send(str(exc))
-            return
-        record = self.build_audit_record(ctx.author, payload, ctx.guild.id)
-        proof_export = settings.get("airdrop_proof_export")
-        if proof_export and proof_export.get("root", "").lower() == str(record.get("airdrop_merkle_root") or "").lower():
-            record["airdrop_proofs"] = proof_export
-        await self.add_audit_record(ctx.guild, record)
-        await self.notify_approval_channel(ctx.guild, settings, record)
-
-        embed = discord.Embed(
-            title="Clanker launch draft prepared",
-            description="Saved for review; choose an execution wallet in a later step.",
-            color=discord.Color.gold(),
-        )
-        embed.add_field(name="Token", value=f"{payload['name']} (${payload['symbol']})", inline=False)
-        embed.add_field(name="Supply", value=str(DEFAULT_CLANKER_SUPPLY), inline=True)
-        embed.add_field(name="Chain", value="Base Sepolia", inline=True)
-        embed.add_field(
-            name="Beneficiaries",
-            value=humanize_list([
-                f"Creator {record['creator_bps']} bps",
-                f"Bot owner {record['platform_bps']} bps",
-            ]),
-            inline=False,
-        )
-        if image_url:
-            embed.set_thumbnail(url=image_url)
-        if payload.get("airdrop"):
-            embed.add_field(
-                name="Airdrop",
-                value=(
-                    f"{payload['airdrop']['amount']} tokens · "
-                    f"lock {payload['airdrop']['lockupDuration']}s"
-                ),
-                inline=False,
-            )
-        await ctx.send(embed=embed)
+        """Open the normal launch card with a ticker and optional name prefilled."""
+        await self._open_clanker_card(ctx, symbol, name)
 
     @clanker.command(name="audit")
     @checks.mod_or_permissions(manage_guild=True)
@@ -1920,7 +1827,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
         embed = self.launch_list_embed(launches[-limit:], audit_log)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
+            self, launches[-limit:], ctx.author.id, ctx.guild.id
+        ))
 
     @clanker.command(name="dismiss")
     async def clanker_dismiss(self, ctx: commands.Context, launch_id: str):

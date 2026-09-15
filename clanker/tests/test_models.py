@@ -86,6 +86,14 @@ class ClankerIntentTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 make_intent(**values)
 
+    def test_rejects_symbol_and_utf8_name_outside_payload_limits(self):
+        with self.assertRaisesRegex(ValueError, "2 through 12"):
+            make_intent(symbol="X")
+        with self.assertRaisesRegex(ValueError, "2 through 12"):
+            make_intent(symbol="TOO-LONG-OR-BAD")
+        with self.assertRaisesRegex(ValueError, "64 UTF-8 bytes"):
+            make_intent(name="😀" * 17)
+
     def test_rejects_bad_rewards_pool_and_expiry(self):
         with self.assertRaises(ValueError):
             make_intent(rewards=(ClankerReward(WALLET, WALLET, 9_999),))

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from .. import clanker as clanker_module
 from ..clanker import Clanker
-from ..views import ClankerVerifiedView
+from ..views import ClankerLaunchHistoryView, ClankerVerifiedView
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -185,6 +185,32 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         )
         resolve.assert_not_awaited()
         ctx.send.assert_awaited_once_with(embed="prefilled-embed", view=fake_view)
+
+    async def test_full_group_rejects_unknown_subcommand_without_opening_draft(self):
+        cog = Clanker.__new__(Clanker)
+        cog._open_clanker_card = AsyncMock()
+        ctx = SimpleNamespace(
+            invoked_with="clanker", send=AsyncMock(), send_help=AsyncMock()
+        )
+        await Clanker.clanker.callback(cog, ctx, "rewards", name="nmt-fc01")
+        cog._open_clanker_card.assert_not_awaited()
+        self.assertIn("Unknown Clanker command", ctx.send.await_args.args[0])
+
+    async def test_clank_alias_remains_the_only_implicit_creation_shortcut(self):
+        cog = Clanker.__new__(Clanker)
+        cog._open_clanker_card = AsyncMock()
+        ctx = SimpleNamespace(
+            invoked_with="clank", send=AsyncMock(), send_help=AsyncMock()
+        )
+        await Clanker.clanker.callback(cog, ctx, "tgbt", name="Token Name")
+        cog._open_clanker_card.assert_awaited_once_with(ctx, "tgbt", "Token Name")
+
+    async def test_explicit_launch_opens_the_same_interactive_card(self):
+        cog = Clanker.__new__(Clanker)
+        cog._open_clanker_card = AsyncMock()
+        ctx = SimpleNamespace()
+        await Clanker.clanker_launch.callback(cog, ctx, "tgbt", name="Token Name")
+        cog._open_clanker_card.assert_awaited_once_with(ctx, "tgbt", "Token Name")
 
     async def test_shortcut_rejects_invalid_symbol_before_opening_view(self):
         settings = {"enabled": True, "treasury_address": TREASURY}
@@ -476,6 +502,10 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_launches.callback(cog, ctx, 10)
         embed = ctx.send.await_args.kwargs["embed"]
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIsInstance(view, ClankerLaunchHistoryView)
+        self.assertEqual(view.user_id, 7)
+        self.assertEqual(len(view.records), 1)
         self.assertEqual(embed.title, "Your Clanker launches")
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("$SUB", embed.fields[0].name)

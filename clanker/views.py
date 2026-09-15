@@ -66,13 +66,14 @@ class ClankerBasicsModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             symbol = str(self.symbol_input.value).strip().upper().lstrip("$")
+            name = " ".join(str(self.name_input.value).strip().split())
             creator = str(self.creator_input.value).strip()
             creator_treasury = str(self.creator_treasury_input.value).strip()
             image_url = str(self.image_input.value).strip()
             if not SYMBOL_RE.fullmatch(symbol):
                 raise ValueError("Token symbols must be 2-12 uppercase letters or numbers.")
-            if not str(self.name_input.value).strip():
-                raise ValueError("Token name is required.")
+            if not name or len(name.encode("utf-8")) > 64:
+                raise ValueError("Token names must be 1-64 UTF-8 bytes.")
             if creator and not is_eth_address(creator):
                 raise ValueError("Token administrator must be a valid EVM address.")
             if creator_treasury and not is_eth_address(creator_treasury):
@@ -84,7 +85,7 @@ class ClankerBasicsModal(discord.ui.Modal):
             return
         self.view_ref.draft.update(
             {
-                "name": str(self.name_input.value).strip(),
+                "name": name,
                 "symbol": symbol,
                 "supply": DEFAULT_CLANKER_SUPPLY,
                 "primary_beneficiary": creator or None,
@@ -415,6 +416,55 @@ class ClankerClaimAllView(discord.ui.View):
             return
         view = ClankerTreasuryWithdrawalView(self.cog, self.records[0], claims, self.user_id, self.guild_id) if claims and profitable else None
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+
+class ClankerLaunchSelect(discord.ui.Select):
+    """Requester-bound selection for reopening one launch receipt."""
+
+    def __init__(self, parent: "ClankerLaunchHistoryView"):
+        self.parent_view = parent
+        options = []
+        for index, record in enumerate(parent.records):
+            reference = str(record.get("launch_ref") or record.get("launch_id") or "unknown")
+            symbol = str(record.get("symbol") or "?").upper()
+            status = parent.cog.launch_status_label(str(record.get("status") or "unknown"))
+            options.append(discord.SelectOption(
+                label=("$" + symbol + " • " + reference)[:100],
+                value=str(index),
+                description=status[:100],
+            ))
+        super().__init__(placeholder="Choose a launch to reopen", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        record = self.parent_view.records[int(self.values[0])]
+        confirmed = record.get("status") in {"internal_confirmed", "external_confirmed"}
+        rewards_view = (
+            ClankerReceiptRewardsView(self.parent_view.cog, record, self.parent_view.guild_id)
+            if confirmed and record.get("token_address") else None
+        )
+        await interaction.response.send_message(
+            embed=self.parent_view.cog.launch_record_embed(record), view=rewards_view, ephemeral=True
+        )
+
+
+class ClankerLaunchHistoryView(discord.ui.View):
+    """Let one requester reopen receipt cards from their launch history."""
+
+    def __init__(self, cog: "Clanker", records: list[Dict[str, Any]], user_id: int, guild_id: int):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.records = copy.deepcopy(list(reversed(records)))
+        self.user_id = int(user_id)
+        self.guild_id = int(guild_id)
+        self.add_item(ClankerLaunchSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person whose launches are listed can open these cards.", ephemeral=True
+        )
+        return False
 
 
 class ClankerReceiptRewardsView(discord.ui.View):

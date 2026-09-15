@@ -45,7 +45,7 @@ The requester can enter token basics, a separately configurable creator reward t
 The legacy text command also prepares a draft:
 
 ```text
-[p]clanker launch TICKER "Token Name" 0xCreatorAddress
+[p]clanker launch TICKER Token Name
 ```
 
 Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the server-configured platform share and treasury are not user-overridable. After verification, **Launch with CryptoWallet** submits the exact card directly when delegated signing is active. If authorization is missing, the bot sends the general signed authorization link; return to the same verified card afterward. The external-wallet route provides a requester-bound companion link and verifies the submitted transaction directly against Base Sepolia.
@@ -69,11 +69,11 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 
 - `[p]clank <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
 - `[p]clanker card` — open an empty interactive draft flow.
-- `[p]clanker launch ...` — prepare a draft with the text command.
+- `[p]clanker launch <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
 - `[p]clanker status` — show draft and guild-control configuration.
 - `[p]clanker drafts [limit]` — list your saved, unsubmitted drafts.
 - `[p]clanker draft <launch_id>` — show one of your saved drafts.
-- `[p]clanker launches [limit]` — list your records that entered an execution route using compact, requester-bound references.
+- `[p]clanker launches [limit]` — list your records and reopen any submitted launch card from its requester-bound selector.
 - A confirmed launch card’s **Rewards** button opens a private, one-coin gas review. **Collect this coin** submits only that token’s collection call through a CryptoWallet signer matching the immutable token administrator.
 - `[p]clanker claimall` — DM a paginated portfolio review, select tokens to collect, and review a WETH-profitable treasury-wide withdrawal separately.
 - `[p]clanker rewardverify <launch_id> <transaction_hash>` — reconcile an external-wallet collection against its token administrator, exact locker call, and `ClaimedRewards` event.
