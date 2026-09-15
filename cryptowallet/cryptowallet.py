@@ -26,6 +26,7 @@ from .core.models import IntentStatus
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_SEPOLIA
 from .providers import CdpWalletProvider
+from .providers.cdp import CLANKER_DEPLOY_GAS_LIMIT
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
@@ -253,10 +254,26 @@ class CryptoWallet(
             "expires_at": min(intent.expires_at, int(time.time()) + 10 * 60),
         }
 
+    @staticmethod
+    def clanker_execution_terms() -> dict:
+        """Return the exact bounded spending policy shown on Clanker review cards."""
+        return {
+            "gas_limit": CLANKER_DEPLOY_GAS_LIMIT,
+            "native_value_wei": 0,
+            "gas_sponsored": True,
+            "gas_payer": "CDP paymaster",
+        }
+
     async def clanker_launch_verified(
-        self, user, launch: dict, operation: dict
+        self, user, launch: dict, operation: dict, execution_terms: dict
     ) -> dict:
         """Submit one Discord-reviewed Clanker operation under active delegation."""
+        if execution_terms != self.clanker_execution_terms():
+            raise ValueError(
+                "The reviewed Clanker gas or spending policy no longer matches CryptoWallet."
+            )
+        if int(operation.get("value", -1)) != execution_terms["native_value_wei"]:
+            raise ValueError("The reviewed Clanker native value does not match the operation.")
         if await self.config.provider_paused():
             raise RuntimeError("CryptoWallet provider operations are paused.")
         user_config = self.config.user(user)
