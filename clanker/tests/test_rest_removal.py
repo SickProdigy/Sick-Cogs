@@ -609,6 +609,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
                 [record], portfolio=False, include_snapshot=True
             )
         rendered = "\n".join(str(field.value) for field in embed.fields)
+        self.assertEqual(embed.title, "Clanker rewards • $NMT")
         self.assertIn("Claimable WETH: 0.01000000", rendered)
         self.assertIn("Claimable $NMT: 2.00000000", rendered)
         self.assertIn("Destination: shared creator/platform treasury", rendered)

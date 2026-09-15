@@ -904,7 +904,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not launches:
             raise RuntimeError("No confirmed Clanker launches were found.")
 
-        title = "Clanker reward portfolio" if portfolio else "Clanker rewards • " + launches[0]["reference"]
+        title = "Clanker reward portfolio" if portfolio else "Clanker rewards • $" + launches[0]["symbol"]
         embed = discord.Embed(
             title=title,
             description=(
