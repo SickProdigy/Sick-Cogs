@@ -114,6 +114,66 @@ class ClankerDetailsModal(discord.ui.Modal):
         await self.view_ref.refresh(interaction, "Optional details saved.")
 
 
+class ClankerVaultModal(discord.ui.Modal):
+    def __init__(self, view: "ClankerDraftView"):
+        super().__init__(title="Optional token vault")
+        self.view_ref = view
+        vault = view.draft.get("vault") or {}
+        self.percentage_input = discord.ui.TextInput(
+            label="Supply percentage (blank disables)", default=str(vault.get("percentage") or ""),
+            required=False, max_length=2,
+        )
+        self.lockup_input = discord.ui.TextInput(
+            label="Lockup seconds (minimum 7 days)",
+            default=str(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS), max_length=10,
+        )
+        self.vesting_input = discord.ui.TextInput(
+            label="Vesting seconds (0 disables)", default=str(vault.get("vestingDuration") or 0),
+            max_length=10,
+        )
+        self.recipient_input = discord.ui.TextInput(
+            label="Recipient (blank uses signer wallet)", default=str(vault.get("recipient") or ""),
+            required=False, max_length=42,
+        )
+        for item in (self.percentage_input, self.lockup_input, self.vesting_input, self.recipient_input):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_percentage = str(self.percentage_input.value).strip()
+        if not raw_percentage:
+            self.view_ref.draft["vault"] = None
+            await self.view_ref.refresh(interaction, "Vault disabled for this launch.")
+            return
+        try:
+            percentage = int(raw_percentage)
+            lockup = int(str(self.lockup_input.value).strip())
+            vesting = int(str(self.vesting_input.value).strip())
+            recipient = str(self.recipient_input.value).strip()
+            if not 1 <= percentage <= 90:
+                raise ValueError("Vault percentage must be from 1 through 90.")
+            if lockup < MIN_VAULT_LOCKUP_SECONDS:
+                raise ValueError("Vault lockup must be at least seven days.")
+            if not 0 <= vesting <= 315360000:
+                raise ValueError("Vault vesting must be from 0 through 315360000 seconds.")
+            if recipient and not is_eth_address(recipient):
+                raise ValueError("Vault recipient must be a valid EVM address.")
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        airdrop_amount = int((self.view_ref.draft.get("airdrop") or {}).get("amount") or 0)
+        supply = int(self.view_ref.draft.get("supply") or DEFAULT_CLANKER_SUPPLY)
+        if percentage * 100 + airdrop_amount * 10_000 // supply > 9_000:
+            await interaction.response.send_message(
+                "Clanker vault and airdrop allocations cannot exceed 90% of supply.", ephemeral=True
+            )
+            return
+        self.view_ref.draft["vault"] = {
+            "percentage": percentage, "lockupDuration": lockup,
+            "vestingDuration": vesting, "recipient": recipient or None,
+        }
+        await self.view_ref.refresh(interaction, "Vault saved for this launch.")
+
+
 class ClankerAirdropModal(discord.ui.Modal):
     def __init__(self, view: "ClankerDraftView"):
         super().__init__(title="Optional Clanker airdrop")
@@ -487,6 +547,7 @@ def draft_values_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "creator_reward_recipient": creator.get("recipient"),
         "image_url": payload.get("image") or None,
         "description": (payload.get("metadata") or {}).get("description") or None,
+        "vault": copy.deepcopy(payload.get("vault")),
         "airdrop": ({
             "recipients": [],
             "amount": int(airdrop.get("amount") or 0),
@@ -1147,6 +1208,12 @@ class ClankerDraftView(discord.ui.View):
             "creator_reward_recipient": creator_address,
             "image_url": None,
             "description": None,
+            "vault": ({
+                "percentage": int(settings.get("vault_percentage") or 0),
+                "lockupDuration": int(settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
+                "vestingDuration": int(settings.get("vault_vesting_seconds") or 0),
+                "recipient": settings.get("vault_recipient"),
+            } if settings.get("vault_enabled") else None),
             "airdrop": None,
         }
 
@@ -1186,11 +1253,11 @@ class ClankerDraftView(discord.ui.View):
             self.user_id,
             self.draft.get("image_url"),
             self.draft.get("description"),
-            bool(self.settings.get("vault_enabled")),
-            int(self.settings.get("vault_percentage") or 0),
-            int(self.settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS),
-            int(self.settings.get("vault_vesting_seconds") or 0),
-            self.settings.get("vault_recipient"),
+            bool(self.draft.get("vault")),
+            int((self.draft.get("vault") or {}).get("percentage") or 0),
+            int((self.draft.get("vault") or {}).get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS),
+            int((self.draft.get("vault") or {}).get("vestingDuration") or 0),
+            (self.draft.get("vault") or {}).get("recipient"),
             creator_reward_recipient=self.draft.get("creator_reward_recipient"),
         )
 
@@ -1214,15 +1281,14 @@ class ClankerDraftView(discord.ui.View):
             inline=False,
         )
         embed.add_field(name="Creator reward treasury", value=self.draft.get("creator_reward_recipient") or "Signer wallet (resolved at execution)", inline=False)
-        if self.settings.get("vault_enabled"):
-            vault_percentage = int(self.settings.get("vault_percentage") or 0)
-            vault_lockup = int(self.settings.get("vault_lockup_seconds") or MIN_VAULT_LOCKUP_SECONDS)
-            vault_recipient = self.settings.get("vault_recipient") or self.draft.get("primary_beneficiary") or "token admin"
-            embed.add_field(
-                name="Vault",
-                value=f"{vault_percentage}% · lock {vault_lockup}s · recipient {vault_recipient}",
-                inline=False,
-            )
+        vault = self.draft.get("vault")
+        if vault:
+            recipient = vault.get("recipient") or self.draft.get("primary_beneficiary") or "signer wallet"
+            vesting = int(vault.get("vestingDuration") or 0)
+            detail = "{}% · lock {}s".format(vault["percentage"], vault["lockupDuration"])
+            if vesting:
+                detail += " · vest {}s".format(vesting)
+            embed.add_field(name="Vault", value=detail + " · recipient " + recipient, inline=False)
         else:
             embed.add_field(name="Vault", value="Disabled / optional", inline=False)
         airdrop = self.draft.get("airdrop")
@@ -1259,6 +1325,10 @@ class ClankerDraftView(discord.ui.View):
     @discord.ui.button(label="Optional Details", emoji="📝", style=discord.ButtonStyle.secondary)
     async def optional_details(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ClankerDetailsModal(self))
+
+    @discord.ui.button(label="Vault", emoji="🔒", style=discord.ButtonStyle.secondary)
+    async def edit_vault(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ClankerVaultModal(self))
 
     @discord.ui.button(label="Airdrop", emoji="🎁", style=discord.ButtonStyle.secondary)
     async def edit_airdrop(self, interaction: discord.Interaction, button: discord.ui.Button):

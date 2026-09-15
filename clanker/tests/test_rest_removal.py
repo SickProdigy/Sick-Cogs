@@ -10,7 +10,8 @@ from ..clanker import Clanker
 from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
                      ClankerDraftHistoryView, ClankerFailedLaunchView,
                      ClankerLaunchHistoryView, ClankerReceiptRewardsView,
-                     ClankerRewardReviewView, ClankerVerifiedView)
+                     ClankerRewardReviewView, ClankerVerifiedView,
+                     draft_values_from_record)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -570,6 +571,17 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
         self.assertIn("uncertain", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
+
+    def test_reopened_draft_restores_per_launch_vault(self):
+        vault = {"percentage": 10, "lockupDuration": 604800,
+                 "vestingDuration": 1209600, "recipient": WALLET.lower()}
+        restored = draft_values_from_record({"payload": {
+            "name": "Test", "symbol": "TEST", "tokenAdmin": WALLET.lower(),
+            "rewards": {"recipients": []}, "vault": vault,
+        }})
+        self.assertEqual(restored["vault"], vault)
+        vault["percentage"] = 20
+        self.assertEqual(restored["vault"]["percentage"], 10)
 
     def test_draft_delete_confirmation_labels_match_scope(self):
         single = ClankerDeleteDraftsView(SimpleNamespace(), SimpleNamespace(), 7, ["one"])
