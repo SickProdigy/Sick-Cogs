@@ -840,6 +840,52 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not safely collect Clanker rewards.") from exc
 
+    async def clanker_reward_operation_status(
+        self, profile: dict, token: str, token_admin: str, user_operation_hash: str
+    ) -> dict:
+        """Refresh one token-scoped collection and validate any echoed call."""
+        if not HASH_PATTERN.fullmatch(user_operation_hash or ""):
+            raise WalletProviderError("The stored reward operation hash is invalid.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_SEPOLIA.key), None)
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            admin = normalize_evm_address(token_admin)
+            normalize_evm_address(token)
+        except ValueError as exc:
+            raise WalletProviderError("The stored reward operation is invalid.") from exc
+        if not provider_user_id or sender.lower() != admin.lower():
+            raise WalletProviderError("The CryptoWallet signer is not this token administrator.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            result = await self._api_client(credentials).get_smart_account_user_operation(
+                provider_user_id, sender, user_operation_hash, credentials.project_id
+            )
+            status = str(result.get("status") or "")
+            returned = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls")
+            if (status not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                    or returned.lower() != user_operation_hash.lower()
+                    or not HASH_PATTERN.fullmatch(returned)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)):
+                raise ValueError("invalid reward operation status")
+            if calls is not None:
+                if not isinstance(calls, list) or len(calls) != 1:
+                    raise ValueError("invalid reward operation calls")
+                validate_clanker_collect_rewards_call(
+                    token, to=str(calls[0].get("to") or ""),
+                    value=int(calls[0].get("value", -1)),
+                    data=str(calls[0].get("data") or ""),
+                )
+            return {"provider_status": status, "user_operation_hash": returned.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None}
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not refresh the Clanker reward operation.") from exc
+
     async def prepare_clanker_deployment(
         self, profile: dict, intent: ClankerDeploymentIntent, attempt_id: str
     ) -> dict:

@@ -150,6 +150,15 @@ class CryptoWallet(
             profile, token, token_admin, attempt_id
         )
 
+    async def clanker_reward_status(
+        self, user, *, token: str, token_admin: str, user_operation_hash: str
+    ) -> dict:
+        """Refresh one previously validated Clanker collection operation."""
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.clanker_reward_operation_status(
+            profile, token, token_admin, user_operation_hash
+        )
+
     async def clanker_create_external_handoff(
         self, discord_user_id: int, handoff: dict
     ) -> tuple[str, int]:
