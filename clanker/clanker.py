@@ -965,7 +965,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             page = offset // 10 + 1
             pages = (len(launches) + 9) // 10
             embed.add_field(name="Portfolio page", value="{} of {} · {} total launches".format(page, pages, len(launches)), inline=False)
-        embed.set_footer(text="Amounts are read from Clanker immediately before approval · Base Sepolia")
+        embed.set_footer(text="Balances and gas estimates checked when this card opened · Base Sepolia")
         return (embed, snapshot) if include_snapshot else embed
 
     async def external_reward_handoff(
