@@ -657,6 +657,25 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("CryptoWallet returned an invalid verified-launch result.")
         return result
 
+    async def discard_verified_draft(
+        self, guild: discord.Guild, user: Any, launch_id: str
+    ) -> None:
+        """Remove an unsubmitted verification when its owner returns to editing."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [
+                (index, item) for index, item in enumerate(audit_log)
+                if str(item.get("launch_id")) == launch_id
+            ]
+            if len(matches) != 1:
+                raise RuntimeError("The verified Clanker record changed before editing.")
+            index, record = matches[0]
+            if (record.get("status") != "verified"
+                    or int(record.get("requester_id", 0)) != int(user.id)):
+                raise RuntimeError(
+                    "Only an unsubmitted verified launch can return to editing."
+                )
+            del audit_log[index]
+
     async def mark_verified_internal_result(
         self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
     ) -> None:

@@ -244,7 +244,9 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
         record["status"] = "verified"
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))
-        embed = ClankerVerifiedView(SimpleNamespace(), ctx, record).embed()
+        embed = ClankerVerifiedView(
+            SimpleNamespace(), ctx, record, {}, {}
+        ).embed()
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["Token administrator"], WALLET.lower())
         self.assertEqual(fields["Creator reward recipient"], WALLET.lower())
@@ -281,6 +283,29 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
         submit.assert_awaited_once_with(
             unittest.mock.ANY, record["intent"], record["operation"]
         )
+
+    async def test_back_to_edit_can_remove_only_unsubmitted_verification(self):
+        record = {"launch_id": "test-launch", "status": "verified", "requester_id": 7}
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(
+                audit_log=lambda: AsyncAuditLog(records)
+            )
+        )
+        await cog.discard_verified_draft(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), "test-launch"
+        )
+        self.assertEqual(records, [])
+
+        records.append({
+            "launch_id": "submitted", "status": "internal_uncertain",
+            "requester_id": 7,
+        })
+        with self.assertRaisesRegex(RuntimeError, "unsubmitted verified"):
+            await cog.discard_verified_draft(
+                SimpleNamespace(id=100), SimpleNamespace(id=7), "submitted"
+            )
 
     async def test_authorization_request_keeps_verified_record_launchable(self):
         record = {"launch_id": "test-launch", "status": "verified"}

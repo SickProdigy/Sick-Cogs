@@ -1,3 +1,4 @@
+import copy
 import json
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -211,11 +212,16 @@ class ClankerAirdropModal(discord.ui.Modal):
 class ClankerVerifiedView(discord.ui.View):
     """Owner-bound launch controls for one immutable reviewed operation."""
 
-    def __init__(self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any]):
+    def __init__(
+        self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any],
+        settings: Dict[str, Any], draft: Dict[str, Any],
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.ctx = ctx
         self.record = record
+        self.settings = settings
+        self.draft = copy.deepcopy(draft)
         self.user_id = ctx.author.id
         self.processing = False
 
@@ -285,6 +291,15 @@ class ClankerVerifiedView(discord.ui.View):
             ),
             inline=False,
         )
+        embed.add_field(
+            name="Status",
+            value=(
+                "Submission outcome unknown — status recovery required"
+                if record.get("status") == "internal_uncertain"
+                else "Verified and not submitted"
+            ),
+            inline=False,
+        )
         embed.add_field(name="Launch ID", value=f"`{record['launch_id']}`", inline=False)
         embed.add_field(
             name="Payload fingerprint",
@@ -299,6 +314,37 @@ class ClankerVerifiedView(discord.ui.View):
     def disable_controls(self) -> None:
         for item in self.children:
             item.disabled = True
+
+    @discord.ui.button(
+        label="Back to Edit", emoji="↩️", style=discord.ButtonStyle.secondary
+    )
+    async def back_to_edit(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.processing:
+            await interaction.response.send_message(
+                "This verified launch is already being processed.", ephemeral=True
+            )
+            return
+        self.processing = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            await self.cog.discard_verified_draft(
+                self.ctx.guild, interaction.user, str(self.record["launch_id"])
+            )
+            draft_view = ClankerDraftView(self.cog, self.ctx, self.settings)
+            draft_view.draft = copy.deepcopy(self.draft)
+            self.disable_controls()
+            await interaction.message.edit(embed=draft_view.embed(), view=draft_view)
+            await interaction.followup.send(
+                "Returned to editing. The previous verification was discarded; verify "
+                "again after making changes.",
+                ephemeral=True,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+        finally:
+            self.processing = False
 
     @discord.ui.button(
         label="Launch with CryptoWallet", emoji="🚀", style=discord.ButtonStyle.success
@@ -330,11 +376,18 @@ class ClankerVerifiedView(discord.ui.View):
             self.disable_controls()
             await interaction.message.edit(embed=self.embed(), view=self)
             detail = result.get("transaction_hash") or result.get("user_operation_hash")
-            await interaction.followup.send(
-                f"Clanker launch `{result['status']}`."
-                + (f" Operation: `{detail}`" if detail else ""),
-                ephemeral=True,
-            )
+            if result["status"] == "uncertain":
+                message = (
+                    "CryptoWallet could not prove whether the provider accepted this launch. "
+                    f"Do not create another one. Use `{self.ctx.clean_prefix}clanker refresh "
+                    f"{self.record['launch_id']}` to recover the same submission attempt."
+                )
+            else:
+                message = (
+                    f"Clanker launch `{result['status']}`."
+                    + (f" Operation: `{detail}`" if detail else "")
+                )
+            await interaction.followup.send(message, ephemeral=True)
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await interaction.followup.send(
                 f"Clanker launch was not submitted: {exc}", ephemeral=True
@@ -550,7 +603,9 @@ class ClankerDraftView(discord.ui.View):
                 self.ctx.guild, self.settings, record
             )
             self.disable_controls()
-            verified_view = ClankerVerifiedView(self.cog, self.ctx, record)
+            verified_view = ClankerVerifiedView(
+                self.cog, self.ctx, record, self.settings, self.draft
+            )
             await interaction.message.edit(
                 embed=verified_view.embed(), view=verified_view
             )
