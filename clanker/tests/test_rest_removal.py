@@ -389,8 +389,16 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
             record["execution_terms"],
         )
 
-    async def test_back_to_edit_can_remove_only_unsubmitted_verification(self):
-        record = {"launch_id": "test-launch", "status": "verified", "requester_id": 7}
+    async def test_back_to_edit_persists_same_editable_draft(self):
+        payload = Clanker.build_draft_payload(
+            "TEST", "Test Token", None, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = {
+            "launch_id": "test-launch", "launch_ref": "test",
+            "created_at": "2026-09-15T00:00:00+00:00",
+            "status": "verified", "requester_id": 7,
+        }
         records = [record]
         cog = Clanker.__new__(Clanker)
         cog.config = SimpleNamespace(
@@ -398,18 +406,24 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
                 audit_log=lambda: AsyncAuditLog(records)
             )
         )
-        await cog.discard_verified_draft(
-            SimpleNamespace(id=100), SimpleNamespace(id=7), "test-launch"
+        editable = await cog.return_verified_draft_to_editing(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), "test-launch", payload
         )
-        self.assertEqual(records, [])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["status"], "dry_run")
+        self.assertEqual(records[0]["launch_id"], "test-launch")
+        self.assertEqual(records[0]["launch_ref"], "test")
+        self.assertEqual(records[0]["created_at"], "2026-09-15T00:00:00+00:00")
+        self.assertEqual(records[0]["payload"], payload)
+        self.assertEqual(editable, records[0])
 
         records.append({
             "launch_id": "submitted", "status": "internal_uncertain",
             "requester_id": 7,
         })
         with self.assertRaisesRegex(RuntimeError, "unsubmitted verified"):
-            await cog.discard_verified_draft(
-                SimpleNamespace(id=100), SimpleNamespace(id=7), "submitted"
+            await cog.return_verified_draft_to_editing(
+                SimpleNamespace(id=100), SimpleNamespace(id=7), "submitted", payload
             )
 
     async def test_authorization_request_keeps_verified_record_launchable(self):

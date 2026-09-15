@@ -1226,10 +1226,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("CryptoWallet returned an invalid verified-launch result.")
         return result
 
-    async def discard_verified_draft(
-        self, guild: discord.Guild, user: Any, launch_id: str
-    ) -> None:
-        """Remove an unsubmitted verification when its owner returns to editing."""
+    async def return_verified_draft_to_editing(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Persist an unsubmitted verification as the same editable draft."""
         async with self.config.guild(guild).audit_log() as audit_log:
             matches = [
                 (index, item) for index, item in enumerate(audit_log)
@@ -1243,7 +1244,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 raise RuntimeError(
                     "Only an unsubmitted verified launch can return to editing."
                 )
-            del audit_log[index]
+            editable = self.build_draft_record(user, payload, guild.id)
+            editable["launch_id"] = record["launch_id"]
+            editable["launch_ref"] = record.get("launch_ref")
+            editable["created_at"] = record.get("created_at")
+            audit_log[index] = editable
+            return copy.deepcopy(editable)
 
     async def mark_verified_internal_result(
         self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]

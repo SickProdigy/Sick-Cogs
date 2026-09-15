@@ -1171,11 +1171,13 @@ class ClankerVerifiedView(discord.ui.View):
         self.processing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            await self.cog.discard_verified_draft(
-                self.ctx.guild, interaction.user, str(self.record["launch_id"])
-            )
             draft_view = ClankerDraftView(self.cog, self.ctx, self.settings)
             draft_view.draft = copy.deepcopy(self.draft)
+            record = await self.cog.return_verified_draft_to_editing(
+                self.ctx.guild, interaction.user, str(self.record["launch_id"]),
+                draft_view.build_current_payload(),
+            )
+            draft_view.saved_record = record
             self.disable_controls()
             await interaction.edit_original_response(
                 embed=draft_view.embed(), view=draft_view
