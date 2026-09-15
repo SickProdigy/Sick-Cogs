@@ -54,13 +54,13 @@ class ClankerAdminMixin:
         if not is_eth_address(treasury_address):
             await ctx.send("Treasury address must be a valid EVM address.")
             return
-        await self.config.guild(ctx.guild).treasury_address.set(treasury_address)
+        await self.config.treasury_address.set(treasury_address)
         await ctx.send("SickGaming treasury address saved.")
 
     @clankerset.command(name="platformbps")
     async def clankerset_platformbps(self, ctx: commands.Context, basis_points: commands.Range[int, 0, 10000]):
         """Set the bot-owner platform reward basis points for launch requests."""
-        await self.config.guild(ctx.guild).platform_bps.set(basis_points)
+        await self.config.platform_bps.set(basis_points)
         await ctx.send(f"Bot-owner platform split set to {basis_points} bps.")
 
     @clankerset.command(name="channel")

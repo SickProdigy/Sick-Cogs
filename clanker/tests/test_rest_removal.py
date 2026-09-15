@@ -20,6 +20,14 @@ WALLET = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
 TREASURY = "0x1111111111111111111111111111111111111111"
 
 
+class PlatformOwnershipTests(unittest.TestCase):
+    def test_platform_financial_settings_are_global_not_guild_owned(self):
+        self.assertEqual(Clanker.default_global["treasury_address"], None)
+        self.assertEqual(Clanker.default_global["platform_bps"], 2000)
+        self.assertNotIn("treasury_address", Clanker.default_guild)
+        self.assertNotIn("platform_bps", Clanker.default_guild)
+
+
 class LegacyRestRemovalTests(unittest.TestCase):
     def test_rest_configuration_and_methods_are_absent(self):
         for key in (
@@ -173,7 +181,9 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         settings = {"enabled": True, "treasury_address": TREASURY}
         cog = Clanker.__new__(Clanker)
         cog.config = SimpleNamespace(
-            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
+            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings)),
+            treasury_address=AsyncMock(return_value=TREASURY),
+            platform_bps=AsyncMock(return_value=2000),
         )
         cog.check_launch_controls = AsyncMock(return_value=True)
         resolve = AsyncMock(return_value=WALLET)
@@ -221,7 +231,9 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         settings = {"enabled": True, "treasury_address": TREASURY}
         cog = Clanker.__new__(Clanker)
         cog.config = SimpleNamespace(
-            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings))
+            guild=lambda guild: SimpleNamespace(all=AsyncMock(return_value=settings)),
+            treasury_address=AsyncMock(return_value=TREASURY),
+            platform_bps=AsyncMock(return_value=2000),
         )
         cog.check_launch_controls = AsyncMock(return_value=True)
         cog.bot = SimpleNamespace(get_cog=lambda name: None)
@@ -611,6 +623,24 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("MINE", embed.fields[0].name)
         self.assertIn("Server 100", embed.fields[0].value)
         self.assertNotIn("OTHER", embed.fields[0].name)
+
+    async def test_drafts_are_read_only_and_aggregated_in_dms(self):
+        records = [
+            {"launch_id": "mine", "status": "verified", "requester_id": 7,
+             "symbol": "MINE"},
+            {"launch_id": "other", "status": "verified", "requester_id": 8,
+             "symbol": "OTHER"},
+        ]
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_guild=lambda guild_id: None)
+        cog.config = SimpleNamespace(all_guilds=AsyncMock(return_value={100: {"audit_log": records}}))
+        ctx = SimpleNamespace(guild=None, author=SimpleNamespace(id=7), send=AsyncMock())
+        await Clanker.clanker_drafts.callback(cog, ctx, 10)
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertNotIn("view", ctx.send.await_args.kwargs)
+        self.assertEqual(len(embed.fields), 1)
+        self.assertIn("MINE", embed.fields[0].name)
+        self.assertIn("Server 100", embed.fields[0].value)
 
     async def test_dismiss_hides_inactive_attempt_but_retains_audit_record(self):
         record = {

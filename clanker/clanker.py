@@ -67,7 +67,12 @@ async def clanker_guild_or_dm_history(ctx: commands.Context) -> bool:
     """Keep Clanker guild-scoped except for requester-owned launch history."""
     if ctx.guild is not None:
         return True
-    if ctx.command and ctx.command.qualified_name == "clanker launches":
+    dm_commands = {
+        "clanker",
+        "clanker drafts",
+        "clanker launches",
+    }
+    if ctx.command and ctx.command.qualified_name in dm_commands:
         return True
     raise commands.NoPrivateMessage
 
@@ -259,10 +264,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     __author__ = ["SickProdigy"]
     __version__ = "0.1.0"
 
-    default_guild = {
-        "enabled": False,
+    default_global = {
         "treasury_address": None,
         "platform_bps": 2000,
+        "platform_config_migrated": False,
+    }
+
+    default_guild = {
+        "enabled": False,
         "launch_channel_id": None,
         "approval_channel_id": None,
         "allowed_role_id": None,
@@ -287,12 +296,41 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def __init__(self, bot: Red):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
+        self.config.register_global(**self.default_global)
         self.config.register_guild(**self.default_guild)
         self.user_cooldowns: Dict[Tuple[int, int], datetime.datetime] = {}
         self.confirmation_tasks: set[asyncio.Task] = set()
 
+    async def settings_for_guild(self, guild: discord.Guild) -> Dict[str, Any]:
+        """Combine guild launch policy with bot-owner platform configuration."""
+        settings = await self.config.guild(guild).all()
+        settings.update({
+            "treasury_address": await self.config.treasury_address(),
+            "platform_bps": int(await self.config.platform_bps()),
+        })
+        return settings
+
     async def cog_load(self):
-        for guild_id, data in (await self.config.all_guilds()).items():
+        guild_data = await self.config.all_guilds()
+        if not await self.config.platform_config_migrated():
+            treasuries = {
+                str(data.get("treasury_address") or "").lower()
+                for data in guild_data.values() if data.get("treasury_address")
+            }
+            platform_splits = {
+                int(data.get("platform_bps", 2000)) for data in guild_data.values()
+            }
+            if len(treasuries) == 1 and not await self.config.treasury_address():
+                await self.config.treasury_address.set(treasuries.pop())
+            elif len(treasuries) > 1:
+                log.error(
+                    "Clanker guild treasury values conflict; set the global platform "
+                    "treasury with clankerset treasury before launching."
+                )
+            if len(platform_splits) == 1:
+                await self.config.platform_bps.set(platform_splits.pop())
+            await self.config.platform_config_migrated.set(True)
+        for guild_id, data in guild_data.items():
             for record in data.get("audit_log") or []:
                 if record.get("status") in {"internal_submitted", "internal_uncertain"}:
                     self._start_confirmation_task(
@@ -2149,7 +2187,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def _open_clanker_card(
         self, ctx: commands.Context, symbol: Optional[str] = None, name: Optional[str] = None
     ) -> None:
-        settings = await self.config.guild(ctx.guild).all()
+        settings = await self.settings_for_guild(ctx.guild)
         if not settings["enabled"]:
             await ctx.send("Clanker launch requests are disabled in this server.")
             return
@@ -2201,7 +2239,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Displays launch availability and this server's configured controls.
         """
-        settings = await self.config.guild(ctx.guild).all()
+        settings = await self.settings_for_guild(ctx.guild)
         try:
             companion_url = await self.companion_session_url()
         except RuntimeError:
@@ -2285,7 +2323,21 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Shows your editable and verified drafts that have not entered a wallet route.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        if ctx.guild is None:
+            audit_log = []
+            for guild_id, guild_data in (await self.config.all_guilds()).items():
+                guild_log = list(guild_data.get("audit_log") or [])
+                guild = self.bot.get_guild(int(guild_id))
+                for record in guild_log:
+                    item = copy.deepcopy(record)
+                    item["history_guild_name"] = (
+                        guild.name if guild is not None else "Server {}".format(guild_id)
+                    )
+                    item["history_reference"] = self.launch_reference(record, guild_log)
+                    audit_log.append(item)
+            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+        else:
+            audit_log = await self.config.guild(ctx.guild).audit_log()
         drafts = [
             record for record in audit_log
             if record.get("status") in {"dry_run", "verified"}
@@ -2303,7 +2355,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             color=discord.Color.blurple(),
         )
         for record in reversed(drafts[-limit:]):
-            reference = record.get("launch_ref") or self.launch_reference(record, audit_log)
+            reference = (
+                record.get("launch_ref") or record.get("history_reference")
+                or self.launch_reference(record, audit_log)
+            )
             symbol = str(record.get("symbol") or "?").upper()
             status = (
                 "✅ Verified — ready to launch"
@@ -2318,11 +2373,21 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 )
             except ValueError:
                 created = created or "Unknown"
+            details = "**Status:** " + status + "\n**Created:** " + created
+            if record.get("history_guild_name"):
+                details += "\n**Server:** " + str(record["history_guild_name"])
             embed.add_field(
-                name="$" + symbol + "  •  " + str(reference),
-                value="**Status:** " + status + "\n**Created:** " + created,
+                name=chr(36) + symbol + "  •  " + str(reference),
+                value=details,
                 inline=False,
             )
+        if ctx.guild is None:
+            embed.description = (
+                "Not submitted to a wallet. Most recent first across your shared servers. "
+                "Reopen or edit a draft from the server where it was created."
+            )
+            await ctx.send(embed=embed)
+            return
         settings = await self.config.guild(ctx.guild).all()
         await ctx.send(
             embed=embed,
