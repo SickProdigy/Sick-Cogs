@@ -253,19 +253,33 @@ class ClankerTreasuryWithdrawalView(discord.ui.View):
 
 
 class ClankerRewardReviewView(discord.ui.View):
-    """Owner-bound controls for one coin; never performs a portfolio sweep."""
+    """Owner-bound, one-approval reward claims for a single coin."""
 
     def __init__(
         self, cog: "Clanker", record: Dict[str, Any], user_id: int, guild_id: int,
-        *, has_deposited_balances: bool = True,
+        *, snapshot: Dict[str, Any],
     ):
         super().__init__(timeout=900)
         self.cog = cog
         self.record = copy.deepcopy(record)
         self.user_id = int(user_id)
         self.guild_id = int(guild_id)
+        self.snapshot = copy.deepcopy(snapshot)
         self.processing = False
-        self.review_withdrawal.disabled = not has_deposited_balances
+        token = str(record.get("token_address") or "").lower()
+        self.claims = [
+            {"owner": row["owner"], "asset": row["asset"]}
+            for row in self.snapshot.get("treasuries", [])
+        ]
+        self.weth_claims = [
+            item for item in self.claims
+            if item["asset"] == "0x4200000000000000000000000000000000000006"
+        ]
+        self.token_claims = [item for item in self.claims if item["asset"] == token]
+        self.claim_all.disabled = not self.claims
+        self.claim_weth.disabled = not self.weth_claims
+        self.claim_token.disabled = not self.token_claims
+        self.claim_token.label = "Claim $" + str(record.get("symbol") or "TOKEN").upper()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -275,54 +289,48 @@ class ClankerRewardReviewView(discord.ui.View):
         )
         return False
 
-    @discord.ui.button(label="Collect via CryptoWallet", emoji="📥", style=discord.ButtonStyle.success)
-    async def collect(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _claim(self, interaction: discord.Interaction, claims: list[dict], label: str):
         if self.processing:
-            await interaction.response.send_message("This collection is already processing.", ephemeral=True)
+            await interaction.response.send_message("A reward claim is already processing.", ephemeral=True)
             return
         self.processing = True
-        button.disabled = True
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
         await interaction.response.edit_message(view=self)
         try:
-            result = await self.cog.collect_launch_rewards_internal(interaction.user, self.record, self.guild_id)
+            result = await self.cog.withdraw_launch_treasuries_internal(
+                interaction.user, self.record, claims, self.guild_id
+            )
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             self.processing = False
-            button.disabled = False
+            self.claim_all.disabled = not self.claims
+            self.claim_weth.disabled = not self.weth_claims
+            self.claim_token.disabled = not self.token_claims
             await interaction.edit_original_response(view=self)
             await interaction.followup.send(str(exc), ephemeral=True)
             return
-        status = str(result["provider_status"])
+        status = str(result.get("provider_status") or "submitted")
         operation = str(result.get("user_operation_hash") or "")
         transaction = str(result.get("transaction_hash") or "")
-        lines = ["Submitted collection for this coin only. Status: " + chr(96) + status + chr(96) + "."]
+        lines = [label + " submitted through CryptoWallet. Status: " + chr(96) + status + chr(96) + "."]
         if transaction:
             lines.append("[Transaction](https://sepolia.basescan.org/tx/" + transaction + ")")
         elif operation:
             lines.append("Operation: " + chr(96) + operation[:10] + "…" + operation[-8:] + chr(96))
-        lines.append("No treasury-wide deposited rewards were withdrawn.")
         await interaction.followup.send(chr(10).join(lines), ephemeral=True)
 
-    @discord.ui.button(label="Collect via external wallet", emoji="🌐", style=discord.ButtonStyle.secondary)
-    async def external(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            url = await self.cog.external_reward_handoff(interaction.user, self.record, self.guild_id)
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await interaction.followup.send("External reward handoff unavailable: " + str(exc), ephemeral=True)
-            return
-        await interaction.followup.send("Open this protected one-time link to collect this token with its administrator wallet:"
-                                        + chr(10) + url, ephemeral=True)
+    @discord.ui.button(label="Claim all rewards", emoji="💰", style=discord.ButtonStyle.success)
+    async def claim_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._claim(interaction, self.claims, "All available rewards")
 
-    @discord.ui.button(label="Review withdrawable balances", emoji="📋", style=discord.ButtonStyle.secondary)
-    async def review_withdrawal(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            embed, claims, profitable = await self.cog.treasury_withdrawal_review(self.record)
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await interaction.followup.send("Treasury review unavailable: " + str(exc), ephemeral=True)
-            return
-        view = ClankerTreasuryWithdrawalView(self.cog, self.record, claims, interaction.user.id, self.guild_id) if claims else None
-        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+    @discord.ui.button(label="Claim WETH", style=discord.ButtonStyle.primary)
+    async def claim_weth(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._claim(interaction, self.weth_claims, "WETH rewards")
+
+    @discord.ui.button(label="Claim token", style=discord.ButtonStyle.primary)
+    async def claim_token(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._claim(interaction, self.token_claims, self.claim_token.label + " rewards")
 
 
 class ClankerClaimAllSelect(discord.ui.Select):
@@ -844,7 +852,7 @@ class ClankerReceiptRewardsView(discord.ui.View):
             return
         view = ClankerRewardReviewView(
             self.cog, self.record, interaction.user.id, self.guild_id,
-            has_deposited_balances=bool(snapshot.get("treasuries")),
+            snapshot=snapshot,
         )
         if self.history_view is not None:
             view.add_item(ClankerBackToLaunchesButton(self.history_view))

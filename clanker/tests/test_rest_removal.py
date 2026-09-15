@@ -609,27 +609,23 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
                 [record], portfolio=False, include_snapshot=True
             )
         rendered = "\n".join(str(field.value) for field in embed.fields)
-        self.assertIn("Creator allocation: 80%", rendered)
-        self.assertIn("Platform allocation: 20% → same treasury", rendered)
-        self.assertIn("Withdrawable $NMT at combined treasury: 2.000000", rendered)
-        self.assertIn("Combined creator/platform treasury: 0.01000000 WETH", rendered)
-        self.assertNotIn("Creator-only", rendered)
-        self.assertIn("Collect new LP fees:", rendered)
-        self.assertIn("Withdraw deposited balances:", rendered)
+        self.assertIn("Claimable WETH: 0.01000000", rendered)
+        self.assertIn("Claimable $NMT: 2.00000000", rendered)
+        self.assertIn("Destination: shared creator/platform treasury", rendered)
+        self.assertIn("Claim all: 100,000 gas", rendered)
+        self.assertIn("WETH only: 50,000 gas", rendered)
+        self.assertIn("$NMT only: 50,000 gas", rendered)
+        self.assertNotIn("Collect new LP fees", rendered)
         self.assertIs(returned, snapshot)
 
     def test_reward_controls_label_alternative_routes_and_disable_empty_withdrawal(self):
         view = ClankerRewardReviewView(
-            SimpleNamespace(), {"launch_id": "nmt"}, 7, 100,
-            has_deposited_balances=False,
+            SimpleNamespace(), {"launch_id": "nmt", "symbol": "NMT", "token_address": "0x" + "ab" * 20},
+            7, 100, snapshot={"treasuries": []},
         )
         controls = {item.label: item for item in view.children}
-        self.assertIn("Collect via CryptoWallet", controls)
-        self.assertIn("Collect via external wallet", controls)
-        self.assertIn("Review withdrawable balances", controls)
-        self.assertTrue(controls["Review withdrawable balances"].disabled)
-        self.assertFalse(controls["Collect via CryptoWallet"].disabled)
-        self.assertFalse(controls["Collect via external wallet"].disabled)
+        self.assertEqual(set(controls), {"Claim all rewards", "Claim WETH", "Claim $NMT"})
+        self.assertTrue(all(item.disabled for item in controls.values()))
 
     def test_reopened_receipt_has_persistent_back_navigation(self):
         cog = SimpleNamespace(
