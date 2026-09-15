@@ -613,6 +613,62 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         requester = record.get("requester_name", record.get("requester_id", "?"))
         return f"{launch_id} · {created} · {status} · ${symbol} by {requester}"
 
+    @staticmethod
+    def launch_status_label(status: str) -> str:
+        labels = {
+            "awaiting_cryptowallet_approval": "⏳ Awaiting CryptoWallet approval",
+            "internal_submitted": "⏳ Submitted — confirming",
+            "internal_confirmed": "✅ Confirmed",
+            "internal_failed": "❌ Failed",
+            "internal_uncertain": "⚠️ Needs status recovery",
+            "awaiting_external_wallet": "⏳ Awaiting external wallet",
+            "external_pending": "⏳ External transaction pending",
+            "external_confirmed": "✅ Confirmed",
+        }
+        return labels.get(status, status.replace("_", " ").title())
+
+    @staticmethod
+    def launch_list_embed(
+        records: List[Dict[str, Any]], audit_log: List[Dict[str, Any]]
+    ) -> discord.Embed:
+        embed = discord.Embed(
+            title="Your Clanker launches",
+            description="Most recent first. Use the short reference with Clanker commands.",
+            color=discord.Color.blue(),
+        )
+        for record in reversed(records):
+            reference = record.get("launch_ref") or Clanker.launch_reference(record, audit_log)
+            symbol = str(record.get("symbol") or "?").upper()
+            status = Clanker.launch_status_label(str(record.get("status") or "unknown"))
+            lines = [f"**Status:** {status}"]
+            created = str(record.get("created_at") or "")
+            try:
+                moment = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+                exact = discord.utils.format_dt(moment, style="f")
+                relative = discord.utils.format_dt(moment, style="R")
+                lines.append(f"**Created:** {exact} ({relative})")
+            except ValueError:
+                if created:
+                    lines.append(f"**Created:** {created}")
+            route = str(record.get("execution_route") or "").replace("_", " ").title()
+            if route:
+                lines.append(f"**Route:** {route}")
+            token = record.get("token_address")
+            if token:
+                lines.append(
+                    f"[Clanker](https://www.clanker.world/clanker/{token}) · "
+                    f"[Contract](https://sepolia.basescan.org/address/{token})"
+                )
+            transaction = record.get("transaction_hash")
+            if transaction:
+                lines.append(f"[Transaction](https://sepolia.basescan.org/tx/{transaction})")
+            embed.add_field(
+                name="$" + symbol + "  •  " + reference,
+                value="\n".join(lines),
+                inline=False,
+            )
+        return embed
+
     async def check_launch_controls(self, ctx: commands.Context, settings: Dict[str, Any]) -> bool:
         launch_channel_id = settings.get("launch_channel_id")
         if launch_channel_id and ctx.channel.id != launch_channel_id:
@@ -1427,8 +1483,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not launches:
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
-        lines = [self.launch_record_line(record, audit_log) for record in reversed(launches[-limit:])]
-        await ctx.send(box("\n".join(lines)))
+        embed = self.launch_list_embed(launches[-limit:], audit_log)
+        await ctx.send(embed=embed)
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
     @checks.mod_or_permissions(manage_guild=True)

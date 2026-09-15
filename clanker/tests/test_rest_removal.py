@@ -436,10 +436,11 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         ]
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_launches.callback(cog, ctx, 10)
-        output = ctx.send.await_args.args[0]
-        self.assertIn("sub", output)
-        self.assertNotIn("saved-draft", output)
-        self.assertNotIn("other", output)
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Your Clanker launches")
+        self.assertEqual(len(embed.fields), 1)
+        self.assertIn("$SUB", embed.fields[0].name)
+        self.assertIn("Awaiting external wallet", embed.fields[0].value)
 
     async def test_compact_references_are_scoped_to_requester(self):
         records = [
