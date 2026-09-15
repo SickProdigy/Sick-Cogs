@@ -234,6 +234,83 @@ class InternalApprovalRetryTests(unittest.IsolatedAsyncioTestCase):
             await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", bad)
 
 
+class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_verified_launch_passes_only_bound_intent_and_operation(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["status"] = "verified"
+        result = {
+            "status": "submitted",
+            "intent_id": "0x" + "12" * 32,
+            "payload_hash": "0x" + "34" * 32,
+            "authorization_expires_at": None,
+            "provider_status": "broadcast",
+            "user_operation_hash": "0x" + "56" * 32,
+            "transaction_hash": None,
+        }
+        submit = AsyncMock(return_value=result)
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(
+            get_cog=lambda name: SimpleNamespace(clanker_launch_verified=submit)
+            if name == "CryptoWallet" else None
+        )
+        returned = await cog.launch_verified_internal(SimpleNamespace(id=7), record)
+        self.assertEqual(returned, result)
+        submit.assert_awaited_once_with(
+            unittest.mock.ANY, record["intent"], record["operation"]
+        )
+
+    async def test_authorization_request_keeps_verified_record_launchable(self):
+        record = {"launch_id": "test-launch", "status": "verified"}
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(
+                audit_log=lambda: AsyncAuditLog([record])
+            )
+        )
+        result = {
+            "status": "authorization_required",
+            "intent_id": "0x" + "12" * 32,
+            "payload_hash": "0x" + "34" * 32,
+            "authorization_expires_at": 4_000_000_000,
+            "provider_status": None,
+            "user_operation_hash": None,
+            "transaction_hash": None,
+        }
+        await cog.mark_verified_internal_result(
+            SimpleNamespace(id=100), "test-launch", result
+        )
+        self.assertEqual(record["status"], "verified")
+        self.assertIn("authorization_requested_at", record)
+
+    async def test_submission_moves_verified_record_into_internal_lifecycle(self):
+        record = {"launch_id": "test-launch", "status": "verified"}
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(
+                audit_log=lambda: AsyncAuditLog([record])
+            )
+        )
+        result = {
+            "status": "uncertain",
+            "intent_id": "0x" + "12" * 32,
+            "payload_hash": "0x" + "34" * 32,
+            "authorization_expires_at": None,
+            "provider_status": "unknown",
+            "user_operation_hash": None,
+            "transaction_hash": None,
+        }
+        await cog.mark_verified_internal_result(
+            SimpleNamespace(id=100), "test-launch", result
+        )
+        self.assertEqual(record["status"], "internal_uncertain")
+        self.assertEqual(record["execution_route"], "internal")
+        self.assertEqual(record["signing_intent_id"], result["intent_id"])
+
+
 class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
     def make_cog_and_context(self, records, author_id=7):
         cog = Clanker.__new__(Clanker)

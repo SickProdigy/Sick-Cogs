@@ -624,6 +624,65 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("CryptoWallet returned an invalid Clanker approval binding.")
         return result
 
+    async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Submit the exact verified card through CryptoWallet delegation."""
+        wallet = self.bot.get_cog("CryptoWallet")
+        submit = getattr(wallet, "clanker_launch_verified", None) if wallet else None
+        if not callable(submit):
+            raise RuntimeError("CryptoWallet verified Clanker launch is unavailable.")
+        launch = record.get("intent")
+        operation = record.get("operation")
+        if not isinstance(launch, dict) or not isinstance(operation, dict):
+            raise ValueError("This verified card has no immutable operation.")
+        if (
+            int(record.get("requester_id", 0)) != int(user.id)
+            or str(record.get("launch_id")) != str(launch.get("launch_id"))
+            or str(record.get("payload_hash", "")).lower()
+            != str(launch.get("payload_hash", "")).lower()
+            or str(operation.get("payload_hash", "")).lower()
+            != str(record.get("payload_hash", "")).lower()
+        ):
+            raise ValueError("The verified launch binding is invalid.")
+        result = await submit(user, launch, operation)
+        expected = {
+            "status", "intent_id", "payload_hash", "authorization_expires_at",
+            "provider_status", "user_operation_hash", "transaction_hash",
+        }
+        allowed = {"authorization_required", "submitted", "confirmed", "uncertain"}
+        if (
+            not isinstance(result, dict) or set(result) != expected
+            or result.get("status") not in allowed
+            or str(result.get("payload_hash", "")).lower() == ""
+        ):
+            raise RuntimeError("CryptoWallet returned an invalid verified-launch result.")
+        return result
+
+    async def mark_verified_internal_result(
+        self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
+    ) -> None:
+        """Persist the bounded result of a verified-card launch attempt."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The verified Clanker record changed during launch.")
+            record = matches[0]
+            if record.get("status") != "verified":
+                raise RuntimeError("This Clanker card is no longer awaiting launch.")
+            if result["status"] == "authorization_required":
+                record["authorization_requested_at"] = int(
+                    datetime.datetime.now(datetime.timezone.utc).timestamp()
+                )
+                return
+            record.update({
+                "status": "internal_" + result["status"],
+                "execution_route": "internal",
+                "signing_intent_id": result["intent_id"],
+                "signing_payload_hash": result["payload_hash"],
+                "provider_status": result.get("provider_status"),
+                "user_operation_hash": result.get("user_operation_hash"),
+                "transaction_hash": result.get("transaction_hash"),
+            })
+
     async def refresh_internal_wallet_status(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
         """Read one exactly bound persisted CryptoWallet lifecycle state."""
         wallet = self.bot.get_cog("CryptoWallet")
@@ -730,6 +789,25 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             record["intent"] = intent.to_dict()
             record["operation"] = operation.to_dict()
             return dict(record)
+
+    async def mark_draft_verified(
+        self, guild: discord.Guild, user: Any, launch_id: str
+    ) -> Dict[str, Any]:
+        """Freeze one freshly materialized draft for its Discord review card."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The Clanker draft changed during verification.")
+            record = matches[0]
+            if (record.get("status") != "dry_run"
+                    or int(record.get("requester_id", 0)) != int(user.id)
+                    or not record.get("payload_hash")
+                    or not isinstance(record.get("intent"), dict)
+                    or not isinstance(record.get("operation"), dict)):
+                raise RuntimeError("The Clanker draft cannot be verified.")
+            record["status"] = "verified"
+            record["verified_at"] = utc_now()
+            return copy.deepcopy(record)
 
     def build_external_template(self, guild_id: int, requester_id: int, record: Dict[str, Any]) -> Dict[str, Any]:
         """Create a signed browser template whose null wallet roles default to its signer."""
@@ -987,7 +1065,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         drafts = [
             record for record in audit_log
-            if record.get("status") == "dry_run" and record.get("requester_id") == ctx.author.id
+            if record.get("status") in {"dry_run", "verified"}
+            and record.get("requester_id") == ctx.author.id
         ]
         if not drafts:
             await ctx.send("You have no saved Clanker drafts.")
@@ -1001,7 +1080,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         record = await self.get_launch_record(ctx.guild, launch_id)
         if (
             not record
-            or record.get("status") != "dry_run"
+            or record.get("status") not in {"dry_run", "verified"}
             or record.get("requester_id") != ctx.author.id
         ):
             await ctx.send("No saved Clanker draft of yours matched that ID.")
@@ -1013,7 +1092,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
         """List recent Clanker records that entered an execution route."""
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
-        launches = [record for record in audit_log if record.get("status") != "dry_run"]
+        launches = [
+            record for record in audit_log
+            if record.get("status") not in {"dry_run", "verified"}
+        ]
         if not launches:
             await ctx.send("No Clanker drafts have entered an execution route.")
             return

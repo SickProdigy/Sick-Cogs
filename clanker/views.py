@@ -208,6 +208,149 @@ class ClankerAirdropModal(discord.ui.Modal):
         await self.view_ref.refresh(interaction, message)
 
 
+class ClankerVerifiedView(discord.ui.View):
+    """Owner-bound launch controls for one immutable reviewed operation."""
+
+    def __init__(self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any]):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.ctx = ctx
+        self.record = record
+        self.user_id = ctx.author.id
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who verified this launch can use its controls.",
+            ephemeral=True,
+        )
+        return False
+
+    def embed(self) -> discord.Embed:
+        record = self.record
+        payload = record["payload"]
+        rewards = payload["rewards"]["recipients"]
+        platform = str(record.get("platform_treasury") or "").lower()
+        creator = next(
+            (
+                item for item in rewards
+                if not (
+                    str(item.get("admin") or "").lower() == platform
+                    and str(item.get("recipient") or "").lower() == platform
+                )
+            ),
+            {},
+        )
+        embed = discord.Embed(
+            title="Verified Clanker launch",
+            description=(
+                "These values are frozen for this card. Review them carefully, then "
+                "launch with your authorized CryptoWallet."
+            ),
+            color=discord.Color.gold(),
+        )
+        embed.add_field(
+            name="Token", value=f"{record['name']} (${record['symbol']})", inline=False
+        )
+        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        embed.add_field(name="Supply", value=format_tokens(DEFAULT_CLANKER_SUPPLY), inline=True)
+        embed.add_field(name="Token administrator", value=payload["tokenAdmin"], inline=False)
+        embed.add_field(
+            name="Creator rewards",
+            value=f"{creator.get('bps', 0)} bps → {creator.get('recipient', 'None')}",
+            inline=False,
+        )
+        embed.add_field(
+            name="Platform rewards",
+            value=f"{record.get('platform_bps', 0)} bps → {record.get('platform_treasury')}",
+            inline=False,
+        )
+        vault = payload.get("vault")
+        embed.add_field(
+            name="Vault",
+            value=(
+                f"{vault['percentage']}% → {vault['recipient']} · lock {vault['lockupDuration']}s"
+                if vault else "Disabled"
+            ),
+            inline=False,
+        )
+        airdrop = payload.get("airdrop")
+        embed.add_field(
+            name="Airdrop",
+            value=(
+                f"{format_tokens(int(airdrop['amount']))} · root {airdrop['merkleRoot']}"
+                if airdrop else "Disabled"
+            ),
+            inline=False,
+        )
+        embed.add_field(name="Launch ID", value=f"`{record['launch_id']}`", inline=False)
+        embed.add_field(
+            name="Payload fingerprint",
+            value=f"`{record['payload_hash']}`",
+            inline=False,
+        )
+        embed.set_footer(
+            text="Immutable review · Base Sepolia only · launching cannot be undone"
+        )
+        return embed
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(
+        label="Launch with CryptoWallet", emoji="🚀", style=discord.ButtonStyle.success
+    )
+    async def launch_internal(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        if self.processing:
+            await interaction.response.send_message(
+                "This verified launch is already being processed.", ephemeral=True
+            )
+            return
+        self.processing = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            result = await self.cog.launch_verified_internal(interaction.user, self.record)
+            await self.cog.mark_verified_internal_result(
+                self.ctx.guild, str(self.record["launch_id"]), result
+            )
+            if result["status"] == "authorization_required":
+                await interaction.followup.send(
+                    "CryptoWallet authorization is missing or expired. I sent its protected "
+                    "authorization link by DM. Complete it, then press this Launch button again "
+                    "before the verified card expires.",
+                    ephemeral=True,
+                )
+                return
+            self.record["status"] = "internal_" + result["status"]
+            self.disable_controls()
+            await interaction.message.edit(embed=self.embed(), view=self)
+            detail = result.get("transaction_hash") or result.get("user_operation_hash")
+            await interaction.followup.send(
+                f"Clanker launch `{result['status']}`."
+                + (f" Operation: `{detail}`" if detail else ""),
+                ephemeral=True,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send(
+                f"Clanker launch was not submitted: {exc}", ephemeral=True
+            )
+        finally:
+            self.processing = False
+
+    @discord.ui.button(label="Cancel", emoji="✖️", style=discord.ButtonStyle.danger)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.disable_controls()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+        await interaction.followup.send(
+            "Verified launch canceled. Nothing was submitted.", ephemeral=True
+        )
+
+
 class ClankerDraftView(discord.ui.View):
     def __init__(
         self,
@@ -283,7 +426,7 @@ class ClankerDraftView(discord.ui.View):
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
             title="Clanker launch draft",
-            description="Fill the card, preview the payload, then save the draft.",
+            description="Fill the card, preview it, then verify the exact launch.",
             color=discord.Color.blurple(),
         )
         token = "Not set"
@@ -362,16 +505,16 @@ class ClankerDraftView(discord.ui.View):
             return
         await interaction.response.send_message(box(json.dumps(payload, indent=2)[:1800], lang="json"), ephemeral=True)
 
-    @discord.ui.button(label="Save Draft", emoji="💾", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Verify", emoji="✅", style=discord.ButtonStyle.success)
     async def save_launch(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.processing:
             await interaction.response.send_message(
-                "This launch draft is already being saved.", ephemeral=True
+                "This launch draft is already being verified.", ephemeral=True
             )
             return
         if not self.is_ready():
             await interaction.response.send_message(
-                "Fill out token basics before saving.", ephemeral=True
+                "Fill out token basics before verification.", ephemeral=True
             )
             return
         if not self.settings.get("treasury_address"):
@@ -389,21 +532,34 @@ class ClankerDraftView(discord.ui.View):
         try:
             payload = self.build_current_payload()
             record = self.cog.build_draft_record(interaction.user, payload, self.ctx.guild.id)
+            wallet = self.cog.bot.get_cog("CryptoWallet")
+            resolve_address = (
+                getattr(wallet, "clanker_requester_address", None) if wallet else None
+            )
+            if not callable(resolve_address):
+                raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
+            signer_address = await resolve_address(interaction.user)
             await self.cog.add_audit_record(self.ctx.guild, record)
+            record = await self.cog.prepare_draft_execution(
+                self.ctx.guild, interaction.user, str(record["launch_id"]), signer_address
+            )
+            record = await self.cog.mark_draft_verified(
+                self.ctx.guild, interaction.user, str(record["launch_id"])
+            )
             await self.cog.notify_approval_channel(
                 self.ctx.guild, self.settings, record
             )
             self.disable_controls()
-            await interaction.message.edit(embed=self.embed(), view=self)
-            launch_id = str(record["launch_id"])
-            prefix = self.ctx.clean_prefix
+            verified_view = ClankerVerifiedView(self.cog, self.ctx, record)
+            await interaction.message.edit(
+                embed=verified_view.embed(), view=verified_view
+            )
             await interaction.followup.send(
-                f"Clanker draft saved as `{launch_id}`. It remains resumable until you choose "
-                f"an execution wallet.\nCryptoWallet: `{prefix}clanker internal {launch_id}`"
-                f"\nExternal wallet: `{prefix}clanker external {launch_id}`",
+                "Verified card created. Review every frozen value, then use its Launch "
+                "button. Any changes require a new card.",
                 ephemeral=True,
             )
-        except ValueError as exc:
+        except (ValueError, RuntimeError) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
         finally:
             self.processing = False
