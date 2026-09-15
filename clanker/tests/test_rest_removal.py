@@ -604,7 +604,8 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.percentage_input.default, "10")
         self.assertEqual(modal.lockup_input.default, "6m")
         self.assertEqual(modal.vesting_input.default, "")
-        self.assertIn("Blank = full unlock", modal.vesting_input.placeholder)
+        self.assertIsNone(modal.vesting_input.placeholder)
+        self.assertFalse(modal.vesting_input.required)
         view.draft["vault"] = {"percentage": 10, "lockupDuration": 2592000,
                                  "vestingDuration": 7776000, "recipient": None}
         fields = {field.name: field.value for field in view.embed().fields}

@@ -164,10 +164,10 @@ class ClankerVaultModal(discord.ui.Modal):
             placeholder="Suggested: 6m", max_length=10,
         )
         self.vesting_input = discord.ui.TextInput(
-            label="Vesting duration (optional; d/w/m/y)",
+            label="Vesting duration (optional)",
             default=(format_vault_duration(vault.get("vestingDuration"))
                      if vault.get("vestingDuration") else ""),
-            placeholder="Blank = full unlock; example: 3m", max_length=10,
+            required=False, max_length=10,
         )
         self.recipient_input = discord.ui.TextInput(
             label="Recipient (blank uses signer wallet)", default=str(vault.get("recipient") or ""),
