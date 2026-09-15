@@ -221,31 +221,6 @@ class WalletCoreCommands:
                 inline=False,
             )
 
-        created_tokens = []
-        for network_key, entries in registry.items():
-            created_network = NETWORKS.get(network_key)
-            if created_network is None or created_network not in networks:
-                continue
-            for contract, entry in entries.items():
-                if (
-                    int(entry.get("submitted_by", 0) or 0) != int(target.id)
-                    or entry.get("source") not in {"clanker", "tokenfactory"}
-                    or entry.get("status") not in {"community", "recognized"}
-                ):
-                    continue
-                short_contract = f"{contract[:8]}…{contract[-6:]}"
-                created_tokens.append(
-                    f"• **{entry.get('symbol', 'TOKEN')}** — {entry.get('name', 'Token')} "
-                    f"([{short_contract}]({created_network.explorer_url}/token/{contract}))"
-                )
-        if created_tokens:
-            shown = created_tokens[:6]
-            if len(created_tokens) > 6:
-                shown.append(f"• {len(created_tokens) - 6} more created token(s)")
-            embed.add_field(
-                name="━━ CREATED TOKENS ━━", value="\n".join(shown)[:1024],
-                inline=False,
-            )
 
         if not embed.fields:
             embed.description += " No enabled testnet accounts are available."

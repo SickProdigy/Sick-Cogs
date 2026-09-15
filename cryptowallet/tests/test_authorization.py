@@ -389,11 +389,10 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             solana_field.value.index(f"`{solana}`"),
             solana_field.value.index("[Solana Devnet]"),
         )
-        self.assertEqual(len(embed.fields), 3)
+        self.assertEqual(len(embed.fields), 2)
         self.assertIn("OWNED", rendered)
-        self.assertNotIn("ZERO", evm_field.value)
-        self.assertIn("━━ CREATED TOKENS ━━", rendered)
-        self.assertIn("ZERO", rendered)
+        self.assertNotIn("ZERO", rendered)
+        self.assertNotIn("━━ CREATED TOKENS ━━", rendered)
         self.assertNotIn("Automatic token discovery", rendered)
         self.assertNotIn("[Arbitrum Sepolia]", rendered)
 
