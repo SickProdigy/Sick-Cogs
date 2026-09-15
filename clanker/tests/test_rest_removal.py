@@ -578,6 +578,46 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Delete all drafts", bulk_labels)
         self.assertIn("Keep drafts", bulk_labels)
 
+    async def test_reward_card_explains_shared_treasury_without_double_counting(self):
+        token = "0x" + "ab" * 20
+        snapshot = {
+            "launches": [{
+                "reference": "nmt", "symbol": "NMT", "token": token,
+                "admin": WALLET.lower(), "creator": WALLET.lower(),
+                "platform": WALLET.lower(), "collection_gas": 146_940,
+                "creator_token_wei": 2 * 10**18,
+                "platform_token_wei": 2 * 10**18,
+            }],
+            "treasuries": [
+                {"owner": WALLET.lower(), "asset": token, "amount_wei": 2 * 10**18,
+                 "claim_gas": 50_000},
+                {"owner": WALLET.lower(), "asset": clanker_module.WETH.lower(),
+                 "amount_wei": 10**16, "claim_gas": 50_000},
+            ],
+            "gas_price_wei": 1_000_000,
+            "collection_estimated_gas": 146_940,
+            "claim_estimated_gas": 100_000,
+            "claim_estimated_fee_wei": 100_000_000_000,
+        }
+        record = {
+            "launch_id": "nmt-long", "launch_ref": "nmt", "symbol": "NMT",
+            "token_address": token, "creator_bps": 8000, "platform_bps": 2000,
+        }
+        cog = Clanker.__new__(Clanker)
+        with patch.object(clanker_module, "reward_preflight", AsyncMock(return_value=snapshot)):
+            embed, returned = await cog.reward_preflight_embed(
+                [record], portfolio=False, include_snapshot=True
+            )
+        rendered = "\n".join(str(field.value) for field in embed.fields)
+        self.assertIn("Creator allocation: 80%", rendered)
+        self.assertIn("Platform allocation: 20% → same treasury", rendered)
+        self.assertIn("Withdrawable $NMT at combined treasury: 2.000000", rendered)
+        self.assertIn("Combined creator/platform treasury: 0.01000000 WETH", rendered)
+        self.assertNotIn("Creator-only", rendered)
+        self.assertIn("Collect new LP fees:", rendered)
+        self.assertIn("Withdraw deposited balances:", rendered)
+        self.assertIs(returned, snapshot)
+
     def test_reward_controls_label_alternative_routes_and_disable_empty_withdrawal(self):
         view = ClankerRewardReviewView(
             SimpleNamespace(), {"launch_id": "nmt"}, 7, 100,
@@ -586,8 +626,8 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         controls = {item.label: item for item in view.children}
         self.assertIn("Collect via CryptoWallet", controls)
         self.assertIn("Collect via external wallet", controls)
-        self.assertIn("Withdraw deposited balances", controls)
-        self.assertTrue(controls["Withdraw deposited balances"].disabled)
+        self.assertIn("Review withdrawable balances", controls)
+        self.assertTrue(controls["Review withdrawable balances"].disabled)
         self.assertFalse(controls["Collect via CryptoWallet"].disabled)
         self.assertFalse(controls["Collect via external wallet"].disabled)
 

@@ -898,83 +898,142 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, records: List[Dict[str, Any]], *, portfolio: bool, offset: int = 0,
         include_snapshot: bool = False,
     ) -> Any:
-        """Build a public-data reward and gas review without submitting transactions."""
+        """Explain collection versus exact FeeLocker withdrawal balances and costs."""
         snapshot = await reward_preflight(records, clanker_rpc)
         launches = snapshot["launches"]
         if not launches:
             raise RuntimeError("No confirmed Clanker launches were found.")
-        title = "Clanker reward portfolio" if portfolio else "Clanker rewards \u2022 " + launches[0]["reference"]
-        description = "Public on-chain balances only. Nothing has been collected or withdrawn."
-        if not portfolio:
-            description = (
-                "Two-step rewards for $" + launches[0]["symbol"] + ": collect new LP fees "
-                "using either wallet route, then withdraw balances after they are deposited. "
-                "Nothing has been submitted from this card."
-            )
-        embed = discord.Embed(
-            title=title, description=description, color=discord.Color.gold()
+
+        def short_address(address: str) -> str:
+            return address[:8] + "…" + address[-6:] if len(address) == 42 else address
+
+        title = "Clanker reward portfolio" if portfolio else "Clanker rewards • " + launches[0]["reference"]
+        description = (
+            "Step 1 collects new LP fees for the selected token through either CryptoWallet "
+            "or an external wallet. Step 2 withdraws exact balances already deposited in the "
+            "FeeLocker to their fixed treasury addresses. Nothing has been submitted."
         )
+        embed = discord.Embed(title=title, description=description, color=discord.Color.gold())
+        record_by_token = {
+            str(item.get("token_address") or "").lower(): item for item in records
+        }
         for launch in launches[offset:offset + 10]:
-            gas = launch.get("collection_gas")
-            gas_text = "{:,} gas".format(gas) if gas is not None else "Estimate unavailable"
+            record = record_by_token.get(launch["token"], {})
+            creator_bps = int(record.get("creator_bps") or 0)
+            platform_bps = int(record.get("platform_bps") or 0)
+            same_treasury = launch["creator"] == launch["platform"]
+            lines = [
+                "New LP fees available to collect: determined by the collection receipt.",
+            ]
+            if same_treasury:
+                lines.extend([
+                    "Creator allocation: {:g}% → {}".format(
+                        creator_bps / 100, short_address(launch["creator"])
+                    ),
+                    "Platform allocation: {:g}% → same treasury".format(platform_bps / 100),
+                    "Withdrawable $" + launch["symbol"] + " at combined treasury: {:,.6f}".format(
+                        launch["creator_token_wei"] / 10**18
+                    ),
+                ])
+            else:
+                lines.extend([
+                    "Creator allocation: {:g}% → {}".format(
+                        creator_bps / 100, short_address(launch["creator"])
+                    ),
+                    "Platform allocation: {:g}% → {}".format(
+                        platform_bps / 100, short_address(launch["platform"])
+                    ),
+                    "Withdrawable $" + launch["symbol"] + " · creator treasury: {:,.6f}".format(
+                        launch["creator_token_wei"] / 10**18
+                    ),
+                    "Withdrawable $" + launch["symbol"] + " · platform treasury: {:,.6f}".format(
+                        launch["platform_token_wei"] / 10**18
+                    ),
+                ])
             embed.add_field(
-                name="$" + launch["symbol"] + " \u2022 " + launch["reference"],
+                name="$" + launch["symbol"] + " • " + launch["reference"],
+                value=chr(10).join(lines),
+                inline=False,
+            )
+
+        balance_map = {
+            (row["owner"], row["asset"]): int(row["amount_wei"])
+            for row in snapshot["treasuries"]
+        }
+        creators = {item["creator"] for item in launches}
+        platforms = {item["platform"] for item in launches}
+        shared = creators & platforms
+        weth_lines = []
+        if shared:
+            weth_lines.append(
+                "Combined creator/platform treasur{}: {:.8f} WETH".format(
+                    "y" if len(shared) == 1 else "ies",
+                    sum(balance_map.get((owner, WETH.lower()), 0) for owner in shared) / 10**18,
+                )
+            )
+        creator_only = creators - shared
+        platform_only = platforms - shared
+        if creator_only:
+            weth_lines.append(
+                "Creator treasur{}: {:.8f} WETH".format(
+                    "y" if len(creator_only) == 1 else "ies",
+                    sum(balance_map.get((owner, WETH.lower()), 0) for owner in creator_only) / 10**18,
+                )
+            )
+        if platform_only:
+            weth_lines.append(
+                "Platform treasur{}: {:.8f} WETH".format(
+                    "y" if len(platform_only) == 1 else "ies",
+                    sum(balance_map.get((owner, WETH.lower()), 0) for owner in platform_only) / 10**18,
+                )
+            )
+        embed.add_field(
+            name="Withdrawable WETH already deposited",
+            value=chr(10).join(weth_lines) if weth_lines else "0.00000000 WETH",
+            inline=False,
+        )
+
+        gas_price = int(snapshot.get("gas_price_wei") or 0)
+        collection_gas = int(snapshot.get("collection_estimated_gas") or 0)
+        collection_fee = collection_gas * gas_price
+        withdrawal_gas = int(snapshot.get("claim_estimated_gas") or 0)
+        withdrawal_fee = int(snapshot.get("claim_estimated_fee_wei") or 0)
+        collection_quality = "Complete" if all(
+            item.get("collection_gas") is not None for item in launches
+        ) else "Partial"
+        gas_lines = [
+            "Collect new LP fees: {} estimate · {:,} gas · {:.8f} ETH".format(
+                collection_quality, collection_gas, collection_fee / 10**18
+            ),
+            (
+                "Withdraw deposited balances: {:,} gas · {:.8f} ETH".format(
+                    withdrawal_gas, withdrawal_fee / 10**18
+                )
+                if snapshot["treasuries"]
+                else "Withdraw deposited balances: unavailable until a balance exists"
+            ),
+            "CryptoWallet requests CDP sponsorship; an external wallet pays its own network gas.",
+        ]
+        embed.add_field(name="Expected network cost", value=chr(10).join(gas_lines), inline=False)
+        if not snapshot["treasuries"] and not portfolio:
+            embed.add_field(
+                name="Available action",
                 value=(
-                    "Creator token deposited: {:,.6f}\n"
-                    "Platform token deposited: {:,.6f}\n"
-                    "Collection: {}"
-                ).format(
-                    launch["creator_token_wei"] / 10**18,
-                    launch["platform_token_wei"] / 10**18,
-                    gas_text,
+                    "You may collect new LP fees using one wallet route. There is currently "
+                    "nothing deposited to withdraw."
                 ),
                 inline=False,
             )
-        creator_weth: dict[str, int] = {}
-        platform_weth: dict[str, int] = {}
-        creators = {item["creator"] for item in launches}
-        platforms = {item["platform"] for item in launches}
-        for row in snapshot["treasuries"]:
-            if row["asset"] != WETH.lower():
-                continue
-            if row["owner"] in creators:
-                creator_weth[row["owner"]] = row["amount_wei"]
-            if row["owner"] in platforms:
-                platform_weth[row["owner"]] = row["amount_wei"]
-        shared = creators & platforms
-        creator_total = sum(value for owner, value in creator_weth.items() if owner not in shared)
-        platform_total = sum(value for owner, value in platform_weth.items() if owner not in shared)
-        shared_total = sum(creator_weth.get(owner, 0) for owner in shared)
-        weth_lines = ["Creator-only: {:.8f} WETH".format(creator_total / 10**18),
-                      "Platform-only: {:.8f} WETH".format(platform_total / 10**18)]
-        if shared:
-            weth_lines.append("Shared creator/platform address: {:.8f} WETH".format(shared_total / 10**18))
-        embed.add_field(name="Deposited WETH totals", value=chr(10).join(weth_lines), inline=False)
-        fee = snapshot.get("estimated_fee_wei", 0)
-        estimate_label = "Complete" if snapshot.get("complete_estimate") else "Partial"
-        embed.add_field(
-            name="Network gas preflight",
-            value=("{} estimate: {:,} gas · {:.8f} ETH at the current gas price"
-                   + chr(10) + "CryptoWallet requests CDP sponsorship; an external wallet pays its own network gas.").format(
-                estimate_label, snapshot.get("estimated_gas", 0), fee / 10**18
-            ),
-            inline=False,
-        )
         if portfolio and len(launches) > 10:
             page = offset // 10 + 1
             pages = (len(launches) + 9) // 10
-            embed.add_field(name="Portfolio page", value="{} of {} · {} total launches".format(page, pages, len(launches)), inline=False)
-        if not snapshot["treasuries"] and not portfolio:
             embed.add_field(
-                name="Withdrawal availability",
-                value=(
-                    "No deposited balances are currently withdrawable. Collection may still "
-                    "discover new LP fees; choose only one collection route."
-                ),
+                name="Portfolio page",
+                value="{} of {} · {} total launches".format(page, pages, len(launches)),
                 inline=False,
             )
         embed.set_footer(
-            text="Collection is token-scoped · deposited balance withdrawals are treasury-wide"
+            text="Collect once through one route · withdraw only exact deposited balances"
         )
         return (embed, snapshot) if include_snapshot else embed
 
@@ -1048,7 +1107,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         for row in snapshot["treasuries"]:
             if row["owner"] not in allowed:
                 continue
-            role = "Creator" if row["owner"] == first_creator else "Platform"
+            role = (
+                "Combined creator/platform"
+                if first_creator == first_platform and row["owner"] == first_creator
+                else "Creator" if row["owner"] == first_creator else "Platform"
+            )
             asset = "WETH" if row["asset"] == WETH.lower() else "$" + symbols.get(row["asset"], row["asset"][:8])
             rows.append(role + " · " + asset + ": " + format(row["amount_wei"] / 10**18, ",.8f"))
             if row["asset"] == WETH.lower() and row["owner"] == first_creator:

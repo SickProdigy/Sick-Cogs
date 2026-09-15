@@ -313,7 +313,7 @@ class ClankerRewardReviewView(discord.ui.View):
         await interaction.followup.send("Open this protected one-time link to collect this token with its administrator wallet:"
                                         + chr(10) + url, ephemeral=True)
 
-    @discord.ui.button(label="Withdraw deposited balances", emoji="📋", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Review withdrawable balances", emoji="📋", style=discord.ButtonStyle.secondary)
     async def review_withdrawal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
