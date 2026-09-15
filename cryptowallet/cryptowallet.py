@@ -267,6 +267,18 @@ class CryptoWallet(
             raise RuntimeError("CryptoWallet has no Base Sepolia address for this user.")
         return address
 
+    async def clanker_spendable_balance(self, user) -> dict:
+        """Return the exact Base Sepolia signer and its current native balance."""
+        profile = await self.get_or_create_wallet_profile(user)
+        account = self._account_for_network(profile, BASE_SEPOLIA.key)
+        address = str(account.get("address") or "") if account else ""
+        if not address:
+            raise RuntimeError("CryptoWallet has no Base Sepolia address for this user.")
+        balance_wei = await self.wallet_provider.get_native_balance(
+            address, BASE_SEPOLIA.key
+        )
+        return {"address": address, "balance_wei": int(balance_wei)}
+
     @staticmethod
     def clanker_execution_terms(native_value_wei: int = 0) -> dict:
         """Return the exact bounded spending policy shown on Clanker review cards."""
@@ -309,6 +321,16 @@ class CryptoWallet(
                     account.get("address") if account else None,
                     deployment_id, application_id)):
             raise RuntimeError("CryptoWallet signing identity is incomplete.")
+
+        available_wei = await self.wallet_provider.get_native_balance(
+            str(account["address"]), BASE_SEPOLIA.key
+        )
+        required_wei = int(execution_terms["native_value_wei"])
+        if int(available_wei) < required_wei:
+            raise RuntimeError(
+                "CryptoWallet has insufficient Base Sepolia ETH for the reviewed "
+                "creator buy-in."
+            )
 
         intent = signing_intent_from_clanker_launch(
             launch, operation, deployment_id=str(deployment_id),

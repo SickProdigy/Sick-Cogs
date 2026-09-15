@@ -1798,6 +1798,26 @@ class _ClankerLifecycleHarness(ClankerLifecycleMixin):
         self.wallet_provider = provider
 
 
+class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spendable_balance_is_bound_to_base_sepolia_account(self):
+        provider = SimpleNamespace(get_native_balance=AsyncMock(return_value=12345))
+        harness = SimpleNamespace(
+            get_or_create_wallet_profile=AsyncMock(return_value={
+                "accounts": [{"network": BASE_SEPOLIA.key, "address": "0x" + "12" * 20}]
+            }),
+            _account_for_network=lambda profile, network: profile["accounts"][0],
+            wallet_provider=provider,
+        )
+        result = await CryptoWallet.clanker_spendable_balance(
+            harness, SimpleNamespace(id=7)
+        )
+        self.assertEqual(result["balance_wei"], 12345)
+        self.assertEqual(result["address"], "0x" + "12" * 20)
+        provider.get_native_balance.assert_awaited_once_with(
+            "0x" + "12" * 20, BASE_SEPOLIA.key
+        )
+
+
 class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_atomic_claim_rejects_replay(self):
         launch = ClankerIntentFixtures.clanker_intent()
