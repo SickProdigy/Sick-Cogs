@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 from .. import clanker as clanker_module
 from ..clanker import Clanker
 from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
-                     ClankerDraftHistoryView, ClankerDraftView, ClankerFailedLaunchView,
+                     ClankerDraftHistoryView, ClankerDraftView, ClankerFailedLaunchView, ClankerVaultModal,
                      ClankerLaunchHistoryView, ClankerReceiptRewardsView,
                      ClankerRewardReviewView, ClankerVerifiedView,
                      draft_values_from_record, format_vault_duration,
@@ -582,7 +582,12 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         )
         fields = {field.name: field.value for field in view.embed().fields}
         self.assertIn("Reserves part of the supply", fields["Vault · optional"])
-        self.assertIn("Starter example: 10% Supply Percentage, 30d Lockup", fields["Vault · optional"])
+        self.assertIn("Starter example: 10% Supply Percentage, 6m Lockup", fields["Vault · optional"])
+        self.assertIn("m = 30-day months", fields["Vault · optional"])
+        modal = ClankerVaultModal(view)
+        self.assertEqual(modal.lockup_input.default, "6m")
+        self.assertEqual(modal.vesting_input.default, "")
+        self.assertIn("Blank = full unlock", modal.vesting_input.placeholder)
         view.draft["vault"] = {"percentage": 10, "lockupDuration": 2592000,
                                  "vestingDuration": 7776000, "recipient": None}
         fields = {field.name: field.value for field in view.embed().fields}
@@ -599,6 +604,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(parse_vault_duration("6m"), 15552000)
         self.assertEqual(parse_vault_duration("1y"), 31536000)
         self.assertEqual(parse_vault_duration("none", allow_zero=True), 0)
+        self.assertEqual(parse_vault_duration("", allow_zero=True), 0)
         self.assertEqual(format_vault_duration(15552000), "6m")
         with self.assertRaisesRegex(ValueError, "7d, 2w, 6m"):
             parse_vault_duration("604800")

@@ -33,7 +33,7 @@ _VAULT_DURATION_UNITS = {"h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 
 
 def parse_vault_duration(value: str, *, allow_zero: bool = False) -> int:
     raw = str(value or "").strip().lower()
-    if allow_zero and raw in {"0", "none", "off"}:
+    if allow_zero and raw in {"", "0", "none", "off"}:
         return 0
     match = re.fullmatch(r"([1-9][0-9]*)\s*([hdwmy])", raw)
     if not match:
@@ -159,14 +159,15 @@ class ClankerVaultModal(discord.ui.Modal):
             placeholder="Starter example: 10", required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
-            label="Lockup duration (minimum 7d)",
-            default=format_vault_duration(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS),
-            placeholder="7d, 2w, 6m, or 1y", max_length=10,
+            label="Lockup duration (min 7d; d/w/m/y)",
+            default=format_vault_duration(vault.get("lockupDuration") or 6 * 2592000),
+            placeholder="Suggested: 6m", max_length=10,
         )
         self.vesting_input = discord.ui.TextInput(
-            label="Vesting duration (optional)",
-            default=format_vault_duration(vault.get("vestingDuration") or 0),
-            placeholder="Gradual unlock: none, 30d, 6m, or 1y", max_length=10,
+            label="Vesting duration (optional; d/w/m/y)",
+            default=(format_vault_duration(vault.get("vestingDuration"))
+                     if vault.get("vestingDuration") else ""),
+            placeholder="Blank = full unlock; example: 3m", max_length=10,
         )
         self.recipient_input = discord.ui.TextInput(
             label="Recipient (blank uses signer wallet)", default=str(vault.get("recipient") or ""),
@@ -1345,9 +1346,10 @@ class ClankerDraftView(discord.ui.View):
                 name="Vault · optional",
                 value=(
                     "Reserves part of the supply so it cannot circulate immediately. "
-                    "Starter example: 10% Supply Percentage, 30d Lockup.\n"
-                    "10% of the supply will be vaulted and locked for 30 days. Vesting is "
-                    "optional and releases it gradually after the lockup."
+                    "Starter example: 10% Supply Percentage, 6m Lockup.\n"
+                    "10% of the supply will be vaulted and locked for 6 months. Vesting is "
+                    "optional and releases it gradually after the lockup.\n"
+                    "Duration units: d = days, w = weeks, m = 30-day months, y = years."
                 ),
                 inline=False,
             )
