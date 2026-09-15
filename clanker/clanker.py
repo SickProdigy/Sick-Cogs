@@ -1,10 +1,13 @@
+import asyncio
 import copy
 import datetime
 import io
+import ipaddress
 import json
 import logging
 import re
 import secrets
+import socket
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse
 
@@ -126,6 +129,45 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
 
 
 
+async def verify_internal_receipt(
+    transaction_hash: str, operation: Dict[str, Any], intent: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Verify a confirmed smart-account launch from its factory receipt event."""
+    if not TX_HASH_RE.fullmatch(str(transaction_hash)):
+        raise ValueError("The internal Clanker transaction hash is invalid.")
+    receipt = await clanker_rpc("eth_getTransactionReceipt", [transaction_hash])
+    if not isinstance(receipt, dict):
+        raise RuntimeError("The confirmed Clanker receipt is unavailable.")
+    if int(str(receipt.get("status", "0x0")), 16) != 1:
+        raise ValueError("The internal Clanker transaction failed on-chain.")
+    logs = receipt.get("logs")
+    if not isinstance(logs, list):
+        raise RuntimeError("Base Sepolia returned malformed receipt logs.")
+    created = [
+        item for item in logs
+        if isinstance(item, dict)
+        and str(item.get("address", "")).lower() == str(operation["to"]).lower()
+        and isinstance(item.get("topics"), list)
+        and len(item["topics"]) >= 3
+        and str(item["topics"][0]).lower() == TOKEN_CREATED_TOPIC
+    ]
+    if len(created) != 1:
+        raise ValueError("The receipt has no unique pinned Clanker TokenCreated event.")
+    token_address = "0x" + str(created[0]["topics"][1])[-40:].lower()
+    token_admin = "0x" + str(created[0]["topics"][2])[-40:].lower()
+    expected_admin = str((intent.get("token") or {}).get("admin") or "").lower()
+    if not ADDRESS_RE.fullmatch(token_address) or token_admin != expected_admin:
+        raise ValueError("The confirmed Clanker token event does not match the review card.")
+    code = str(await clanker_rpc("eth_getCode", [token_address, "latest"]) or "").lower()
+    if code in {"", "0x", "0x0"}:
+        raise ValueError("The confirmed Clanker token has no deployed bytecode.")
+    return {
+        "token_address": token_address,
+        "transaction_hash": str(transaction_hash).lower(),
+        "block_number": int(str(receipt["blockNumber"]), 16),
+    }
+
+
 class Clanker(ClankerAdminMixin, commands.Cog):
     """Prepare and orchestrate Clanker token launch requests on Base Sepolia."""
 
@@ -162,6 +204,33 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**self.default_guild)
         self.user_cooldowns: Dict[Tuple[int, int], datetime.datetime] = {}
+        self.confirmation_tasks: set[asyncio.Task] = set()
+
+    async def cog_load(self):
+        for guild_id, data in (await self.config.all_guilds()).items():
+            for record in data.get("audit_log") or []:
+                if (
+                    record.get("status") == "internal_submitted"
+                    and record.get("confirmation_channel_id")
+                    and record.get("confirmation_message_id")
+                ):
+                    self._start_confirmation_task(
+                        int(guild_id), int(record["requester_id"]),
+                        str(record["launch_id"]),
+                    )
+
+    def cog_unload(self):
+        for task in self.confirmation_tasks:
+            task.cancel()
+
+    def _start_confirmation_task(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        task = self.bot.loop.create_task(
+            self._track_internal_confirmation(guild_id, user_id, launch_id)
+        )
+        self.confirmation_tasks.add(task)
+        task.add_done_callback(self.confirmation_tasks.discard)
 
     async def red_delete_data_for_user(self, **kwargs):
         """This cog stores no per-user profile data."""
@@ -171,6 +240,49 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def validate_https_url(url: str) -> bool:
         parsed = urlparse((url or "").strip())
         return parsed.scheme == "https" and bool(parsed.netloc)
+
+    async def validate_remote_image(self, url: str) -> None:
+        """Validate a direct public HTTPS raster image without downloading it."""
+        parsed = urlparse((url or "").strip())
+        if not self.validate_https_url(url) or not parsed.hostname:
+            raise ValueError("Image URL must be a direct public HTTPS image URL.")
+        try:
+            addresses = await asyncio.get_running_loop().getaddrinfo(
+                parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror as exc:
+            raise ValueError("Image host could not be resolved.") from exc
+        for address in addresses:
+            ip = ipaddress.ip_address(address[4][0])
+            if not ip.is_global:
+                raise ValueError("Image URL must resolve only to public internet addresses.")
+        timeout = aiohttp.ClientTimeout(total=8)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(
+                    url, headers={"Range": "bytes=0-511"}, allow_redirects=False
+                ) as response:
+                    if response.status not in {200, 206}:
+                        raise ValueError(
+                            "Image URL must respond directly without redirects or errors."
+                        )
+                    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                    if content_type not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
+                        raise ValueError("Image URL must return a JPEG, PNG, GIF, or WebP image.")
+                    length = response.headers.get("Content-Length")
+                    if length and int(length) > 8 * 1024 * 1024:
+                        raise ValueError("Image must be 8 MB or smaller.")
+                    prefix = await response.content.read(512)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            raise ValueError("Image URL could not be reached safely.") from exc
+        signatures = (
+            prefix.startswith(b"\xff\xd8\xff"),
+            prefix.startswith(b"\x89PNG\r\n\x1a\n"),
+            prefix.startswith((b"GIF87a", b"GIF89a")),
+            prefix.startswith(b"RIFF") and prefix[8:12] == b"WEBP",
+        )
+        if not any(signatures):
+            raise ValueError("Image response does not contain the advertised image format.")
 
     async def companion_session_url(self) -> str:
         """Return the single shared CryptoWallet companion session page."""
@@ -753,6 +865,111 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             record["signing_payload_hash"] = result["signing_payload_hash"]
             record["approval_expires_at"] = int(result["expires_at"])
 
+    async def schedule_internal_confirmation(
+        self, guild: discord.Guild, user: Any, record: Dict[str, Any],
+        message: discord.Message,
+    ) -> None:
+        """Persist the result-card destination and track one submitted launch."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
+            if len(matches) != 1 or matches[0].get("status") != "internal_submitted":
+                return
+            matches[0]["confirmation_channel_id"] = int(message.channel.id)
+            matches[0]["confirmation_message_id"] = int(message.id)
+        self._start_confirmation_task(
+            guild.id, int(user.id), str(record["launch_id"])
+        )
+
+    async def _track_internal_confirmation(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        await asyncio.sleep(20)
+        for delay in (30, 45, 60, 90, 120, 180, 300, 300, 300):
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                return
+            record = await self.get_launch_record(guild, launch_id)
+            if not record or record.get("status") != "internal_submitted":
+                return
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            try:
+                result = await self.refresh_internal_wallet_status(user, record)
+                await self._persist_internal_status(guild, launch_id, result)
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                await asyncio.sleep(delay)
+                continue
+            if result["status"] in {"confirmed", "failed", "uncertain"}:
+                await self._deliver_internal_result(guild, user, launch_id, result)
+                return
+            await asyncio.sleep(delay)
+
+    async def _persist_internal_status(
+        self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1 or matches[0].get("execution_route") != "internal":
+                raise RuntimeError("The internal launch record changed during confirmation.")
+            record = matches[0]
+            record.update({
+                "status": "internal_" + result["status"],
+                "provider_status": result.get("provider_status"),
+                "attempt_id": result.get("attempt_id"),
+                "user_operation_hash": result.get("user_operation_hash"),
+                "transaction_hash": result.get("transaction_hash"),
+                "block_number": result.get("block_number"),
+            })
+            return copy.deepcopy(record)
+
+    async def _deliver_internal_result(
+        self, guild: discord.Guild, user: Any, launch_id: str, result: Dict[str, Any]
+    ) -> None:
+        record = await self.get_launch_record(guild, launch_id)
+        if not record:
+            return
+        if result["status"] == "confirmed" and result.get("transaction_hash"):
+            try:
+                verified = await verify_internal_receipt(
+                    result["transaction_hash"], record["operation"], record["intent"]
+                )
+                async with self.config.guild(guild).audit_log() as audit_log:
+                    match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
+                    match.update(verified)
+                record.update(verified)
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                log.exception("Could not verify confirmed Clanker receipt %s", launch_id)
+                async with self.config.guild(guild).audit_log() as audit_log:
+                    match = next(
+                        item for item in audit_log
+                        if str(item.get("launch_id")) == launch_id
+                    )
+                    match["status"] = "internal_uncertain"
+                    match["provider_status"] = "receipt_verification_failed"
+                record["status"] = "internal_uncertain"
+                record["provider_status"] = "receipt_verification_failed"
+        embed = self.launch_record_embed(record)
+        color = discord.Color.green() if record["status"] == "internal_confirmed" else discord.Color.red()
+        embed.color = color
+        tx_hash = record.get("transaction_hash")
+        if record.get("token_address"):
+            embed.add_field(name="Token contract", value=f"[{record['token_address']}](https://sepolia.basescan.org/address/{record['token_address']})", inline=False)
+        if tx_hash:
+            embed.add_field(name="Transaction", value=f"[{tx_hash}](https://sepolia.basescan.org/tx/{tx_hash})", inline=False)
+        if record.get("user_operation_hash"):
+            embed.add_field(name="User operation", value=f"`{record['user_operation_hash']}`", inline=False)
+        image_url = (record.get("payload") or {}).get("image")
+        if image_url:
+            embed.set_thumbnail(url=image_url)
+        channel_id = int(record.get("confirmation_channel_id", 0) or 0)
+        message_id = int(record.get("confirmation_message_id", 0) or 0)
+        try:
+            channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
+            message = await channel.fetch_message(message_id)
+            await message.edit(embed=embed, view=None)
+            await user.send(embed=embed)
+        except discord.HTTPException:
+            log.exception("Could not deliver Clanker confirmation %s", launch_id)
+
     async def get_launch_record(self, guild: discord.Guild, launch_id: str) -> Optional[Dict[str, Any]]:
         audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
         needle = launch_id.strip().lower()
@@ -1190,18 +1407,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         try:
             result = await self.refresh_internal_wallet_status(ctx.author, record)
-            async with self.config.guild(ctx.guild).audit_log() as audit_log:
-                matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
-                if len(matches) != 1 or matches[0].get("execution_route") != "internal":
-                    raise RuntimeError("The launch record changed during status refresh.")
-                matches[0].update({
-                    "status": "internal_" + result["status"],
-                    "provider_status": result.get("provider_status"),
-                    "attempt_id": result.get("attempt_id"),
-                    "user_operation_hash": result.get("user_operation_hash"),
-                    "transaction_hash": result.get("transaction_hash"),
-                    "block_number": result.get("block_number"),
-                })
+            await self._persist_internal_status(
+                ctx.guild, str(record["launch_id"]), result
+            )
+            if result["status"] in {"confirmed", "failed", "uncertain"}:
+                await self._deliver_internal_result(
+                    ctx.guild, ctx.author, str(record["launch_id"]), result
+                )
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send(f"Clanker could not refresh CryptoWallet status: {exc}")
             return

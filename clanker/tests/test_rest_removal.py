@@ -507,6 +507,32 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "invalid Clanker lifecycle"):
             await cog.refresh_internal_wallet_status(user, record)
 
+    async def test_internal_receipt_extracts_bound_created_token(self):
+        tx_hash = "0x" + "11" * 32
+        token = "0x" + "22" * 20
+        operation = {"to": "0xE85A59c628F7d27878ACeB4bf3b35733630083a9"}
+        intent = {"token": {"admin": WALLET}}
+        receipt = {
+            "status": "0x1", "blockNumber": "0x7b",
+            "logs": [{
+                "address": operation["to"],
+                "topics": [
+                    clanker_module.TOKEN_CREATED_TOPIC,
+                    "0x" + "00" * 12 + token[2:],
+                    "0x" + "00" * 12 + WALLET[2:].lower(),
+                ],
+            }],
+        }
+        with patch.object(
+            clanker_module, "clanker_rpc",
+            AsyncMock(side_effect=[receipt, "0x6000"]),
+        ):
+            result = await clanker_module.verify_internal_receipt(
+                tx_hash, operation, intent
+            )
+        self.assertEqual(result["token_address"], token)
+        self.assertEqual(result["block_number"], 123)
+
     async def test_external_verifier_requires_exact_created_token(self):
         tx_hash = "0x" + "ab" * 32
         sender, token = WALLET, "0x" + "78" * 20

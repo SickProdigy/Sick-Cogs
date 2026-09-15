@@ -77,8 +77,8 @@ class ClankerBasicsModal(discord.ui.Modal):
                 raise ValueError("Token administrator must be a valid EVM address.")
             if creator_treasury and not is_eth_address(creator_treasury):
                 raise ValueError("Creator reward treasury must be a valid EVM address.")
-            if image_url and not self.view_ref.cog.validate_https_url(image_url):
-                raise ValueError("Image URL must be HTTPS.")
+            if image_url:
+                await self.view_ref.cog.validate_remote_image(image_url)
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
@@ -330,6 +330,8 @@ class ClankerVerifiedView(discord.ui.View):
         embed.set_footer(
             text="Immutable review · Base Sepolia only · launching cannot be undone"
         )
+        if payload.get("image"):
+            embed.set_thumbnail(url=payload["image"])
         return embed
 
     def disable_controls(self) -> None:
@@ -396,6 +398,10 @@ class ClankerVerifiedView(discord.ui.View):
             self.record["status"] = "internal_" + result["status"]
             self.disable_controls()
             await interaction.message.edit(embed=self.embed(), view=self)
+            if result["status"] == "submitted":
+                await self.cog.schedule_internal_confirmation(
+                    self.ctx.guild, interaction.user, self.record, interaction.message
+                )
             detail = result.get("transaction_hash") or result.get("user_operation_hash")
             if result["status"] == "uncertain":
                 message = (
