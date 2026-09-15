@@ -1,5 +1,6 @@
 """Regression tests for removal of the legacy partner REST path."""
 
+import copy
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -633,6 +634,20 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         controls = {item.label: item for item in view.children}
         self.assertEqual(set(controls), {"Claim all rewards", "Claim WETH", "Claim $NMT"})
         self.assertTrue(all(item.disabled for item in controls.values()))
+
+    def test_reward_snapshot_recheck_detects_balance_and_gas_changes(self):
+        base = {"gas_price_wei": 10, "treasuries": [
+            {"owner": WALLET.lower(), "asset": clanker_module.WETH.lower(),
+             "amount_wei": 5, "claim_gas": 50_000},
+        ]}
+        changed_balance = copy.deepcopy(base)
+        changed_balance["treasuries"][0]["amount_wei"] = 6
+        changed_gas = copy.deepcopy(base)
+        changed_gas["gas_price_wei"] = 11
+        fingerprint = ClankerRewardReviewView._snapshot_fingerprint
+        self.assertEqual(fingerprint(base), fingerprint(copy.deepcopy(base)))
+        self.assertNotEqual(fingerprint(base), fingerprint(changed_balance))
+        self.assertNotEqual(fingerprint(base), fingerprint(changed_gas))
 
     def test_reopened_receipt_has_persistent_back_navigation(self):
         cog = SimpleNamespace(

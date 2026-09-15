@@ -264,9 +264,13 @@ class ClankerRewardReviewView(discord.ui.View):
         self.record = copy.deepcopy(record)
         self.user_id = int(user_id)
         self.guild_id = int(guild_id)
-        self.snapshot = copy.deepcopy(snapshot)
         self.processing = False
-        token = str(record.get("token_address") or "").lower()
+        self.claim_token.label = "Claim $" + str(record.get("symbol") or "TOKEN").upper()
+        self._set_snapshot(snapshot)
+
+    def _set_snapshot(self, snapshot: Dict[str, Any]) -> None:
+        self.snapshot = copy.deepcopy(snapshot)
+        token = str(self.record.get("token_address") or "").lower()
         self.claims = [
             {"owner": row["owner"], "asset": row["asset"]}
             for row in self.snapshot.get("treasuries", [])
@@ -279,7 +283,22 @@ class ClankerRewardReviewView(discord.ui.View):
         self.claim_all.disabled = not self.claims
         self.claim_weth.disabled = not self.weth_claims
         self.claim_token.disabled = not self.token_claims
-        self.claim_token.label = "Claim $" + str(record.get("symbol") or "TOKEN").upper()
+
+    @staticmethod
+    def _snapshot_fingerprint(snapshot: Dict[str, Any]) -> tuple:
+        rows = tuple(sorted(
+            (str(row.get("owner") or ""), str(row.get("asset") or ""),
+             int(row.get("amount_wei") or 0), row.get("claim_gas"))
+            for row in snapshot.get("treasuries", [])
+        ))
+        return int(snapshot.get("gas_price_wei") or 0), rows
+
+    def _claims_for(self, scope: str) -> list[dict]:
+        if scope == "weth":
+            return self.weth_claims
+        if scope == "token":
+            return self.token_claims
+        return self.claims
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -289,24 +308,44 @@ class ClankerRewardReviewView(discord.ui.View):
         )
         return False
 
-    async def _claim(self, interaction: discord.Interaction, claims: list[dict], label: str):
+    async def _claim(self, interaction: discord.Interaction, scope: str, label: str):
         if self.processing:
             await interaction.response.send_message("A reward claim is already processing.", ephemeral=True)
             return
+        await interaction.response.defer()
+        try:
+            embed, fresh = await self.cog.reward_preflight_embed(
+                [self.record], portfolio=False, include_snapshot=True
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send("Could not recheck rewards: " + str(exc), ephemeral=True)
+            return
+        if self._snapshot_fingerprint(fresh) != self._snapshot_fingerprint(self.snapshot):
+            self._set_snapshot(fresh)
+            await interaction.edit_original_response(embed=embed, view=self)
+            await interaction.followup.send(
+                "Claimable balances or gas changed. The card was refreshed; review it and click again.",
+                ephemeral=True,
+            )
+            return
+        claims = self._claims_for(scope)
+        if not claims:
+            self._set_snapshot(fresh)
+            await interaction.edit_original_response(embed=embed, view=self)
+            await interaction.followup.send("There are no rewards available for that choice.", ephemeral=True)
+            return
         self.processing = True
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
-        await interaction.response.edit_message(view=self)
+        self.claim_all.disabled = True
+        self.claim_weth.disabled = True
+        self.claim_token.disabled = True
+        await interaction.edit_original_response(view=self)
         try:
             result = await self.cog.withdraw_launch_treasuries_internal(
                 interaction.user, self.record, claims, self.guild_id
             )
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             self.processing = False
-            self.claim_all.disabled = not self.claims
-            self.claim_weth.disabled = not self.weth_claims
-            self.claim_token.disabled = not self.token_claims
+            self._set_snapshot(self.snapshot)
             await interaction.edit_original_response(view=self)
             await interaction.followup.send(str(exc), ephemeral=True)
             return
@@ -322,15 +361,15 @@ class ClankerRewardReviewView(discord.ui.View):
 
     @discord.ui.button(label="Claim all rewards", emoji="💰", style=discord.ButtonStyle.success)
     async def claim_all(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._claim(interaction, self.claims, "All available rewards")
+        await self._claim(interaction, "all", "All available rewards")
 
     @discord.ui.button(label="Claim WETH", style=discord.ButtonStyle.primary)
     async def claim_weth(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._claim(interaction, self.weth_claims, "WETH rewards")
+        await self._claim(interaction, "weth", "WETH rewards")
 
     @discord.ui.button(label="Claim token", style=discord.ButtonStyle.primary)
     async def claim_token(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self._claim(interaction, self.token_claims, self.claim_token.label + " rewards")
+        await self._claim(interaction, "token", self.claim_token.label + " rewards")
 
 
 class ClankerClaimAllSelect(discord.ui.Select):
