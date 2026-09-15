@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 from .. import clanker as clanker_module
 from ..clanker import Clanker
-from ..views import ClankerDraftHistoryView, ClankerLaunchHistoryView, ClankerVerifiedView
+from ..views import (ClankerDeleteDraftsView, ClankerDraftHistoryView,
+                     ClankerLaunchHistoryView, ClankerVerifiedView)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -564,6 +565,16 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
         self.assertIn("uncertain", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
+
+    def test_draft_delete_confirmation_labels_match_scope(self):
+        single = ClankerDeleteDraftsView(SimpleNamespace(), SimpleNamespace(), 7, ["one"])
+        bulk = ClankerDeleteDraftsView(SimpleNamespace(), SimpleNamespace(), 7, ["one", "two"])
+        single_labels = [item.label for item in single.children]
+        bulk_labels = [item.label for item in bulk.children]
+        self.assertIn("Delete draft", single_labels)
+        self.assertIn("Keep draft", single_labels)
+        self.assertIn("Delete all drafts", bulk_labels)
+        self.assertIn("Keep drafts", bulk_labels)
 
     async def test_delete_user_drafts_removes_only_owned_unsubmitted_records(self):
         records = [

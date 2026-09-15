@@ -483,6 +483,9 @@ class ClankerDeleteDraftsView(discord.ui.View):
         self.user_id = int(user_id)
         self.launch_ids = list(launch_ids)
         self.processing = False
+        if len(self.launch_ids) == 1:
+            self.confirm.label = "Delete draft"
+            self.cancel.label = "Keep draft"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -501,7 +504,7 @@ class ClankerDeleteDraftsView(discord.ui.View):
         try:
             deleted = await self.cog.delete_user_drafts(self.guild, interaction.user, self.launch_ids)
             embed = discord.Embed(
-                title="Clanker drafts deleted",
+                title="Clanker draft deleted" if deleted == 1 else "Clanker drafts deleted",
                 description="Deleted {} unsubmitted draft{}. Nothing was sent to a wallet.".format(
                     deleted, "" if deleted == 1 else "s"
                 ),
