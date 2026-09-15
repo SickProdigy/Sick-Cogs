@@ -588,7 +588,10 @@ class WalletTransactionCommands:
 
     @WalletCoreCommands.wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, *arguments: str):
-        """Prepare an unsigned native-token or registered ERC-20 transfer."""
+        """Prepare a transfer.
+
+        Prepares a reviewed native-token or registered ERC-20 transfer intent.
+        """
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if not await self._wallet_read_allowed(ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS):
@@ -719,7 +722,10 @@ class WalletTransactionCommands:
 
     @WalletCoreCommands.wallet.command(name="intent", aliases=("transaction",))
     async def wallet_intent(self, ctx: commands.Context, reference: str):
-        """Show one of your private stored intents by bot reference."""
+        """Show one transfer intent.
+
+        Shows one of your private stored transaction intents by bot reference.
+        """
         intents = await self.expire_and_trim_intents(ctx.author)
         lookup = reference.strip()
         data = intents.get(lookup)

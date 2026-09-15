@@ -12,7 +12,10 @@ class WalletAccountCommands:
 
     @WalletCoreCommands.wallet.command(name="recovery", aliases=("recover", "backup"))
     async def wallet_recovery(self, ctx: commands.Context):
-        """DM a protected link for backing up the wallet profile's account keys."""
+        """Back up wallet keys.
+
+        DMs a protected link for backing up the wallet profile's account keys.
+        """
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if not await self._wallet_read_allowed(

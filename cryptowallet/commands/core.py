@@ -270,7 +270,10 @@ class WalletCoreCommands:
         name="wallet", aliases=("wallets", "cryptowallet"), invoke_without_command=True
     )
     async def wallet(self, ctx: commands.Context, member: discord.Member = None):
-        """Show your wallet or another member's existing public wallet profile."""
+        """Show a public wallet profile.
+
+        Shows your wallet or another member's existing public testnet profile.
+        """
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -308,7 +311,10 @@ class WalletCoreCommands:
 
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context, network_key: str = None):
-        """Show all testnet assets or details for one enabled testnet."""
+        """Show wallet balances.
+
+        Shows all testnet assets or details for one enabled testnet.
+        """
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -329,7 +335,10 @@ class WalletCoreCommands:
 
     @wallet.command(name="mode", aliases=("environment",))
     async def wallet_mode(self, ctx: commands.Context, environment: str = None):
-        """Show or select the wallet environment; live chains remain disabled."""
+        """Show wallet mode.
+
+        Shows or selects the wallet environment; live chains remain disabled.
+        """
         user_config = self.config.user(ctx.author)
         current = await user_config.selected_environment()
         if environment is None:
@@ -350,14 +359,20 @@ class WalletCoreCommands:
 
     @wallet.group(name="token", aliases=("tokens",), invoke_without_command=True)
     async def wallet_token(self, ctx: commands.Context):
-        """Add or list tokens shared by this bot installation."""
+        """Manage shared tokens.
+
+        Adds or lists tokens shared by this bot installation.
+        """
         await ctx.invoke(self.wallet_token_list)
 
     @wallet_token.command(name="add")
     async def wallet_token_add(
         self, ctx: commands.Context, network_key: str, contract_address: str
     ):
-        """Validate and add an ERC-20 token for every wallet user."""
+        """Add a shared token.
+
+        Validates and adds an ERC-20 token for every wallet user.
+        """
         if not await self._wallet_read_allowed(ctx, "token_submission", 30):
             return
         network = NETWORKS.get(network_key.strip().lower())
@@ -514,7 +529,10 @@ class WalletCoreCommands:
     async def wallet_notifications(
         self, ctx: commands.Context, enabled: bool = None
     ):
-        """Show or change optional wallet transaction confirmation DMs."""
+        """Manage confirmation DMs.
+
+        Shows or changes optional wallet transaction confirmation notifications.
+        """
         if enabled is None:
             enabled = await self.config.user(ctx.author).notifications_enabled()
             state = "enabled" if enabled else "disabled"
@@ -533,7 +551,10 @@ class WalletCoreCommands:
 
     @wallet.group(name="security", invoke_without_command=True)
     async def wallet_security(self, ctx: commands.Context):
-        """Show emergency wallet-lock status and available protections."""
+        """Show wallet security.
+
+        Shows emergency lock status and available wallet protections.
+        """
         locked = await self.config.user(ctx.author).security_locked()
         if locked:
             locked_at = int(await self.config.user(ctx.author).security_locked_at() or 0)
@@ -584,7 +605,10 @@ class WalletCoreCommands:
 
     @wallet.command(name="networks")
     async def wallet_networks(self, ctx: commands.Context):
-        """List networks enabled for this prototype."""
+        """List wallet networks.
+
+        Lists the test networks enabled for this prototype.
+        """
         lines = []
         for network in NETWORKS.values():
             capabilities = ", ".join(
@@ -609,7 +633,10 @@ class WalletCoreCommands:
 
     @wallet.command(name="network")
     async def wallet_network(self, ctx: commands.Context, network_key: str = None):
-        """Show or select the preferred network for network-specific commands."""
+        """Choose a wallet network.
+
+        Shows or selects the preferred network for network-specific commands.
+        """
         user_config = self.config.user(ctx.author)
         current_key = await user_config.selected_network()
         if network_key is None:
