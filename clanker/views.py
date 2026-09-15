@@ -418,6 +418,99 @@ class ClankerClaimAllView(discord.ui.View):
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
+def draft_values_from_record(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Restore editable card values from a persisted route-neutral payload."""
+    payload = copy.deepcopy(record.get("payload") or {})
+    rewards = (payload.get("rewards") or {}).get("recipients") or []
+    platform = str(record.get("platform_treasury") or "").lower()
+    creator = next(
+        (item for item in rewards if str(item.get("recipient") or "").lower() != platform),
+        {},
+    )
+    airdrop = payload.get("airdrop")
+    return {
+        "name": payload.get("name"),
+        "symbol": payload.get("symbol"),
+        "supply": DEFAULT_CLANKER_SUPPLY,
+        "primary_beneficiary": payload.get("tokenAdmin"),
+        "creator_reward_recipient": creator.get("recipient"),
+        "image_url": payload.get("image") or None,
+        "description": (payload.get("metadata") or {}).get("description") or None,
+        "airdrop": ({
+            "recipients": [],
+            "amount": int(airdrop.get("amount") or 0),
+            "total_input": str(airdrop.get("amount") or ""),
+            "total_label": "saved total",
+            "merkleRoot": airdrop.get("merkleRoot"),
+            "merkleExport": record.get("airdrop_proofs"),
+            "lockupDuration": int(airdrop.get("lockupDuration") or MIN_AIRDROP_LOCKUP_SECONDS),
+            "vestingDuration": int(airdrop.get("vestingDuration") or 0),
+            "preview_only": False,
+        } if airdrop else None),
+    }
+
+
+class ClankerDraftSelect(discord.ui.Select):
+    def __init__(self, parent: "ClankerDraftHistoryView"):
+        self.parent_view = parent
+        options = []
+        for index, record in enumerate(parent.records):
+            reference = str(record.get("launch_ref") or record.get("launch_id") or "unknown")
+            symbol = str(record.get("symbol") or "?").upper()
+            status = "Verified — ready to launch" if record.get("status") == "verified" else "Editable draft"
+            options.append(discord.SelectOption(
+                label=("$" + symbol + " • " + reference)[:100],
+                value=str(index),
+                description=status,
+            ))
+        super().__init__(placeholder="Choose a draft to reopen", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        record = self.parent_view.records[int(self.values[0])]
+        draft = draft_values_from_record(record)
+        if record.get("status") == "verified":
+            try:
+                record = await self.parent_view.cog.refresh_verified_draft(
+                    self.parent_view.ctx.guild, interaction.user, str(record["launch_id"])
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                await interaction.response.send_message(str(exc), ephemeral=True)
+                return
+            view = ClankerVerifiedView(
+                self.parent_view.cog, self.parent_view.ctx, record,
+                self.parent_view.settings, draft,
+            )
+        else:
+            view = ClankerDraftView(
+                self.parent_view.cog, self.parent_view.ctx, self.parent_view.settings,
+                saved_record=record,
+            )
+            view.draft = draft
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
+
+class ClankerDraftHistoryView(discord.ui.View):
+    def __init__(
+        self, cog: "Clanker", ctx: commands.Context, records: list[Dict[str, Any]],
+        settings: Dict[str, Any],
+    ):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.ctx = ctx
+        self.records = copy.deepcopy(list(reversed(records)))
+        self.settings = copy.deepcopy(settings)
+        self.user_id = int(ctx.author.id)
+        self.add_item(ClankerDraftSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person whose drafts are listed can open these cards.", ephemeral=True
+        )
+        return False
+
+
 class ClankerLaunchSelect(discord.ui.Select):
     """Requester-bound selection for reopening one launch receipt."""
 
@@ -726,6 +819,7 @@ class ClankerDraftView(discord.ui.View):
         symbol: Optional[str] = None,
         name: Optional[str] = None,
         creator_address: Optional[str] = None,
+        saved_record: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(timeout=900)
         self.cog = cog
@@ -733,6 +827,7 @@ class ClankerDraftView(discord.ui.View):
         self.settings = settings
         self.user_id = ctx.author.id
         self.processing = False
+        self.saved_record = copy.deepcopy(saved_record) if saved_record else None
         self.draft: Dict[str, Any] = {
             "name": name,
             "symbol": symbol,
@@ -911,7 +1006,13 @@ class ClankerDraftView(discord.ui.View):
             if not isinstance(execution_terms, dict):
                 raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
             record["execution_terms"] = execution_terms
-            await self.cog.add_audit_record(self.ctx.guild, record)
+            if self.saved_record:
+                record = await self.cog.replace_saved_draft(
+                    self.ctx.guild, interaction.user,
+                    str(self.saved_record["launch_id"]), record,
+                )
+            else:
+                await self.cog.add_audit_record(self.ctx.guild, record)
             record = await self.cog.prepare_draft_execution(
                 self.ctx.guild, interaction.user, str(record["launch_id"]), signer_address
             )

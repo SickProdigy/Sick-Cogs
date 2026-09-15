@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from .. import clanker as clanker_module
 from ..clanker import Clanker
-from ..views import ClankerLaunchHistoryView, ClankerVerifiedView
+from ..views import ClankerDraftHistoryView, ClankerLaunchHistoryView, ClankerVerifiedView
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -472,7 +472,10 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
     def make_cog_and_context(self, records, author_id=7):
         cog = Clanker.__new__(Clanker)
         cog.config = SimpleNamespace(
-            guild=lambda guild: SimpleNamespace(audit_log=AsyncMock(return_value=records))
+            guild=lambda guild: SimpleNamespace(
+                audit_log=AsyncMock(return_value=records),
+                all=AsyncMock(return_value={"treasury_address": TREASURY, "platform_bps": 2000}),
+            )
         )
         ctx = SimpleNamespace(
             guild=SimpleNamespace(id=100), author=SimpleNamespace(id=author_id), send=AsyncMock()
@@ -487,10 +490,14 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         ]
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_drafts.callback(cog, ctx, 10)
-        output = ctx.send.await_args.args[0]
-        self.assertIn("mine", output)
-        self.assertNotIn("other-draft", output)
-        self.assertNotIn("mine-launch", output)
+        embed = ctx.send.await_args.kwargs["embed"]
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIsInstance(view, ClankerDraftHistoryView)
+        self.assertEqual(embed.title, "Your Clanker drafts")
+        rendered = "\n".join(field.name for field in embed.fields)
+        self.assertIn("$MINE", rendered)
+        self.assertNotIn("$OTHER", rendered)
+        self.assertNotIn("$LAUNCH", rendered)
 
     async def test_launches_excludes_unsubmitted_drafts(self):
         records = [
@@ -506,7 +513,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(view, ClankerLaunchHistoryView)
         self.assertEqual(view.user_id, 7)
         self.assertEqual(len(view.records), 1)
-        self.assertEqual(embed.title, "Your Clanker launches")
+        self.assertEqual(embed.title, "Your Clanker launch activity")
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("$SUB", embed.fields[0].name)
         self.assertIn("Awaiting external wallet", embed.fields[0].value)
@@ -557,6 +564,52 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["launch_id"], records[0]["launch_id"])
         self.assertEqual(second["launch_id"], records[1]["launch_id"])
         self.assertEqual(other["launch_id"], records[2]["launch_id"])
+
+    async def test_resumed_editable_draft_is_replaced_in_place(self):
+        current = {
+            "launch_id": "test", "launch_ref": "test", "status": "dry_run",
+            "requester_id": 7, "created_at": "original",
+        }
+        records = [current]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        replacement = {
+            "launch_id": "new-random-id", "status": "dry_run",
+            "requester_id": 7, "created_at": "new", "payload": {"name": "Changed"},
+        }
+        result = await cog.replace_saved_draft(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), "test", replacement
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["launch_id"], "test")
+        self.assertEqual(records[0]["created_at"], "original")
+        self.assertEqual(result["payload"]["name"], "Changed")
+
+    async def test_reopening_verified_draft_renews_immutable_window(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["status"] = "verified"
+        record["execution_terms"] = {"gas_limit": 1, "native_value_wei": 0}
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        reopened = await cog.refresh_verified_draft(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), record["launch_id"]
+        )
+        self.assertEqual(reopened["status"], "verified")
+        self.assertEqual(reopened["payload"], payload)
+        self.assertGreater(reopened["intent"]["expires_at"], reopened["intent"]["created_at"])
+        self.assertEqual(
+            reopened["intent"]["created_at"], reopened["execution_created_at"]
+        )
+        self.assertEqual(reopened["operation"]["payload_hash"], reopened["payload_hash"])
 
     async def test_draft_detail_is_requester_bound(self):
         record = {"launch_id": "draft-id", "status": "dry_run", "requester_id": 7}

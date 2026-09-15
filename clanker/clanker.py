@@ -48,7 +48,8 @@ from .helpers import (
 )
 from .admin import ClankerAdminMixin
 from .views import (
-    ClankerClaimAllView, ClankerDraftView, ClankerLaunchHistoryView,
+    ClankerClaimAllView, ClankerDraftHistoryView, ClankerDraftView,
+    ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
 )
 
@@ -659,7 +660,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         records: List[Dict[str, Any]], audit_log: List[Dict[str, Any]]
     ) -> discord.Embed:
         embed = discord.Embed(
-            title="Your Clanker launches",
+            title="Your Clanker launch activity",
             description="Most recent first. Use the short reference with Clanker commands.",
             color=discord.Color.blue(),
         )
@@ -1557,6 +1558,54 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         ]
         return exact[-1] if len(exact) == 1 else None
 
+    async def replace_saved_draft(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+        replacement: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Update one editable draft in place so resuming cannot create duplicates."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [
+                (index, item) for index, item in enumerate(audit_log)
+                if str(item.get("launch_id")) == launch_id
+            ]
+            if len(matches) != 1:
+                raise RuntimeError("The saved Clanker draft is missing or ambiguous.")
+            index, current = matches[0]
+            if current.get("status") != "dry_run" or int(current.get("requester_id", 0)) != int(user.id):
+                raise RuntimeError("Only your editable draft can be replaced.")
+            replacement = copy.deepcopy(replacement)
+            replacement["launch_id"] = current["launch_id"]
+            replacement["launch_ref"] = current.get("launch_ref")
+            replacement["created_at"] = current.get("created_at")
+            audit_log[index] = replacement
+            return copy.deepcopy(replacement)
+
+    async def refresh_verified_draft(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+    ) -> Dict[str, Any]:
+        """Renew a verified draft's signing window without changing launch values."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The verified Clanker draft is missing or ambiguous.")
+            record = matches[0]
+            if record.get("status") != "verified" or int(record.get("requester_id", 0)) != int(user.id):
+                raise RuntimeError("Only your unsubmitted verified draft can be reopened.")
+            payload = copy.deepcopy(record.get("payload"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("The verified Clanker draft has no immutable payload.")
+            now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            intent = self.build_launch_intent(
+                guild.id, user.id, launch_id, payload,
+                created_at=now, expires_at=now + 900,
+            )
+            record["execution_created_at"] = now
+            record["execution_expires_at"] = now + 900
+            record["payload_hash"] = intent.payload_hash
+            record["intent"] = intent.to_dict()
+            record["operation"] = clanker_deployment_operation(intent).to_dict()
+            return copy.deepcopy(record)
+
     async def prepare_draft_execution(
         self, guild: discord.Guild, user: Any, launch_id: str, signer_address: Optional[str]
     ) -> Dict[str, Any]:
@@ -1797,8 +1846,40 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not drafts:
             await ctx.send("You have no saved Clanker drafts.")
             return
-        lines = [self.launch_record_line(record, audit_log) for record in reversed(drafts[-limit:])]
-        await ctx.send(box("\n".join(lines)))
+        embed = discord.Embed(
+            title="Your Clanker drafts",
+            description=(
+                "Not submitted to a wallet. Editable drafts can be changed; verified drafts "
+                "are ready for a final route choice."
+            ),
+            color=discord.Color.blurple(),
+        )
+        for record in reversed(drafts[-limit:]):
+            reference = record.get("launch_ref") or self.launch_reference(record, audit_log)
+            symbol = str(record.get("symbol") or "?").upper()
+            status = (
+                "✅ Verified — ready to launch"
+                if record.get("status") == "verified" else "📝 Editable draft"
+            )
+            created = str(record.get("created_at") or "")
+            try:
+                moment = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+                created = "{} ({})".format(
+                    discord.utils.format_dt(moment, style="f"),
+                    discord.utils.format_dt(moment, style="R"),
+                )
+            except ValueError:
+                created = created or "Unknown"
+            embed.add_field(
+                name="$" + symbol + "  •  " + str(reference),
+                value="**Status:** " + status + "\n**Created:** " + created,
+                inline=False,
+            )
+        settings = await self.config.guild(ctx.guild).all()
+        await ctx.send(
+            embed=embed,
+            view=ClankerDraftHistoryView(self, ctx, drafts[-limit:], settings),
+        )
 
     @clanker.command(name="draft")
     async def clanker_draft(self, ctx: commands.Context, launch_id: str):
