@@ -915,8 +915,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         fee = snapshot.get("estimated_fee_wei", 0)
         estimate_label = "Complete" if snapshot.get("complete_estimate") else "Partial"
         embed.add_field(
-            name="Gas preflight",
-            value="{} estimate: {:,} gas \u00b7 up to {:.8f} ETH at the current gas price".format(
+            name="Network gas preflight",
+            value=("{} estimate: {:,} gas · {:.8f} ETH at the current gas price"
+                   + chr(10) + "CryptoWallet requests CDP sponsorship; an external wallet pays its own network gas.").format(
                 estimate_label, snapshot.get("estimated_gas", 0), fee / 10**18
             ),
             inline=False,
@@ -928,9 +929,33 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 inline=False,
             )
         embed.set_footer(
-            text="Read-only preflight \u00b7 collected WETH is treasury-wide \u00b7 claim controls follow after validation"
+            text="Collect this coin is token-scoped · deposited WETH withdrawals are treasury-wide"
         )
         return embed
+
+    async def collect_launch_rewards_internal(
+        self, user: Any, record: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Collect exactly one launch after CryptoWallet proves the token administrator."""
+        if int(record.get("requester_id", 0) or 0) != int(user.id):
+            raise ValueError("Only the launch requester can start this reward review.")
+        if record.get("status") not in {"internal_confirmed", "external_confirmed"}:
+            raise ValueError("Only a confirmed launch can collect rewards.")
+        token = str(record.get("token_address") or "").lower()
+        admin = str(record.get("token_admin") or "").lower()
+        if not ADDRESS_RE.fullmatch(token) or not ADDRESS_RE.fullmatch(admin):
+            raise ValueError("The confirmed launch has invalid reward bindings.")
+        wallet = self.bot.get_cog("CryptoWallet")
+        collect = getattr(wallet, "clanker_collect_rewards", None) if wallet else None
+        if not callable(collect):
+            raise RuntimeError("CryptoWallet reward collection is unavailable.")
+        result = await collect(
+            user, token=token, token_admin=admin,
+            attempt_id=secrets.token_urlsafe(18),
+        )
+        if str(result.get("provider_status") or "") not in {"pending", "signed", "broadcast", "complete"}:
+            raise RuntimeError("CryptoWallet returned an invalid reward collection status.")
+        return result
 
     async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
         """Submit the exact verified card through CryptoWallet delegation."""

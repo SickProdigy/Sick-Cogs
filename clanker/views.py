@@ -209,6 +209,52 @@ class ClankerAirdropModal(discord.ui.Modal):
         await self.view_ref.refresh(interaction, message)
 
 
+class ClankerRewardReviewView(discord.ui.View):
+    """Owner-bound controls for one coin; never performs a portfolio sweep."""
+
+    def __init__(self, cog: "Clanker", record: Dict[str, Any], user_id: int):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.record = copy.deepcopy(record)
+        self.user_id = int(user_id)
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person who opened this reward review can use it.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Collect this coin", emoji="📥", style=discord.ButtonStyle.success)
+    async def collect(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message("This collection is already processing.", ephemeral=True)
+            return
+        self.processing = True
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        try:
+            result = await self.cog.collect_launch_rewards_internal(interaction.user, self.record)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            self.processing = False
+            button.disabled = False
+            await interaction.edit_original_response(view=self)
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        status = str(result["provider_status"])
+        operation = str(result.get("user_operation_hash") or "")
+        transaction = str(result.get("transaction_hash") or "")
+        lines = ["Submitted collection for this coin only. Status: " + chr(96) + status + chr(96) + "."]
+        if transaction:
+            lines.append("[Transaction](https://sepolia.basescan.org/tx/" + transaction + ")")
+        elif operation:
+            lines.append("Operation: " + chr(96) + operation[:10] + "…" + operation[-8:] + chr(96))
+        lines.append("No treasury-wide deposited rewards were withdrawn.")
+        await interaction.followup.send(chr(10).join(lines), ephemeral=True)
+
+
 class ClankerReceiptRewardsView(discord.ui.View):
     """Open a private reward preflight scoped to one confirmed launch."""
 
@@ -228,7 +274,11 @@ class ClankerReceiptRewardsView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(
+            embed=embed,
+            view=ClankerRewardReviewView(self.cog, self.record, interaction.user.id),
+            ephemeral=True,
+        )
 
 
 class ClankerVerifiedView(discord.ui.View):
