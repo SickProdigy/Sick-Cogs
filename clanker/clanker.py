@@ -1631,6 +1631,40 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         ]
         return exact[-1] if len(exact) == 1 else None
 
+    async def resume_approval_launch(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+    ) -> Dict[str, Any]:
+        """Restore one never-submitted CryptoWallet approval to verified review."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The CryptoWallet approval is missing or ambiguous.")
+            record = matches[0]
+            if (
+                record.get("status") != "awaiting_cryptowallet_approval"
+                or int(record.get("requester_id", 0)) != int(user.id)
+            ):
+                raise RuntimeError("Only your never-submitted CryptoWallet approval can be resumed.")
+            if record.get("transaction_hash") or record.get("user_operation_hash"):
+                raise RuntimeError(
+                    "This launch has a submitted operation and cannot return to approval."
+                )
+            if not isinstance(record.get("payload"), dict):
+                raise RuntimeError("The approval has no reusable Clanker payload.")
+            if not isinstance(record.get("execution_terms"), dict):
+                wallet = self.bot.get_cog("CryptoWallet")
+                get_terms = getattr(wallet, "clanker_execution_terms", None) if wallet else None
+                if not callable(get_terms):
+                    raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
+                terms = get_terms()
+                if not isinstance(terms, dict):
+                    raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
+                record["execution_terms"] = terms
+            record["status"] = "verified"
+            record.pop("dismissed_by_requester", None)
+            record.pop("dismissed_at", None)
+        return await self.refresh_verified_draft(guild, user, launch_id)
+
     async def retry_failed_launch(
         self, guild: discord.Guild, user: Any, launch_id: str,
     ) -> Dict[str, Any]:

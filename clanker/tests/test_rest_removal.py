@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, patch
 
 from .. import clanker as clanker_module
 from ..clanker import Clanker
-from ..views import (ClankerDeleteDraftsView, ClankerDraftHistoryView,
-                     ClankerFailedLaunchView, ClankerLaunchHistoryView,
+from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
+                     ClankerDraftHistoryView, ClankerFailedLaunchView,
+                     ClankerLaunchHistoryView,
                      ClankerVerifiedView)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
@@ -576,6 +577,57 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Keep draft", single_labels)
         self.assertIn("Delete all drafts", bulk_labels)
         self.assertIn("Keep drafts", bulk_labels)
+
+    def test_awaiting_approval_view_has_resume_control_without_refresh(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7))
+        view = ClankerApprovalResumeView(
+            SimpleNamespace(), ctx, {"launch_id": "approval"}, {}
+        )
+        labels = [item.label for item in view.children]
+        self.assertEqual(labels, ["Resume approval"])
+        self.assertNotIn("Refresh status", labels)
+
+    async def test_resume_approval_reuses_record_and_renews_window(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["status"] = "awaiting_cryptowallet_approval"
+        record["execution_terms"] = {
+            "gas_limit": 8_000_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        reopened = await cog.resume_approval_launch(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), record["launch_id"]
+        )
+        self.assertEqual(len(records), 1)
+        self.assertEqual(reopened["launch_id"], record["launch_id"])
+        self.assertEqual(reopened["status"], "verified")
+        self.assertEqual(reopened["payload"], payload)
+        self.assertEqual(reopened["operation"]["payload_hash"], reopened["payload_hash"])
+        self.assertGreater(reopened["execution_expires_at"], reopened["execution_created_at"])
+
+    async def test_resume_approval_rejects_any_submitted_operation(self):
+        record = {
+            "launch_id": "approval", "status": "awaiting_cryptowallet_approval",
+            "requester_id": 7, "payload": {}, "transaction_hash": "0x" + "ab" * 32,
+        }
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        with self.assertRaisesRegex(RuntimeError, "submitted operation"):
+            await cog.resume_approval_launch(
+                SimpleNamespace(id=100), SimpleNamespace(id=7), "approval"
+            )
+        self.assertEqual(record["status"], "awaiting_cryptowallet_approval")
 
     def test_failed_launch_view_has_only_retry_and_confirmed_removal_controls(self):
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))

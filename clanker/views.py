@@ -620,6 +620,55 @@ class ClankerRemoveFailedView(discord.ui.View):
         )
 
 
+class ClankerApprovalResumeView(discord.ui.View):
+    def __init__(
+        self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any],
+        settings: Dict[str, Any],
+    ):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.ctx = ctx
+        self.record = copy.deepcopy(record)
+        self.settings = copy.deepcopy(settings)
+        self.user_id = int(ctx.author.id)
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the launch owner can resume this approval.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Resume approval", emoji="▶️", style=discord.ButtonStyle.primary)
+    async def resume(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "This approval is already being resumed.", ephemeral=True
+            )
+            return
+        self.processing = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            record = await self.cog.resume_approval_launch(
+                self.ctx.guild, interaction.user, str(self.record["launch_id"])
+            )
+            view = ClankerVerifiedView(
+                self.cog, self.ctx, record, self.settings,
+                draft_values_from_record(record),
+            )
+            await interaction.message.edit(embed=view.embed(), view=view)
+            await interaction.followup.send(
+                "Approval resumed on the same launch record. Review the renewed immutable "
+                "card, then use its launch control.",
+                ephemeral=True,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            self.processing = False
+            await interaction.followup.send(str(exc), ephemeral=True)
+
+
 class ClankerFailedLaunchView(discord.ui.View):
     def __init__(
         self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any],
@@ -701,6 +750,11 @@ class ClankerLaunchSelect(discord.ui.Select):
         if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
             view = ClankerReceiptRewardsView(
                 self.parent_view.cog, record, self.parent_view.ctx.guild.id
+            )
+        elif status == "awaiting_cryptowallet_approval":
+            view = ClankerApprovalResumeView(
+                self.parent_view.cog, self.parent_view.ctx, record,
+                self.parent_view.settings,
             )
         elif status == "internal_failed":
             view = ClankerFailedLaunchView(
