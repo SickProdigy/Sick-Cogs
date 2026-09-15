@@ -616,6 +616,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Claim all: 100,000 gas", rendered)
         self.assertIn("WETH only: 50,000 gas", rendered)
         self.assertIn("$NMT only: 50,000 gas", rendered)
+        self.assertIn("`nmt` · use with Clanker commands", rendered)
         self.assertNotIn("Collect new LP fees", rendered)
         self.assertIs(returned, snapshot)
 

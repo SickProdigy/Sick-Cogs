@@ -955,6 +955,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         else:
             cost_lines = ["No claimable rewards, so no transaction or gas charge is needed."]
         embed.add_field(name="Estimated network cost", value=chr(10).join(cost_lines), inline=False)
+        if not portfolio:
+            embed.add_field(
+                name="Launch reference",
+                value=chr(96) + launches[0]["reference"] + chr(96) + " · use with Clanker commands",
+                inline=False,
+            )
         if portfolio and len(launches) > 10:
             page = offset // 10 + 1
             pages = (len(launches) + 9) // 10
