@@ -1134,6 +1134,40 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):
+    def test_creator_buy_in_reconciles_only_token_transfers_to_recipient(self):
+        token = "0x" + "22" * 20
+        amount = 10009491160428546597517
+        receipt = {"logs": [
+            {"address": token, "topics": [
+                clanker_module.TRANSFER_TOPIC, "0x" + "00" * 32,
+                "0x" + "00" * 12 + WALLET[2:].lower(),
+            ], "data": hex(amount)},
+            {"address": token, "topics": [
+                clanker_module.TRANSFER_TOPIC, "0x" + "00" * 32,
+                "0x" + "00" * 12 + TREASURY[2:].lower(),
+            ], "data": hex(999)},
+        ]}
+        self.assertEqual(
+            clanker_module._creator_buy_in_tokens(receipt, token, WALLET, 10**12),
+            amount,
+        )
+
+    def test_confirmed_receipt_shows_creator_buy_in(self):
+        record = {
+            "launch_id": "test1", "launch_ref": "test1", "status": "internal_confirmed",
+            "symbol": "TEST1", "name": "Test Toke", "created_at": "2026-09-15T18:57:00+00:00",
+            "supply": "100000000000", "requester_name": "sickprodigy",
+            "token_admin": WALLET, "creator_bps": 8000, "platform_bps": 2000,
+            "platform_treasury": WALLET,
+            "creator_buy_in_tokens_atomic": 10009491160428546597517,
+            "payload": {"devBuy": {
+                "ethAmountWei": "1000000000000", "recipient": WALLET,
+            }},
+        }
+        fields = {field.name: field.value for field in Clanker.launch_record_embed(record).fields}
+        self.assertIn("Spent: 0.000001 ETH", fields["Creator buy-in"])
+        self.assertIn("10,009.491160428546597517 $TEST1", fields["Creator buy-in"])
+
     async def test_launch_updates_clicked_card_not_deferred_response(self):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,

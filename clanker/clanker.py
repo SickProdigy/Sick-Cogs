@@ -60,6 +60,41 @@ TX_HASH_RE = re.compile(r"^0x[0-9a-fA-F]{64}$")
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 MAX_RPC_BYTES = 1024 * 1024
 TOKEN_CREATED_TOPIC = "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def _creator_buy_in_tokens(
+    receipt: Dict[str, Any], token_address: str, recipient: str, native_value_wei: int
+) -> Optional[int]:
+    if int(native_value_wei or 0) <= 0:
+        return None
+    recipient_topic = str(recipient).lower().replace("0x", "").rjust(64, "0")
+    total = 0
+    for item in receipt.get("logs") or []:
+        topics = item.get("topics") if isinstance(item, dict) else None
+        if (
+            str(item.get("address") or "").lower() == str(token_address).lower()
+            and isinstance(topics, list) and len(topics) >= 3
+            and str(topics[0]).lower() == TRANSFER_TOPIC
+            and str(topics[2]).lower().replace("0x", "") == recipient_topic
+        ):
+            try:
+                total += int(str(item.get("data") or "0x0"), 16)
+            except ValueError:
+                return None
+    return total or None
+
+
+def _format_eth_wei(value: int) -> str:
+    whole, fraction = divmod(int(value), 10**18)
+    suffix = str(fraction).rjust(18, "0").rstrip("0")
+    return "{}{} ETH".format(whole, "." + suffix if suffix else "")
+
+
+def _format_token_atomic(value: int) -> str:
+    whole, fraction = divmod(int(value), 10**18)
+    suffix = str(fraction).rjust(18, "0").rstrip("0")
+    return "{:,}{}".format(whole, "." + suffix if suffix else "")
 
 
 def _format_vault_duration(seconds: int) -> str:
@@ -157,8 +192,12 @@ async def verify_external_operation(transaction_hash: str, operation: Dict[str, 
     code = str(await clanker_rpc("eth_getCode", [token_address, "latest"]) or "").lower()
     if code in {"", "0x", "0x0"}:
         raise ValueError("The reported Clanker token has no deployed bytecode.")
+    buy_in_tokens = _creator_buy_in_tokens(
+        receipt, token_address, expected_admin, int(intent.get("expected_native_value_wei") or 0)
+    )
     return {"verified": True, "status": "confirmed", "transaction_hash": returned_hash,
-            "signer_address": sender, "block_number": block_number, "token_address": token_address}
+            "signer_address": sender, "block_number": block_number, "token_address": token_address,
+            "creator_buy_in_tokens_atomic": buy_in_tokens}
 
 
 
@@ -194,10 +233,14 @@ async def verify_internal_receipt(
     code = str(await clanker_rpc("eth_getCode", [token_address, "latest"]) or "").lower()
     if code in {"", "0x", "0x0"}:
         raise ValueError("The confirmed Clanker token has no deployed bytecode.")
+    buy_in_tokens = _creator_buy_in_tokens(
+        receipt, token_address, expected_admin, int(intent.get("expected_native_value_wei") or 0)
+    )
     return {
         "token_address": token_address,
         "transaction_hash": str(transaction_hash).lower(),
         "block_number": int(str(receipt["blockNumber"]), 16),
+        "creator_buy_in_tokens_atomic": buy_in_tokens,
     }
 
 
@@ -902,6 +945,25 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=False,
         )
+        dev_buy = (record.get("payload") or {}).get("devBuy") or {}
+        buy_in_wei = int(dev_buy.get("ethAmountWei") or 0)
+        if buy_in_wei:
+            buy_lines = [
+                "Spent: {}".format(_format_eth_wei(buy_in_wei)),
+                "Recipient: {}".format(address_link(dev_buy.get("recipient") or record.get("token_admin"))),
+            ]
+            bought_atomic = record.get("creator_buy_in_tokens_atomic")
+            if bought_atomic is not None:
+                buy_lines.append(
+                    "Tokens received: {} {}".format(
+                        _format_token_atomic(int(bought_atomic)), chr(36) + symbol
+                    )
+                )
+            else:
+                buy_lines.append("Tokens received: Not available from reconciled receipt")
+            embed.add_field(
+                name="Creator buy-in", value="\n".join(buy_lines), inline=False
+            )
         if record.get("vault_percentage"):
             vault = (record.get("payload") or {}).get("vault") or {}
             percentage = int(record.get("vault_percentage") or vault.get("percentage") or 0)
@@ -1552,36 +1614,61 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("The confirmed Base Sepolia block timestamp is invalid.")
         return timestamp
 
-    async def _backfill_vault_timestamps(
+    async def _backfill_confirmed_receipts(
         self, guild: discord.Guild, records: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        missing = [
-            record for record in records
-            if record.get("vault_percentage") and record.get("block_number")
-            and not record.get("block_timestamp")
-            and record.get("status") in {"internal_confirmed", "external_confirmed"}
-        ]
-        resolved: Dict[str, int] = {}
-        for record in missing:
-            try:
-                resolved[str(record["launch_id"])] = await self._block_timestamp(
-                    int(record["block_number"])
-                )
-            except (KeyError, TypeError, ValueError, RuntimeError):
-                log.exception("Could not backfill Clanker vault timestamp %s", record.get("launch_id"))
-        if not resolved:
+        timestamps: Dict[str, int] = {}
+        buy_tokens: Dict[str, int] = {}
+        for record in records:
+            if record.get("status") not in {"internal_confirmed", "external_confirmed"}:
+                continue
+            launch_id = str(record.get("launch_id") or "")
+            if (
+                record.get("vault_percentage") and record.get("block_number")
+                and not record.get("block_timestamp")
+            ):
+                try:
+                    timestamps[launch_id] = await self._block_timestamp(int(record["block_number"]))
+                except (KeyError, TypeError, ValueError, RuntimeError):
+                    log.exception("Could not backfill Clanker vault timestamp %s", launch_id)
+            dev_buy = (record.get("payload") or {}).get("devBuy") or {}
+            if (
+                int(dev_buy.get("ethAmountWei") or 0) > 0
+                and record.get("creator_buy_in_tokens_atomic") is None
+                and record.get("transaction_hash") and record.get("token_address")
+            ):
+                try:
+                    receipt = await clanker_rpc(
+                        "eth_getTransactionReceipt", [str(record["transaction_hash"])]
+                    )
+                    if not isinstance(receipt, dict):
+                        raise RuntimeError("receipt unavailable")
+                    amount = _creator_buy_in_tokens(
+                        receipt, str(record["token_address"]),
+                        str(dev_buy.get("recipient") or record.get("token_admin")),
+                        int(dev_buy["ethAmountWei"]),
+                    )
+                    if amount is not None:
+                        buy_tokens[launch_id] = amount
+                except (KeyError, TypeError, ValueError, RuntimeError):
+                    log.exception("Could not backfill Clanker buy-in receipt %s", launch_id)
+        if not timestamps and not buy_tokens:
             return records
         async with self.config.guild(guild).audit_log() as audit_log:
             for record in audit_log:
-                timestamp = resolved.get(str(record.get("launch_id")))
-                if timestamp:
-                    record["block_timestamp"] = timestamp
+                launch_id = str(record.get("launch_id") or "")
+                if launch_id in timestamps:
+                    record["block_timestamp"] = timestamps[launch_id]
+                if launch_id in buy_tokens:
+                    record["creator_buy_in_tokens_atomic"] = buy_tokens[launch_id]
         refreshed = []
         for record in records:
             item = copy.deepcopy(record)
-            timestamp = resolved.get(str(item.get("launch_id")))
-            if timestamp:
-                item["block_timestamp"] = timestamp
+            launch_id = str(item.get("launch_id") or "")
+            if launch_id in timestamps:
+                item["block_timestamp"] = timestamps[launch_id]
+            if launch_id in buy_tokens:
+                item["creator_buy_in_tokens_atomic"] = buy_tokens[launch_id]
             refreshed.append(item)
         return refreshed
 
@@ -2302,7 +2389,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         Shows launch attempts that entered an internal or external wallet route.
         """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
-        audit_log = await self._backfill_vault_timestamps(ctx.guild, audit_log)
+        audit_log = await self._backfill_confirmed_receipts(ctx.guild, audit_log)
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}
