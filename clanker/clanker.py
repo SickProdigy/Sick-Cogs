@@ -33,6 +33,7 @@ from .models import (
     ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
 )
 from .operation import clanker_deployment_operation
+from .rewards import WETH, reward_preflight
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -42,7 +43,7 @@ from .helpers import (
     validate_airdrop_total,
 )
 from .admin import ClankerAdminMixin
-from .views import ClankerDraftView
+from .views import ClankerDraftView, ClankerReceiptRewardsView
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
 
@@ -861,6 +862,76 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.set_footer(text="Requested by {} \u00b7 Base Sepolia testnet".format(requester))
         return embed
 
+    async def reward_preflight_embed(
+        self, records: List[Dict[str, Any]], *, portfolio: bool
+    ) -> discord.Embed:
+        """Build a public-data reward and gas review without submitting transactions."""
+        snapshot = await reward_preflight(records, clanker_rpc)
+        launches = snapshot["launches"]
+        if not launches:
+            raise RuntimeError("No confirmed Clanker launches were found.")
+        title = "Clanker reward portfolio" if portfolio else "Clanker rewards \u2022 " + launches[0]["reference"]
+        description = "Public on-chain balances only. Nothing has been collected or claimed."
+        if not portfolio:
+            description = "This private review is scoped only to $" + launches[0]["symbol"] + ". Nothing has been collected or claimed."
+        embed = discord.Embed(
+            title=title, description=description, color=discord.Color.gold()
+        )
+        for launch in launches[:10]:
+            gas = launch.get("collection_gas")
+            gas_text = "{:,} gas".format(gas) if gas is not None else "Estimate unavailable"
+            embed.add_field(
+                name="$" + launch["symbol"] + " \u2022 " + launch["reference"],
+                value=(
+                    "Creator token deposited: {:,.6f}\n"
+                    "Platform token deposited: {:,.6f}\n"
+                    "Collection: {}"
+                ).format(
+                    launch["creator_token_wei"] / 10**18,
+                    launch["platform_token_wei"] / 10**18,
+                    gas_text,
+                ),
+                inline=False,
+            )
+        creator_weth: dict[str, int] = {}
+        platform_weth: dict[str, int] = {}
+        creators = {item["creator"] for item in launches}
+        platforms = {item["platform"] for item in launches}
+        for row in snapshot["treasuries"]:
+            if row["asset"] != WETH.lower():
+                continue
+            if row["owner"] in creators:
+                creator_weth[row["owner"]] = row["amount_wei"]
+            if row["owner"] in platforms:
+                platform_weth[row["owner"]] = row["amount_wei"]
+        embed.add_field(
+            name="Deposited WETH totals",
+            value="Creator: {:.8f} WETH\nPlatform: {:.8f} WETH".format(
+                sum(creator_weth.values()) / 10**18,
+                sum(platform_weth.values()) / 10**18,
+            ),
+            inline=False,
+        )
+        fee = snapshot.get("estimated_fee_wei", 0)
+        estimate_label = "Complete" if snapshot.get("complete_estimate") else "Partial"
+        embed.add_field(
+            name="Gas preflight",
+            value="{} estimate: {:,} gas \u00b7 up to {:.8f} ETH at the current gas price".format(
+                estimate_label, snapshot.get("estimated_gas", 0), fee / 10**18
+            ),
+            inline=False,
+        )
+        if len(launches) > 10:
+            embed.add_field(
+                name="More launches",
+                value="{} additional launches are omitted from this first page.".format(len(launches) - 10),
+                inline=False,
+            )
+        embed.set_footer(
+            text="Read-only preflight \u00b7 collected WETH is treasury-wide \u00b7 claim controls follow after validation"
+        )
+        return embed
+
     async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
         """Submit the exact verified card through CryptoWallet delegation."""
         wallet = self.bot.get_cog("CryptoWallet")
@@ -1093,11 +1164,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             try:
                 channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
                 message = await channel.fetch_message(message_id)
-                await message.edit(embed=embed, view=None)
+                await message.edit(embed=embed, view=ClankerReceiptRewardsView(self, record))
             except discord.HTTPException:
                 log.exception("Could not update Clanker confirmation card %s", launch_id)
         try:
-            await user.send(embed=embed)
+            await user.send(embed=embed, view=ClankerReceiptRewardsView(self, record))
         except discord.HTTPException:
             log.exception("Could not DM Clanker confirmation card %s", launch_id)
 
@@ -1527,6 +1598,31 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             f"Dismissed {reference} from your launch list. "
             "The server audit record was retained."
         )
+
+    @clanker.command(name="claimall")
+    async def clanker_claimall(self, ctx: commands.Context):
+        """DM a read-only reward and gas preflight for all confirmed launches."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        records = [
+            item for item in audit_log
+            if int(item.get("requester_id", 0) or 0) == int(ctx.author.id)
+            and item.get("status") in {"internal_confirmed", "external_confirmed"}
+            and item.get("token_address")
+        ]
+        if not records:
+            await ctx.send("You have no confirmed Clanker launches with reward data.")
+            return
+        try:
+            async with ctx.typing():
+                embed = await self.reward_preflight_embed(records, portfolio=True)
+                await ctx.author.send(embed=embed)
+        except discord.Forbidden:
+            await ctx.send("I could not DM your reward review. Enable DMs and try again.")
+            return
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send("Clanker rewards are temporarily unavailable: {}".format(exc))
+            return
+        await ctx.send("I sent your Clanker reward portfolio and gas preflight by DM.")
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
     @checks.mod_or_permissions(manage_guild=True)

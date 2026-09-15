@@ -74,6 +74,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker drafts [limit]` — list your saved, unsubmitted drafts.
 - `[p]clanker draft <launch_id>` — show one of your saved drafts.
 - `[p]clanker launches [limit]` — list your records that entered an execution route using compact, requester-bound references.
+- `[p]clanker claimall` — DM a read-only portfolio reward and gas preflight for your confirmed launches.
 - `[p]clanker dismiss <launch_id>` — hide a failed, uncertain, or abandoned attempt from your list while retaining the moderator audit record.
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
 

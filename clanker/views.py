@@ -209,6 +209,28 @@ class ClankerAirdropModal(discord.ui.Modal):
         await self.view_ref.refresh(interaction, message)
 
 
+class ClankerReceiptRewardsView(discord.ui.View):
+    """Open a private reward preflight scoped to one confirmed launch."""
+
+    def __init__(self, cog: "Clanker", record: Dict[str, Any]):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.record = copy.deepcopy(record)
+
+    @discord.ui.button(label="Rewards", emoji="\U0001f4b0", style=discord.ButtonStyle.primary)
+    async def rewards(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            embed = await self.cog.reward_preflight_embed([self.record], portfolio=False)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send(
+                "Clanker rewards are temporarily unavailable: {}".format(exc),
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 class ClankerVerifiedView(discord.ui.View):
     """Owner-bound launch controls for one immutable reviewed operation."""
 
