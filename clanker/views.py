@@ -321,7 +321,7 @@ class ClankerVerifiedView(discord.ui.View):
             ),
             inline=False,
         )
-        embed.add_field(name="Launch ID", value=f"`{record['launch_id']}`", inline=False)
+        embed.add_field(name="Launch ID", value=f"`{record.get('launch_ref') or record['launch_id']}`", inline=False)
         embed.add_field(
             name="Payload fingerprint",
             value=f"`{record['payload_hash']}`",
@@ -407,7 +407,7 @@ class ClankerVerifiedView(discord.ui.View):
                 message = (
                     "CryptoWallet could not prove whether the provider accepted this launch. "
                     f"Do not create another one. Use `{self.ctx.clean_prefix}clanker refresh "
-                    f"{self.record['launch_id']}` to recover the same submission attempt."
+                    f"{self.record.get('launch_ref') or self.record['launch_id']}` to recover the same submission attempt."
                 )
             else:
                 message = (

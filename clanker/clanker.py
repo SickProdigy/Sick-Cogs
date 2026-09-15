@@ -579,8 +579,28 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         }
 
     @staticmethod
-    def launch_record_line(record: Dict[str, Any]) -> str:
-        launch_id = record.get("launch_id", "legacy")
+    def launch_reference(record: Dict[str, Any], audit_log: List[Dict[str, Any]]) -> str:
+        """Return a compact reference unique to one requester and token symbol."""
+        base = str(record.get("symbol") or "token").strip().lower()
+        requester_id = int(record.get("requester_id", 0) or 0)
+        siblings = [
+            item for item in audit_log
+            if int(item.get("requester_id", 0) or 0) == requester_id
+            and str(item.get("symbol") or "").strip().lower() == base
+        ]
+        if siblings and siblings[0] is record:
+            return base
+        suffix = str(record.get("launch_id") or "").rsplit("-", 1)[-1][-4:]
+        return f"{base}-{suffix}" if suffix else base
+
+    @staticmethod
+    def launch_record_line(
+        record: Dict[str, Any], audit_log: Optional[List[Dict[str, Any]]] = None
+    ) -> str:
+        launch_id = record.get("launch_ref") or (
+            Clanker.launch_reference(record, audit_log)
+            if audit_log is not None else record.get("launch_id", "legacy")
+        )
         created = record.get("created_at", "unknown")
         status = record.get("status", "unknown")
         symbol = record.get("symbol", "?")
@@ -643,6 +663,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def add_audit_record(self, guild: discord.Guild, record: Dict[str, Any]):
         async with self.config.guild(guild).audit_log() as audit_log:
             audit_log.append(record)
+            record["launch_ref"] = self.launch_reference(record, audit_log)
             del audit_log[:-MAX_AUDIT_RECORDS]
 
     async def notify_approval_channel(self, guild: discord.Guild, settings: Dict[str, Any], record: Dict[str, Any]) -> None:
@@ -1007,6 +1028,23 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return record
         return None
 
+    async def get_user_launch_record(
+        self, guild: discord.Guild, user_id: int, reference: str
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve a full internal ID or compact reference within one users records."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
+        needle = reference.strip().lower()
+        owned = [
+            record for record in audit_log
+            if int(record.get("requester_id", 0) or 0) == int(user_id)
+        ]
+        exact = [
+            record for record in owned
+            if str(record.get("launch_id") or "").lower() == needle
+            or self.launch_reference(record, audit_log) == needle
+        ]
+        return exact[-1] if len(exact) == 1 else None
+
     async def prepare_draft_execution(
         self, guild: discord.Guild, user: Any, launch_id: str, signer_address: Optional[str]
     ) -> Dict[str, Any]:
@@ -1325,7 +1363,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not audit_log:
             await ctx.send("No Clanker launch requests have been recorded.")
             return
-        lines = [self.launch_record_line(r) for r in reversed(audit_log[-limit:])]
+        lines = [self.launch_record_line(r, audit_log) for r in reversed(audit_log[-limit:])]
         await ctx.send(box("\n".join(lines)))
 
     @clanker.command(name="drafts")
@@ -1340,13 +1378,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not drafts:
             await ctx.send("You have no saved Clanker drafts.")
             return
-        lines = [self.launch_record_line(record) for record in reversed(drafts[-limit:])]
+        lines = [self.launch_record_line(record, audit_log) for record in reversed(drafts[-limit:])]
         await ctx.send(box("\n".join(lines)))
 
     @clanker.command(name="draft")
     async def clanker_draft(self, ctx: commands.Context, launch_id: str):
         """Show one of the requesting users saved drafts."""
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if (
             not record
             or record.get("status") not in {"dry_run", "verified"}
@@ -1357,18 +1395,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         await ctx.send(embed=self.launch_record_embed(record))
 
     @clanker.command(name="launches", aliases=("history", "records"))
-    @checks.mod_or_permissions(manage_guild=True)
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
         """List recent Clanker records that entered an execution route."""
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}
+            and int(record.get("requester_id", 0) or 0) == int(ctx.author.id)
         ]
         if not launches:
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
-        lines = [self.launch_record_line(record) for record in reversed(launches[-limit:])]
+        lines = [self.launch_record_line(record, audit_log) for record in reversed(launches[-limit:])]
         await ctx.send(box("\n".join(lines)))
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
@@ -1384,7 +1422,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="internal", aliases=("wallet",))
     async def clanker_internal(self, ctx: commands.Context, launch_id: str):
         """Open protected CryptoWallet approval for your saved launch."""
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record:
             await ctx.send("No Clanker launch record matched that ID.")
             return
@@ -1429,7 +1467,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="refresh")
     async def clanker_refresh(self, ctx: commands.Context, launch_id: str):
         """Refresh your persisted internal-wallet launch status after approval or restart."""
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
             await ctx.send("No matching internal-wallet launch belongs to you.")
             return
@@ -1450,7 +1488,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="external")
     async def clanker_external(self, ctx: commands.Context, launch_id: str):
         """DM the requester the exact transaction for an external wallet."""
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record:
             await ctx.send("No Clanker launch record matched that ID.")
             return
@@ -1503,7 +1541,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="verify")
     async def clanker_verify(self, ctx: commands.Context, launch_id: str, transaction_hash: str):
         """Verify an external Base Sepolia transaction against the saved operation."""
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
             await ctx.send("No matching external-wallet launch belongs to you.")
             return

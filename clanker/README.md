@@ -77,8 +77,10 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker status` — show draft and guild-control configuration.
 - `[p]clanker drafts [limit]` — list your saved, unsubmitted drafts.
 - `[p]clanker draft <launch_id>` — show one of your saved drafts.
-- `[p]clanker launches [limit]` — list records that entered an execution route (moderator).
+- `[p]clanker launches [limit]` — list your records that entered an execution route using compact, requester-bound references.
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
+
+The first launch of a symbol for each requester uses the lowercase symbol as its command reference (for example, `nmt`). Additional launches of the same symbol receive a short suffix. Full immutable launch IDs remain accepted for compatibility and internal binding.
 - `[p]clanker internal <launch_id>` — DM the requester a protected CryptoWallet approval link.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 - `[p]clanker external <launch_id>` — DM the requester the exact Base Sepolia operation.

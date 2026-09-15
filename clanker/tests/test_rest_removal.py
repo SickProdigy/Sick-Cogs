@@ -380,32 +380,48 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_drafts_lists_only_requesters_unsubmitted_records(self):
         records = [
-            {"launch_id": "mine-draft", "status": "dry_run", "requester_id": 7},
-            {"launch_id": "other-draft", "status": "dry_run", "requester_id": 8},
-            {"launch_id": "mine-launch", "status": "awaiting_external_wallet", "requester_id": 7},
+            {"launch_id": "mine-draft", "status": "dry_run", "requester_id": 7, "symbol": "MINE"},
+            {"launch_id": "other-draft", "status": "dry_run", "requester_id": 8, "symbol": "OTHER"},
+            {"launch_id": "mine-launch", "status": "awaiting_external_wallet", "requester_id": 7, "symbol": "LAUNCH"},
         ]
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_drafts.callback(cog, ctx, 10)
         output = ctx.send.await_args.args[0]
-        self.assertIn("mine-draft", output)
+        self.assertIn("mine", output)
         self.assertNotIn("other-draft", output)
         self.assertNotIn("mine-launch", output)
 
     async def test_launches_excludes_unsubmitted_drafts(self):
         records = [
-            {"launch_id": "saved-draft", "status": "dry_run"},
-            {"launch_id": "submitted-launch", "status": "awaiting_external_wallet"},
+            {"launch_id": "saved-draft", "status": "dry_run", "requester_id": 7, "symbol": "SAVE"},
+            {"launch_id": "submitted-launch", "status": "awaiting_external_wallet", "requester_id": 7, "symbol": "SUB"},
+            {"launch_id": "other-launch", "status": "internal_confirmed", "requester_id": 8, "symbol": "OTHER"},
         ]
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_launches.callback(cog, ctx, 10)
         output = ctx.send.await_args.args[0]
-        self.assertIn("submitted-launch", output)
+        self.assertIn("sub", output)
         self.assertNotIn("saved-draft", output)
+        self.assertNotIn("other", output)
+
+    async def test_compact_references_are_scoped_to_requester(self):
+        records = [
+            {"launch_id": "nmt-20260915005422-e6fc01", "symbol": "NMT", "requester_id": 7},
+            {"launch_id": "nmt-20260916010101-a1b2c3", "symbol": "NMT", "requester_id": 7},
+            {"launch_id": "nmt-20260917010101-112233", "symbol": "NMT", "requester_id": 8},
+        ]
+        cog, _ = self.make_cog_and_context(records)
+        first = await cog.get_user_launch_record(SimpleNamespace(id=100), 7, "nmt")
+        second = await cog.get_user_launch_record(SimpleNamespace(id=100), 7, "nmt-b2c3")
+        other = await cog.get_user_launch_record(SimpleNamespace(id=100), 8, "nmt")
+        self.assertEqual(first["launch_id"], records[0]["launch_id"])
+        self.assertEqual(second["launch_id"], records[1]["launch_id"])
+        self.assertEqual(other["launch_id"], records[2]["launch_id"])
 
     async def test_draft_detail_is_requester_bound(self):
         record = {"launch_id": "draft-id", "status": "dry_run", "requester_id": 7}
         cog, ctx = self.make_cog_and_context([record])
-        cog.get_launch_record = AsyncMock(return_value=record)
+        cog.get_user_launch_record = AsyncMock(return_value=record)
         with patch.object(Clanker, "launch_record_embed", return_value="draft-embed"):
             await Clanker.clanker_draft.callback(cog, ctx, "draft-id")
         ctx.send.assert_awaited_once_with(embed="draft-embed")
@@ -572,7 +588,7 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(
             guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
         )
-        cog.get_launch_record = AsyncMock(return_value={
+        cog.get_user_launch_record = AsyncMock(return_value={
             "launch_id": "launch", "requester_id": 7, "status": "external_confirmed",
             "transaction_hash": tx_hash, "operation": {}, "intent": {},
         })
@@ -582,7 +598,7 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_with("That launch is not awaiting external-wallet verification.")
 
         ctx.send.reset_mock()
-        cog.get_launch_record.return_value["status"] = "external_pending"
+        cog.get_user_launch_record.return_value["status"] = "external_pending"
         with patch.object(clanker_module, "verify_external_operation", AsyncMock()) as verify:
             await Clanker.clanker_verify.callback(cog, ctx, "launch", other_hash)
             verify.assert_not_awaited()
