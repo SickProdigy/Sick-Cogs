@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import discord
@@ -25,6 +26,29 @@ from .helpers import (
 
 if TYPE_CHECKING:
     from .clanker import Clanker
+
+
+_VAULT_DURATION_UNITS = {"h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 31536000}
+
+
+def parse_vault_duration(value: str, *, allow_zero: bool = False) -> int:
+    raw = str(value or "").strip().lower()
+    if allow_zero and raw in {"0", "none", "off"}:
+        return 0
+    match = re.fullmatch(r"([1-9][0-9]*)\s*([hdwmy])", raw)
+    if not match:
+        raise ValueError("Use a duration like 7d, 2w, 6m, or 1y (m means 30-day month).")
+    return int(match.group(1)) * _VAULT_DURATION_UNITS[match.group(2)]
+
+
+def format_vault_duration(seconds: int) -> str:
+    amount = int(seconds or 0)
+    if amount == 0:
+        return "none"
+    for unit, size in (("y", 31536000), ("m", 2592000), ("w", 604800), ("d", 86400), ("h", 3600)):
+        if amount % size == 0:
+            return str(amount // size) + unit
+    return str(amount // 86400) + "d"
 
 
 class ClankerBasicsModal(discord.ui.Modal):
@@ -124,12 +148,14 @@ class ClankerVaultModal(discord.ui.Modal):
             required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
-            label="Lockup seconds (minimum 7 days)",
-            default=str(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS), max_length=10,
+            label="Lockup / cliff (minimum 7d)",
+            default=format_vault_duration(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS),
+            placeholder="7d, 2w, 6m, or 1y", max_length=10,
         )
         self.vesting_input = discord.ui.TextInput(
-            label="Vesting seconds (0 disables)", default=str(vault.get("vestingDuration") or 0),
-            max_length=10,
+            label="Gradual release after lock (optional)",
+            default=format_vault_duration(vault.get("vestingDuration") or 0),
+            placeholder="none, 30d, 6m, or 1y", max_length=10,
         )
         self.recipient_input = discord.ui.TextInput(
             label="Recipient (blank uses signer wallet)", default=str(vault.get("recipient") or ""),
@@ -146,15 +172,15 @@ class ClankerVaultModal(discord.ui.Modal):
             return
         try:
             percentage = int(raw_percentage)
-            lockup = int(str(self.lockup_input.value).strip())
-            vesting = int(str(self.vesting_input.value).strip())
+            lockup = parse_vault_duration(str(self.lockup_input.value))
+            vesting = parse_vault_duration(str(self.vesting_input.value), allow_zero=True)
             recipient = str(self.recipient_input.value).strip()
             if not 1 <= percentage <= 90:
                 raise ValueError("Vault percentage must be from 1 through 90.")
             if lockup < MIN_VAULT_LOCKUP_SECONDS:
                 raise ValueError("Vault lockup must be at least seven days.")
             if not 0 <= vesting <= 315360000:
-                raise ValueError("Vault vesting must be from 0 through 315360000 seconds.")
+                raise ValueError("Vault gradual release cannot exceed 10 years.")
             if recipient and not is_eth_address(recipient):
                 raise ValueError("Vault recipient must be a valid EVM address.")
         except ValueError as exc:
@@ -1045,14 +1071,17 @@ class ClankerVerifiedView(discord.ui.View):
             name="Platform treasury", value=str(platform_treasury), inline=False
         )
         vault = payload.get("vault")
-        embed.add_field(
-            name="Vault",
-            value=(
-                f"{vault['percentage']}% → {vault['recipient']} · lock {vault['lockupDuration']}s"
-                if vault else "Disabled"
-            ),
-            inline=False,
-        )
+        vault_summary = "Disabled"
+        if vault:
+            release = (
+                "gradual release over " + format_vault_duration(vault.get("vestingDuration") or 0)
+                if vault.get("vestingDuration") else "full unlock after lockup"
+            )
+            vault_summary = "{}% → {} · locked {} · {}".format(
+                vault["percentage"], vault["recipient"],
+                format_vault_duration(vault["lockupDuration"]), release,
+            )
+        embed.add_field(name="Vault", value=vault_summary, inline=False)
         airdrop = payload.get("airdrop")
         embed.add_field(
             name="Airdrop",
@@ -1285,9 +1314,13 @@ class ClankerDraftView(discord.ui.View):
         if vault:
             recipient = vault.get("recipient") or self.draft.get("primary_beneficiary") or "signer wallet"
             vesting = int(vault.get("vestingDuration") or 0)
-            detail = "{}% · lock {}s".format(vault["percentage"], vault["lockupDuration"])
+            detail = "{}% · locked {}".format(
+                vault["percentage"], format_vault_duration(vault["lockupDuration"])
+            )
             if vesting:
-                detail += " · vest {}s".format(vesting)
+                detail += " · gradual release over {}".format(format_vault_duration(vesting))
+            else:
+                detail += " · full unlock after lockup"
             embed.add_field(name="Vault", value=detail + " · recipient " + recipient, inline=False)
         else:
             embed.add_field(name="Vault", value="Disabled / optional", inline=False)

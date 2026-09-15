@@ -11,7 +11,8 @@ from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
                      ClankerDraftHistoryView, ClankerFailedLaunchView,
                      ClankerLaunchHistoryView, ClankerReceiptRewardsView,
                      ClankerRewardReviewView, ClankerVerifiedView,
-                     draft_values_from_record)
+                     draft_values_from_record, format_vault_duration,
+                     parse_vault_duration)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -571,6 +572,16 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
         self.assertIn("uncertain", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
+
+    def test_vault_durations_use_human_units(self):
+        self.assertEqual(parse_vault_duration("7d"), 604800)
+        self.assertEqual(parse_vault_duration("2w"), 1209600)
+        self.assertEqual(parse_vault_duration("6m"), 15552000)
+        self.assertEqual(parse_vault_duration("1y"), 31536000)
+        self.assertEqual(parse_vault_duration("none", allow_zero=True), 0)
+        self.assertEqual(format_vault_duration(15552000), "6m")
+        with self.assertRaisesRegex(ValueError, "7d, 2w, 6m"):
+            parse_vault_duration("604800")
 
     def test_reopened_draft_restores_per_launch_vault(self):
         vault = {"percentage": 10, "lockupDuration": 604800,
