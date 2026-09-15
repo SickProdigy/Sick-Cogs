@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from typing import Any, Mapping
@@ -11,6 +12,8 @@ from ..core.models import IntentStatus
 from ..providers.base import WalletProviderError
 
 HASH_PATTERN = re.compile(r"^0x[0-9a-fA-F]{64}$")
+log = logging.getLogger("red.sickcogs.cryptowallet.clanker")
+
 ACTIVE_CLANKER_STATES = {status.value for status in (
     IntentStatus.PROCESSING, IntentStatus.SUBMITTED, IntentStatus.CONFIRMED,
     IntentStatus.UNCERTAIN,
@@ -165,6 +168,10 @@ class ClankerLifecycleMixin:
                 discord_user_id, intent, attempt_id, result
             )
         except (RuntimeError, WalletProviderError):
+            log.exception(
+                "Recovery failed for Clanker intent %s using its stored attempt",
+                intent.intent_id,
+            )
             await self.mark_clanker_submission_uncertain(
                 discord_user_id, intent, attempt_id
             )

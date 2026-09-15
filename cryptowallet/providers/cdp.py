@@ -892,6 +892,10 @@ class CdpWalletProvider(WalletProvider):
                 "payload_hash": intent.payload_hash,
             }
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            log.exception(
+                "CDP Clanker submission failed safe validation for intent %s",
+                intent.intent_id,
+            )
             raise WalletProviderError(
                 "CDP could not safely submit the Clanker deployment."
             ) from exc
