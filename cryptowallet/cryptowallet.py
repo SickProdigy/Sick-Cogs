@@ -326,6 +326,10 @@ class CryptoWallet(
                 secrets.token_urlsafe(24),
             )
         except RuntimeError:
+            log.exception(
+                "Clanker launch %s entered status recovery after provider submission",
+                launch.get("launch_id"),
+            )
             lifecycle = await self.clanker_intent_status(
                 int(user.id), intent.intent_id, intent.payload_hash
             )
