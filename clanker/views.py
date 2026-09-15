@@ -1176,13 +1176,16 @@ class ClankerVerifiedView(discord.ui.View):
             value=wallet_total + " · creator buy-in + wallet-paid gas",
             inline=False,
         )
+        status = str(record.get("status") or "verified")
+        status_labels = {
+            "verified": "Verified and not submitted",
+            "internal_submitted": "Submitted through CryptoWallet — awaiting confirmation",
+            "internal_confirmed": "Confirmed on Base Sepolia",
+            "internal_failed": "Submission failed",
+            "internal_uncertain": "Submission outcome unknown — automatic recovery active",
+        }
         embed.add_field(
-            name="Status",
-            value=(
-                "Submission outcome unknown — status recovery required"
-                if record.get("status") == "internal_uncertain"
-                else "Verified and not submitted"
-            ),
+            name="Status", value=status_labels.get(status, status.replace("_", " ").title()),
             inline=False,
         )
         embed.add_field(name="Launch ID", value=f"`{record.get('launch_ref') or record['launch_id']}`", inline=False)
@@ -1269,7 +1272,7 @@ class ClankerVerifiedView(discord.ui.View):
                 await self.cog.schedule_internal_confirmation(
                     self.ctx.guild, interaction.user, self.record, interaction.message
                 )
-            await interaction.edit_original_response(embed=self.embed(), view=self)
+            await interaction.message.edit(embed=self.embed(), view=self)
             detail = result.get("transaction_hash") or result.get("user_operation_hash")
             if result["status"] == "uncertain":
                 message = (

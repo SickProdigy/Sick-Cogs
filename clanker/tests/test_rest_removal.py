@@ -1134,6 +1134,45 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_launch_updates_clicked_card_not_deferred_response(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["status"] = "verified"
+        record["execution_terms"] = {
+            "gas_limit": 8_000_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
+        cog = SimpleNamespace(
+            launch_verified_internal=AsyncMock(return_value={
+                "status": "submitted", "intent_id": "intent",
+                "payload_hash": record["payload_hash"], "authorization_expires_at": None,
+                "provider_status": "pending", "user_operation_hash": "0x" + "12" * 32,
+                "transaction_hash": None,
+            }),
+            mark_verified_internal_result=AsyncMock(),
+            schedule_internal_confirmation=AsyncMock(),
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), guild=SimpleNamespace(id=100), clean_prefix="!"
+        )
+        view = ClankerVerifiedView(cog, ctx, record, {}, {})
+        interaction = SimpleNamespace(
+            user=ctx.author,
+            response=SimpleNamespace(defer=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+            edit_original_response=AsyncMock(),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await view.launch_internal.callback(interaction)
+        interaction.message.edit.assert_awaited_once()
+        interaction.edit_original_response.assert_not_awaited()
+        sent_embed = interaction.message.edit.await_args.kwargs["embed"]
+        fields = {field.name: field.value for field in sent_embed.fields}
+        self.assertIn("awaiting confirmation", fields["Status"])
+
     async def test_launch_fee_falls_back_to_reviewed_ceiling(self):
         cog = Clanker.__new__(Clanker)
         operation = {"to": TREASURY, "data": "0x1234", "value": "0"}
