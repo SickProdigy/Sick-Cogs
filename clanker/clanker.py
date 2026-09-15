@@ -63,6 +63,15 @@ TOKEN_CREATED_TOPIC = "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee3
 TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 
+async def clanker_guild_or_dm_history(ctx: commands.Context) -> bool:
+    """Keep Clanker guild-scoped except for requester-owned launch history."""
+    if ctx.guild is not None:
+        return True
+    if ctx.command and ctx.command.qualified_name == "clanker launches":
+        return True
+    raise commands.NoPrivateMessage
+
+
 def _creator_buy_in_tokens(
     receipt: Dict[str, Any], token_address: str, recipient: str, native_value_wei: int
 ) -> Optional[int]:
@@ -762,6 +771,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             except ValueError:
                 if created:
                     lines.append(f"**Created:** {created}")
+            server_name = str(record.get("history_guild_name") or "")
+            if server_name:
+                lines.append(f"**Server:** {server_name}")
             route = str(record.get("execution_route") or "").replace("_", " ").title()
             if route:
                 lines.append(f"**Route:** {route}")
@@ -2171,7 +2183,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         """Start clanking a token with a ticker and optional token name."""
         await self._open_clanker_card(ctx, symbol, name)
 
-    @commands.guild_only()
+    @commands.check(clanker_guild_or_dm_history)
     @commands.group(name="clanker", invoke_without_command=True, usage="")
     async def clanker(
         self, ctx: commands.Context, symbol: Optional[str] = None, *, name: Optional[str] = None
@@ -2388,8 +2400,23 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Shows launch attempts that entered an internal or external wallet route.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
-        audit_log = await self._backfill_confirmed_receipts(ctx.guild, audit_log)
+        if ctx.guild is None:
+            audit_log = []
+            for guild_id, guild_data in (await self.config.all_guilds()).items():
+                guild_log = list(guild_data.get("audit_log") or [])
+                guild = self.bot.get_guild(int(guild_id))
+                if guild is not None:
+                    guild_log = await self._backfill_confirmed_receipts(guild, guild_log)
+                for record in guild_log:
+                    item = copy.deepcopy(record)
+                    item["history_guild_name"] = (
+                        guild.name if guild is not None else "Server {}".format(guild_id)
+                    )
+                    audit_log.append(item)
+            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+        else:
+            audit_log = await self.config.guild(ctx.guild).audit_log()
+            audit_log = await self._backfill_confirmed_receipts(ctx.guild, audit_log)
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}
@@ -2400,6 +2427,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
         embed = self.launch_list_embed(launches[-limit:], audit_log)
+        if ctx.guild is None:
+            embed.description = (
+                "Most recent first across your shared servers. Reopen and manage a launch "
+                "from the server where it was created."
+            )
+            await ctx.send(embed=embed)
+            return
         settings = await self.config.guild(ctx.guild).all()
         await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
             self, ctx, launches[-limit:], settings

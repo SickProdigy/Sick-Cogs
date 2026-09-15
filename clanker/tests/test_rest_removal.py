@@ -283,6 +283,7 @@ class VerifiedCardDisplayTests(unittest.TestCase):
             "gas_price_wei": 100_000_000,
             "estimated_fee_wei": 100_000_000_000_000,
         }
+        record["wallet_balance_wei"] = 88_890_000_000_000
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))
         embed = ClankerVerifiedView(
             SimpleNamespace(), ctx, record, {}, {}
@@ -311,6 +312,10 @@ class VerifiedCardDisplayTests(unittest.TestCase):
             fields["Gas fee"],
             "Network fee: 0.0001 ETH (estimated for 1,000,000 gas)\n"
             "Your gas charge: 0.00000000 ETH (CDP-sponsored)",
+        )
+        self.assertEqual(
+            fields["CryptoWallet balance"],
+            "Available: 0.00008889 ETH\nAfter this launch: 0.00008889 ETH",
         )
 
 
@@ -587,6 +592,25 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("$SUB", embed.fields[0].name)
         self.assertIn("Awaiting external wallet", embed.fields[0].value)
+
+    async def test_launches_are_read_only_and_aggregated_in_dms(self):
+        records = [
+            {"launch_id": "mine", "launch_ref": "mine", "status": "internal_confirmed",
+             "requester_id": 7, "symbol": "MINE"},
+            {"launch_id": "other", "status": "internal_confirmed",
+             "requester_id": 8, "symbol": "OTHER"},
+        ]
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_guild=lambda guild_id: None)
+        cog.config = SimpleNamespace(all_guilds=AsyncMock(return_value={100: {"audit_log": records}}))
+        ctx = SimpleNamespace(guild=None, author=SimpleNamespace(id=7), send=AsyncMock())
+        await Clanker.clanker_launches.callback(cog, ctx, 10)
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertNotIn("view", ctx.send.await_args.kwargs)
+        self.assertEqual(len(embed.fields), 1)
+        self.assertIn("MINE", embed.fields[0].name)
+        self.assertIn("Server 100", embed.fields[0].value)
+        self.assertNotIn("OTHER", embed.fields[0].name)
 
     async def test_dismiss_hides_inactive_attempt_but_retains_audit_record(self):
         record = {

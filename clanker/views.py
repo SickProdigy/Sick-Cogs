@@ -1176,6 +1176,18 @@ class ClankerVerifiedView(discord.ui.View):
             value=wallet_total + " · creator buy-in + wallet-paid gas",
             inline=False,
         )
+        available_wei = record.get("wallet_balance_wei")
+        if available_wei is not None:
+            debit_wei = creator_buy_in_wei + wallet_gas_wei
+            remaining_wei = max(0, int(available_wei) - debit_wei)
+            embed.add_field(
+                name="CryptoWallet balance",
+                value="Available: {}\nAfter this launch: {}".format(
+                    format_eth_wei(int(available_wei)),
+                    format_eth_wei(remaining_wei),
+                ),
+                inline=False,
+            )
         status = str(record.get("status") or "verified")
         status_labels = {
             "verified": "Verified and not submitted",
@@ -1527,6 +1539,13 @@ class ClankerDraftView(discord.ui.View):
             if not callable(resolve_address):
                 raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
             signer_address = await resolve_address(interaction.user)
+            get_balance = getattr(wallet, "clanker_spendable_balance", None)
+            if not callable(get_balance):
+                raise RuntimeError("CryptoWallet balance review is unavailable.")
+            wallet_balance = await get_balance(interaction.user)
+            if str(wallet_balance.get("address") or "").lower() != signer_address.lower():
+                raise RuntimeError("CryptoWallet balance does not match the launch signer.")
+            record["wallet_balance_wei"] = int(wallet_balance["balance_wei"])
             get_terms = getattr(wallet, "clanker_execution_terms", None)
             if not callable(get_terms):
                 raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
