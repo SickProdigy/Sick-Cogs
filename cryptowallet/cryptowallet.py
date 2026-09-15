@@ -268,11 +268,14 @@ class CryptoWallet(
         return address
 
     @staticmethod
-    def clanker_execution_terms() -> dict:
+    def clanker_execution_terms(native_value_wei: int = 0) -> dict:
         """Return the exact bounded spending policy shown on Clanker review cards."""
+        native_value = int(native_value_wei)
+        if not 0 <= native_value <= 10**18:
+            raise ValueError("Clanker creator buy-in is outside the reviewed 0-1 ETH limit.")
         return {
             "gas_limit": CLANKER_DEPLOY_GAS_LIMIT,
-            "native_value_wei": 0,
+            "native_value_wei": native_value,
             "gas_sponsored": True,
             "gas_payer": "CDP paymaster",
         }
@@ -281,7 +284,7 @@ class CryptoWallet(
         self, user, launch: dict, operation: dict, execution_terms: dict
     ) -> dict:
         """Submit one Discord-reviewed Clanker operation under active delegation."""
-        if execution_terms != self.clanker_execution_terms():
+        if execution_terms != self.clanker_execution_terms(int(operation.get("value", -1))):
             raise ValueError(
                 "The reviewed Clanker gas or spending policy no longer matches CryptoWallet."
             )

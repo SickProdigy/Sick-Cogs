@@ -12,6 +12,7 @@ DEPLOY_TOKEN_SELECTOR = "df40224a"
 LOCKER = "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f"
 VAULT = "0xcC80d1226F899a78fC2E459a1500A13C373CE0A5"
 AIRDROP = "0x5c68F1560a5913c176Fc5238038098970B567B19"
+DEVBUY = "0x691f97752E91feAcD7933F32a1FEdCeDae7bB59c"
 MEV_MODULE = "0x261fE99C4D0D41EE8d0e594D11aec740E8354ab0"
 STATIC_FEE_HOOK_V2 = "0x11b51DBC2f7F683b81CeDa83DC0078D57bA328cc"
 ZERO_ADDRESS = "0x" + "00" * 20
@@ -170,6 +171,13 @@ def clanker_deployment_calldata(intent: ClankerDeploymentIntent) -> str:
         supply_atomic = CLANKER_TOKEN_SUPPLY * 10**18
         bps = (amount_atomic * 10_000 + supply_atomic - 1) // supply_atomic
         extensions.append((AIRDROP, 0, bps, _abi_encode(("address", "bytes32", "uint256", "uint256"), (intent.airdrop.admin, intent.airdrop.merkle_root, intent.airdrop.lockup_seconds, intent.airdrop.vesting_seconds))))
+    if intent.expected_native_value_wei:
+        pool_key = (ZERO_ADDRESS, ZERO_ADDRESS, 0, 0, ZERO_ADDRESS)
+        devbuy_data = _abi_encode(
+            (TupleType((TupleType(("address", "address", "uint24", "int24", "address")), "uint256", "address")),),
+            ((pool_key, 0, intent.token_admin),),
+        )
+        extensions.append((DEVBUY, intent.expected_native_value_wei, 0, devbuy_data))
     config = (
         (intent.token_admin, intent.name, intent.symbol, intent.salt, intent.image, intent.metadata_json, intent.context_json, CLANKER_CHAIN_ID),
         (STATIC_FEE_HOOK_V2, intent.pool.paired_token, intent.pool.tick_if_token0_is_clanker, intent.pool.tick_spacing, pool_data),

@@ -256,8 +256,8 @@ class ClankerDeploymentIntent:
             raise ValueError("Clanker reward bps must sum to 10000.")
         if self.created_at <= 0 or self.expires_at <= self.created_at:
             raise ValueError("Clanker intent expiry must follow its creation time.")
-        if self.expected_native_value_wei != 0:
-            raise ValueError("Prototype Clanker intents do not permit a developer buy or native value.")
+        if not 0 <= self.expected_native_value_wei <= 10**18:
+            raise ValueError("Creator buy-in must be from 0 through 1 ETH.")
         if self.estimated_gas_fee_wei < 0:
             raise ValueError("Estimated Clanker gas fee cannot be negative.")
         extension_percentage = (self.vault.percentage if self.vault else 0)
@@ -441,7 +441,7 @@ def signing_intent_from_clanker_launch(
         or str(operation["payload_hash"]).lower() != supplied_hash
         or int(operation["chain_id"]) != CLANKER_CHAIN_ID
         or str(operation["to"]).lower() != CLANKER_FACTORY.lower()
-        or int(operation["value"]) != 0
+        or int(operation["value"]) != int(launch["expected_native_value_wei"])
         or not re.fullmatch(r"0x[0-9a-fA-F]+", str(operation["data"]))
     ):
         raise ValueError("Clanker operation does not match its immutable launch binding.")
@@ -491,6 +491,6 @@ def signing_intent_from_clanker_launch(
             int(airdrop_data["amount_tokens"]), int(airdrop_data["lockup_seconds"]),
             int(airdrop_data["vesting_seconds"]),
         ) if airdrop_data else None,
-        expected_native_value_wei=0, estimated_gas_fee_wei=0,
+        expected_native_value_wei=int(launch["expected_native_value_wei"]), estimated_gas_fee_wei=0,
         created_at=int(launch["created_at"]), expires_at=int(launch["expires_at"]),
     )
