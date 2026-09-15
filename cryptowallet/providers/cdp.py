@@ -64,6 +64,7 @@ TOKEN_FACTORY_RUNTIME_SHA256 = "d9cdd1effe5aac3b2bab44d78897fb27d4527f6ac964cdbc
 TOKEN_FACTORY_SINGLETON_SHA256 = "687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
 TOKEN_FACTORY_DEPLOY_GAS_LIMIT = 2_000_000
 TOKEN_DEPLOY_GAS_LIMIT = 1_500_000
+CLANKER_DEPLOY_GAS_LIMIT = 8_000_000
 TOKEN_CREATE_SELECTOR = "8b08cf96"
 
 
@@ -863,6 +864,7 @@ class CdpWalletProvider(WalletProvider):
                 prepared["value"],
                 prepared["idempotency_key"],
                 prepared["data"],
+                override_gas_limit=CLANKER_DEPLOY_GAS_LIMIT,
             )
             status = str(result.get("status") or "")
             user_op_hash = str(result.get("userOpHash") or "")

@@ -2201,6 +2201,10 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             prepared["to"], prepared["value"],
             prepared["idempotency_key"], prepared["data"],
         ))
+        self.assertEqual(
+            client.send_smart_account_user_operation.await_args.kwargs,
+            {"override_gas_limit": 8_000_000},
+        )
 
     async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
         launch = StoredApprovalSessionTests._clanker_intent()
