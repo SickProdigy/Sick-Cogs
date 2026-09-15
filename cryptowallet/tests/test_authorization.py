@@ -17,12 +17,10 @@ from redbot.core import commands
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
 from ..backend.clanker_lifecycle import ClankerLifecycleMixin
-from ..backend.companion import CompanionServer
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
 )
-from ..backend.sessions import ApprovalSessionMixin
 from ..backend.config import WalletConfigMixin
 from ..backend.usage import ProviderUsageMixin
 from ..cryptowallet import CryptoWallet
@@ -36,9 +34,7 @@ from ..commands.admin import WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
-from ..core.models import (
-    ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
-)
+from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
@@ -173,37 +169,6 @@ class _ApprovalStore:
         for key in keys[:-1]:
             target = target.setdefault(key, {})
         target[keys[-1]] = value
-
-
-class _SessionConfig:
-    def __init__(self, deployment_id="deployment"):
-        self.deployment_id = _Value(deployment_id)
-        self.stores = {}
-        self.intent_stores = {}
-
-    def user_from_id(self, user_id):
-        user_id = int(user_id)
-        store = self.stores.setdefault(user_id, _ApprovalStore())
-        intent_store = self.intent_stores.setdefault(user_id, _ApprovalStore())
-        return SimpleNamespace(approval_sessions=store, intents=intent_store)
-
-    async def all_users(self):
-        return {
-            user_id: {
-                "approval_sessions": store.data,
-                "intents": self.intent_stores.setdefault(user_id, _ApprovalStore()).data,
-            }
-            for user_id, store in self.stores.items()
-        }
-
-
-class _SessionHarness(ApprovalSessionMixin):
-    def __init__(self, deployment_id="deployment", application_id=42):
-        self.config = _SessionConfig(deployment_id)
-        self.application_id = application_id
-
-    def discord_application_id(self):
-        return self.application_id
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
@@ -926,9 +891,9 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No signing authorization was created", ctx.send.await_args.args[0])
 
 
-class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
+class ClankerIntentFixtures:
     @staticmethod
-    def _clanker_intent(**overrides):
+    def clanker_intent(**overrides):
         wallet = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         values = {
             "intent_id": "0x" + "12" * 32,
@@ -956,117 +921,6 @@ class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
         values.update(overrides)
         return ClankerDeploymentIntent.create(**values)
 
-    async def test_malformed_or_unknown_session_token_is_rejected(self):
-        harness = _SessionHarness()
-        self.assertIsNone(await harness.resolve_approval_session("short"))
-        self.assertIsNone(await harness.resolve_approval_session("x" * 40))
-
-    async def test_expired_session_is_rejected(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        digest = harness._token_digest(token)
-        harness.config.stores[7].data[digest]["expires_at"] = int(time.time()) - 1
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-    async def test_wrong_discord_user_cannot_consume_session(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        self.assertIsNone(await harness.establish_browser_session(token, 8))
-        self.assertIsNotNone(await harness.resolve_approval_session(token))
-
-    async def test_consumed_session_rejects_replay(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        browser_token = await harness.establish_browser_session(token, 7)
-        self.assertIsNotNone(browser_token)
-        self.assertIsNone(await harness.resolve_approval_session(token))
-        self.assertIsNone(await harness.establish_browser_session(token, 7))
-        resolved = await harness.resolve_browser_session(browser_token)
-        self.assertIsNotNone(resolved)
-        self.assertIs(resolved.status, ApprovalStatus.IDENTITY_VERIFIED)
-        self.assertIs(resolved.purpose, ApprovalPurpose.RECOVERY)
-
-    async def test_wrong_deployment_or_application_rejects_session(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
-        harness.config.deployment_id = _Value("foreign-deployment")
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
-        harness.application_id = 99
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-    async def test_clanker_session_requires_complete_bindings(self):
-        harness = _SessionHarness()
-        with self.assertRaisesRegex(RuntimeError, "complete immutable bindings"):
-            await harness.create_approval_session(
-                7, ApprovalPurpose.CLANKER_DEPLOYMENT, "0x" + "12" * 32
-            )
-
-    async def test_clanker_session_binds_and_verifies_stored_intent(self):
-        harness = _SessionHarness()
-        intent = self._clanker_intent()
-        token = await harness.create_clanker_approval_session(intent)
-        resolved = await harness.resolve_approval_session(token)
-        self.assertIsNotNone(resolved)
-        self.assertIs(resolved.purpose, ApprovalPurpose.CLANKER_DEPLOYMENT)
-        self.assertEqual(resolved.guild_id, intent.guild_id)
-        self.assertEqual(resolved.profile_id, intent.profile_id)
-        self.assertEqual(resolved.wallet_address, intent.wallet_address)
-        self.assertEqual(resolved.payload_hash, intent.payload_hash)
-        self.assertLessEqual(resolved.expires_at, intent.expires_at)
-
-        stored = harness.config.intent_stores[7].data[intent.intent_id]
-        self.assertEqual(stored["status"], IntentStatus.PENDING.value)
-        stored["token"]["name"] = "Tampered"
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-    async def test_clanker_session_never_overwrites_lifecycle_state(self):
-        harness = _SessionHarness()
-        intent = self._clanker_intent()
-        await harness.create_clanker_approval_session(intent)
-        stored = harness.config.intent_stores[7].data[intent.intent_id]
-        stored["status"] = IntentStatus.PROCESSING.value
-
-        with self.assertRaisesRegex(RuntimeError, "entered its lifecycle"):
-            await harness.create_clanker_approval_session(intent)
-        self.assertEqual(stored["status"], IntentStatus.PROCESSING.value)
-
-    async def test_clanker_companion_payload_displays_exact_intent(self):
-        harness = _SessionHarness()
-        intent = self._clanker_intent(estimated_gas_fee_wei=12345)
-        token = await harness.create_clanker_approval_session(intent)
-        browser_token = await harness.establish_browser_session(token, 7)
-        session = await harness.resolve_browser_session(browser_token)
-        payload = await WalletConfigMixin.companion_session_payload(harness, session)
-
-        self.assertIsNone(payload["transaction"])
-        clanker = payload["clanker"]
-        self.assertEqual(clanker["network"], "base-sepolia")
-        self.assertEqual(clanker["chain_id"], 84532)
-        self.assertEqual(clanker["wallet_address"], intent.wallet_address)
-        self.assertEqual(clanker["factory"], intent.factory)
-        self.assertEqual(clanker["token"]["name"], intent.name)
-        self.assertEqual(clanker["rewards"][0]["bps"], 10_000)
-        self.assertEqual(clanker["estimated_gas_fee_wei"], "12345")
-        self.assertEqual(clanker["payload_hash"], intent.payload_hash)
-
-    async def test_clanker_mutation_prevents_browser_session_creation(self):
-        harness = _SessionHarness()
-        intent = self._clanker_intent()
-        token = await harness.create_clanker_approval_session(intent)
-        harness.config.intent_stores[7].data[intent.intent_id]["profile_id"] = "wrong"
-        self.assertIsNone(await harness.establish_browser_session(token, 7))
-
-    async def test_clanker_browser_session_rejects_post_approval_mutation(self):
-        harness = _SessionHarness()
-        intent = self._clanker_intent()
-        token = await harness.create_clanker_approval_session(intent)
-        browser_token = await harness.establish_browser_session(token, 7)
-        self.assertIsNotNone(browser_token)
-        harness.config.intent_stores[7].data[intent.intent_id]["guild_id"] = "101"
-        self.assertIsNone(await harness.resolve_browser_session(browser_token))
 
 
 class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
@@ -1941,7 +1795,7 @@ class _ClankerLifecycleHarness(ClankerLifecycleMixin):
 
 class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_atomic_claim_rejects_replay(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
 
         claimed = await harness.begin_clanker_submission(
@@ -1960,7 +1814,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_expired_intent_is_terminal(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
         with self.assertRaisesRegex(RuntimeError, "expired"):
             await harness.begin_clanker_submission(
@@ -1973,7 +1827,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_submission_persists_acknowledgement_and_blocks_retry(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         result = {
             "provider_status": "broadcast",
             "user_operation_hash": "0x" + "1" * 64,
@@ -1998,7 +1852,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         provider.submit_clanker_deployment.assert_awaited_once()
 
     async def test_ambiguous_provider_failure_becomes_uncertain(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         provider = SimpleNamespace(
             submit_clanker_deployment=AsyncMock(
                 side_effect=WalletProviderError("connection ended")
@@ -2019,7 +1873,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_uncertain_recovery_reuses_only_original_attempt(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         result = {
             "provider_status": "broadcast",
             "user_operation_hash": "0x" + "2" * 64,
@@ -2054,7 +1908,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_submitted_status_refresh_persists_confirmation(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         provider = SimpleNamespace(clanker_operation_status=AsyncMock(return_value={
             "provider_status": "complete", "user_operation_hash": "0x" + "11" * 32,
             "transaction_hash": "0x" + "22" * 32, "block_number": 123}))
@@ -2067,7 +1921,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         provider.clanker_operation_status.assert_awaited_once()
 
     async def test_status_and_rejection_are_bound_and_terminal(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
         status = await harness.clanker_intent_status(7, launch.intent_id, launch.payload_hash)
         self.assertEqual(status["status"], IntentStatus.PENDING.value)
@@ -2079,7 +1933,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await harness.clanker_intent_status(7, launch.intent_id, "0x" + "00" * 32)
 
     async def test_public_clanker_status_rebinds_current_wallet_profile(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {"profile_id": launch.profile_id, "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
         store = _ApprovalStore(); store.data[launch.intent_id] = {**launch.to_dict(), "status": "submitted"}
         harness = SimpleNamespace(
@@ -2094,28 +1948,12 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["route"], "internal")
         self.assertEqual(result["status"], "submitted")
 
-    async def test_clanker_endpoint_submits_only_verified_pending_session(self):
-        session = SimpleNamespace(discord_user_id=7, intent_id="intent", payload_hash="0x" + "12" * 32, purpose=ApprovalPurpose.CLANKER_DEPLOYMENT)
-        cog = SimpleNamespace(
-            verify_companion_request=AsyncMock(return_value=(True, "ok")),
-            resolve_browser_session=AsyncMock(return_value=session),
-            clanker_intent_status=AsyncMock(return_value={"status": "pending"}),
-            submit_claimed_clanker_intent=AsyncMock(return_value={"status": "submitted"}),
-            config=SimpleNamespace(provider_paused=_Value(False), user_from_id=lambda user_id: SimpleNamespace(security_locked=_Value(False))),
-        )
-        request = SimpleNamespace(cookies={"__Secure-sickwallet-session": "x" * 40}, content_type="application/json", read=AsyncMock(return_value=b"{\"action\":\"approve\"}"))
-        response = await CompanionServer(cog).api_clanker(request)
-        self.assertEqual(response.status, 200)
-        cog.submit_claimed_clanker_intent.assert_awaited_once()
-        self.assertEqual(cog.submit_claimed_clanker_intent.await_args.args[:3], (7, "intent", session.payload_hash))
-
-    def test_clanker_browser_controls_and_proxy_are_present(self):
+    def test_only_external_clanker_browser_controls_are_present(self):
         root = Path(__file__).resolve().parents[1]
         page = (root / "web" / "session.html").read_text(encoding="utf-8")
         script = (root / "web" / "app.js").read_text(encoding="utf-8")
         external = (root / "web" / "clanker-external.js").read_text(encoding="utf-8")
-        proxy = (root / "web" / "api" / "clanker.php").read_text(encoding="utf-8")
-        self.assertIn("approve-clanker", page)
+        self.assertNotIn("approve-clanker", page)
         self.assertNotIn("type=\"file\"", page)
         self.assertIn("clanker-external.js", page)
         self.assertIn("eth_sendTransaction", external)
@@ -2123,14 +1961,14 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("api/recovery-handoff.php", external)
         self.assertIn("clanker_external", external)
         self.assertIn("crypto.subtle.verify", external)
-        self.assertIn("api/clanker.php", script)
-        self.assertIn("/api/v1/clanker", proxy)
-        self.assertNotIn("access_token", proxy)
+        self.assertNotIn("api/clanker.php", script)
+        self.assertFalse((root / "web" / "api" / "clanker.php").exists())
+        self.assertFalse((root / "web" / "api" / "session.php").exists())
 
 
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
     async def test_prepares_exact_call_without_provider_submission(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {
             "profile_id": launch.profile_id,
             "provider_user_id": "provider-user",
@@ -2149,7 +1987,7 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         provider.get_delegation_status.assert_awaited_with(profile, BASE_SEPOLIA.key)
 
     async def test_accepts_checksum_case_for_bound_wallet_address(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {
             "profile_id": launch.profile_id,
             "provider_user_id": "provider-user",
@@ -2169,7 +2007,7 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prepared["from"].lower(), launch.wallet_address)
 
     async def test_submits_prepared_call_and_validates_provider_echo(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {
             "profile_id": launch.profile_id,
             "provider_user_id": "provider-user",
@@ -2211,7 +2049,7 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {"profile_id": launch.profile_id, "provider_user_id": "provider-user",
                    "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
         provider = CdpWalletProvider(SimpleNamespace())
@@ -2228,7 +2066,7 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["block_number"], 123)
 
     async def test_rejects_changed_provider_call(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {
             "profile_id": launch.profile_id,
             "provider_user_id": "provider-user",
@@ -2258,7 +2096,7 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             await provider.submit_clanker_deployment(profile, launch, "attempt-1")
 
     async def test_rejects_wrong_profile_or_inactive_delegation(self):
-        launch = StoredApprovalSessionTests._clanker_intent()
+        launch = ClankerIntentFixtures.clanker_intent()
         profile = {
             "profile_id": "wrong-profile",
             "provider_user_id": "provider-user",

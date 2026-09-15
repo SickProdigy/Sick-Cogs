@@ -19,18 +19,13 @@
       <button id="authorize-wallet" type="button">Authorize this wallet</button>
       <p id="authorization-status" role="status"></p>
     </div>
-    <div id="clanker-controls" hidden>
-      <button id="approve-clanker" type="button">Approve and deploy on Base Sepolia</button>
-      <button id="reject-clanker" type="button">Reject launch</button>
-      <p id="clanker-status" role="status"></p>
-    </div>
     <section id="clanker-external-workflow" hidden>
       <h2>Clanker external wallet</h2>
       <p id="external-clanker-status">Loading protected Clanker deployment details…</p>
       <dl id="external-clanker-details" hidden></dl>
       <div id="external-clanker-controls" hidden>
         <button id="external-clanker-connect" type="button">Connect external wallet</button>
-        <p class="notice">The connected wallet must match the saved creator/token administrator and submits the exact reviewed Base Sepolia operation. The token administrator and reward treasury may be different addresses. No wallet secret is sent to the website or bot.</p>
+        <p class="notice">The connected wallet is the execution wallet and gas payer. Blank token-administrator and reward roles resolve to it; explicit addresses remain unchanged. No wallet secret is sent to the website or bot.</p>
         <button id="external-clanker-deploy" type="button" disabled>Review and deploy token</button>
         <p id="external-clanker-result" role="status"></p>
         <div id="external-clanker-verification" hidden>

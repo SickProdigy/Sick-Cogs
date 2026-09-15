@@ -9,11 +9,6 @@ const authorizationButton = document.querySelector("#authorize-wallet");
 const authorizationStatus = document.querySelector("#authorization-status");
 const authorizationDays = document.querySelector("#authorization-days");
 const authorizationDurationHelp = document.querySelector("#authorization-duration-help");
-const clankerControls = document.querySelector("#clanker-controls");
-const clankerApprove = document.querySelector("#approve-clanker");
-const clankerReject = document.querySelector("#reject-clanker");
-const clankerStatus = document.querySelector("#clanker-status");
-const noticeElement = document.querySelector("#session-notice");
 let handoffToken = null;
 
 function addDetail(label, value) {
@@ -61,92 +56,12 @@ function decodeHandoff() {
 }
 
 async function loadSession() {
-  if (window.location.hash.includes("handoff=")) {
-    const candidate = new URLSearchParams(window.location.hash.slice(1)).get("handoff") || "";
-    if (candidate.split(".").length === 3) return decodeHandoff();
-    throw new Error("Protected external-wallet handoff loading below.");
+  if (!window.location.hash.includes("handoff=")) {
+    throw new Error("This protected wallet authorization link is missing its handoff token.");
   }
-  const response = await fetch("api/session.php", {
-    method: "GET",
-    credentials: "same-origin",
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.data) {
-    throw new Error(body.error?.message || "This protected wallet session is unavailable.");
-  }
-  return body.data;
-}
-
-function formatWei(value) {
-  try {
-    const wei = BigInt(value);
-    const whole = wei / 1000000000000000000n;
-    let fraction = (wei % 1000000000000000000n).toString().padStart(18, "0");
-    while (fraction.endsWith("0")) fraction = fraction.slice(0, -1);
-    return fraction ? String(whole) + "." + fraction + " ETH" : String(whole) + " ETH";
-  } catch {
-    return String(value) + " wei";
-  }
-}
-
-function renderClanker(clanker) {
-  addDetail("Network", clanker.network_name + " (" + clanker.chain_id + ")");
-  addDetail("Signing wallet", clanker.wallet_address);
-  addDetail("Clanker factory", clanker.factory);
-  addDetail("Token", clanker.token.name + " ($" + clanker.token.symbol + ")");
-  addDetail("Token administrator", clanker.token.admin);
-  addDetail("Image", clanker.token.image || "None");
-  addDetail("Metadata", JSON.stringify(clanker.token.metadata || {}));
-  addDetail("Context", JSON.stringify(clanker.token.context || {}));
-  addDetail("Pool pair", clanker.pool.paired_token);
-  addDetail("Pool ticks", "start " + clanker.pool.tick_if_token0_is_clanker + "; spacing " + clanker.pool.tick_spacing);
-  addDetail("Pool positions", clanker.pool.positions.map((item) =>
-    item.tick_lower + " to " + item.tick_upper + ": " + item.position_bps + " bps"
-  ).join("; "));
-  addDetail("Pool fees", clanker.pool.fees.type + "; token " + clanker.pool.fees.clanker_bps + " bps; pair " + clanker.pool.fees.paired_bps + " bps");
-  clanker.rewards.forEach((reward, index) => {
-    addDetail("Reward " + (index + 1), reward.bps + " bps in " + reward.token + "; recipient " + reward.recipient + "; admin " + reward.admin);
-  });
-  addDetail("Vault", clanker.vault ? clanker.vault.percentage + "% to " + clanker.vault.recipient + "; lock " + clanker.vault.lockup_seconds + "s; vest " + clanker.vault.vesting_seconds + "s" : "None");
-  if (clanker.airdrop) {
-    addDetail("Airdrop", clanker.airdrop.amount_tokens + " tokens; admin " + clanker.airdrop.admin + "; lock " + clanker.airdrop.lockup_seconds + "s; vest " + clanker.airdrop.vesting_seconds + "s");
-    addDetail("Airdrop Merkle root", clanker.airdrop.merkle_root);
-  } else {
-    addDetail("Airdrop", "None");
-  }
-  addDetail("Expected native value", formatWei(clanker.expected_native_value_wei));
-  addDetail("Estimated gas fee", formatWei(clanker.estimated_gas_fee_wei));
-  addDetail("Payload hash", clanker.payload_hash);
-  addDetail("Intent", clanker.intent_id);
-  addDetail("Intent expires", new Date(clanker.expires_at * 1000).toLocaleString());
-  if (noticeElement) {
-    noticeElement.textContent = "Review every field carefully. This Base Sepolia prototype view does not submit a transaction by itself.";
-  }
-}
-
-async function clankerAction(action) {
-  const response = await fetch("api/clanker.php", {method: "POST", credentials: "same-origin",
-    headers: {"Content-Type": "application/json", Accept: "application/json"},
-    body: JSON.stringify({action})});
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.data) throw new Error(body.error?.message || "The Clanker operation could not be processed.");
-  return body.data;
-}
-function configureClanker(session) {
-  if (!session.clanker || !clankerControls || !clankerApprove || !clankerReject || !clankerStatus) return;
-  clankerControls.hidden = false;
-  clankerApprove.addEventListener("click", async () => {
-    clankerApprove.disabled = true; clankerReject.disabled = true; clankerStatus.textContent = "Submitting the exact reviewed operation…";
-    try { const value = await clankerAction("approve"); clankerStatus.textContent = "Clanker deployment status: " + value.status + (value.transaction_hash ? "; transaction " + value.transaction_hash : ""); }
-    catch (error) { clankerStatus.textContent = error instanceof Error ? error.message : "Clanker approval failed."; }
-  });
-  clankerReject.addEventListener("click", async () => {
-    clankerApprove.disabled = true; clankerReject.disabled = true;
-    try { await clankerAction("reject"); clankerStatus.textContent = "Clanker launch rejected. No transaction was submitted."; }
-    catch (error) { clankerStatus.textContent = error instanceof Error ? error.message : "Clanker rejection failed."; }
-  });
+  const candidate = new URLSearchParams(window.location.hash.slice(1)).get("handoff") || "";
+  if (candidate.split(".").length === 3) return decodeHandoff();
+  throw new Error("Protected external-wallet handoff loading below.");
 }
 
 function configureAuthorization(session) {
@@ -202,7 +117,7 @@ function configureAuthorization(session) {
 if (statusElement && detailsElement) {
   Promise.resolve().then(loadSession)
     .then((session) => {
-      statusElement.textContent = session.clanker ? "Protected Clanker deployment review loaded." : "Protected wallet handoff loaded.";
+      statusElement.textContent = "Protected wallet authorization loaded.";
       addDetail("Purpose", session.purpose);
       addDetail("Approval link expires", new Date(session.expires_at * 1000).toLocaleString());
       if (session.wallet?.accounts?.length) {
@@ -218,8 +133,6 @@ if (statusElement && detailsElement) {
         addDetail("Value (wei)", session.transaction.value_wei);
         addDetail("Intent", session.transaction.intent_id);
       }
-      if (session.clanker) renderClanker(session.clanker);
-      configureClanker(session);
       detailsElement.hidden = false;
       configureAuthorization(session);
     })

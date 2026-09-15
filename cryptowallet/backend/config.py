@@ -2,9 +2,8 @@ import time
 
 from redbot.core import Config
 
-from ..core.clanker import ClankerDeploymentIntent
-from ..core.models import ApprovalPurpose, IntentStatus
-from ..core.networks import DEFAULT_NETWORK, NETWORKS
+from ..core.models import IntentStatus
+from ..core.networks import DEFAULT_NETWORK
 
 CONFIG_IDENTIFIER = 9365048217
 MAX_STORED_INTENTS = 25
@@ -18,13 +17,6 @@ def create_config(cog) -> Config:
         approval_base_url=None,
         provider="unconfigured",
         default_network=DEFAULT_NETWORK,
-        companion_enabled=False,
-        companion_host="127.0.0.1",
-        companion_port=8787,
-        pairing_code_digest=None,
-        pairing_expires_at=0,
-        paired_at=0,
-        companion_nonces={},
         provider_paused=False,
         provider_usage={},
         token_registry={},
@@ -39,7 +31,6 @@ def create_config(cog) -> Config:
         selected_environment="testnet",
         claimed_at=0,
         intents={},
-        approval_sessions={},
         notifications_enabled=True,
         default_send_asset=None,
         security_locked=False,
@@ -50,7 +41,7 @@ def create_config(cog) -> Config:
 
 
 class WalletConfigMixin:
-    """Stored-data helpers shared by the command and companion layers."""
+    """Stored-data helpers shared by wallet command and relay layers."""
 
     async def expire_and_trim_intents(self, user) -> dict:
         now = int(time.time())
@@ -69,73 +60,3 @@ class WalletConfigMixin:
             intents.clear()
             intents.update(ordered[:MAX_STORED_INTENTS])
             return dict(intents)
-
-    async def companion_session_payload(self, session) -> dict:
-        """Build the public API representation from authoritative stored state."""
-        payload = {
-            "version": 1,
-            "purpose": session.purpose.value,
-            "expires_at": session.expires_at,
-            "identity_verified": True,
-            "transaction": None,
-            "clanker": None,
-        }
-        if not session.intent_id:
-            return payload
-        data = await self.config.user_from_id(session.discord_user_id).intents.get_raw(
-            session.intent_id, default=None
-        )
-        if data is None:
-            return payload
-        if session.purpose is ApprovalPurpose.CLANKER_DEPLOYMENT:
-            try:
-                intent = ClankerDeploymentIntent.from_dict(data)
-            except (KeyError, TypeError, ValueError):
-                return payload
-            network = NETWORKS.get(intent.network)
-            if network is None:
-                return payload
-            payload["clanker"] = {
-                "intent_id": intent.intent_id,
-                "payload_hash": intent.payload_hash,
-                "network": intent.network,
-                "network_name": network.name,
-                "chain_id": intent.chain_id,
-                "wallet_address": intent.wallet_address,
-                "factory": intent.factory,
-                "expected_native_value_wei": str(intent.expected_native_value_wei),
-                "estimated_gas_fee_wei": str(intent.estimated_gas_fee_wei),
-                "expires_at": intent.expires_at,
-                "token": intent.canonical_payload()["token"],
-                "pool": intent.pool.to_dict(),
-                "rewards": [item.to_dict() for item in intent.rewards],
-                "vault": intent.vault.to_dict() if intent.vault else None,
-                "airdrop": intent.airdrop.to_dict() if intent.airdrop else None,
-            }
-            return payload
-        network = NETWORKS.get(str(data.get("network") or ""))
-        if network is None:
-            return payload
-        payload["transaction"] = {
-            "intent_id": str(data.get("intent_id") or ""),
-            "network": network.key,
-            "network_name": network.name,
-            "chain_id": network.chain_id,
-            "chain_family": network.family.value,
-            "network_reference": network.reference,
-            "network_reference_label": network.reference_label,
-            "native_symbol": network.native_symbol,
-            "native_decimals": network.native_decimals,
-            "capabilities": [capability.value for capability in network.capabilities.enabled()],
-            "from_address": str(data.get("from_address") or ""),
-            "to_address": str(data.get("to_address") or ""),
-            "value_atomic": str(data.get("value_atomic", data.get("value_wei", 0))),
-            "value_wei": str(data.get("value_wei", data.get("value_atomic", 0))),
-            "asset_kind": str(data.get("asset_kind") or "native"),
-            "asset_contract": data.get("asset_contract"),
-            "asset_symbol": data.get("asset_symbol"),
-            "asset_decimals": data.get("asset_decimals"),
-            "status": str(data.get("status") or "unknown"),
-            "expires_at": int(data.get("expires_at", 0) or 0),
-        }
-        return payload
