@@ -144,18 +144,18 @@ class ClankerVaultModal(discord.ui.Modal):
         self.view_ref = view
         vault = view.draft.get("vault") or {}
         self.percentage_input = discord.ui.TextInput(
-            label="Supply to reserve (blank disables)", default=str(vault.get("percentage") or ""),
+            label="Supply percentage (blank disables)", default=str(vault.get("percentage") or ""),
             placeholder="Starter example: 10", required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
-            label="Lockup / cliff (minimum 7d)",
+            label="Lockup (minimum 7d)",
             default=format_vault_duration(vault.get("lockupDuration") or MIN_VAULT_LOCKUP_SECONDS),
             placeholder="7d, 2w, 6m, or 1y", max_length=10,
         )
         self.vesting_input = discord.ui.TextInput(
-            label="Gradual release after lock (optional)",
+            label="Vesting (optional)",
             default=format_vault_duration(vault.get("vestingDuration") or 0),
-            placeholder="none, 30d, 6m, or 1y", max_length=10,
+            placeholder="Gradual unlock: none, 30d, 6m, or 1y", max_length=10,
         )
         self.recipient_input = discord.ui.TextInput(
             label="Recipient (blank uses signer wallet)", default=str(vault.get("recipient") or ""),
@@ -180,7 +180,7 @@ class ClankerVaultModal(discord.ui.Modal):
             if lockup < MIN_VAULT_LOCKUP_SECONDS:
                 raise ValueError("Vault lockup must be at least seven days.")
             if not 0 <= vesting <= 315360000:
-                raise ValueError("Vault gradual release cannot exceed 10 years.")
+                raise ValueError("Vault vesting cannot exceed 10 years.")
             if recipient and not is_eth_address(recipient):
                 raise ValueError("Vault recipient must be a valid EVM address.")
         except ValueError as exc:
@@ -1073,13 +1073,14 @@ class ClankerVerifiedView(discord.ui.View):
         vault = payload.get("vault")
         vault_summary = "Disabled"
         if vault:
-            release = (
-                "gradual release over " + format_vault_duration(vault.get("vestingDuration") or 0)
-                if vault.get("vestingDuration") else "full unlock after lockup"
+            vaulted_tokens = DEFAULT_CLANKER_SUPPLY * int(vault["percentage"]) // 100
+            vesting = (
+                format_vault_duration(vault.get("vestingDuration") or 0)
+                if vault.get("vestingDuration") else "none (full unlock after lockup)"
             )
-            vault_summary = "{}% → {} · locked {} · {}".format(
-                vault["percentage"], vault["recipient"],
-                format_vault_duration(vault["lockupDuration"]), release,
+            vault_summary = "{}% ({}) → {} · Lockup: {} · Vesting: {}".format(
+                vault["percentage"], format_tokens(vaulted_tokens), vault["recipient"],
+                format_vault_duration(vault["lockupDuration"]), vesting,
             )
         embed.add_field(name="Vault", value=vault_summary, inline=False)
         airdrop = payload.get("airdrop")
@@ -1314,13 +1315,15 @@ class ClankerDraftView(discord.ui.View):
         if vault:
             recipient = vault.get("recipient") or self.draft.get("primary_beneficiary") or "signer wallet"
             vesting = int(vault.get("vestingDuration") or 0)
-            detail = "{}% · locked {}".format(
-                vault["percentage"], format_vault_duration(vault["lockupDuration"])
+            vaulted_tokens = DEFAULT_CLANKER_SUPPLY * int(vault["percentage"]) // 100
+            detail = "{}% ({}) · Lockup: {}".format(
+                vault["percentage"], format_tokens(vaulted_tokens),
+                format_vault_duration(vault["lockupDuration"]),
             )
             if vesting:
-                detail += " · gradual release over {}".format(format_vault_duration(vesting))
+                detail += " · Vesting: {}".format(format_vault_duration(vesting))
             else:
-                detail += " · full unlock after lockup"
+                detail += " · Vesting: none (full unlock after lockup)"
             embed.add_field(name="Vault", value=detail + " · recipient " + recipient, inline=False)
         else:
             embed.add_field(
