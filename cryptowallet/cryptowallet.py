@@ -200,6 +200,43 @@ class CryptoWallet(
                 "source": "tokenfactory",
             }
 
+    async def clanker_register_verified_token(self, user, token: dict) -> None:
+        """Register one receipt-verified Clanker token for wallet discovery."""
+        required = {"contract_address", "symbol", "name", "decimals"}
+        if not isinstance(token, dict) or set(token) != required:
+            raise ValueError("Clanker returned an invalid verified token record.")
+        contract = str(token["contract_address"]).lower()
+        if not contract.startswith("0x") or len(contract) != 42:
+            raise ValueError("Clanker returned an invalid token contract address.")
+        async with self.config.token_registry() as registry:
+            entries = registry.setdefault(BASE_SEPOLIA.key, {})
+            existing = entries.get(contract)
+            if existing is not None:
+                if (
+                    str(existing.get("symbol")) != str(token["symbol"])
+                    or int(existing.get("decimals", -1)) != int(token["decimals"])
+                ):
+                    raise RuntimeError(
+                        "The existing token registry entry conflicts with the Clanker receipt."
+                    )
+                return
+            active = sum(
+                item.get("status") in {"community", "recognized"}
+                for item in entries.values()
+            )
+            if active >= 25:
+                raise RuntimeError("The Base Sepolia community token registry is full.")
+            entries[contract] = {
+                "contract_address": contract,
+                "symbol": str(token["symbol"]),
+                "name": str(token["name"]),
+                "decimals": int(token["decimals"]),
+                "status": "community",
+                "submitted_by": int(user.id),
+                "submitted_at": int(time.time()),
+                "source": "clanker",
+            }
+
     async def clanker_requester_address(self, user) -> str:
         """Return the requesting user's public Base Sepolia wallet address."""
         profile = await self.get_or_create_wallet_profile(user)

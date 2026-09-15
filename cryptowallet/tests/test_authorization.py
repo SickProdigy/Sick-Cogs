@@ -336,8 +336,11 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
                             },
                             zero_contract: {
                                 "symbol": "ZERO",
+                                "name": "Created Zero Token",
                                 "decimals": 0,
                                 "status": "community",
+                                "source": "clanker",
+                                "submitted_by": 7,
                             },
                         }
                     }
@@ -352,7 +355,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             _network_badge=WalletCoreCommands._network_badge,
             _network_compact_label=WalletCoreCommands._network_compact_label,
         )
-        ctx = SimpleNamespace(author=SimpleNamespace(display_name="Member"))
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7, display_name="Member"))
         embed = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
         rendered = "\n".join(
             f"{field.name}\n{field.value}" for field in embed.fields
@@ -386,9 +389,11 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             solana_field.value.index(f"`{solana}`"),
             solana_field.value.index("[Solana Devnet]"),
         )
-        self.assertEqual(len(embed.fields), 2)
+        self.assertEqual(len(embed.fields), 3)
         self.assertIn("OWNED", rendered)
-        self.assertNotIn("ZERO", rendered)
+        self.assertNotIn("ZERO", evm_field.value)
+        self.assertIn("━━ CREATED TOKENS ━━", rendered)
+        self.assertIn("ZERO", rendered)
         self.assertNotIn("Automatic token discovery", rendered)
         self.assertNotIn("[Arbitrum Sepolia]", rendered)
 
