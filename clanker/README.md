@@ -32,21 +32,15 @@ The treasury receives the configured platform share of creator rewards. The defa
 
 ## User flow
 
-Open a prefilled interactive draft card with the friendly shortcut:
+Start a prefilled interactive draft with the dedicated clanking command:
 
 ```text
 [p]clank SGBT "SickGaming Bot Token"
 ```
 
-The ticker is uppercased automatically. The token name is optional, so `[p]clank SGBT` opens the same form with only the ticker prefilled. `[p]clanker card` remains available as an empty administrative draft.
+The ticker is uppercased automatically. The token name is optional, so `[p]clank SGBT` opens the same form with only the ticker prefilled. `clank` is a standalone creation command, not an alias for the `clanker` management group. `[p]clanker launch` opens the same draft explicitly, and `[p]clanker card` opens an empty draft.
 
 The requester can enter token basics, a separately configurable creator reward treasury, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. When CryptoWallet is loaded, its Discord-bound public Base Sepolia address is prefilled as the editable creator/token-admin default. The card is requester-bound so another member cannot edit or save it.
-
-The legacy text command also prepares a draft:
-
-```text
-[p]clanker launch TICKER Token Name
-```
 
 Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the server-configured platform share and treasury are not user-overridable. After verification, **Launch with CryptoWallet** submits the exact card directly when delegated signing is active. If authorization is missing, the bot sends the general signed authorization link; return to the same verified card afterward. The external-wallet route provides a requester-bound companion link and verifies the submitted transaction directly against Base Sepolia.
 
@@ -67,7 +61,8 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 
 ## Commands
 
-- `[p]clank <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
+- `[p]clank <symbol> [token name]` — start clanking a new token; this is separate from the `clanker` management group.
+
 - `[p]clanker card` — open an empty interactive draft flow.
 - `[p]clanker launch <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
 - `[p]clanker status` — show draft and guild-control configuration.

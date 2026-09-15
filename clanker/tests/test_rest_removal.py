@@ -203,13 +203,11 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_not_awaited()
         ctx.send_help.assert_awaited_once_with()
 
-    async def test_clank_alias_remains_the_only_implicit_creation_shortcut(self):
+    async def test_standalone_clank_opens_prefilled_launch_draft(self):
         cog = Clanker.__new__(Clanker)
         cog._open_clanker_card = AsyncMock()
-        ctx = SimpleNamespace(
-            invoked_with="clank", send=AsyncMock(), send_help=AsyncMock()
-        )
-        await Clanker.clanker.callback(cog, ctx, "tgbt", name="Token Name")
+        ctx = SimpleNamespace()
+        await Clanker.clank.callback(cog, ctx, "tgbt", name="Token Name")
         cog._open_clanker_card.assert_awaited_once_with(ctx, "tgbt", "Token Name")
 
     async def test_explicit_launch_opens_the_same_interactive_card(self):

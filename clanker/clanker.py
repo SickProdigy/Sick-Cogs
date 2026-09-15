@@ -1960,22 +1960,31 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         await ctx.send(embed=view.embed(), view=view)
 
     @commands.guild_only()
-    @commands.group(name="clanker", aliases=("clank",), invoke_without_command=True)
+    @commands.command(name="clank")
+    async def clank(
+        self, ctx: commands.Context, symbol: str, *, name: Optional[str] = None
+    ):
+        """Start clanking a token with a ticker and optional token name."""
+        await self._open_clanker_card(ctx, symbol, name)
+
+    @commands.guild_only()
+    @commands.group(name="clanker", invoke_without_command=True, usage="")
     async def clanker(
         self, ctx: commands.Context, symbol: Optional[str] = None, *, name: Optional[str] = None
     ):
-        """Open a Clanker launch draft, optionally prefilled with a ticker and name."""
-        if symbol is None:
-            await ctx.send_help()
-            return
-        if str(ctx.invoked_with).lower() != "clank":
-            await ctx.send_help()
-            return
-        await self._open_clanker_card(ctx, symbol, name)
+        """Manage Clanker token launches, drafts, rewards, and history.
+
+        Clanker creates tokens and liquidity on Base. Start a new token with
+        `[p]clank <symbol> [token name]`.
+        """
+        await ctx.send_help()
 
     @clanker.command(name="status")
     async def clanker_status(self, ctx: commands.Context):
-        """Show whether Clanker launch requests are enabled."""
+        """Show Clanker status.
+
+        Displays launch availability and this server's configured controls.
+        """
         settings = await self.config.guild(ctx.guild).all()
         try:
             companion_url = await self.companion_session_url()
@@ -2020,7 +2029,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="card", aliases=("create",))
     async def clanker_card(self, ctx: commands.Context):
-        """Open an interactive launch-card draft with optional airdrops."""
+        """Open an empty draft.
+
+        Opens the interactive launch card for token, reward, vault, and airdrop details.
+        """
         await self._open_clanker_card(ctx)
 
     @clanker.command(name="launch")
@@ -2031,13 +2043,19 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         *,
         name: Optional[str] = None,
     ):
-        """Open the normal launch card with a ticker and optional name prefilled."""
+        """Open a prefilled draft.
+
+        Starts the launch card with a ticker and optional token name already filled in.
+        """
         await self._open_clanker_card(ctx, symbol, name)
 
     @clanker.command(name="audit")
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_audit(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
-        """Show recent Clanker launch request audit records."""
+        """Show the audit log.
+
+        Displays recent Clanker draft and launch records for server moderators.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         if not audit_log:
             await ctx.send("No Clanker launch requests have been recorded.")
@@ -2047,7 +2065,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="drafts")
     async def clanker_drafts(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
-        """List the requesting users saved, unsubmitted drafts."""
+        """List your drafts.
+
+        Shows your editable and verified drafts that have not entered a wallet route.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         drafts = [
             record for record in audit_log
@@ -2094,7 +2115,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="draft")
     async def clanker_draft(self, ctx: commands.Context, launch_id: str):
-        """Show one of the requesting users saved drafts."""
+        """Open one draft.
+
+        Reopens one of your saved drafts by its short launch reference.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if (
             not record
@@ -2107,7 +2131,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="draftremove", aliases=("removedraft", "deletedraft"))
     async def clanker_draftremove(self, ctx: commands.Context, launch_id: str):
-        """Review deletion of one requester-owned unsubmitted draft."""
+        """Delete one draft.
+
+        Opens a confirmation before permanently deleting one of your unsubmitted drafts.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record or record.get("status") not in {"dry_run", "verified"}:
             await ctx.send("No removable Clanker draft of yours matched that reference.")
@@ -2127,7 +2154,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="draftsremoveall", aliases=("removealldrafts", "deletedrafts"))
     async def clanker_draftsremoveall(self, ctx: commands.Context):
-        """Review deletion of all requester-owned unsubmitted drafts."""
+        """Delete all drafts.
+
+        Opens a confirmation before deleting all of your unsubmitted drafts.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         drafts = [item for item in audit_log
                   if int(item.get("requester_id", 0)) == int(ctx.author.id)
@@ -2150,7 +2180,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="launches", aliases=("history", "records"))
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
-        """List recent Clanker records that entered an execution route."""
+        """List your launches.
+
+        Shows launch attempts that entered an internal or external wallet route.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         launches = [
             record for record in audit_log
@@ -2204,7 +2237,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_rewardverify(
         self, ctx: commands.Context, launch_id: str, transaction_hash: str
     ):
-        """Verify one external-wallet reward collection for your token."""
+        """Verify an external reward claim.
+
+        Reconciles an external-wallet reward transaction for your token.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record:
             await ctx.send("No matching confirmed Clanker launch belongs to you.")
@@ -2230,7 +2266,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="claimall")
     async def clanker_claimall(self, ctx: commands.Context):
-        """DM paginated collection selection and profitable withdrawal review."""
+        """Review all rewards.
+
+        DMs token selection, combined claims, and profitable treasury withdrawal review.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         records = [
             item for item in audit_log
@@ -2258,7 +2297,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="claimplatform")
     @commands.is_owner()
     async def clanker_claimplatform(self, ctx: commands.Context):
-        """Review profitable platform-only treasury deposits across this guild."""
+        """Review platform rewards.
+
+        Reviews profitable platform-only treasury deposits across this server.
+        """
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         records = [item for item in audit_log
                    if item.get("status") in {"internal_confirmed", "external_confirmed"}
@@ -2283,7 +2325,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="launchinfo", aliases=("record", "info"))
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_launchinfo(self, ctx: commands.Context, launch_id: str):
-        """Show details for one Clanker launch audit record."""
+        """Show one launch.
+
+        Displays the detailed receipt for one launch reference.
+        """
         record = await self.get_launch_record(ctx.guild, launch_id)
         if not record:
             await ctx.send("No Clanker launch record matched that ID.")
@@ -2293,7 +2338,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="refresh")
     @commands.is_owner()
     async def clanker_refresh(self, ctx: commands.Context, launch_id: str):
-        """Refresh your persisted internal-wallet launch status after approval or restart."""
+        """Recover launch status.
+
+        Reconciles a persisted CryptoWallet launch after approval or restart.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
             await ctx.send("No matching internal-wallet launch belongs to you.")
@@ -2314,7 +2362,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="external")
     async def clanker_external(self, ctx: commands.Context, launch_id: str):
-        """DM the requester the exact transaction for an external wallet."""
+        """Use an external wallet.
+
+        DMs a requester-bound companion handoff for the exact launch transaction.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record:
             await ctx.send("No Clanker launch record matched that ID.")
@@ -2367,7 +2418,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     @clanker.command(name="verify")
     async def clanker_verify(self, ctx: commands.Context, launch_id: str, transaction_hash: str):
-        """Verify an external Base Sepolia transaction against the saved operation."""
+        """Verify an external launch.
+
+        Checks a Base Sepolia transaction against the exact saved launch operation.
+        """
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
         if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
             await ctx.send("No matching external-wallet launch belongs to you.")
@@ -2425,7 +2479,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     @clanker.command(name="airdropproofs", aliases=("proofs", "airdropexport"))
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_airdropproofs(self, ctx: commands.Context, launch_id: str):
-        """Export generated airdrop Merkle proofs for a launch record."""
+        """Export airdrop proofs.
+
+        Exports generated Merkle proof metadata for a launch record.
+        """
         record = await self.get_launch_record(ctx.guild, launch_id)
         if not record:
             await ctx.send("No Clanker launch record matched that ID.")
