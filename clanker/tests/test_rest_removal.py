@@ -192,7 +192,7 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         resolve.assert_not_awaited()
         ctx.send.assert_awaited_once_with(embed="prefilled-embed", view=fake_view)
 
-    async def test_full_group_rejects_unknown_subcommand_without_opening_draft(self):
+    async def test_full_group_routes_unknown_subcommand_to_help(self):
         cog = Clanker.__new__(Clanker)
         cog._open_clanker_card = AsyncMock()
         ctx = SimpleNamespace(
@@ -200,7 +200,8 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         )
         await Clanker.clanker.callback(cog, ctx, "rewards", name="nmt-fc01")
         cog._open_clanker_card.assert_not_awaited()
-        self.assertIn("Unknown Clanker command", ctx.send.await_args.args[0])
+        ctx.send.assert_not_awaited()
+        ctx.send_help.assert_awaited_once_with()
 
     async def test_clank_alias_remains_the_only_implicit_creation_shortcut(self):
         cog = Clanker.__new__(Clanker)

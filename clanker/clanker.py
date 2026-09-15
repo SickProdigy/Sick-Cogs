@@ -1969,11 +1969,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send_help()
             return
         if str(ctx.invoked_with).lower() != "clank":
-            await ctx.send(
-                "Unknown Clanker command. To create a token, use "
-                "`!clank <symbol> [token name]` or "
-                "`!clanker launch <symbol> [token name]`."
-            )
+            await ctx.send_help()
             return
         await self._open_clanker_card(ctx, symbol, name)
 
