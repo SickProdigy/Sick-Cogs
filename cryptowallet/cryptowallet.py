@@ -4,6 +4,8 @@ import secrets
 import time
 from urllib.parse import quote
 
+import discord
+
 from redbot.core import commands
 
 from .backend import (
@@ -20,6 +22,7 @@ from .backend.provisioning import WalletProvisioningMixin
 from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
+from .core.models import IntentStatus
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_SEPOLIA
 from .providers import CdpWalletProvider
@@ -248,6 +251,95 @@ class CryptoWallet(
             "signing_payload_hash": intent.payload_hash,
             "approval_url": f"{base_url}/session/{quote(token, safe='')}",
             "expires_at": min(intent.expires_at, int(time.time()) + 10 * 60),
+        }
+
+    async def clanker_launch_verified(
+        self, user, launch: dict, operation: dict
+    ) -> dict:
+        """Submit one Discord-reviewed Clanker operation under active delegation."""
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        user_config = self.config.user(user)
+        if await user_config.security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if int(launch.get("requester_id", 0)) != int(user.id):
+            raise ValueError("Clanker requester does not match the signing wallet user.")
+
+        profile = await self.get_or_create_wallet_profile(user)
+        account = next(
+            (item for item in profile.get("accounts") or []
+             if item.get("network") == BASE_SEPOLIA.key), None
+        )
+        deployment_id = await self.config.deployment_id()
+        application_id = self.discord_application_id()
+        if not all((profile.get("profile_id"), account,
+                    account.get("address") if account else None,
+                    deployment_id, application_id)):
+            raise RuntimeError("CryptoWallet signing identity is incomplete.")
+
+        intent = signing_intent_from_clanker_launch(
+            launch, operation, deployment_id=str(deployment_id),
+            discord_application_id=int(application_id),
+            profile_id=str(profile["profile_id"]),
+            wallet_address=str(account["address"]),
+        )
+        validate_clanker_deployment_call(
+            intent, to=str(operation["to"]), value=int(operation["value"]),
+            data=str(operation["data"]),
+        )
+        delegation = await self.wallet_provider.get_delegation_status(
+            profile, BASE_SEPOLIA.key
+        )
+        if not delegation.get("active"):
+            try:
+                expires_at = await self.send_authorization_link(user, profile)
+            except discord.Forbidden as exc:
+                raise RuntimeError(
+                    "I could not DM the CryptoWallet authorization link. Enable DMs and try again."
+                ) from exc
+            return {
+                "status": "authorization_required",
+                "intent_id": intent.intent_id,
+                "payload_hash": intent.payload_hash,
+                "authorization_expires_at": int(expires_at),
+                "provider_status": None,
+                "user_operation_hash": None,
+                "transaction_hash": None,
+            }
+
+        async with user_config.intents() as intents:
+            existing = intents.get(intent.intent_id)
+            if existing is not None:
+                stored = self._stored_clanker_intent(existing)
+                if stored != intent:
+                    raise RuntimeError("A different Clanker intent already uses this ID.")
+                if existing.get("status") != IntentStatus.PENDING.value:
+                    raise RuntimeError("This Clanker launch has already entered its lifecycle.")
+            else:
+                intents[intent.intent_id] = {
+                    **intent.to_dict(), "status": IntentStatus.PENDING.value
+                }
+
+        try:
+            result = await self.submit_claimed_clanker_intent(
+                int(user.id), intent.intent_id, intent.payload_hash,
+                secrets.token_urlsafe(24),
+            )
+        except RuntimeError:
+            lifecycle = await self.clanker_intent_status(
+                int(user.id), intent.intent_id, intent.payload_hash
+            )
+            if lifecycle["status"] != IntentStatus.UNCERTAIN.value:
+                raise
+            result = lifecycle
+        return {
+            "status": str(result["status"]),
+            "intent_id": intent.intent_id,
+            "payload_hash": intent.payload_hash,
+            "authorization_expires_at": None,
+            "provider_status": result.get("provider_status"),
+            "user_operation_hash": result.get("user_operation_hash"),
+            "transaction_hash": result.get("transaction_hash"),
         }
 
     async def clanker_internal_status(
