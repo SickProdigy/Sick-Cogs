@@ -334,17 +334,24 @@ class LaunchReceiptDisplayTests(unittest.TestCase):
             "token_address": "0x7a97de41b37f23bb94aa1652f0d1979060c1cf72",
             "transaction_hash": "0x" + "ab" * 32,
             "user_operation_hash": "0x" + "cd" * 32,
-            "payload": {"image": "https://example.com/nmt.png"},
+            "payload": {
+                "image": "https://example.com/nmt.png",
+                "metadata": {"description": "A test launch description."},
+            },
         }
         embed = Clanker.launch_record_embed(record)
         fields = {field.name: field.value for field in embed.fields}
-        self.assertEqual(embed.title, "\u2705 $NMT launched \u2022 nmt-fc01")
-        self.assertEqual(embed.description, "Nikki Minaje Twatt")
+        self.assertEqual(embed.title, "Clanker launch " + chr(36) + "NMT")
+        self.assertIsNone(embed.description)
+        self.assertEqual(fields["Token"], "Nikki Minaje Twatt (" + chr(36) + "NMT)")
+        self.assertEqual(fields["Description"], "A test launch description.")
         self.assertEqual(fields["Status"], "\u2705 Confirmed")
         self.assertEqual(fields["Network"], "Base Sepolia")
         self.assertEqual(fields["Supply"], "100,000,000,000")
         self.assertTrue(fields["Created"].startswith("<t:"))
-        self.assertIn("0x7a97de\u2026c1cf72", fields["Token contract"])
+        self.assertIn(record["token_address"], fields["Token contract"])
+        self.assertIn("View on BaseScan", fields["Token contract"])
+        self.assertEqual(fields["Launch reference"], "`nmt-fc01`")
         self.assertIn("View on Clanker", fields["Launch links"])
         self.assertIn("View transaction", fields["Launch links"])
         self.assertIn("80%", fields["Creator rewards"])
@@ -527,7 +534,7 @@ class ClankerRedIntegrationTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(), user, "nmt-long", {"status": "failed"}
         )
         embed = user.send.await_args.kwargs["embed"]
-        self.assertEqual(embed.title, "Clanker launch • nmt")
+        self.assertEqual(embed.title, "Clanker launch " + chr(36) + "NMT")
         rendered = "\n".join(str(field.value) for field in embed.fields)
         self.assertIn(f"https://www.clanker.world/clanker/{token}", rendered)
 

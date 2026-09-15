@@ -791,13 +791,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         status = str(record.get("status") or "unknown")
         symbol = str(record.get("symbol") or "?").upper()
         confirmed = status in {"internal_confirmed", "external_confirmed"}
-        title = (
-            "\u2705 $" + symbol + " launched \u2022 " + str(reference)
-            if confirmed else "Clanker launch \u2022 " + str(reference)
-        )
         embed = discord.Embed(
-            title=title,
-            description=str(record.get("name") or "Unnamed token"),
+            title="Clanker launch " + chr(36) + symbol,
             color=discord.Color.green() if confirmed else discord.Color.blue(),
         )
 
@@ -815,6 +810,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 return "Unknown"
             return "{:g}%".format(amount / 100)
 
+        embed.add_field(
+            name="Token",
+            value="{} ({}{})".format(
+                record.get("name") or "Unnamed token", chr(36), symbol
+            ),
+            inline=False,
+        )
+        description = str(
+            ((record.get("payload") or {}).get("metadata") or {}).get("description") or ""
+        ).strip()
+        if description:
+            embed.add_field(name="Description", value=description, inline=False)
         embed.add_field(name="Status", value=Clanker.launch_status_label(status), inline=True)
         embed.add_field(name="Network", value="Base Sepolia", inline=True)
         try:
@@ -837,7 +844,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         token_address = record.get("token_address")
         transaction_hash = record.get("transaction_hash")
         if token_address:
-            embed.add_field(name="Token contract", value=address_link(token_address), inline=False)
+            embed.add_field(
+                name="Token contract",
+                value="`{}`\n[View on BaseScan](https://sepolia.basescan.org/address/{})".format(
+                    token_address, token_address
+                ),
+                inline=False,
+            )
             links = ["[View on Clanker](https://www.clanker.world/clanker/{})".format(token_address)]
             if transaction_hash:
                 links.append("[View transaction](https://sepolia.basescan.org/tx/{})".format(transaction_hash))
@@ -883,6 +896,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 inline=False,
             )
         operation_hash = str(record.get("user_operation_hash") or "")
+        embed.add_field(
+            name="Launch reference", value="`{}`".format(reference), inline=False
+        )
         if operation_hash:
             compact_operation = operation_hash[:10] + "\u2026" + operation_hash[-8:]
             embed.add_field(
