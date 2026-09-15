@@ -19,6 +19,7 @@ FEE_PREFERENCE = {"Both": 0, "Paired": 1, "Clanker": 2}
 FEE_LOCKER = "0x42A95190B4088C88Dd904d930c79deC1158bF09D"
 LP_LOCKER = LOCKER
 COLLECT_REWARDS_SELECTOR = "5763dbd0"
+CLAIM_SELECTOR = "21c0b342"
 
 
 def _address_word(address: str) -> str:
@@ -36,6 +37,21 @@ def clanker_collect_rewards_call(token: str) -> dict[str, object]:
         "value": 0,
         "data": "0x" + COLLECT_REWARDS_SELECTOR + _address_word(token),
     }
+
+
+def clanker_claim_call(owner: str, asset: str) -> dict[str, object]:
+    """Build one fee-locker withdrawal whose destination is fixed by the contract."""
+    return {"to": FEE_LOCKER, "value": 0,
+            "data": "0x" + CLAIM_SELECTOR + _address_word(owner) + _address_word(asset)}
+
+
+def validate_clanker_claim_call(
+    owner: str, asset: str, *, to: str, value: int, data: str
+) -> None:
+    expected = clanker_claim_call(owner, asset)
+    if (str(to).lower() != str(expected["to"]).lower() or int(value) != 0
+            or str(data).lower() != str(expected["data"]).lower()):
+        raise ValueError("Clanker treasury withdrawal call does not match the review.")
 
 
 def validate_clanker_collect_rewards_call(

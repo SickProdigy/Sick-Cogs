@@ -32,8 +32,9 @@ from ..core.validation import (
 )
 from .base import WalletProvider, WalletProviderError
 from .clanker import (
-    clanker_collect_rewards_call, clanker_deployment_calldata,
-    validate_clanker_collect_rewards_call, validate_clanker_deployment_call,
+    clanker_claim_call, clanker_collect_rewards_call, clanker_deployment_calldata,
+    validate_clanker_claim_call, validate_clanker_collect_rewards_call,
+    validate_clanker_deployment_call,
 )
 from .base_rpc import (
     BaseRpcError,
@@ -885,6 +886,117 @@ class CdpWalletProvider(WalletProvider):
                     "transaction_hash": transaction_hash.lower() if transaction_hash else None}
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not refresh the Clanker reward operation.") from exc
+
+    async def submit_clanker_treasury_withdrawal(
+        self, profile: dict, *, token_admin: str, creator_treasury: str,
+        platform_treasury: str, claims: list[dict], attempt_id: str,
+        platform_only: bool = False,
+    ) -> dict:
+        """Atomically submit a reviewed treasury withdrawal under asymmetric policy."""
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_SEPOLIA.key), None)
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+            admin = normalize_evm_address(token_admin).lower()
+            creator = normalize_evm_address(creator_treasury).lower()
+            platform = normalize_evm_address(platform_treasury).lower()
+            if not 1 <= len(claims) <= 32:
+                raise ValueError("invalid claim count")
+            normalized = []
+            for item in claims:
+                if set(item) != {"owner", "asset"}:
+                    raise ValueError("invalid claim fields")
+                owner = normalize_evm_address(str(item["owner"])).lower()
+                asset = normalize_evm_address(str(item["asset"])).lower()
+                if owner not in {creator, platform}:
+                    raise ValueError("unbound treasury")
+                if platform_only:
+                    if sender != platform or owner != platform:
+                        raise ValueError("platform-only withdrawal cannot include creator rewards")
+                elif sender != admin or owner not in {creator, platform}:
+                    raise ValueError("token-admin withdrawal has invalid authority")
+                normalized.append(clanker_claim_call(owner, asset))
+            if len({(item["owner"].lower(), item["asset"].lower()) for item in claims}) != len(claims):
+                raise ValueError("duplicate treasury claim")
+        except ValueError as exc:
+            raise WalletProviderError("The Clanker treasury withdrawal violates its review policy.") from exc
+        if not provider_user_id or not attempt_id:
+            raise WalletProviderError("The treasury withdrawal identity is incomplete.")
+        if not (await self.get_delegation_status(profile, BASE_SEPOLIA.key)).get("active"):
+            raise WalletProviderError("An active wallet authorization is required to withdraw rewards.")
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"sick-cogs:clanker:withdraw:{sender}:{attempt_id}"))
+        try:
+            result = await self._api_client(credentials).send_smart_account_calls(
+                provider_user_id, sender, credentials.project_id, BASE_SEPOLIA.key, normalized, key
+            )
+            status = str(result.get("status") or "")
+            operation_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            echoed = result.get("calls") or []
+            if (str(result.get("network") or "") != BASE_SEPOLIA.key
+                    or status not in {"pending", "signed", "broadcast", "complete"}
+                    or not HASH_PATTERN.fullmatch(operation_hash)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
+                    or not isinstance(echoed, list) or len(echoed) != len(claims)):
+                raise ValueError("invalid treasury acknowledgement")
+            for item, call in zip(claims, echoed):
+                validate_clanker_claim_call(str(item["owner"]), str(item["asset"]),
+                    to=str(call.get("to") or ""), value=int(call.get("value", -1)),
+                    data=str(call.get("data") or ""))
+            return {"provider_status": status, "user_operation_hash": operation_hash.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None}
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not safely withdraw Clanker rewards.") from exc
+
+    async def clanker_treasury_operation_status(
+        self, profile: dict, *, token_admin: str, creator_treasury: str, platform_treasury: str,
+        claims: list[dict], user_operation_hash: str, platform_only: bool = False,
+    ) -> dict:
+        """Refresh an exact treasury batch and revalidate every echoed call."""
+        if not HASH_PATTERN.fullmatch(user_operation_hash or ""):
+            raise WalletProviderError("The stored treasury operation hash is invalid.")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next((item for item in profile.get("accounts") or [] if item.get("network") == BASE_SEPOLIA.key), None)
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+            admin = normalize_evm_address(token_admin).lower()
+            creator = normalize_evm_address(creator_treasury).lower()
+            platform = normalize_evm_address(platform_treasury).lower()
+            for item in claims:
+                owner = normalize_evm_address(str(item["owner"])).lower()
+                if (platform_only and (sender != platform or owner != platform)
+                        or not platform_only and (sender != admin or owner not in {creator, platform})):
+                    raise ValueError
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WalletProviderError("The stored treasury operation violates its authority policy.") from exc
+        credentials = await self.credentials()
+        if credentials is None or not provider_user_id:
+            raise WalletProviderError("The treasury operation identity is incomplete.")
+        try:
+            result = await self._api_client(credentials).get_smart_account_user_operation(
+                provider_user_id, sender, user_operation_hash, credentials.project_id)
+            status = str(result.get("status") or "")
+            returned = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls")
+            if (status not in {"pending", "signed", "broadcast", "complete", "dropped", "failed"}
+                    or returned.lower() != user_operation_hash.lower() or not HASH_PATTERN.fullmatch(returned)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)):
+                raise ValueError
+            if calls is not None:
+                if not isinstance(calls, list) or len(calls) != len(claims):
+                    raise ValueError
+                for item, call in zip(claims, calls):
+                    validate_clanker_claim_call(str(item["owner"]), str(item["asset"]),
+                        to=str(call.get("to") or ""), value=int(call.get("value", -1)), data=str(call.get("data") or ""))
+            return {"provider_status": status, "user_operation_hash": returned.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None}
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError("CDP could not refresh the Clanker treasury operation.") from exc
 
     async def prepare_clanker_deployment(
         self, profile: dict, intent: ClankerDeploymentIntent, attempt_id: str

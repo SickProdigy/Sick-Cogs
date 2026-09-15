@@ -728,6 +728,11 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("sickwallet_accounts", claims)
         self.assertNotIn("sickwallet_address", claims)
         self.assertEqual(expires_at, handoff["expires_at"])
+        handoff["kind"] = "clanker-v4-reward-collection"
+        reward_token, _ = await harness.create_clanker_external_handoff(7, handoff)
+        reward_claims = jwt.decode(reward_token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test")
+        self.assertEqual(reward_claims["sickwallet_clanker"]["kind"], "clanker-v4-reward-collection")
         handoff["requester_id"] = "8"
         with self.assertRaisesRegex(ValueError, "binding"):
             await harness.create_clanker_external_handoff(7, handoff)
@@ -1960,6 +1965,8 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("0xe85a59c628f7d27878aceb4bf3b35733630083a9", external)
         self.assertIn("api/recovery-handoff.php", external)
         self.assertIn("clanker_external", external)
+        self.assertIn("clanker-v4-reward-collection", external)
+        self.assertIn("immutable token administrator wallet", external)
         self.assertIn("crypto.subtle.verify", external)
         self.assertNotIn("api/clanker.php", script)
         self.assertFalse((root / "web" / "api" / "clanker.php").exists())
@@ -2077,6 +2084,43 @@ class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
             await provider.submit_clanker_reward_collection(
                 profile, token, "0x3333333333333333333333333333333333333333", "attempt-2"
             )
+
+    async def test_platform_withdrawal_cannot_include_creator_treasury(self):
+        weth = "0x4200000000000000000000000000000000000006"
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        creator = "0x2222222222222222222222222222222222222222"
+        platform = "0x3333333333333333333333333333333333333333"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": platform}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        with self.assertRaisesRegex(WalletProviderError, "review policy"):
+            await provider.submit_clanker_treasury_withdrawal(
+                profile, token_admin=admin, creator_treasury=creator,
+                platform_treasury=platform, claims=[{"owner": creator, "asset": weth}],
+                attempt_id="attempt-1", platform_only=True)
+
+    async def test_platform_withdrawal_submits_only_exact_platform_calls(self):
+        weth = "0x4200000000000000000000000000000000000006"
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        creator = "0x2222222222222222222222222222222222222222"
+        platform = "0x3333333333333333333333333333333333333333"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": platform}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        data = "0x21c0b342" + platform[2:].rjust(64, "0") + weth[2:].rjust(64, "0")
+        client = SimpleNamespace(send_smart_account_calls=AsyncMock(return_value={
+            "network": BASE_SEPOLIA.key, "status": "broadcast",
+            "userOpHash": "0x" + "4" * 64,
+            "calls": [{"to": "0x42A95190B4088C88Dd904d930c79deC1158bF09D",
+                       "value": "0", "data": data}],}))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+        result = await provider.submit_clanker_treasury_withdrawal(
+            profile, token_admin=admin, creator_treasury=creator, platform_treasury=platform,
+            claims=[{"owner": platform, "asset": weth}], attempt_id="attempt-1",
+            platform_only=True)
+        self.assertEqual(result["provider_status"], "broadcast")
 
     async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
         launch = ClankerIntentFixtures.clanker_intent()
@@ -2230,6 +2274,19 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raw, b'{"jsonrpc":"2.0","result":"0x1234"}')
         self.assertEqual(content.requested_size, 64 * 1024)
+
+    async def test_smart_account_batch_preserves_exact_reviewed_calls(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"status": "pending"})
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        calls = [{"to": "0x42A95190B4088C88Dd904d930c79deC1158bF09D",
+                  "value": 0, "data": "0x21c0b342"}]
+        await client.send_smart_account_calls(
+            "end-user-id", address, "project-id", BASE_SEPOLIA.key, calls, "attempt-id")
+        request = client._request.await_args
+        self.assertEqual(request.kwargs["body"]["calls"], [
+            {"to": calls[0]["to"], "value": "0", "data": calls[0]["data"]}])
+        self.assertTrue(request.kwargs["body"]["useCdpPaymaster"] )
 
     async def test_user_operation_lookup_uses_documented_project_route(self):
         client = object.__new__(CdpApiClient)

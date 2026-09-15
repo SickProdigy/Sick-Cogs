@@ -411,6 +411,26 @@ class CdpApiClient:
             idempotency_key=idempotency_key,
         )
 
+    async def send_smart_account_calls(
+        self, user_id: str, address: str, project_id: str, network: str,
+        calls: list[dict], idempotency_key: str,
+    ) -> dict:
+        """Atomically submit a bounded list of already reviewed smart-account calls."""
+        if not 1 <= len(calls) <= 32:
+            raise ValueError("A smart-account batch must contain 1 through 32 calls.")
+        normalized = []
+        for call in calls:
+            if set(call) != {"to", "value", "data"}:
+                raise ValueError("A smart-account batch call has unexpected fields.")
+            normalized.append({"to": str(call["to"]), "value": str(int(call["value"])),
+                               "data": str(call["data"])})
+        path = (f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe=chr(39))}"
+                f"/evm/smart-accounts/{quote(address, safe=chr(39))}/send")
+        return await self._request(
+            "POST", path, body={"network": network, "calls": normalized, "useCdpPaymaster": True},
+            query={"projectID": project_id}, wallet_auth=True, idempotency_key=idempotency_key,
+        )
+
     async def get_smart_account_user_operation(
         self, user_id: str, address: str, user_operation_hash: str, project_id: str
     ) -> dict:

@@ -217,7 +217,7 @@ class JwtAuthMixin:
             raise RuntimeError("The protected companion identity is incomplete")
         expected = {"version", "kind", "requester_id", "expires_at", "intent", "operation", "verification_command"}
         if (not isinstance(handoff, dict) or set(handoff) != expected
-                or handoff.get("kind") not in {"clanker-v4-external-handoff", "clanker-v4-external-template"}
+                or handoff.get("kind") not in {"clanker-v4-external-handoff", "clanker-v4-external-template", "clanker-v4-reward-collection"}
                 or str(handoff.get("requester_id")) != str(discord_user_id)):
             raise ValueError("The Clanker external handoff binding is invalid")
         now = int(time.time())

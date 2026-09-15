@@ -159,6 +159,30 @@ class CryptoWallet(
             profile, token, token_admin, user_operation_hash
         )
 
+    async def clanker_withdraw_treasuries(
+        self, user, *, token_admin: str, creator_treasury: str,
+        platform_treasury: str, claims: list[dict], attempt_id: str,
+        platform_only: bool = False,
+    ) -> dict:
+        """Submit only the separately reviewed Clanker treasury withdrawals."""
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.submit_clanker_treasury_withdrawal(
+            profile, token_admin=token_admin, creator_treasury=creator_treasury,
+            platform_treasury=platform_treasury, claims=claims, attempt_id=attempt_id,
+            platform_only=platform_only,
+        )
+
+    async def clanker_treasury_status(
+        self, user, *, token_admin: str, creator_treasury: str, platform_treasury: str,
+        claims: list[dict], user_operation_hash: str, platform_only: bool = False,
+    ) -> dict:
+        """Refresh a separately reviewed Clanker treasury withdrawal."""
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.clanker_treasury_operation_status(
+            profile, token_admin=token_admin, creator_treasury=creator_treasury,
+            platform_treasury=platform_treasury, claims=claims,
+            user_operation_hash=user_operation_hash, platform_only=platform_only)
+
     async def clanker_create_external_handoff(
         self, discord_user_id: int, handoff: dict
     ) -> tuple[str, int]:

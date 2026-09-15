@@ -61,6 +61,15 @@ class ClankerProviderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             provider.validate_clanker_collect_rewards_call(WALLET, **call)
 
+    def test_treasury_claim_is_pinned_to_owner_and_asset(self):
+        call = provider.clanker_claim_call(WALLET, WETH)
+        self.assertEqual(call["to"], provider.FEE_LOCKER)
+        self.assertEqual(call["value"], 0)
+        self.assertEqual(call["data"][:10], "0x21c0b342")
+        provider.validate_clanker_claim_call(WALLET, WETH, **call)
+        with self.assertRaises(ValueError):
+            provider.validate_clanker_claim_call(TREASURY, WETH, **call)
+
     def test_rejects_changed_target_value_or_data(self):
         launch = intent()
         data = provider.clanker_deployment_calldata(launch)
