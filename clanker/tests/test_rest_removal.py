@@ -295,11 +295,18 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         self.assertEqual(fields["Platform reward share"], "2000 bps")
         self.assertEqual(fields["Platform treasury"], TREASURY.lower())
         self.assertEqual(
-            fields["Estimated network fee"],
-            "0.0001 ETH (estimated for 1,000,000 gas)",
+            fields["Creator buy-in"],
+            "0.00000000 ETH · ETH used to buy tokens at launch",
         )
-        self.assertEqual(fields["Your wallet pays"], "0.00000000 ETH (CDP-sponsored)")
-        self.assertEqual(fields["ETH sent with launch"], "0.00000000 ETH")
+        self.assertEqual(
+            fields["Estimated total from your wallet"],
+            "0.00000000 ETH · creator buy-in + wallet-paid gas",
+        )
+        self.assertEqual(
+            fields["Gas fee"],
+            "Network fee: 0.0001 ETH (estimated for 1,000,000 gas)\n"
+            "Your gas charge: 0.00000000 ETH (CDP-sponsored)",
+        )
 
 
 class LaunchReceiptDisplayTests(unittest.TestCase):

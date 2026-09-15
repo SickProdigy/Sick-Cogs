@@ -1065,19 +1065,12 @@ class ClankerVerifiedView(discord.ui.View):
             )
             if estimated_fee_wei else "Estimate unavailable"
         )
-        embed.add_field(name="Estimated network fee", value=network_cost, inline=False)
-        embed.add_field(
-            name="Your wallet pays",
-            value=(
-                format_eth_wei(0) + " (CDP-sponsored)"
-                if terms["gas_sponsored"] else network_cost
-            ),
-            inline=True,
-        )
-        embed.add_field(
-            name="ETH sent with launch",
-            value=format_eth_wei(int(terms["native_value_wei"])),
-            inline=True,
+        creator_buy_in_wei = int(terms["native_value_wei"])
+        wallet_gas_wei = 0 if terms["gas_sponsored"] else estimated_fee_wei
+        wallet_total = (
+            format_eth_wei(creator_buy_in_wei + wallet_gas_wei)
+            if terms["gas_sponsored"] or estimated_fee_wei
+            else "Unavailable until gas estimation succeeds"
         )
         embed.add_field(
             name="Creator reward recipient",
@@ -1114,6 +1107,27 @@ class ClankerVerifiedView(discord.ui.View):
             value=(
                 f"{format_tokens(int(airdrop['amount']))} · root {airdrop['merkleRoot']}"
                 if airdrop else "Disabled"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Creator buy-in",
+            value=format_eth_wei(creator_buy_in_wei) + " · ETH used to buy tokens at launch",
+            inline=False,
+        )
+        embed.add_field(
+            name="Estimated total from your wallet",
+            value=wallet_total + " · creator buy-in + wallet-paid gas",
+            inline=False,
+        )
+        embed.add_field(
+            name="Gas fee",
+            value=(
+                "Network fee: {}\nYour gas charge: {}".format(
+                    network_cost,
+                    format_eth_wei(wallet_gas_wei) + " (CDP-sponsored)"
+                    if terms["gas_sponsored"] else network_cost,
+                )
             ),
             inline=False,
         )
