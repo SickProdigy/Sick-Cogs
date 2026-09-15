@@ -259,6 +259,27 @@ class ClankerVerifiedView(discord.ui.View):
         embed.add_field(name="Network", value="Base Sepolia", inline=True)
         embed.add_field(name="Supply", value=format_tokens(DEFAULT_CLANKER_SUPPLY), inline=True)
         embed.add_field(name="Token administrator", value=payload["tokenAdmin"], inline=False)
+        terms = record["execution_terms"]
+        embed.add_field(
+            name="Gas limit", value=f"{int(terms['gas_limit']):,} gas", inline=True
+        )
+        embed.add_field(
+            name="Native value",
+            value=(
+                "0 ETH" if int(terms["native_value_wei"]) == 0
+                else f"{int(terms['native_value_wei'])} wei"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Gas payment",
+            value=(
+                f"Sponsored by {terms['gas_payer']} (no wallet gas charge)"
+                if terms["gas_sponsored"]
+                else f"Paid by {terms['gas_payer']}"
+            ),
+            inline=False,
+        )
         embed.add_field(
             name="Creator reward recipient",
             value=str(creator_recipient),
@@ -592,6 +613,13 @@ class ClankerDraftView(discord.ui.View):
             if not callable(resolve_address):
                 raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
             signer_address = await resolve_address(interaction.user)
+            get_terms = getattr(wallet, "clanker_execution_terms", None)
+            if not callable(get_terms):
+                raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
+            execution_terms = get_terms()
+            if not isinstance(execution_terms, dict):
+                raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
+            record["execution_terms"] = execution_terms
             await self.cog.add_audit_record(self.ctx.guild, record)
             record = await self.cog.prepare_draft_execution(
                 self.ctx.guild, interaction.user, str(record["launch_id"]), signer_address

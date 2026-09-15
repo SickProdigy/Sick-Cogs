@@ -243,6 +243,10 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         )
         record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
         record["status"] = "verified"
+        record["execution_terms"] = {
+            "gas_limit": 8_000_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))
         embed = ClankerVerifiedView(
             SimpleNamespace(), ctx, record, {}, {}
@@ -253,6 +257,9 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         self.assertEqual(fields["Creator reward share"], "8000 bps")
         self.assertEqual(fields["Platform reward share"], "2000 bps")
         self.assertEqual(fields["Platform treasury"], TREASURY.lower())
+        self.assertEqual(fields["Gas limit"], "8,000,000 gas")
+        self.assertEqual(fields["Native value"], "0 ETH")
+        self.assertIn("no wallet gas charge", fields["Gas payment"])
 
 
 class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
@@ -263,6 +270,10 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
         )
         record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
         record["status"] = "verified"
+        record["execution_terms"] = {
+            "gas_limit": 8_000_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
         result = {
             "status": "submitted",
             "intent_id": "0x" + "12" * 32,
@@ -281,7 +292,8 @@ class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
         returned = await cog.launch_verified_internal(SimpleNamespace(id=7), record)
         self.assertEqual(returned, result)
         submit.assert_awaited_once_with(
-            unittest.mock.ANY, record["intent"], record["operation"]
+            unittest.mock.ANY, record["intent"], record["operation"],
+            record["execution_terms"],
         )
 
     async def test_back_to_edit_can_remove_only_unsubmitted_verification(self):

@@ -632,8 +632,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise RuntimeError("CryptoWallet verified Clanker launch is unavailable.")
         launch = record.get("intent")
         operation = record.get("operation")
-        if not isinstance(launch, dict) or not isinstance(operation, dict):
-            raise ValueError("This verified card has no immutable operation.")
+        execution_terms = record.get("execution_terms")
+        if (
+            not isinstance(launch, dict)
+            or not isinstance(operation, dict)
+            or not isinstance(execution_terms, dict)
+        ):
+            raise ValueError("This verified card has no immutable operation or spending policy.")
         if (
             int(record.get("requester_id", 0)) != int(user.id)
             or str(record.get("launch_id")) != str(launch.get("launch_id"))
@@ -643,7 +648,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             != str(record.get("payload_hash", "")).lower()
         ):
             raise ValueError("The verified launch binding is invalid.")
-        result = await submit(user, launch, operation)
+        result = await submit(user, launch, operation, execution_terms)
         expected = {
             "status", "intent_id", "payload_hash", "authorization_expires_at",
             "provider_status", "user_operation_hash", "transaction_hash",
