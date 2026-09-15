@@ -2,10 +2,7 @@
 
 Clanker prepares and orchestrates Clanker v4 token launches on Base Sepolia.
 
-The cog supports immutable draft creation, review, and two explicit Base Sepolia execution adapters. The obsolete generic partner REST submission path and API-token configuration have been removed:
-
-- protected signing with the requesting user’s CryptoWallet; and
-- a TokenFactory-style external-wallet handoff with exact transaction verification.
+The cog supports immutable draft creation and review followed by either direct protected CryptoWallet signing from the verified Discord card or an external-wallet handoff with exact transaction verification. Obsolete REST submission and browser-based internal approval paths have been removed.
 
 Clanker owns launch construction, field validation, previews, limits, audit records, execution-method selection, and final launch status. CryptoWallet remains an optional narrow signer and never gives Clanker access to CDP credentials or generic transaction authority.
 
@@ -51,8 +48,7 @@ The legacy text command also prepares a draft:
 [p]clanker launch TICKER "Token Name" 0xCreatorAddress
 ```
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the server-configured platform share and treasury are not user-overridable. Saved drafts can enter protected CryptoWallet approval with `[p]clanker internal <launch_id>`. Clanker passes only its immutable launch and exact operation to CryptoWallet; the external-wallet route provides a requester-bound protected companion link and verifies the submitted transaction directly against Base Sepolia.
-- `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the server-configured platform share and treasury are not user-overridable. After verification, **Launch with CryptoWallet** submits the exact card directly when delegated signing is active. If authorization is missing, the bot sends the general signed authorization link; return to the same verified card afterward. The external-wallet route provides a requester-bound companion link and verifies the submitted transaction directly against Base Sepolia.
 
 ## Vaults
 
@@ -82,7 +78,6 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
 
 The first launch of a symbol for each requester uses the lowercase symbol as its command reference (for example, `nmt`). Additional launches of the same symbol receive a short suffix. Full immutable launch IDs remain accepted for compatibility and internal binding.
-- `[p]clanker internal <launch_id>` — DM the requester a protected CryptoWallet approval link.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 - `[p]clanker external <launch_id>` — DM the requester the exact Base Sepolia operation.
 - `[p]clanker verify <launch_id> <transaction_hash>` — verify the exact transaction, TokenCreated event, and deployed bytecode.
@@ -104,9 +99,9 @@ The first launch of a symbol for each requester uses the lowercase symbol as its
 
 ## Base Sepolia acceptance
 
-Before treating either route as accepted, use a newly created draft and record its launch ID. For the internal route, approve through the OAuth-protected CryptoWallet page, then run `[p]clanker refresh <launch_id>` until the stored status is confirmed. For the external route, open the short-lived DM companion link, submit from the intended wallet, then run `[p]clanker verify <launch_id> <transaction_hash>`.
+Before treating either route as accepted, use a newly created draft and retain its short reference. For the internal route, verify the Discord card and press **Launch with CryptoWallet**; authorize the wallet through the general signed handoff only if prompted, then return to the card. Run `[p]clanker refresh <launch_id>` when a submitted or uncertain operation needs reconciliation. For the external route, open the short-lived DM companion link, submit from the intended wallet, then run `[p]clanker verify <launch_id> <transaction_hash>`.
 
-For each route, retain only public evidence: launch ID, execution route, transaction hash, deployed token address, block number, and final status. Confirm the transaction is on chain ID 84532, calls the pinned factory with zero value and exact stored calldata, emits one matching `TokenCreated` event for the stored admin, and leaves deployed bytecode at the reported token address. Do not record approval URLs, browser cookies, OAuth state, provider credentials, private keys, or recovery material. A failed, rejected, expired, replayed, wrong-user, wrong-wallet, wrong-network, or mutated attempt must not become confirmed.
+For each route, retain only public evidence: launch ID, execution route, transaction hash, deployed token address, block number, and final status. Confirm the transaction is on chain ID 84532, calls the pinned factory with zero value and exact stored calldata, emits one matching `TokenCreated` event for the stored admin, and leaves deployed bytecode at the reported token address. Do not record approval URLs, browser handles, provider credentials, private keys, or recovery material. A failed, rejected, expired, replayed, wrong-user, wrong-wallet, wrong-network, or mutated attempt must not become confirmed.
 
 ## Prototype boundary
 

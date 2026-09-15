@@ -24,7 +24,8 @@ class LegacyRestRemovalTests(unittest.TestCase):
             "get_api_token", "get_session", "submit_payload", "submit_approved_launch",
             "clankerset_submit", "clankerset_apiurl", "clankerset_apipath",
             "clankerset_apitoken", "clankerset_requireapproval",
-            "clanker_approve", "clanker_reject",
+            "clanker_approve", "clanker_reject", "clanker_internal",
+            "create_internal_wallet_approval", "mark_internal_approval",
         ):
             self.assertFalse(hasattr(Clanker, method))
 
@@ -210,29 +211,6 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(refreshed["intent"]["expires_at"], refreshed["intent"]["created_at"])
         self.assertEqual(refreshed["payload_hash"], refreshed["intent"]["payload_hash"])
         self.assertEqual(refreshed["operation"]["payload_hash"], refreshed["payload_hash"])
-
-
-class InternalApprovalRetryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_pending_internal_approval_can_reissue_same_binding(self):
-        record = {
-            "launch_id": "test-launch", "status": "awaiting_cryptowallet_approval",
-            "execution_route": "internal", "signing_intent_id": "intent-1",
-            "signing_payload_hash": "0x" + "12" * 32,
-        }
-        cog = Clanker.__new__(Clanker)
-        cog.config = SimpleNamespace(
-            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog([record]))
-        )
-        result = {
-            "signing_intent_id": "intent-1",
-            "signing_payload_hash": "0x" + "12" * 32,
-            "expires_at": 4_000_000_000,
-        }
-        await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", result)
-        self.assertEqual(record["approval_expires_at"], 4_000_000_000)
-        bad = {**result, "signing_intent_id": "changed"}
-        with self.assertRaisesRegex(RuntimeError, "does not match"):
-            await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", bad)
 
 
 class VerifiedCardDisplayTests(unittest.TestCase):
@@ -536,46 +514,6 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(link.endswith("h" * 43))
         create.assert_awaited_once_with(7, handoff)
         register.assert_awaited_once_with("signed-token", 1_800_000_000)
-
-    async def test_passes_only_authoritative_launch_and_operation(self):
-        payload = Clanker.build_payload(
-            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
-            0, 86400, 0, None, 7,
-        )
-        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
-        response = {
-            "route": "internal", "launch_id": record["launch_id"],
-            "source_payload_hash": record["payload_hash"],
-            "signing_intent_id": "0x" + "12" * 32,
-            "signing_payload_hash": "0x" + "34" * 32,
-            "approval_url": "https://wallet.example/session/secret",
-            "expires_at": 4_000_000_000,
-        }
-        api = AsyncMock(return_value=response)
-        cog = Clanker.__new__(Clanker)
-        cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_create_internal_approval=api))
-        user = SimpleNamespace(id=7)
-        self.assertEqual(await cog.create_internal_wallet_approval(user, record), response)
-        api.assert_awaited_once_with(user, record["intent"], record["operation"])
-
-    async def test_rejects_missing_wallet_and_changed_response_binding(self):
-        cog = Clanker.__new__(Clanker)
-        cog.bot = SimpleNamespace(get_cog=lambda name: None)
-        with self.assertRaisesRegex(RuntimeError, "unavailable"):
-            await cog.create_internal_wallet_approval(SimpleNamespace(id=7), {})
-        payload = Clanker.build_payload(
-            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
-            0, 86400, 0, None, 7,
-        )
-        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
-        bad = {"route": "internal", "launch_id": "changed",
-               "source_payload_hash": record["payload_hash"],
-               "signing_intent_id": "x", "signing_payload_hash": "y",
-               "approval_url": "https://wallet.example/session/secret",
-               "expires_at": 4_000_000_000}
-        cog.bot = SimpleNamespace(get_cog=lambda name: SimpleNamespace(clanker_create_internal_approval=AsyncMock(return_value=bad)))
-        with self.assertRaisesRegex(RuntimeError, "invalid Clanker approval binding"):
-            await cog.create_internal_wallet_approval(SimpleNamespace(id=7), record)
 
     async def test_internal_status_refresh_is_exactly_bound(self):
         response = {"route": "internal", "signing_intent_id": "intent-1",

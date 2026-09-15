@@ -788,37 +788,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed.set_footer(text="Bounded per-guild launch record · no wallet secrets")
         return embed
 
-    async def create_internal_wallet_approval(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
-        """Ask CryptoWallet to approve exactly the operation owned by this record."""
-
-        wallet = self.bot.get_cog("CryptoWallet")
-        create_approval = getattr(wallet, "clanker_create_internal_approval", None) if wallet else None
-        if not callable(create_approval):
-            raise RuntimeError("CryptoWallet is unavailable or does not support Clanker approvals.")
-        launch = record.get("intent")
-        operation = record.get("operation")
-        if not isinstance(launch, dict) or not isinstance(operation, dict):
-            raise ValueError("This launch record does not contain an immutable operation.")
-        if (
-            int(record.get("requester_id", 0)) != int(user.id)
-            or str(record.get("launch_id")) != str(launch.get("launch_id"))
-            or str(record.get("payload_hash", "")).lower() != str(launch.get("payload_hash", "")).lower()
-        ):
-            raise ValueError("The launch record identity binding is invalid.")
-        result = await create_approval(user, launch, operation)
-        expected = {"route", "launch_id", "source_payload_hash", "signing_intent_id",
-                    "signing_payload_hash", "approval_url", "expires_at"}
-        if (
-            not isinstance(result, dict) or set(result) != expected
-            or result.get("route") != "internal"
-            or str(result.get("launch_id")) != str(record["launch_id"])
-            or str(result.get("source_payload_hash", "")).lower() != str(record["payload_hash"]).lower()
-            or not self.validate_https_url(str(result.get("approval_url") or ""))
-            or int(result.get("expires_at", 0)) <= int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-        ):
-            raise RuntimeError("CryptoWallet returned an invalid Clanker approval binding.")
-        return result
-
     async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
         """Submit the exact verified card through CryptoWallet delegation."""
         wallet = self.bot.get_cog("CryptoWallet")
@@ -925,28 +894,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 or result.get("status") not in allowed):
             raise RuntimeError("CryptoWallet returned an invalid Clanker lifecycle state.")
         return result
-
-    async def mark_internal_approval(self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]) -> None:
-        """Persist safe signer references without storing the one-time approval URL."""
-
-        async with self.config.guild(guild).audit_log() as audit_log:
-            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
-            if len(matches) != 1:
-                raise RuntimeError("The Clanker launch record changed before approval was saved.")
-            record = matches[0]
-            retry = record.get("status") == "awaiting_cryptowallet_approval" and record.get("execution_route") == "internal"
-            if record.get("status") != "dry_run" and not retry:
-                raise RuntimeError("This Clanker launch has already entered an execution route.")
-            if retry and (
-                str(record.get("signing_intent_id") or "") != str(result["signing_intent_id"])
-                or str(record.get("signing_payload_hash") or "").lower() != str(result["signing_payload_hash"]).lower()
-            ):
-                raise RuntimeError("The replacement approval does not match the existing CryptoWallet intent.")
-            record["status"] = "awaiting_cryptowallet_approval"
-            record["execution_route"] = "internal"
-            record["signing_intent_id"] = result["signing_intent_id"]
-            record["signing_payload_hash"] = result["signing_payload_hash"]
-            record["approval_expires_at"] = int(result["expires_at"])
 
     async def schedule_internal_confirmation(
         self, guild: discord.Guild, user: Any, record: Dict[str, Any],
@@ -1534,51 +1481,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("No Clanker launch record matched that ID.")
             return
         await ctx.send(embed=self.launch_record_embed(record))
-
-    @clanker.command(name="internal", aliases=("wallet",))
-    async def clanker_internal(self, ctx: commands.Context, launch_id: str):
-        """Open protected CryptoWallet approval for your saved launch."""
-        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
-        if not record:
-            await ctx.send("No Clanker launch record matched that ID.")
-            return
-        if int(record.get("requester_id", 0)) != int(ctx.author.id):
-            await ctx.send("Only the launch requester can choose its signing wallet.")
-            return
-        retry = record.get("status") == "awaiting_cryptowallet_approval" and record.get("execution_route") == "internal"
-        if record.get("status") != "dry_run" and not retry:
-            await ctx.send("That launch has already entered an execution route.")
-            return
-        try:
-            if retry:
-                lifecycle = await self.refresh_internal_wallet_status(ctx.author, record)
-                if lifecycle["status"] != "pending":
-                    await ctx.send(
-                        f"That CryptoWallet launch is `{lifecycle['status']}` and cannot receive another approval link."
-                    )
-                    return
-            wallet = self.bot.get_cog("CryptoWallet")
-            resolve_address = getattr(wallet, "clanker_requester_address", None) if wallet else None
-            if not callable(resolve_address):
-                raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
-            signer_address = await resolve_address(ctx.author)
-            if not retry:
-                record = await self.prepare_draft_execution(
-                    ctx.guild, ctx.author, str(record["launch_id"]), signer_address
-                )
-            result = await self.create_internal_wallet_approval(ctx.author, record)
-            await ctx.author.send("Review and approve your Base Sepolia Clanker launch here:\n" + result["approval_url"] + "\nThis protected link is short-lived and bound to your Discord account.")
-            await self.mark_internal_approval(ctx.guild, str(record["launch_id"]), result)
-        except discord.Forbidden:
-            await ctx.send("I could not DM the protected approval link. Enable DMs and try again.")
-            return
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await ctx.send(f"Clanker could not start CryptoWallet approval: {exc}")
-            return
-        await ctx.send(
-            "I sent a replacement protected CryptoWallet approval link by DM." if retry
-            else "I sent your protected CryptoWallet approval link by DM."
-        )
 
     @clanker.command(name="refresh")
     async def clanker_refresh(self, ctx: commands.Context, launch_id: str):
