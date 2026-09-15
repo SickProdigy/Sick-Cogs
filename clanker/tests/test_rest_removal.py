@@ -433,6 +433,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
             {"launch_id": "saved-draft", "status": "dry_run", "requester_id": 7, "symbol": "SAVE"},
             {"launch_id": "submitted-launch", "status": "awaiting_external_wallet", "requester_id": 7, "symbol": "SUB"},
             {"launch_id": "other-launch", "status": "internal_confirmed", "requester_id": 8, "symbol": "OTHER"},
+            {"launch_id": "hidden-launch", "status": "internal_failed", "requester_id": 7, "symbol": "HIDDEN", "dismissed_by_requester": True},
         ]
         cog, ctx = self.make_cog_and_context(records)
         await Clanker.clanker_launches.callback(cog, ctx, 10)
@@ -441,6 +442,39 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("$SUB", embed.fields[0].name)
         self.assertIn("Awaiting external wallet", embed.fields[0].value)
+
+    async def test_dismiss_hides_inactive_attempt_but_retains_audit_record(self):
+        record = {
+            "launch_id": "nmt-long-fc01", "launch_ref": "nmt-fc01",
+            "status": "internal_uncertain", "requester_id": 7, "symbol": "NMT",
+        }
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.get_user_launch_record = AsyncMock(return_value=record)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
+        )
+        await Clanker.clanker_dismiss.callback(cog, ctx, "nmt-fc01")
+        self.assertTrue(record["dismissed_by_requester"])
+        self.assertIn("dismissed_at", record)
+        self.assertIn("audit record was retained", ctx.send.await_args.args[0])
+
+    async def test_dismiss_rejects_confirmed_launch(self):
+        record = {
+            "launch_id": "nmt-long", "status": "internal_confirmed",
+            "requester_id": 7, "symbol": "NMT",
+        }
+        cog = Clanker.__new__(Clanker)
+        cog.get_user_launch_record = AsyncMock(return_value=record)
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
+        )
+        await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
+        self.assertIn("Confirmed", ctx.send.await_args.args[0])
+        self.assertNotIn("dismissed_by_requester", record)
 
     async def test_compact_references_are_scoped_to_requester(self):
         records = [

@@ -1002,6 +1002,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 "transaction_hash": result.get("transaction_hash"),
                 "block_number": result.get("block_number"),
             })
+            if result["status"] == "confirmed":
+                record.pop("dismissed_by_requester", None)
+                record.pop("dismissed_at", None)
             return copy.deepcopy(record)
 
     async def _deliver_internal_result(
@@ -1478,6 +1481,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}
+            and not record.get("dismissed_by_requester")
             and int(record.get("requester_id", 0) or 0) == int(ctx.author.id)
         ]
         if not launches:
@@ -1485,6 +1489,41 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         embed = self.launch_list_embed(launches[-limit:], audit_log)
         await ctx.send(embed=embed)
+
+    @clanker.command(name="dismiss")
+    async def clanker_dismiss(self, ctx: commands.Context, launch_id: str):
+        "Hide one inactive launch attempt from the requesters personal history."
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
+        if not record:
+            await ctx.send("No matching Clanker launch belongs to you.")
+            return
+        dismissible = {
+            "awaiting_cryptowallet_approval", "internal_failed", "internal_uncertain",
+            "awaiting_external_wallet",
+        }
+        if record.get("status") not in dismissible:
+            await ctx.send(
+                "Only failed, uncertain, or abandoned approval attempts can be dismissed. "
+                "Confirmed and actively submitted launches remain visible."
+            )
+            return
+        internal_id = str(record.get("launch_id") or "")
+        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+            matches = [
+                item for item in audit_log
+                if str(item.get("launch_id") or "") == internal_id
+                and int(item.get("requester_id", 0) or 0) == int(ctx.author.id)
+            ]
+            if len(matches) != 1:
+                await ctx.send("That launch record changed before it could be dismissed.")
+                return
+            matches[0]["dismissed_by_requester"] = True
+            matches[0]["dismissed_at"] = utc_now()
+        reference = record.get("launch_ref") or self.launch_reference(record, [record])
+        await ctx.send(
+            f"Dismissed {reference} from your launch list. "
+            "The server audit record was retained."
+        )
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
     @checks.mod_or_permissions(manage_guild=True)

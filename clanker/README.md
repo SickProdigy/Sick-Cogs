@@ -78,6 +78,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker drafts [limit]` — list your saved, unsubmitted drafts.
 - `[p]clanker draft <launch_id>` — show one of your saved drafts.
 - `[p]clanker launches [limit]` — list your records that entered an execution route using compact, requester-bound references.
+- `[p]clanker dismiss <launch_id>` — hide a failed, uncertain, or abandoned attempt from your list while retaining the moderator audit record.
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
 
 The first launch of a symbol for each requester uses the lowercase symbol as its command reference (for example, `nmt`). Additional launches of the same symbol receive a short suffix. Full immutable launch IDs remain accepted for compatibility and internal binding.
