@@ -144,8 +144,8 @@ class ClankerVaultModal(discord.ui.Modal):
         self.view_ref = view
         vault = view.draft.get("vault") or {}
         self.percentage_input = discord.ui.TextInput(
-            label="Supply percentage (blank disables)", default=str(vault.get("percentage") or ""),
-            required=False, max_length=2,
+            label="Supply to reserve (blank disables)", default=str(vault.get("percentage") or ""),
+            placeholder="Starter example: 10", required=False, max_length=2,
         )
         self.lockup_input = discord.ui.TextInput(
             label="Lockup / cliff (minimum 7d)",
@@ -1323,7 +1323,15 @@ class ClankerDraftView(discord.ui.View):
                 detail += " · full unlock after lockup"
             embed.add_field(name="Vault", value=detail + " · recipient " + recipient, inline=False)
         else:
-            embed.add_field(name="Vault", value="Disabled / optional", inline=False)
+            embed.add_field(
+                name="Vault · optional",
+                value=(
+                    "Reserves part of the supply so it cannot circulate immediately. "
+                    "Starter example: 10% locked 30d. Add gradual release when team or "
+                    "treasury tokens should unlock over time."
+                ),
+                inline=False,
+            )
         airdrop = self.draft.get("airdrop")
         if airdrop:
             status = "ready for execution" if airdrop.get("merkleRoot") else "preview only: Merkle root needed"

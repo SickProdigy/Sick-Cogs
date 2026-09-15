@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 from .. import clanker as clanker_module
 from ..clanker import Clanker
 from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
-                     ClankerDraftHistoryView, ClankerFailedLaunchView,
+                     ClankerDraftHistoryView, ClankerDraftView, ClankerFailedLaunchView,
                      ClankerLaunchHistoryView, ClankerReceiptRewardsView,
                      ClankerRewardReviewView, ClankerVerifiedView,
                      draft_values_from_record, format_vault_duration,
@@ -572,6 +572,17 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         await Clanker.clanker_dismiss.callback(cog, ctx, "nmt")
         self.assertIn("uncertain", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
+
+    def test_disabled_vault_explains_purpose_and_starter_example(self):
+        settings = {"treasury_address": TREASURY, "platform_bps": 2000,
+                    "vault_enabled": False}
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7))
+        view = ClankerDraftView(
+            SimpleNamespace(), ctx, settings, symbol="TEST", name="Test Token"
+        )
+        fields = {field.name: field.value for field in view.embed().fields}
+        self.assertIn("Reserves part of the supply", fields["Vault · optional"])
+        self.assertIn("Starter example: 10% locked 30d", fields["Vault · optional"])
 
     def test_vault_durations_use_human_units(self):
         self.assertEqual(parse_vault_duration("7d"), 604800)
