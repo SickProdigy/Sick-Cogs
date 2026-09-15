@@ -890,6 +890,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 value="User operation " + chr(96) + compact_operation + chr(96),
                 inline=False,
             )
+        image_url = str((record.get("payload") or {}).get("image") or "")
+        if image_url.startswith("https://"):
+            embed.set_thumbnail(url=image_url)
         requester = record.get("requester_name", record.get("requester_id", "?"))
         embed.set_footer(text="Requested by {} \u00b7 Base Sepolia testnet".format(requester))
         return embed
@@ -913,6 +916,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             color=discord.Color.gold(),
         )
+        image_url = str((records[0].get("payload") or {}).get("image") or "")
+        if not portfolio and image_url.startswith("https://"):
+            embed.set_thumbnail(url=image_url)
         balances = {
             (row["owner"], row["asset"]): int(row["amount_wei"])
             for row in snapshot["treasuries"]
@@ -1595,9 +1601,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed = self.launch_record_embed(record)
         color = discord.Color.green() if record["status"] == "internal_confirmed" else discord.Color.red()
         embed.color = color
-        image_url = (record.get("payload") or {}).get("image")
-        if image_url:
-            embed.set_thumbnail(url=image_url)
         channel_id = int(record.get("confirmation_channel_id", 0) or 0)
         message_id = int(record.get("confirmation_message_id", 0) or 0)
         if channel_id and message_id:

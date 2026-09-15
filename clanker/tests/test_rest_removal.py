@@ -310,6 +310,7 @@ class LaunchReceiptDisplayTests(unittest.TestCase):
             "token_address": "0x7a97de41b37f23bb94aa1652f0d1979060c1cf72",
             "transaction_hash": "0x" + "ab" * 32,
             "user_operation_hash": "0x" + "cd" * 32,
+            "payload": {"image": "https://example.com/nmt.png"},
         }
         embed = Clanker.launch_record_embed(record)
         fields = {field.name: field.value for field in embed.fields}
@@ -327,6 +328,7 @@ class LaunchReceiptDisplayTests(unittest.TestCase):
         self.assertNotIn(record["user_operation_hash"], fields["Technical reference"])
         self.assertIn("0xcdcdcdcd\u2026cdcdcdcd", fields["Technical reference"])
         self.assertEqual(embed.footer.text, "Requested by sickprodigy \u00b7 Base Sepolia testnet")
+        self.assertEqual(embed.thumbnail.url, "https://example.com/nmt.png")
 
 
 class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
@@ -602,6 +604,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         record = {
             "launch_id": "nmt-long", "launch_ref": "nmt", "symbol": "NMT",
             "token_address": token, "creator_bps": 8000, "platform_bps": 2000,
+            "payload": {"image": "https://example.com/nmt.png"},
         }
         cog = Clanker.__new__(Clanker)
         with patch.object(clanker_module, "reward_preflight", AsyncMock(return_value=snapshot)):
@@ -611,6 +614,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         rendered = "\n".join(str(field.value) for field in embed.fields)
         self.assertEqual(embed.title, "Clanker rewards • $NMT")
         self.assertEqual(embed.footer.text, "Balances and gas estimates checked when this card opened · Base Sepolia")
+        self.assertEqual(embed.thumbnail.url, "https://example.com/nmt.png")
         self.assertIn("Claimable WETH: 0.01000000", rendered)
         self.assertIn("Claimable $NMT: 2.00000000", rendered)
         self.assertIn("Destination: shared creator/platform treasury", rendered)
