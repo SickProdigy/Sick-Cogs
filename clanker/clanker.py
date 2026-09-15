@@ -928,12 +928,16 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not record:
             return
         if result["status"] == "confirmed" and result.get("transaction_hash"):
+            verified = None
             try:
                 verified = await verify_internal_receipt(
                     result["transaction_hash"], record["operation"], record["intent"]
                 )
                 async with self.config.guild(guild).audit_log() as audit_log:
-                    match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
+                    match = next(
+                        item for item in audit_log
+                        if str(item.get("launch_id")) == launch_id
+                    )
                     match.update(verified)
                 record.update(verified)
             except (KeyError, TypeError, ValueError, RuntimeError):
@@ -947,6 +951,30 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     match["provider_status"] = "receipt_verification_failed"
                 record["status"] = "internal_uncertain"
                 record["provider_status"] = "receipt_verification_failed"
+            if verified is not None:
+                try:
+                    wallet = self.bot.get_cog("CryptoWallet")
+                    register = (
+                        getattr(wallet, "clanker_register_verified_token", None)
+                        if wallet else None
+                    )
+                    if not callable(register):
+                        raise RuntimeError(
+                            "CryptoWallet token registration is unavailable."
+                        )
+                    await register(user, {
+                        "contract_address": verified["token_address"],
+                        "symbol": str(record["symbol"]),
+                        "name": str(record["name"]),
+                        "decimals": 18,
+                    })
+                    record["wallet_registered"] = True
+                except (KeyError, TypeError, ValueError, RuntimeError):
+                    log.exception(
+                        "Confirmed Clanker token %s could not be registered in CryptoWallet",
+                        launch_id,
+                    )
+                    record["wallet_registered"] = False
         embed = self.launch_record_embed(record)
         color = discord.Color.green() if record["status"] == "internal_confirmed" else discord.Color.red()
         embed.color = color
