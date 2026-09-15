@@ -75,7 +75,9 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker draft <launch_id>` — show one of your saved drafts.
 - `[p]clanker launches [limit]` — list your records that entered an execution route using compact, requester-bound references.
 - A confirmed launch card’s **Rewards** button opens a private, one-coin gas review. **Collect this coin** submits only that token’s collection call through a CryptoWallet signer matching the immutable token administrator.
-- `[p]clanker claimall` — DM a read-only portfolio reward and gas preflight for your confirmed launches.
+- `[p]clanker claimall` — DM a paginated portfolio review, select tokens to collect, and review a WETH-profitable treasury-wide withdrawal separately.
+- `[p]clanker rewardverify <launch_id> <transaction_hash>` — reconcile an external-wallet collection against its token administrator, exact locker call, and `ClaimedRewards` event.
+- `[p]clanker claimplatform` — bot-owner review for profitable platform-treasury withdrawals only; creator balances cannot be included.
 - `[p]clanker dismiss <launch_id>` — hide a failed, uncertain, or abandoned attempt from your list while retaining the moderator audit record.
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
 

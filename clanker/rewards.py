@@ -9,6 +9,7 @@ FEE_LOCKER = "0x42A95190B4088C88Dd904d930c79deC1158bF09D"
 LP_LOCKER = "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f"
 WETH = "0x4200000000000000000000000000000000000006"
 CLAIMED_REWARDS_TOPIC = "0x21d15f71483b597e8f0009e83b90b2117f6f98c185d7173857dddcae5eb8546a"
+CLAIM_TOKENS_TOPIC = "0xf98eaa9c1f790e5c18b1f227bd5bade62600f9f3e3587c7644b90c50b9bf13c5"
 
 
 def decode_claimed_rewards_log(
@@ -40,8 +41,32 @@ def decode_claimed_rewards_log(
             arrays.append(words[start + 1:start + 1 + length])
     except (TypeError, ValueError) as exc:
         raise ValueError("The reward receipt contains malformed amounts.") from exc
-    return {"token": token.lower(), "amount0_wei": amount0, "amount1_wei": amount1,
+    token0_is_clanker = int(token, 16) < int(WETH, 16)
+    return {"token": token.lower(), "asset0": token.lower() if token0_is_clanker else WETH.lower(),
+            "asset1": WETH.lower() if token0_is_clanker else token.lower(),
+            "amount0_wei": amount0, "amount1_wei": amount1,
             "rewards0_wei": arrays[0], "rewards1_wei": arrays[1]}
+
+
+async def verify_external_collection(
+    transaction_hash: str, token: str, token_admin: str, recipient_count: int,
+    rpc: Callable[[str, list[Any]], Awaitable[Any]],
+) -> dict[str, Any]:
+    """Verify an external admin signed only the selected-token collection call."""
+    transaction = await rpc("eth_getTransactionByHash", [transaction_hash])
+    if transaction is None:
+        return {"status": "pending"}
+    expected = collect_rewards_call(token)
+    try:
+        if (str(transaction.get("hash") or "").lower() != transaction_hash.lower()
+                or str(transaction.get("from") or "").lower() != token_admin.lower()
+                or str(transaction.get("to") or "").lower() != str(expected["to"]).lower()
+                or int(str(transaction.get("value") or "0x0"), 16) != 0
+                or str(transaction.get("input") or transaction.get("data") or "").lower() != str(expected["data"]).lower()):
+            raise ValueError("The external reward transaction does not match the reviewed admin collection.")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The external reward transaction is malformed.") from exc
+    return await reconcile_collection_receipt(transaction_hash, token, recipient_count, rpc)
 
 
 async def reconcile_collection_receipt(
@@ -122,6 +147,44 @@ async def _gas(
         return None
 
 
+async def reconcile_withdrawal_receipt(
+    transaction_hash: str, claims: list[dict[str, str]],
+    rpc: Callable[[str, list[Any]], Awaitable[Any]],
+) -> dict[str, Any]:
+    """Reconcile every exact ClaimTokens event from an atomic withdrawal batch."""
+    receipt = await rpc("eth_getTransactionReceipt", [transaction_hash])
+    if receipt is None:
+        return {"status": "pending"}
+    try:
+        if str(receipt.get("transactionHash") or "").lower() != transaction_hash.lower():
+            raise ValueError
+        if int(str(receipt["status"]), 16) != 1:
+            return {"status": "failed", "transaction_hash": transaction_hash.lower()}
+        expected = {(str(item["owner"]).lower(), str(item["asset"]).lower()) for item in claims}
+        amounts = {}
+        for log in receipt.get("logs") or []:
+            topics = log.get("topics") if isinstance(log, dict) else None
+            if (str(log.get("address") or "").lower() != FEE_LOCKER.lower()
+                    or not isinstance(topics, list) or len(topics) != 3
+                    or str(topics[0]).lower() != CLAIM_TOKENS_TOPIC):
+                continue
+            owner = "0x" + str(topics[1])[-40:].lower()
+            asset = "0x" + str(topics[2])[-40:].lower()
+            data = str(log.get("data") or "")
+            if (owner, asset) not in expected or len(data) != 66:
+                raise ValueError
+            amounts[(owner, asset)] = int(data, 16)
+        if set(amounts) != expected:
+            raise ValueError
+        return {"status": "confirmed", "transaction_hash": transaction_hash.lower(),
+                "block_number": int(str(receipt["blockNumber"]), 16),
+                "claims": [{"owner": owner, "asset": asset, "amount_wei": amounts[(owner, asset)]}
+                           for owner, asset in sorted(expected)]}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("The confirmed treasury withdrawal receipt could not be reconciled.") from exc
+
+
+
 async def reward_preflight(
     records: list[dict[str, Any]],
     rpc: Callable[[str, list[Any]], Awaitable[Any]],
@@ -171,18 +234,23 @@ async def reward_preflight(
         launch["collection_gas"] = estimate
         launch["creator_token_wei"] = balance_map[(launch["creator"], launch["token"])]
         launch["platform_token_wei"] = balance_map[(launch["platform"], launch["token"])]
+    claim_gas_map = dict(zip(claim_keys, claim_gas))
     treasury_rows = [
-        {"owner": owner, "asset": asset, "amount_wei": balance_map[(owner, asset)]}
+        {"owner": owner, "asset": asset, "amount_wei": balance_map[(owner, asset)],
+         "claim_gas": claim_gas_map.get((owner, asset))}
         for owner, asset in balance_keys if balance_map[(owner, asset)] > 0
     ]
-    estimated_gas = sum(value or 0 for value in collection_gas) + sum(
-        value or 0 for value in claim_gas
-    )
+    collection_estimated_gas = sum(value or 0 for value in collection_gas)
+    claim_estimated_gas = sum(value or 0 for value in claim_gas)
+    estimated_gas = collection_estimated_gas + claim_estimated_gas
     return {
         "launches": launches,
         "treasuries": treasury_rows,
         "gas_price_wei": gas_price,
         "estimated_gas": estimated_gas,
+        "collection_estimated_gas": collection_estimated_gas,
+        "claim_estimated_gas": claim_estimated_gas,
+        "claim_estimated_fee_wei": claim_estimated_gas * gas_price,
         "estimated_fee_wei": estimated_gas * gas_price,
         "complete_estimate": all(value is not None for value in collection_gas + claim_gas),
     }

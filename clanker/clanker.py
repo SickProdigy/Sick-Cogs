@@ -33,7 +33,11 @@ from .models import (
     ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
 )
 from .operation import clanker_deployment_operation
-from .rewards import WETH, reconcile_collection_receipt, reward_preflight
+from .rewards import (
+    WETH, collect_rewards_call, reconcile_collection_receipt,
+    reconcile_withdrawal_receipt, reward_preflight,
+    verify_external_collection,
+)
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -43,7 +47,10 @@ from .helpers import (
     validate_airdrop_total,
 )
 from .admin import ClankerAdminMixin
-from .views import ClankerDraftView, ClankerReceiptRewardsView
+from .views import (
+    ClankerClaimAllView, ClankerDraftView, ClankerReceiptRewardsView,
+    ClankerTreasuryWithdrawalView,
+)
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
 
@@ -234,6 +241,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                         int(guild_id), int(record["requester_id"]),
                         str(record["launch_id"]),
                     )
+                withdrawal = record.get("reward_withdrawal") or {}
+                if withdrawal.get("status") == "submitted" and withdrawal.get("submitted_by"):
+                    self._start_treasury_confirmation_task(
+                        int(guild_id), int(withdrawal["submitted_by"]), str(record["launch_id"]))
 
     def cog_unload(self):
         for task in self.confirmation_tasks:
@@ -868,7 +879,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return embed
 
     async def reward_preflight_embed(
-        self, records: List[Dict[str, Any]], *, portfolio: bool
+        self, records: List[Dict[str, Any]], *, portfolio: bool, offset: int = 0
     ) -> discord.Embed:
         """Build a public-data reward and gas review without submitting transactions."""
         snapshot = await reward_preflight(records, clanker_rpc)
@@ -882,7 +893,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed = discord.Embed(
             title=title, description=description, color=discord.Color.gold()
         )
-        for launch in launches[:10]:
+        for launch in launches[offset:offset + 10]:
             gas = launch.get("collection_gas")
             gas_text = "{:,} gas".format(gas) if gas is not None else "Estimate unavailable"
             embed.add_field(
@@ -909,14 +920,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 creator_weth[row["owner"]] = row["amount_wei"]
             if row["owner"] in platforms:
                 platform_weth[row["owner"]] = row["amount_wei"]
-        embed.add_field(
-            name="Deposited WETH totals",
-            value="Creator: {:.8f} WETH\nPlatform: {:.8f} WETH".format(
-                sum(creator_weth.values()) / 10**18,
-                sum(platform_weth.values()) / 10**18,
-            ),
-            inline=False,
-        )
+        shared = creators & platforms
+        creator_total = sum(value for owner, value in creator_weth.items() if owner not in shared)
+        platform_total = sum(value for owner, value in platform_weth.items() if owner not in shared)
+        shared_total = sum(creator_weth.get(owner, 0) for owner in shared)
+        weth_lines = ["Creator-only: {:.8f} WETH".format(creator_total / 10**18),
+                      "Platform-only: {:.8f} WETH".format(platform_total / 10**18)]
+        if shared:
+            weth_lines.append("Shared creator/platform address: {:.8f} WETH".format(shared_total / 10**18))
+        embed.add_field(name="Deposited WETH totals", value=chr(10).join(weth_lines), inline=False)
         fee = snapshot.get("estimated_fee_wei", 0)
         estimate_label = "Complete" if snapshot.get("complete_estimate") else "Partial"
         embed.add_field(
@@ -927,16 +939,181 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=False,
         )
-        if len(launches) > 10:
-            embed.add_field(
-                name="More launches",
-                value="{} additional launches are omitted from this first page.".format(len(launches) - 10),
-                inline=False,
-            )
+        if portfolio and len(launches) > 10:
+            page = offset // 10 + 1
+            pages = (len(launches) + 9) // 10
+            embed.add_field(name="Portfolio page", value="{} of {} · {} total launches".format(page, pages, len(launches)), inline=False)
         embed.set_footer(
             text="Collect this coin is token-scoped · deposited WETH withdrawals are treasury-wide"
         )
         return embed
+
+    async def external_reward_handoff(
+        self, user: Any, record: Dict[str, Any], guild_id: int
+    ) -> str:
+        """Create a signed one-time companion handoff for one collection call."""
+        if int(record.get("requester_id", 0) or 0) != int(user.id):
+            raise ValueError("Only the launch requester can open this reward handoff.")
+        current_collection = record.get("reward_collection") or {}
+        if (current_collection.get("status") == "submitted"
+                or current_collection.get("status") == "awaiting_external_wallet"
+                and int(current_collection.get("expires_at") or 0) > int(datetime.datetime.now(datetime.timezone.utc).timestamp())):
+            raise ValueError("This token already has an active reward collection.")
+        token = str(record.get("token_address") or "").lower()
+        admin = str(record.get("token_admin") or "").lower()
+        if not ADDRESS_RE.fullmatch(token) or not ADDRESS_RE.fullmatch(admin):
+            raise ValueError("The confirmed reward binding is invalid.")
+        expires_at = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) + 900
+        call = collect_rewards_call(token)
+        reference = str(record.get("launch_ref") or record["launch_id"])
+        handoff = {"version": 1, "kind": "clanker-v4-reward-collection",
+                   "requester_id": str(user.id), "expires_at": expires_at,
+                   "intent": {"launch_id": str(record["launch_id"]), "reference": reference,
+                              "token": {"address": token, "admin": admin,
+                                        "name": str(record.get("name") or "Token"),
+                                        "symbol": str(record.get("symbol") or "?")}},
+                   "operation": {"chain_id": BASE_CHAIN_ID, "to": call["to"],
+                                 "value": "0", "data": call["data"]},
+                   "verification_command": "!clanker rewardverify " + reference + " <transaction_hash>"}
+        url = await self.create_external_wallet_handoff(user, handoff)
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is not None:
+            async with self.config.guild(guild).audit_log() as audit_log:
+                match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
+                match["reward_collection"] = {"status": "awaiting_external_wallet",
+                    "route": "external", "token_address": token, "expires_at": expires_at}
+        return url
+
+    async def treasury_withdrawal_review(
+        self, records: Dict[str, Any] | List[Dict[str, Any]]
+    ) -> tuple[discord.Embed, List[Dict[str, str]], bool]:
+        """Build a separately labeled, treasury-wide withdrawal review."""
+        records = [records] if isinstance(records, dict) else list(records)
+        if not records:
+            raise ValueError("No launches were selected.")
+        first_creator = str(records[0].get("creator_reward_recipient") or records[0].get("token_admin") or "").lower()
+        first_platform = str(records[0].get("platform_treasury") or "").lower()
+        first_admin = str(records[0].get("token_admin") or "").lower()
+        compatible = [item for item in records
+                      if str(item.get("token_admin") or "").lower() == first_admin
+                      and str(item.get("creator_reward_recipient") or item.get("token_admin") or "").lower() == first_creator
+                      and str(item.get("platform_treasury") or "").lower() == first_platform]
+        snapshot = await reward_preflight(compatible, clanker_rpc)
+        launches = snapshot["launches"]
+        allowed = {first_creator, first_platform}
+        claims = []
+        seen = set()
+        for row in snapshot["treasuries"]:
+            key = (row["owner"], row["asset"])
+            if row["owner"] in allowed and key not in seen:
+                claims.append({"owner": row["owner"], "asset": row["asset"]})
+                seen.add(key)
+        symbols = {item["token"]: item["symbol"] for item in launches}
+        embed = discord.Embed(
+            title="Treasury-wide reward withdrawal",
+            description=("This is separate from per-token collection. WETH balances are aggregated "
+                         "by treasury across every Clanker token."), color=discord.Color.orange())
+        rows = []
+        creator_weth = 0
+        for row in snapshot["treasuries"]:
+            if row["owner"] not in allowed:
+                continue
+            role = "Creator" if row["owner"] == first_creator else "Platform"
+            asset = "WETH" if row["asset"] == WETH.lower() else "$" + symbols.get(row["asset"], row["asset"][:8])
+            rows.append(role + " · " + asset + ": " + format(row["amount_wei"] / 10**18, ",.8f"))
+            if row["asset"] == WETH.lower() and row["owner"] == first_creator:
+                creator_weth += int(row["amount_wei"])
+        embed.add_field(name="Exact deposited balances", value=chr(10).join(rows) if rows else "Nothing available", inline=False)
+        gas = int(snapshot.get("claim_estimated_gas") or 0)
+        fee = int(snapshot.get("claim_estimated_fee_wei") or 0)
+        profitable = creator_weth > fee and creator_weth > 0
+        embed.add_field(name="Withdrawal gas", value=(format(gas, ",") + " gas · " + format(fee / 10**18, ".8f") + " ETH network estimate"), inline=False)
+        embed.add_field(name="Creator profitability signal", value=("Profitable from deposited WETH alone" if profitable else "Not profitable from deposited WETH alone; token rewards are unpriced"), inline=False)
+        if len(compatible) != len(records):
+            embed.add_field(name="Different authority groups", value=str(len(records) - len(compatible)) + " launch(es) require a separate signer/treasury review.", inline=False)
+        embed.add_field(name="Authority", value=("CryptoWallet must prove the immutable token administrator. Creator funds go only to the creator treasury; platform funds go only to the platform treasury."), inline=False)
+        embed.set_footer(text="Treasury-wide action · not an individual-coin claim")
+        return embed, claims, profitable
+
+    async def platform_withdrawal_review(
+        self, records: List[Dict[str, Any]]
+    ) -> tuple[discord.Embed, List[Dict[str, str]], bool]:
+        """Review only the platform treasury across all guild launches."""
+        snapshot = await reward_preflight(records, clanker_rpc)
+        platform = str(records[0].get("platform_treasury") or "").lower()
+        rows = [row for row in snapshot["treasuries"] if row["owner"] == platform]
+        claims = [{"owner": row["owner"], "asset": row["asset"]} for row in rows]
+        gas = sum(int(row.get("claim_gas") or 0) for row in rows)
+        fee = gas * int(snapshot.get("gas_price_wei") or 0)
+        weth = sum(int(row["amount_wei"]) for row in rows if row["asset"] == WETH.lower())
+        profitable = weth > fee and weth > 0
+        symbols = {item["token"]: item["symbol"] for item in snapshot["launches"]}
+        values = [("WETH" if row["asset"] == WETH.lower() else "$" + symbols.get(row["asset"], row["asset"][:8]))
+                  + ": " + format(row["amount_wei"] / 10**18, ",.8f") for row in rows]
+        embed = discord.Embed(title="Platform treasury withdrawal",
+            description="Platform balances only. This operation cannot include any creator treasury.",
+            color=discord.Color.orange())
+        embed.add_field(name="Exact deposited balances", value=chr(10).join(values) if values else "Nothing available", inline=False)
+        embed.add_field(name="Gas and profitability", value=(format(fee / 10**18, ".8f") + " ETH · "
+            + ("profitable from WETH alone" if profitable else "not profitable from WETH alone")), inline=False)
+        return embed, claims, profitable
+
+    async def withdraw_platform_treasury_internal(
+        self, user: Any, record: Dict[str, Any], claims: List[Dict[str, str]], guild_id: int
+    ) -> Dict[str, Any]:
+        if (record.get("reward_withdrawal") or {}).get("status") == "submitted":
+            raise ValueError("A treasury withdrawal is already being reconciled.")
+        platform = str(record.get("platform_treasury") or "").lower()
+        if not claims or any(str(item.get("owner") or "").lower() != platform for item in claims):
+            raise ValueError("Platform withdrawal cannot contain creator treasury claims.")
+        wallet = self.bot.get_cog("CryptoWallet")
+        withdraw = getattr(wallet, "clanker_withdraw_treasuries", None) if wallet else None
+        if not callable(withdraw):
+            raise RuntimeError("CryptoWallet treasury withdrawal is unavailable.")
+        result = await withdraw(user, token_admin=str(record["token_admin"]),
+            creator_treasury=str(record.get("creator_reward_recipient") or record["token_admin"]),
+            platform_treasury=platform, claims=claims, attempt_id=secrets.token_urlsafe(18),
+            platform_only=True)
+        await self._record_treasury_submission(guild_id, user.id, record, claims, result, True)
+        return result
+
+    async def withdraw_launch_treasuries_internal(
+        self, user: Any, record: Dict[str, Any], claims: List[Dict[str, str]], guild_id: int
+    ) -> Dict[str, Any]:
+        if (record.get("reward_withdrawal") or {}).get("status") == "submitted":
+            raise ValueError("A treasury withdrawal is already being reconciled.")
+        if int(record.get("requester_id", 0) or 0) != int(user.id):
+            raise ValueError("Only the launch requester can approve this withdrawal.")
+        if not claims:
+            raise ValueError("No deposited treasury rewards are currently available.")
+        wallet = self.bot.get_cog("CryptoWallet")
+        withdraw = getattr(wallet, "clanker_withdraw_treasuries", None) if wallet else None
+        if not callable(withdraw):
+            raise RuntimeError("CryptoWallet treasury withdrawal is unavailable.")
+        result = await withdraw(
+            user, token_admin=str(record["token_admin"]),
+            creator_treasury=str(record.get("creator_reward_recipient") or record["token_admin"]),
+            platform_treasury=str(record["platform_treasury"]), claims=claims,
+            attempt_id=secrets.token_urlsafe(18),
+        )
+        await self._record_treasury_submission(guild_id, user.id, record, claims, result, False)
+        return result
+
+    async def _record_treasury_submission(
+        self, guild_id: int, user_id: int, record: Dict[str, Any], claims: List[Dict[str, str]],
+        result: Dict[str, Any], platform_only: bool,
+    ) -> None:
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            raise RuntimeError("The launch server is unavailable.")
+        withdrawal = {"status": "submitted", "provider_status": result.get("provider_status"),
+            "user_operation_hash": result.get("user_operation_hash"),
+            "transaction_hash": result.get("transaction_hash"), "claims": copy.deepcopy(claims),
+            "platform_only": bool(platform_only), "submitted_by": int(user_id), "submitted_at": utc_now()}
+        async with self.config.guild(guild).audit_log() as audit_log:
+            match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
+            match["reward_withdrawal"] = withdrawal
+        self._start_treasury_confirmation_task(int(guild_id), int(user_id), str(record["launch_id"]))
 
     async def collect_launch_rewards_internal(
         self, user: Any, record: Dict[str, Any], guild_id: int
@@ -946,6 +1123,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise ValueError("Only the launch requester can start this reward review.")
         if record.get("status") not in {"internal_confirmed", "external_confirmed"}:
             raise ValueError("Only a confirmed launch can collect rewards.")
+        current_collection = record.get("reward_collection") or {}
+        if (current_collection.get("status") == "submitted"
+                or current_collection.get("status") == "awaiting_external_wallet"
+                and int(current_collection.get("expires_at") or 0) > int(datetime.datetime.now(datetime.timezone.utc).timestamp())):
+            raise ValueError("This token already has an active reward collection.")
         token = str(record.get("token_address") or "").lower()
         admin = str(record.get("token_admin") or "").lower()
         if not ADDRESS_RE.fullmatch(token) or not ADDRESS_RE.fullmatch(admin):
@@ -1125,6 +1307,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                         str(result["transaction_hash"]), str(record["token_address"]),
                         len(recipients), clanker_rpc,
                     )
+                    if reconciled.get("status") == "pending":
+                        await asyncio.sleep(delay)
+                        continue
                     reconciled["provider_status"] = provider_status
                     reconciled["user_operation_hash"] = result.get("user_operation_hash")
                 else:
@@ -1135,10 +1320,79 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     match["reward_collection"] = reconciled
                 symbol = str(record.get("symbol") or "token").upper()
                 if reconciled["status"] == "confirmed":
-                    message = "$" + symbol + " reward collection confirmed and reconciled from its on-chain event."
+                    embed = discord.Embed(title="$" + symbol + " rewards collected",
+                        description="Exact amounts reconciled from the confirmed ClaimedRewards event.",
+                        color=discord.Color.green())
+                    asset0 = "$" + symbol if reconciled["asset0"] == str(record["token_address"]).lower() else "WETH"
+                    asset1 = "$" + symbol if reconciled["asset1"] == str(record["token_address"]).lower() else "WETH"
+                    for index, recipient in enumerate(recipients):
+                        role = "Creator" if index == 0 else "Platform" if index == len(recipients) - 1 else "Recipient " + str(index + 1)
+                        embed.add_field(name=role + " · " + str(recipient.get("recipient") or "")[:10] + "…",
+                            value=(asset0 + ": " + format(reconciled["rewards0_wei"][index] / 10**18, ",.8f")
+                                   + chr(10) + asset1 + ": " + format(reconciled["rewards1_wei"][index] / 10**18, ",.8f")), inline=False)
+                    embed.add_field(name="Next step", value="These amounts are deposited in their treasuries. Any withdrawal is a separately reviewed treasury-wide action.", inline=False)
+                    embed.add_field(name="Transaction", value="https://sepolia.basescan.org/tx/" + str(reconciled["transaction_hash"]), inline=False)
+                    await user.send(embed=embed)
                 else:
-                    message = "$" + symbol + " reward collection failed. No withdrawal was recorded."
-                await user.send(message)
+                    await user.send("$" + symbol + " reward collection failed. No withdrawal was recorded.")
+                return
+            except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException):
+                await asyncio.sleep(delay)
+
+    def _start_treasury_confirmation_task(self, guild_id: int, user_id: int, launch_id: str) -> None:
+        task = self.bot.loop.create_task(self._track_treasury_confirmation(guild_id, user_id, launch_id))
+        self.confirmation_tasks.add(task)
+        task.add_done_callback(self.confirmation_tasks.discard)
+
+    async def _track_treasury_confirmation(self, guild_id: int, user_id: int, launch_id: str) -> None:
+        await asyncio.sleep(15)
+        for delay in (20, 30, 45, 60, 90, 120, 180, 300, 300):
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                return
+            record = await self.get_launch_record(guild, launch_id)
+            withdrawal = (record or {}).get("reward_withdrawal") or {}
+            if withdrawal.get("status") != "submitted":
+                return
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            wallet = self.bot.get_cog("CryptoWallet")
+            status_call = getattr(wallet, "clanker_treasury_status", None) if wallet else None
+            if not callable(status_call):
+                await asyncio.sleep(delay)
+                continue
+            try:
+                result = await status_call(user, token_admin=str(record["token_admin"]),
+                    creator_treasury=str(record.get("creator_reward_recipient") or record["token_admin"]),
+                    platform_treasury=str(record["platform_treasury"]), claims=withdrawal["claims"],
+                    user_operation_hash=str(withdrawal["user_operation_hash"]),
+                    platform_only=bool(withdrawal.get("platform_only")))
+                provider_status = str(result.get("provider_status") or "")
+                if provider_status in {"dropped", "failed"}:
+                    reconciled = {"status": "failed", **withdrawal, **result}
+                elif provider_status == "complete" and result.get("transaction_hash"):
+                    reconciled = await reconcile_withdrawal_receipt(
+                        str(result["transaction_hash"]), withdrawal["claims"], clanker_rpc)
+                    if reconciled.get("status") == "pending":
+                        await asyncio.sleep(delay)
+                        continue
+                    reconciled.update({"provider_status": provider_status,
+                        "user_operation_hash": result.get("user_operation_hash"),
+                        "platform_only": bool(withdrawal.get("platform_only"))})
+                else:
+                    await asyncio.sleep(delay)
+                    continue
+                async with self.config.guild(guild).audit_log() as audit_log:
+                    match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
+                    match["reward_withdrawal"] = reconciled
+                if reconciled["status"] == "confirmed":
+                    lines = ["Treasury withdrawal confirmed:"]
+                    for item in reconciled["claims"]:
+                        asset = "WETH" if item["asset"] == WETH.lower() else item["asset"][:10] + "…"
+                        lines.append(asset + " → " + item["owner"][:10] + "…: " + format(item["amount_wei"] / 10**18, ",.8f"))
+                    lines.append("https://sepolia.basescan.org/tx/" + reconciled["transaction_hash"])
+                    await user.send(chr(10).join(lines))
+                else:
+                    await user.send("Clanker treasury withdrawal failed; no successful withdrawal was recorded.")
                 return
             except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException):
                 await asyncio.sleep(delay)
@@ -1268,11 +1522,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             try:
                 channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
                 message = await channel.fetch_message(message_id)
-                await message.edit(embed=embed, view=ClankerReceiptRewardsView(self, record, guild.id))
+                await message.edit(embed=embed, view=ClankerReceiptRewardsView(self, record, int(getattr(guild, "id", 0) or 0)))
             except discord.HTTPException:
                 log.exception("Could not update Clanker confirmation card %s", launch_id)
         try:
-            await user.send(embed=embed, view=ClankerReceiptRewardsView(self, record, guild.id))
+            await user.send(embed=embed, view=ClankerReceiptRewardsView(self, record, int(getattr(guild, "id", 0) or 0)))
         except discord.HTTPException:
             log.exception("Could not DM Clanker confirmation card %s", launch_id)
 
@@ -1703,9 +1957,37 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "The server audit record was retained."
         )
 
+    @clanker.command(name="rewardverify")
+    async def clanker_rewardverify(
+        self, ctx: commands.Context, launch_id: str, transaction_hash: str
+    ):
+        """Verify one external-wallet reward collection for your token."""
+        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
+        if not record:
+            await ctx.send("No matching confirmed Clanker launch belongs to you.")
+            return
+        recipients = (record.get("payload") or {}).get("rewards", {}).get("recipients") or []
+        try:
+            result = await verify_external_collection(
+                transaction_hash, str(record["token_address"]), str(record["token_admin"]),
+                len(recipients), clanker_rpc,
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send("Clanker could not verify that reward collection: " + str(exc))
+            return
+        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+            match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
+            match["reward_collection"] = {"route": "external", **result}
+        if result["status"] == "pending":
+            await ctx.send("That external collection is still pending; run this command again after confirmation.")
+        else:
+            await ctx.send("External reward collection " + chr(96) + result["status"] + chr(96)
+                           + " and reconciled for " + chr(96)
+                           + str(record.get("launch_ref") or record["launch_id"]) + chr(96) + ".")
+
     @clanker.command(name="claimall")
     async def clanker_claimall(self, ctx: commands.Context):
-        """DM a read-only reward and gas preflight for all confirmed launches."""
+        """DM paginated collection selection and profitable withdrawal review."""
         audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
         records = [
             item for item in audit_log
@@ -1719,7 +2001,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         try:
             async with ctx.typing():
                 embed = await self.reward_preflight_embed(records, portfolio=True)
-                await ctx.author.send(embed=embed)
+                await ctx.author.send(embed=embed, view=ClankerClaimAllView(
+                    self, records, ctx.author.id, ctx.guild.id
+                ))
         except discord.Forbidden:
             await ctx.send("I could not DM your reward review. Enable DMs and try again.")
             return
@@ -1727,6 +2011,31 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("Clanker rewards are temporarily unavailable: {}".format(exc))
             return
         await ctx.send("I sent your Clanker reward portfolio and gas preflight by DM.")
+
+    @clanker.command(name="claimplatform")
+    @commands.is_owner()
+    async def clanker_claimplatform(self, ctx: commands.Context):
+        """Review profitable platform-only treasury deposits across this guild."""
+        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        records = [item for item in audit_log
+                   if item.get("status") in {"internal_confirmed", "external_confirmed"}
+                   and item.get("token_address") and item.get("platform_treasury")]
+        if not records:
+            await ctx.send("No confirmed platform reward records are available.")
+            return
+        try:
+            embed, claims, profitable = await self.platform_withdrawal_review(records)
+            view = ClankerTreasuryWithdrawalView(
+                self, records[0], claims, ctx.author.id, ctx.guild.id, platform_only=True
+            ) if claims and profitable else None
+            await ctx.author.send(embed=embed, view=view)
+        except discord.Forbidden:
+            await ctx.send("I could not DM the platform treasury review.")
+            return
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send("Platform reward review unavailable: " + str(exc))
+            return
+        await ctx.send("I sent the platform-only treasury review by DM.")
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
     @checks.mod_or_permissions(manage_guild=True)

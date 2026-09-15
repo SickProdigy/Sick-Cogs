@@ -209,6 +209,48 @@ class ClankerAirdropModal(discord.ui.Modal):
         await self.view_ref.refresh(interaction, message)
 
 
+class ClankerTreasuryWithdrawalView(discord.ui.View):
+    """Final approval for a clearly treasury-wide reward withdrawal."""
+
+    def __init__(self, cog: "Clanker", record: Dict[str, Any], claims: list[dict], user_id: int, guild_id: int, *, platform_only: bool = False):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.record = copy.deepcopy(record)
+        self.claims = copy.deepcopy(claims)
+        self.user_id = int(user_id)
+        self.guild_id = int(guild_id)
+        self.platform_only = bool(platform_only)
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Only the reviewing token administrator can approve this withdrawal.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Withdraw treasury balances", emoji="🏦", style=discord.ButtonStyle.danger)
+    async def withdraw(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message("This withdrawal is already processing.", ephemeral=True)
+            return
+        self.processing = True
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        try:
+            result = await (self.cog.withdraw_platform_treasury_internal(interaction.user, self.record, self.claims, self.guild_id)
+                            if self.platform_only else self.cog.withdraw_launch_treasuries_internal(interaction.user, self.record, self.claims, self.guild_id))
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            self.processing = False
+            button.disabled = False
+            await interaction.edit_original_response(view=self)
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        detail = str(result.get("transaction_hash") or result.get("user_operation_hash") or "")
+        await interaction.followup.send("Treasury-wide withdrawal submitted. Status: " + chr(96)
+            + str(result.get("provider_status")) + chr(96)
+            + (" · reference " + chr(96) + detail[:10] + "…" + detail[-8:] + chr(96) if detail else ""), ephemeral=True)
+
+
 class ClankerRewardReviewView(discord.ui.View):
     """Owner-bound controls for one coin; never performs a portfolio sweep."""
 
@@ -254,6 +296,125 @@ class ClankerRewardReviewView(discord.ui.View):
             lines.append("Operation: " + chr(96) + operation[:10] + "…" + operation[-8:] + chr(96))
         lines.append("No treasury-wide deposited rewards were withdrawn.")
         await interaction.followup.send(chr(10).join(lines), ephemeral=True)
+
+    @discord.ui.button(label="Use external wallet", emoji="🌐", style=discord.ButtonStyle.secondary)
+    async def external(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            url = await self.cog.external_reward_handoff(interaction.user, self.record, self.guild_id)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send("External reward handoff unavailable: " + str(exc), ephemeral=True)
+            return
+        await interaction.followup.send("Open this protected one-time link to collect this token with its administrator wallet:"
+                                        + chr(10) + url, ephemeral=True)
+
+    @discord.ui.button(label="Review treasury withdrawal", emoji="📋", style=discord.ButtonStyle.secondary)
+    async def review_withdrawal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            embed, claims, profitable = await self.cog.treasury_withdrawal_review(self.record)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send("Treasury review unavailable: " + str(exc), ephemeral=True)
+            return
+        view = ClankerTreasuryWithdrawalView(self.cog, self.record, claims, interaction.user.id, self.guild_id) if claims else None
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
+
+class ClankerClaimAllSelect(discord.ui.Select):
+    def __init__(self, view_ref: "ClankerClaimAllView"):
+        self.view_ref = view_ref
+        page_records = view_ref.page_records()
+        options = [discord.SelectOption(
+            label=("$" + str(item.get("symbol") or "?").upper() + " · " + str(item.get("launch_ref") or item.get("launch_id")))[:100],
+            value=str(item.get("launch_id")),
+            default=str(item.get("launch_id")) in view_ref.selected_ids,
+        ) for item in page_records]
+        super().__init__(placeholder="Select tokens to collect on this page", min_values=0,
+                         max_values=max(1, len(options)), options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        page_ids = {str(item.get("launch_id")) for item in self.view_ref.page_records()}
+        self.view_ref.selected_ids.difference_update(page_ids)
+        self.view_ref.selected_ids.update(self.values)
+        await interaction.response.edit_message(view=self.view_ref)
+
+
+class ClankerClaimAllView(discord.ui.View):
+    """Paginated portfolio selection with separate collection and withdrawal actions."""
+
+    def __init__(self, cog: "Clanker", records: list[dict], user_id: int, guild_id: int):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.records = copy.deepcopy(records)
+        self.user_id = int(user_id)
+        self.guild_id = int(guild_id)
+        self.page = 0
+        self.selected_ids: set[str] = set()
+        self._rebuild_select()
+
+    def page_records(self):
+        return self.records[self.page * 10:(self.page + 1) * 10]
+
+    def _rebuild_select(self):
+        for item in list(self.children):
+            if isinstance(item, ClankerClaimAllSelect):
+                self.remove_item(item)
+        if self.page_records():
+            self.add_item(ClankerClaimAllSelect(self))
+        self.previous.disabled = self.page == 0
+        self.next.disabled = (self.page + 1) * 10 >= len(self.records)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Only the portfolio owner can use these controls.", ephemeral=True)
+        return False
+
+    async def _show_page(self, interaction: discord.Interaction):
+        self._rebuild_select()
+        embed = await self.cog.reward_preflight_embed(self.records, portfolio=True, offset=self.page * 10)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        await self._show_page(interaction)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, row=2)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        await self._show_page(interaction)
+
+    @discord.ui.button(label="Collect selected", emoji="📥", style=discord.ButtonStyle.primary, row=3)
+    async def collect_selected(self, interaction: discord.Interaction, button: discord.ui.Button):
+        selected = [item for item in self.records if str(item.get("launch_id")) in self.selected_ids]
+        if not selected:
+            await interaction.response.send_message("Select at least one token first.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        submitted, failures = [], []
+        for record in selected:
+            try:
+                await self.cog.collect_launch_rewards_internal(interaction.user, record, self.guild_id)
+                submitted.append(str(record.get("launch_ref") or record.get("launch_id")))
+            except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                failures.append(str(record.get("launch_ref") or record.get("launch_id")) + ": " + str(exc))
+        lines = ["Submitted: " + (", ".join(submitted) if submitted else "none")]
+        if failures:
+            lines.append("Not submitted:" + chr(10) + chr(10).join(failures))
+        lines.append("Profit cannot be known before collection; exact amounts arrive from each confirmed receipt.")
+        await interaction.followup.send(chr(10).join(lines), ephemeral=True)
+
+    @discord.ui.button(label="Claim all profitable", emoji="💰", style=discord.ButtonStyle.success, row=3)
+    async def profitable(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            embed, claims, profitable = await self.cog.treasury_withdrawal_review(self.records)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.followup.send("Portfolio withdrawal review unavailable: " + str(exc), ephemeral=True)
+            return
+        view = ClankerTreasuryWithdrawalView(self.cog, self.records[0], claims, self.user_id, self.guild_id) if claims and profitable else None
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class ClankerReceiptRewardsView(discord.ui.View):

@@ -3,8 +3,9 @@ from unittest.mock import AsyncMock
 
 from ..rewards import (
     FEE_LOCKER, LP_LOCKER, WETH, available_fees_call, claim_call,
-    CLAIMED_REWARDS_TOPIC, collect_rewards_call, decode_claimed_rewards_log,
-    reconcile_collection_receipt, reward_preflight,
+    CLAIMED_REWARDS_TOPIC, CLAIM_TOKENS_TOPIC, collect_rewards_call,
+    decode_claimed_rewards_log, reconcile_collection_receipt,
+    reconcile_withdrawal_receipt, reward_preflight,
 )
 
 
@@ -46,6 +47,21 @@ class RewardReceiptTests(unittest.IsolatedAsyncioTestCase):
         result = await reconcile_collection_receipt(transaction, TOKEN, 2, rpc)
         self.assertEqual(result["status"], "confirmed")
         self.assertEqual(result["block_number"], 16)
+
+    async def test_reconciles_every_exact_treasury_claim(self):
+        transaction = "0x" + "b" * 64
+        claims = [{"owner": CREATOR, "asset": WETH}, {"owner": PLATFORM, "asset": TOKEN}]
+        logs = []
+        for index, item in enumerate(claims, 1):
+            logs.append({"address": FEE_LOCKER, "topics": [CLAIM_TOKENS_TOPIC,
+                "0x" + item["owner"][2:].rjust(64, "0"),
+                "0x" + item["asset"][2:].rjust(64, "0")],
+                "data": "0x" + format(index, "064x")})
+        rpc = AsyncMock(return_value={"transactionHash": transaction, "status": "0x1",
+                                      "blockNumber": "0x20", "logs": logs})
+        result = await reconcile_withdrawal_receipt(transaction, claims, rpc)
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(sum(item["amount_wei"] for item in result["claims"]), 3)
 
     async def test_rejects_wrong_token_or_recipient_shape(self):
         with self.assertRaises(ValueError):
