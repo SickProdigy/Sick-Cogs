@@ -31,6 +31,14 @@ if TYPE_CHECKING:
 _VAULT_DURATION_UNITS = {"h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 31536000}
 
 
+def format_eth_wei(value_wei: int) -> str:
+    """Format wei without rounding a nonzero network cost down to zero."""
+    value = int(value_wei)
+    if value == 0:
+        return "0.00000000 ETH"
+    return ("{:.12f}".format(value / 10**18).rstrip("0") + " ETH")
+
+
 def parse_vault_duration(value: str, *, allow_zero: bool = False) -> int:
     raw = str(value or "").strip().lower()
     if allow_zero and raw in {"", "0", "none", "off"}:
@@ -1048,25 +1056,28 @@ class ClankerVerifiedView(discord.ui.View):
         embed.add_field(name="Supply", value=format_tokens(DEFAULT_CLANKER_SUPPLY), inline=True)
         embed.add_field(name="Token administrator", value=payload["tokenAdmin"], inline=False)
         terms = record["execution_terms"]
-        embed.add_field(
-            name="Gas limit", value=f"{int(terms['gas_limit']):,} gas", inline=True
+        estimate = record.get("network_fee_estimate") or {}
+        estimated_gas = int(estimate.get("estimated_gas") or 0)
+        estimated_fee_wei = int(estimate.get("estimated_fee_wei") or 0)
+        network_cost = (
+            "{} (estimated for {:,} gas)".format(
+                format_eth_wei(estimated_fee_wei), estimated_gas
+            )
+            if estimated_fee_wei else "Estimate unavailable"
         )
+        embed.add_field(name="Estimated network fee", value=network_cost, inline=False)
         embed.add_field(
-            name="Native value",
+            name="Your wallet pays",
             value=(
-                "0 ETH" if int(terms["native_value_wei"]) == 0
-                else f"{int(terms['native_value_wei'])} wei"
+                format_eth_wei(0) + " (CDP-sponsored)"
+                if terms["gas_sponsored"] else network_cost
             ),
             inline=True,
         )
         embed.add_field(
-            name="Gas payment",
-            value=(
-                f"Sponsored by {terms['gas_payer']} (no wallet gas charge)"
-                if terms["gas_sponsored"]
-                else f"Paid by {terms['gas_payer']}"
-            ),
-            inline=False,
+            name="ETH sent with launch",
+            value=format_eth_wei(int(terms["native_value_wei"])),
+            inline=True,
         )
         embed.add_field(
             name="Creator reward recipient",
@@ -1462,6 +1473,12 @@ class ClankerDraftView(discord.ui.View):
             record = await self.cog.mark_draft_verified(
                 self.ctx.guild, interaction.user, str(record["launch_id"])
             )
+            try:
+                record["network_fee_estimate"] = await self.cog.estimate_launch_network_fee(
+                    record["operation"], signer_address
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                record["network_fee_estimate"] = None
             await self.cog.notify_approval_channel(
                 self.ctx.guild, self.settings, record
             )

@@ -1825,6 +1825,28 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             record["operation"] = operation.to_dict()
             return dict(record)
 
+    async def estimate_launch_network_fee(
+        self, operation: Dict[str, Any], signer_address: str
+    ) -> Dict[str, int]:
+        """Estimate gas for the exact prepared launch at the current network fee rate."""
+        call = {
+            "from": str(signer_address),
+            "to": str(operation["to"]),
+            "data": str(operation["data"]),
+            "value": hex(int(operation.get("value", 0))),
+        }
+        estimated_gas_raw, gas_price_raw = await asyncio.gather(
+            clanker_rpc("eth_estimateGas", [call]),
+            clanker_rpc("eth_gasPrice", []),
+        )
+        estimated_gas = int(str(estimated_gas_raw), 16)
+        gas_price_wei = int(str(gas_price_raw), 16)
+        return {
+            "estimated_gas": estimated_gas,
+            "gas_price_wei": gas_price_wei,
+            "estimated_fee_wei": estimated_gas * gas_price_wei,
+        }
+
     async def mark_draft_verified(
         self, guild: discord.Guild, user: Any, launch_id: str
     ) -> Dict[str, Any]:

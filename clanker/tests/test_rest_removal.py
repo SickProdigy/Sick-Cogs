@@ -279,6 +279,11 @@ class VerifiedCardDisplayTests(unittest.TestCase):
             "gas_limit": 8_000_000, "native_value_wei": 0,
             "gas_sponsored": True, "gas_payer": "CDP paymaster",
         }
+        record["network_fee_estimate"] = {
+            "estimated_gas": 1_000_000,
+            "gas_price_wei": 100_000_000,
+            "estimated_fee_wei": 100_000_000_000_000,
+        }
         ctx = SimpleNamespace(author=SimpleNamespace(id=7))
         embed = ClankerVerifiedView(
             SimpleNamespace(), ctx, record, {}, {}
@@ -289,9 +294,12 @@ class VerifiedCardDisplayTests(unittest.TestCase):
         self.assertEqual(fields["Creator reward share"], "8000 bps")
         self.assertEqual(fields["Platform reward share"], "2000 bps")
         self.assertEqual(fields["Platform treasury"], TREASURY.lower())
-        self.assertEqual(fields["Gas limit"], "8,000,000 gas")
-        self.assertEqual(fields["Native value"], "0 ETH")
-        self.assertIn("no wallet gas charge", fields["Gas payment"])
+        self.assertEqual(
+            fields["Estimated network fee"],
+            "0.0001 ETH (estimated for 1,000,000 gas)",
+        )
+        self.assertEqual(fields["Your wallet pays"], "0.00000000 ETH (CDP-sponsored)")
+        self.assertEqual(fields["ETH sent with launch"], "0.00000000 ETH")
 
 
 class LaunchReceiptDisplayTests(unittest.TestCase):
