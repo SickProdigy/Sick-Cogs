@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock
 
 from ..rewards import (
     FEE_LOCKER, LP_LOCKER, WETH, available_fees_call, claim_call,
-    collect_rewards_call, reward_preflight,
+    CLAIMED_REWARDS_TOPIC, collect_rewards_call, decode_claimed_rewards_log,
+    reconcile_collection_receipt, reward_preflight,
 )
 
 
@@ -27,6 +28,31 @@ class RewardOperationTests(unittest.TestCase):
         self.assertIn(CREATOR[2:], claim["data"])
         self.assertIn(WETH[2:].lower(), claim["data"])
         self.assertIn(TOKEN[2:], collect["data"])
+
+
+class RewardReceiptTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def event(rewards0=(8, 2), rewards1=(80, 20)):
+        words = [100, 10, 128, 224, len(rewards0), *rewards0, len(rewards1), *rewards1]
+        return {"address": LP_LOCKER, "topics": [CLAIMED_REWARDS_TOPIC, "0x" + TOKEN[2:].rjust(64, "0")],
+                "data": "0x" + "".join(format(item, "064x") for item in words)}
+
+    async def test_decodes_and_reconciles_exact_collection_event(self):
+        decoded = decode_claimed_rewards_log(self.event(), TOKEN, 2)
+        self.assertEqual(decoded["rewards0_wei"], [8, 2])
+        transaction = "0x" + "a" * 64
+        rpc = AsyncMock(return_value={"transactionHash": transaction, "status": "0x1",
+                                      "blockNumber": "0x10", "logs": [self.event()]})
+        result = await reconcile_collection_receipt(transaction, TOKEN, 2, rpc)
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["block_number"], 16)
+
+    async def test_rejects_wrong_token_or_recipient_shape(self):
+        with self.assertRaises(ValueError):
+            decode_claimed_rewards_log(self.event(), ADMIN, 2)
+        with self.assertRaises(ValueError):
+            decode_claimed_rewards_log(self.event(), TOKEN, 3)
+
 
 
 class RewardPreflightTests(unittest.IsolatedAsyncioTestCase):

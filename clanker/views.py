@@ -212,11 +212,12 @@ class ClankerAirdropModal(discord.ui.Modal):
 class ClankerRewardReviewView(discord.ui.View):
     """Owner-bound controls for one coin; never performs a portfolio sweep."""
 
-    def __init__(self, cog: "Clanker", record: Dict[str, Any], user_id: int):
+    def __init__(self, cog: "Clanker", record: Dict[str, Any], user_id: int, guild_id: int):
         super().__init__(timeout=900)
         self.cog = cog
         self.record = copy.deepcopy(record)
         self.user_id = int(user_id)
+        self.guild_id = int(guild_id)
         self.processing = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -236,7 +237,7 @@ class ClankerRewardReviewView(discord.ui.View):
         button.disabled = True
         await interaction.response.edit_message(view=self)
         try:
-            result = await self.cog.collect_launch_rewards_internal(interaction.user, self.record)
+            result = await self.cog.collect_launch_rewards_internal(interaction.user, self.record, self.guild_id)
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             self.processing = False
             button.disabled = False
@@ -258,10 +259,11 @@ class ClankerRewardReviewView(discord.ui.View):
 class ClankerReceiptRewardsView(discord.ui.View):
     """Open a private reward preflight scoped to one confirmed launch."""
 
-    def __init__(self, cog: "Clanker", record: Dict[str, Any]):
+    def __init__(self, cog: "Clanker", record: Dict[str, Any], guild_id: int):
         super().__init__(timeout=900)
         self.cog = cog
         self.record = copy.deepcopy(record)
+        self.guild_id = int(guild_id)
 
     @discord.ui.button(label="Rewards", emoji="\U0001f4b0", style=discord.ButtonStyle.primary)
     async def rewards(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -276,7 +278,7 @@ class ClankerReceiptRewardsView(discord.ui.View):
             return
         await interaction.followup.send(
             embed=embed,
-            view=ClankerRewardReviewView(self.cog, self.record, interaction.user.id),
+            view=ClankerRewardReviewView(self.cog, self.record, interaction.user.id, self.guild_id),
             ephemeral=True,
         )
 

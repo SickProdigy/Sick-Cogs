@@ -33,7 +33,7 @@ from .models import (
     ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
 )
 from .operation import clanker_deployment_operation
-from .rewards import WETH, reward_preflight
+from .rewards import WETH, reconcile_collection_receipt, reward_preflight
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -226,6 +226,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     and record.get("confirmation_message_id")
                 ):
                     self._start_confirmation_task(
+                        int(guild_id), int(record["requester_id"]),
+                        str(record["launch_id"]),
+                    )
+                if (record.get("reward_collection") or {}).get("status") == "submitted":
+                    self._start_reward_confirmation_task(
                         int(guild_id), int(record["requester_id"]),
                         str(record["launch_id"]),
                     )
@@ -934,7 +939,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return embed
 
     async def collect_launch_rewards_internal(
-        self, user: Any, record: Dict[str, Any]
+        self, user: Any, record: Dict[str, Any], guild_id: int
     ) -> Dict[str, Any]:
         """Collect exactly one launch after CryptoWallet proves the token administrator."""
         if int(record.get("requester_id", 0) or 0) != int(user.id):
@@ -955,6 +960,20 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         )
         if str(result.get("provider_status") or "") not in {"pending", "signed", "broadcast", "complete"}:
             raise RuntimeError("CryptoWallet returned an invalid reward collection status.")
+        guild = self.bot.get_guild(int(guild_id))
+        if guild is None:
+            raise RuntimeError("The launch server is unavailable.")
+        collection = {"status": "submitted", "route": "internal",
+                      "provider_status": result.get("provider_status"),
+                      "user_operation_hash": result.get("user_operation_hash"),
+                      "transaction_hash": result.get("transaction_hash"),
+                      "token_address": token, "submitted_at": utc_now()}
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record.get("launch_id"))]
+            if len(matches) != 1:
+                raise RuntimeError("The launch changed before collection could be recorded.")
+            matches[0]["reward_collection"] = collection
+        self._start_reward_confirmation_task(int(guild_id), int(user.id), str(record["launch_id"]))
         return result
 
     async def launch_verified_internal(self, user: Any, record: Dict[str, Any]) -> Dict[str, Any]:
@@ -1063,6 +1082,66 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 or result.get("status") not in allowed):
             raise RuntimeError("CryptoWallet returned an invalid Clanker lifecycle state.")
         return result
+
+    def _start_reward_confirmation_task(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        task = self.bot.loop.create_task(
+            self._track_reward_confirmation(guild_id, user_id, launch_id)
+        )
+        self.confirmation_tasks.add(task)
+        task.add_done_callback(self.confirmation_tasks.discard)
+
+    async def _track_reward_confirmation(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        await asyncio.sleep(15)
+        for delay in (20, 30, 45, 60, 90, 120, 180, 300, 300):
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                return
+            record = await self.get_launch_record(guild, launch_id)
+            collection = (record or {}).get("reward_collection") or {}
+            if collection.get("status") != "submitted":
+                return
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            wallet = self.bot.get_cog("CryptoWallet")
+            status_call = getattr(wallet, "clanker_reward_status", None) if wallet else None
+            if not callable(status_call):
+                await asyncio.sleep(delay)
+                continue
+            try:
+                result = await status_call(
+                    user, token=str(record["token_address"]),
+                    token_admin=str(record["token_admin"]),
+                    user_operation_hash=str(collection["user_operation_hash"]),
+                )
+                provider_status = str(result.get("provider_status") or "")
+                if provider_status in {"dropped", "failed"}:
+                    reconciled = {"status": "failed", **result}
+                elif provider_status == "complete" and result.get("transaction_hash"):
+                    recipients = (record.get("payload") or {}).get("rewards", {}).get("recipients") or []
+                    reconciled = await reconcile_collection_receipt(
+                        str(result["transaction_hash"]), str(record["token_address"]),
+                        len(recipients), clanker_rpc,
+                    )
+                    reconciled["provider_status"] = provider_status
+                    reconciled["user_operation_hash"] = result.get("user_operation_hash")
+                else:
+                    await asyncio.sleep(delay)
+                    continue
+                async with self.config.guild(guild).audit_log() as audit_log:
+                    match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
+                    match["reward_collection"] = reconciled
+                symbol = str(record.get("symbol") or "token").upper()
+                if reconciled["status"] == "confirmed":
+                    message = "$" + symbol + " reward collection confirmed and reconciled from its on-chain event."
+                else:
+                    message = "$" + symbol + " reward collection failed. No withdrawal was recorded."
+                await user.send(message)
+                return
+            except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException):
+                await asyncio.sleep(delay)
 
     async def schedule_internal_confirmation(
         self, guild: discord.Guild, user: Any, record: Dict[str, Any],
@@ -1189,11 +1268,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             try:
                 channel = self.bot.get_channel(channel_id) or await self.bot.fetch_channel(channel_id)
                 message = await channel.fetch_message(message_id)
-                await message.edit(embed=embed, view=ClankerReceiptRewardsView(self, record))
+                await message.edit(embed=embed, view=ClankerReceiptRewardsView(self, record, guild.id))
             except discord.HTTPException:
                 log.exception("Could not update Clanker confirmation card %s", launch_id)
         try:
-            await user.send(embed=embed, view=ClankerReceiptRewardsView(self, record))
+            await user.send(embed=embed, view=ClankerReceiptRewardsView(self, record, guild.id))
         except discord.HTTPException:
             log.exception("Could not DM Clanker confirmation card %s", launch_id)
 

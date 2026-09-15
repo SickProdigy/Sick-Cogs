@@ -8,6 +8,66 @@ from .helpers import keccak256
 FEE_LOCKER = "0x42A95190B4088C88Dd904d930c79deC1158bF09D"
 LP_LOCKER = "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f"
 WETH = "0x4200000000000000000000000000000000000006"
+CLAIMED_REWARDS_TOPIC = "0x21d15f71483b597e8f0009e83b90b2117f6f98c185d7173857dddcae5eb8546a"
+
+
+def decode_claimed_rewards_log(
+    log: dict[str, Any], token: str, recipient_count: int
+) -> dict[str, Any]:
+    """Decode one pinned ClaimedRewards event with bounded dynamic arrays."""
+    topics = log.get("topics")
+    data = str(log.get("data") or "")
+    if (str(log.get("address") or "").lower() != LP_LOCKER.lower()
+            or not isinstance(topics, list) or len(topics) != 2
+            or str(topics[0]).lower() != CLAIMED_REWARDS_TOPIC
+            or str(topics[1]).lower() != "0x" + _address_word(token)
+            or not data.startswith("0x")):
+        raise ValueError("The reward receipt event does not match this token.")
+    try:
+        raw = bytes.fromhex(data[2:])
+        if len(raw) < 128 or len(raw) % 32:
+            raise ValueError
+        words = [int.from_bytes(raw[i:i + 32], "big") for i in range(0, len(raw), 32)]
+        amount0, amount1, offset0, offset1 = words[:4]
+        arrays = []
+        for offset in (offset0, offset1):
+            if offset % 32 or offset < 128 or offset // 32 >= len(words):
+                raise ValueError
+            start = offset // 32
+            length = words[start]
+            if length != recipient_count or start + 1 + length > len(words):
+                raise ValueError
+            arrays.append(words[start + 1:start + 1 + length])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The reward receipt contains malformed amounts.") from exc
+    return {"token": token.lower(), "amount0_wei": amount0, "amount1_wei": amount1,
+            "rewards0_wei": arrays[0], "rewards1_wei": arrays[1]}
+
+
+async def reconcile_collection_receipt(
+    transaction_hash: str, token: str, recipient_count: int,
+    rpc: Callable[[str, list[Any]], Awaitable[Any]],
+) -> dict[str, Any]:
+    receipt = await rpc("eth_getTransactionReceipt", [transaction_hash])
+    if receipt is None:
+        return {"status": "pending"}
+    try:
+        if str(receipt.get("transactionHash") or "").lower() != transaction_hash.lower():
+            raise ValueError("The reward receipt transaction does not match.")
+        if int(str(receipt["status"]), 16) != 1:
+            return {"status": "failed", "transaction_hash": transaction_hash.lower()}
+        matches = [item for item in receipt.get("logs") or []
+                   if isinstance(item, dict)
+                   and str(item.get("address") or "").lower() == LP_LOCKER.lower()
+                   and str((item.get("topics") or [None])[0]).lower() == CLAIMED_REWARDS_TOPIC]
+        if len(matches) != 1:
+            raise ValueError("The reward receipt lacks one exact ClaimedRewards event.")
+        decoded = decode_claimed_rewards_log(matches[0], token, recipient_count)
+        return {"status": "confirmed", "transaction_hash": transaction_hash.lower(),
+                "block_number": int(str(receipt["blockNumber"]), 16), **decoded}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("The confirmed reward receipt could not be reconciled.") from exc
+
 
 
 def _selector(signature: str) -> str:
