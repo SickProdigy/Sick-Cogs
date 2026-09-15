@@ -1489,6 +1489,11 @@ class ClankerDraftView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", emoji="✖️", style=discord.ButtonStyle.danger, row=1)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.disable_controls()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
-        await interaction.followup.send("Clanker launch draft canceled.", ephemeral=True)
+        self.stop()
+        await interaction.response.defer()
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            await interaction.edit_original_response(
+                content="Clanker launch draft canceled.", embed=None, view=None
+            )

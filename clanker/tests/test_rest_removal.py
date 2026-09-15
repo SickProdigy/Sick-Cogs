@@ -573,6 +573,22 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("uncertain", ctx.send.await_args.args[0])
         self.assertNotIn("dismissed_by_requester", record)
 
+    async def test_canceling_temporary_draft_deletes_its_message(self):
+        settings = {"treasury_address": TREASURY, "platform_bps": 2000,
+                    "vault_enabled": False}
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7))
+        view = ClankerDraftView(SimpleNamespace(), ctx, settings)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            delete_original_response=AsyncMock(),
+            edit_original_response=AsyncMock(),
+        )
+        await view.cancel.callback(interaction)
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.delete_original_response.assert_awaited_once_with()
+        interaction.edit_original_response.assert_not_awaited()
+        self.assertTrue(view.is_finished())
+
     def test_disabled_vault_explains_purpose_and_starter_example(self):
         settings = {"treasury_address": TREASURY, "platform_bps": 2000,
                     "vault_enabled": False}
