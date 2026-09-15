@@ -231,18 +231,14 @@ class ClankerVerifiedView(discord.ui.View):
     def embed(self) -> discord.Embed:
         record = self.record
         payload = record["payload"]
-        rewards = payload["rewards"]["recipients"]
-        platform = str(record.get("platform_treasury") or "").lower()
-        creator = next(
-            (
-                item for item in rewards
-                if not (
-                    str(item.get("admin") or "").lower() == platform
-                    and str(item.get("recipient") or "").lower() == platform
-                )
-            ),
-            {},
+        creator_bps = int(record.get("creator_bps", 0))
+        platform_bps = int(record.get("platform_bps", 0))
+        if creator_bps + platform_bps != 10_000:
+            creator_bps = 10_000 - platform_bps
+        creator_recipient = (
+            record.get("creator_reward_recipient") or payload["tokenAdmin"]
         )
+        platform_treasury = record.get("platform_treasury")
         embed = discord.Embed(
             title="Verified Clanker launch",
             description=(
@@ -258,14 +254,18 @@ class ClankerVerifiedView(discord.ui.View):
         embed.add_field(name="Supply", value=format_tokens(DEFAULT_CLANKER_SUPPLY), inline=True)
         embed.add_field(name="Token administrator", value=payload["tokenAdmin"], inline=False)
         embed.add_field(
-            name="Creator rewards",
-            value=f"{creator.get('bps', 0)} bps → {creator.get('recipient', 'None')}",
+            name="Creator reward recipient",
+            value=str(creator_recipient),
             inline=False,
         )
         embed.add_field(
-            name="Platform rewards",
-            value=f"{record.get('platform_bps', 0)} bps → {record.get('platform_treasury')}",
-            inline=False,
+            name="Creator reward share", value=f"{creator_bps} bps", inline=True
+        )
+        embed.add_field(
+            name="Platform reward share", value=f"{platform_bps} bps", inline=True
+        )
+        embed.add_field(
+            name="Platform treasury", value=str(platform_treasury), inline=False
         )
         vault = payload.get("vault")
         embed.add_field(

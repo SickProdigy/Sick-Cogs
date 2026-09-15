@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from .. import clanker as clanker_module
 from ..clanker import Clanker
+from ..views import ClankerVerifiedView
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -232,6 +233,24 @@ class InternalApprovalRetryTests(unittest.IsolatedAsyncioTestCase):
         bad = {**result, "signing_intent_id": "changed"}
         with self.assertRaisesRegex(RuntimeError, "does not match"):
             await cog.mark_internal_approval(SimpleNamespace(id=100), "test-launch", bad)
+
+
+class VerifiedCardDisplayTests(unittest.TestCase):
+    def test_card_shows_creator_and_platform_treasuries_and_shares(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["status"] = "verified"
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7))
+        embed = ClankerVerifiedView(SimpleNamespace(), ctx, record).embed()
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["Token administrator"], WALLET.lower())
+        self.assertEqual(fields["Creator reward recipient"], WALLET.lower())
+        self.assertEqual(fields["Creator reward share"], "8000 bps")
+        self.assertEqual(fields["Platform reward share"], "2000 bps")
+        self.assertEqual(fields["Platform treasury"], TREASURY.lower())
 
 
 class VerifiedCardLaunchTests(unittest.IsolatedAsyncioTestCase):
