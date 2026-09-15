@@ -228,12 +228,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def cog_load(self):
         for guild_id, data in (await self.config.all_guilds()).items():
             for record in data.get("audit_log") or []:
-                if (
-                    record.get("status") == "internal_submitted"
-                    and record.get("confirmation_channel_id")
-                    and record.get("confirmation_message_id")
-                ):
+                if record.get("status") in {"internal_submitted", "internal_uncertain"}:
                     self._start_confirmation_task(
+                        int(guild_id), int(record["requester_id"]),
+                        str(record["launch_id"]),
+                    )
+                if (
+                    record.get("status") == "external_pending"
+                    and record.get("transaction_hash")
+                    and record.get("operation")
+                    and record.get("intent")
+                ):
+                    self._start_external_confirmation_task(
                         int(guild_id), int(record["requester_id"]),
                         str(record["launch_id"]),
                     )
@@ -256,6 +262,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     ) -> None:
         task = self.bot.loop.create_task(
             self._track_internal_confirmation(guild_id, user_id, launch_id)
+        )
+        self.confirmation_tasks.add(task)
+        task.add_done_callback(self.confirmation_tasks.discard)
+
+    def _start_external_confirmation_task(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        task = self.bot.loop.create_task(
+            self._track_external_confirmation(guild_id, user_id, launch_id)
         )
         self.confirmation_tasks.add(task)
         task.add_done_callback(self.confirmation_tasks.discard)
@@ -1417,12 +1432,16 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild_id: int, user_id: int, launch_id: str
     ) -> None:
         await asyncio.sleep(20)
-        for delay in (30, 45, 60, 90, 120, 180, 300, 300, 300):
+        delays = (30, 45, 60, 90, 120, 180, 300, 300, 300, 900)
+        attempt = 0
+        while True:
+            delay = delays[min(attempt, len(delays) - 1)]
+            attempt += 1
             guild = self.bot.get_guild(guild_id)
             if guild is None:
                 return
             record = await self.get_launch_record(guild, launch_id)
-            if not record or record.get("status") != "internal_submitted":
+            if not record or record.get("status") not in {"internal_submitted", "internal_uncertain"}:
                 return
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             try:
@@ -1431,10 +1450,64 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             except (KeyError, TypeError, ValueError, RuntimeError):
                 await asyncio.sleep(delay)
                 continue
-            if result["status"] in {"confirmed", "failed", "uncertain"}:
+            if result["status"] in {"confirmed", "failed"}:
                 await self._deliver_internal_result(guild, user, launch_id, result)
                 return
             await asyncio.sleep(delay)
+
+    async def _track_external_confirmation(
+        self, guild_id: int, user_id: int, launch_id: str
+    ) -> None:
+        await asyncio.sleep(20)
+        delays = (30, 45, 60, 90, 120, 180, 300, 300, 300, 900)
+        attempt = 0
+        while True:
+            delay = delays[min(attempt, len(delays) - 1)]
+            attempt += 1
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                return
+            record = await self.get_launch_record(guild, launch_id)
+            if not record or record.get("status") != "external_pending":
+                return
+            try:
+                result = await verify_external_operation(
+                    str(record["transaction_hash"]), record["operation"], record["intent"]
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError):
+                await asyncio.sleep(delay)
+                continue
+            if not result["verified"]:
+                await asyncio.sleep(delay)
+                continue
+            async with self.config.guild(guild).audit_log() as audit_log:
+                match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
+                match.update({
+                    "status": "external_confirmed",
+                    "transaction_hash": result["transaction_hash"],
+                    "signer_address": result["signer_address"],
+                    "block_number": result["block_number"],
+                    "token_address": result["token_address"],
+                })
+                record = copy.deepcopy(match)
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            try:
+                wallet = self.bot.get_cog("CryptoWallet")
+                register = getattr(wallet, "clanker_register_verified_token", None) if wallet else None
+                if callable(register):
+                    await register(user, {
+                        "contract_address": result["token_address"],
+                        "symbol": str(record["symbol"]),
+                        "name": str(record["name"]),
+                        "decimals": 18,
+                    })
+                await user.send(
+                    embed=self.launch_record_embed(record),
+                    view=ClankerReceiptRewardsView(self, record, guild_id),
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException):
+                log.exception("Could not deliver automatic external Clanker confirmation %s", launch_id)
+            return
 
     async def _persist_internal_status(
         self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
@@ -1557,6 +1630,35 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             or self.launch_reference(record, audit_log) == needle
         ]
         return exact[-1] if len(exact) == 1 else None
+
+    async def retry_failed_launch(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+    ) -> Dict[str, Any]:
+        """Copy one failed internal attempt into a new editable draft."""
+        record = await self.get_user_launch_record(guild, user.id, launch_id)
+        if not record or record.get("status") != "internal_failed":
+            raise RuntimeError("Only your failed internal launch can be retried.")
+        payload = copy.deepcopy(record.get("payload"))
+        if not isinstance(payload, dict):
+            raise RuntimeError("The failed launch has no reusable payload.")
+        replacement = self.build_draft_record(user, payload, guild.id)
+        replacement["retried_from"] = str(record["launch_id"])
+        await self.add_audit_record(guild, replacement)
+        return copy.deepcopy(replacement)
+
+    async def dismiss_failed_launch(
+        self, guild: discord.Guild, user: Any, launch_id: str,
+    ) -> None:
+        """Hide one failed internal attempt while retaining its audit record."""
+        async with self.config.guild(guild).audit_log() as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The failed launch attempt is missing or ambiguous.")
+            record = matches[0]
+            if record.get("status") != "internal_failed" or int(record.get("requester_id", 0)) != int(user.id):
+                raise RuntimeError("Only your failed internal launch can be removed.")
+            record["dismissed_by_requester"] = True
+            record["dismissed_at"] = utc_now()
 
     async def delete_user_drafts(
         self, guild: discord.Guild, user: Any, launch_ids: List[str],
@@ -1971,8 +2073,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
         embed = self.launch_list_embed(launches[-limit:], audit_log)
+        settings = await self.config.guild(ctx.guild).all()
         await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
-            self, launches[-limit:], ctx.author.id, ctx.guild.id
+            self, ctx, launches[-limit:], settings
         ))
 
     @clanker.command(name="dismiss")
@@ -2099,6 +2202,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         await ctx.send(embed=self.launch_record_embed(record))
 
     @clanker.command(name="refresh")
+    @commands.is_owner()
     async def clanker_refresh(self, ctx: commands.Context, launch_id: str):
         """Refresh your persisted internal-wallet launch status after approval or restart."""
         record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
@@ -2186,6 +2290,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if bound_hash and bound_hash != str(transaction_hash).lower():
             await ctx.send("That launch is already bound to a different pending transaction.")
             return
+        if record.get("status") == "external_pending" and bound_hash:
+            await ctx.send(
+                "That pending transaction is already bound. Clanker is reconciling it "
+                "automatically; no additional verification request is needed."
+            )
+            return
         try:
             if not record.get("operation") or not record.get("intent"):
                 transaction = await clanker_rpc("eth_getTransactionByHash", [transaction_hash])
@@ -2205,7 +2315,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     if str(item.get("launch_id")) == str(record["launch_id"]):
                         item["status"] = "external_pending"
                         item["transaction_hash"] = result["transaction_hash"]
-            await ctx.send("That transaction is still pending a Base Sepolia receipt. Try verification again shortly.")
+            self._start_external_confirmation_task(
+                ctx.guild.id, ctx.author.id, str(record["launch_id"])
+            )
+            await ctx.send(
+                "That transaction is pending a Base Sepolia receipt. Clanker will reconcile "
+                "it automatically; you do not need to run this command again."
+            )
             return
         async with self.config.guild(ctx.guild).audit_log() as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]

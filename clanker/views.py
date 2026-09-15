@@ -585,6 +585,98 @@ class ClankerDraftHistoryView(discord.ui.View):
         return False
 
 
+class ClankerRemoveFailedView(discord.ui.View):
+    def __init__(self, cog: "Clanker", guild: Any, user_id: int, launch_id: str):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.guild = guild
+        self.user_id = int(user_id)
+        self.launch_id = str(launch_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the launch owner can remove this failed attempt.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Remove failed attempt", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await self.cog.dismiss_failed_launch(self.guild, interaction.user, self.launch_id)
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content="Failed launch attempt removed from your activity. Its audit record was retained.",
+            embed=None, view=None,
+        )
+
+    @discord.ui.button(label="Keep attempt", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Failed launch attempt kept.", embed=None, view=None
+        )
+
+
+class ClankerFailedLaunchView(discord.ui.View):
+    def __init__(
+        self, cog: "Clanker", ctx: commands.Context, record: Dict[str, Any],
+        settings: Dict[str, Any],
+    ):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.ctx = ctx
+        self.record = copy.deepcopy(record)
+        self.settings = copy.deepcopy(settings)
+        self.user_id = int(ctx.author.id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the launch owner can manage this failed attempt.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Retry as new draft", emoji="↩️", style=discord.ButtonStyle.primary)
+    async def retry(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            record = await self.cog.retry_failed_launch(
+                self.ctx.guild, interaction.user, str(self.record["launch_id"])
+            )
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        view = ClankerDraftView(
+            self.cog, self.ctx, self.settings, saved_record=record
+        )
+        view.draft = draft_values_from_record(record)
+        view.add_item(ClankerDeleteDraftButton(
+            self.cog, self.ctx.guild, self.user_id, str(record["launch_id"])
+        ))
+        await interaction.response.send_message(
+            content="A new editable draft was created. The failed attempt remains in activity until removed.",
+            embed=view.embed(), view=view, ephemeral=True,
+        )
+
+    @discord.ui.button(label="Remove failed attempt", emoji="🗑️", style=discord.ButtonStyle.danger)
+    async def remove(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="Remove failed launch attempt?",
+            description="This only hides the failed attempt from your activity; its audit record remains.",
+            color=discord.Color.red(),
+        )
+        await interaction.response.send_message(
+            embed=embed,
+            view=ClankerRemoveFailedView(
+                self.cog, self.ctx.guild, self.user_id, str(self.record["launch_id"])
+            ),
+            ephemeral=True,
+        )
+
+
 class ClankerLaunchSelect(discord.ui.Select):
     """Requester-bound selection for reopening one launch receipt."""
 
@@ -604,25 +696,35 @@ class ClankerLaunchSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         record = self.parent_view.records[int(self.values[0])]
-        confirmed = record.get("status") in {"internal_confirmed", "external_confirmed"}
-        rewards_view = (
-            ClankerReceiptRewardsView(self.parent_view.cog, record, self.parent_view.guild_id)
-            if confirmed and record.get("token_address") else None
-        )
+        status = str(record.get("status") or "")
+        view = None
+        if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
+            view = ClankerReceiptRewardsView(
+                self.parent_view.cog, record, self.parent_view.ctx.guild.id
+            )
+        elif status == "internal_failed":
+            view = ClankerFailedLaunchView(
+                self.parent_view.cog, self.parent_view.ctx, record,
+                self.parent_view.settings,
+            )
         await interaction.response.send_message(
-            embed=self.parent_view.cog.launch_record_embed(record), view=rewards_view, ephemeral=True
+            embed=self.parent_view.cog.launch_record_embed(record), view=view, ephemeral=True
         )
 
 
 class ClankerLaunchHistoryView(discord.ui.View):
     """Let one requester reopen receipt cards from their launch history."""
 
-    def __init__(self, cog: "Clanker", records: list[Dict[str, Any]], user_id: int, guild_id: int):
+    def __init__(
+        self, cog: "Clanker", ctx: commands.Context, records: list[Dict[str, Any]],
+        settings: Dict[str, Any],
+    ):
         super().__init__(timeout=900)
         self.cog = cog
+        self.ctx = ctx
         self.records = copy.deepcopy(list(reversed(records)))
-        self.user_id = int(user_id)
-        self.guild_id = int(guild_id)
+        self.settings = copy.deepcopy(settings)
+        self.user_id = int(ctx.author.id)
         self.add_item(ClankerLaunchSelect(self))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:

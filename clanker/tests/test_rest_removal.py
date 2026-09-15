@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 from .. import clanker as clanker_module
 from ..clanker import Clanker
 from ..views import (ClankerDeleteDraftsView, ClankerDraftHistoryView,
-                     ClankerLaunchHistoryView, ClankerVerifiedView)
+                     ClankerFailedLaunchView, ClankerLaunchHistoryView,
+                     ClankerVerifiedView)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
 
 
@@ -575,6 +576,51 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Keep draft", single_labels)
         self.assertIn("Delete all drafts", bulk_labels)
         self.assertIn("Keep drafts", bulk_labels)
+
+    def test_failed_launch_view_has_only_retry_and_confirmed_removal_controls(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7))
+        view = ClankerFailedLaunchView(
+            SimpleNamespace(), ctx, {"launch_id": "failed"}, {}
+        )
+        labels = [item.label for item in view.children]
+        self.assertEqual(labels, ["Retry as new draft", "Remove failed attempt"])
+        self.assertNotIn("Refresh status", labels)
+
+    async def test_retry_failed_launch_creates_separate_editable_draft(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        failed = Clanker.build_draft_record(SimpleNamespace(id=7), payload, 100)
+        failed["status"] = "internal_failed"
+        cog = Clanker.__new__(Clanker)
+        cog.get_user_launch_record = AsyncMock(return_value=failed)
+        cog.add_audit_record = AsyncMock()
+        retried = await cog.retry_failed_launch(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), failed["launch_id"]
+        )
+        self.assertEqual(retried["status"], "dry_run")
+        self.assertEqual(retried["payload"], failed["payload"])
+        self.assertEqual(retried["retried_from"], failed["launch_id"])
+        self.assertNotEqual(retried["launch_id"], failed["launch_id"])
+        cog.add_audit_record.assert_awaited_once()
+
+    async def test_failed_launch_removal_retains_hidden_audit_record(self):
+        record = {
+            "launch_id": "failed", "status": "internal_failed",
+            "requester_id": 7,
+        }
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        await cog.dismiss_failed_launch(
+            SimpleNamespace(id=100), SimpleNamespace(id=7), "failed"
+        )
+        self.assertEqual(len(records), 1)
+        self.assertTrue(record["dismissed_by_requester"])
+        self.assertIn("dismissed_at", record)
 
     async def test_delete_user_drafts_removes_only_owned_unsubmitted_records(self):
         records = [
