@@ -49,7 +49,7 @@ from .helpers import (
 from .admin import ClankerAdminMixin
 from .views import (
     ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
-    ClankerDraftView, ClankerDMLaunchHistoryView, ClankerLaunchHistoryView,
+    ClankerDraftView, ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
 )
 
@@ -830,11 +830,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             description="Most recent first. Choose a launch below to open its current receipt.",
             color=discord.Color.blue(),
         )
-        server_names = {
-            str(record.get("history_guild_name") or "") for record in records
-            if record.get("history_guild_name")
-        }
-        show_server = len(server_names) > 1
         for record in reversed(records):
             reference = record.get("launch_ref") or Clanker.launch_reference(record, audit_log)
             symbol = str(record.get("symbol") or "?").upper()
@@ -849,9 +844,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             except ValueError:
                 if created:
                     lines.append(f"**Created:** {created}")
-            server_name = str(record.get("history_guild_name") or "")
-            if show_server and server_name:
-                lines.append(f"**Server:** {server_name}")
             route = str(record.get("execution_route") or "").replace("_", " ").title()
             if route and route.lower() != "internal":
                 lines.append(f"**Route:** {route}")
@@ -2588,35 +2580,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_launches(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
         """List your launches.
 
-        Shows launch attempts that entered an internal or external wallet route.
+        Shows requester-owned launch attempts independent of where they were created.
         """
-        if ctx.guild is None and hasattr(self.config, "user_from_id"):
+        if hasattr(self.config, "user_from_id"):
             audit_log = await self.user_launch_records(ctx.author.id)
-            for item in audit_log:
-                guild_id = int(item.get("origin_guild_id", 0) or 0)
-                guild = self.bot.get_guild(guild_id)
-                item["history_guild_name"] = (
-                    guild.name if guild is not None else item.get("origin_guild_name")
-                    or "Server {}".format(guild_id)
-                )
-            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         elif ctx.guild is None:
             audit_log = []
-            for guild_id, guild_data in (await self.config.all_guilds()).items():
-                guild_log = list(guild_data.get("audit_log") or [])
-                guild = self.bot.get_guild(int(guild_id))
-                if guild is not None:
-                    guild_log = await self._backfill_confirmed_receipts(guild, guild_log)
-                for record in guild_log:
-                    item = copy.deepcopy(record)
-                    item["history_guild_name"] = (
-                        guild.name if guild is not None else "Server {}".format(guild_id)
-                    )
-                    audit_log.append(item)
-            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+            for guild_data in (await self.config.all_guilds()).values():
+                audit_log.extend(copy.deepcopy(guild_data.get("audit_log") or []))
         else:
             audit_log = await self.records_for_guild(ctx.guild)
             audit_log = await self._backfill_confirmed_receipts(ctx.guild, audit_log)
+        audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         launches = [
             record for record in audit_log
             if record.get("status") not in {"dry_run", "verified"}
@@ -2631,16 +2606,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 record.get("launch_ref") or self.launch_reference(record, audit_log)
             )
         embed = self.launch_list_embed(launches[-limit:], audit_log)
-        if ctx.guild is None:
-            embed.description = (
-                "Most recent first across your shared servers. Choose a launch below to open "
-                "its current receipt."
-            )
-            await ctx.send(embed=embed, view=ClankerDMLaunchHistoryView(
-                self, ctx.author.id, launches[-limit:]
-            ))
-            return
-        settings = await self.settings_for_guild(ctx.guild)
+        settings = await self.settings_for_guild(ctx.guild) if ctx.guild is not None else {}
         await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
             self, ctx, launches[-limit:], settings
         ))

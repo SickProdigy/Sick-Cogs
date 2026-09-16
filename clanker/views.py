@@ -1,6 +1,7 @@
 import copy
 import json
 from decimal import Decimal, InvalidOperation
+from types import SimpleNamespace
 import re
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -914,40 +915,60 @@ class ClankerFailedLaunchView(discord.ui.View):
 
 
 class ClankerLaunchSelect(discord.ui.Select):
-    """Requester-bound selection for reopening one launch receipt."""
+    """Requester-bound selection for reopening one current launch receipt."""
 
     def __init__(self, parent: "ClankerLaunchHistoryView"):
         self.parent_view = parent
         options = []
-        for index, record in enumerate(parent.records):
-            reference = str(record.get("launch_ref") or record.get("launch_id") or "unknown")
+        for record in parent.records:
+            launch_id = str(record.get("launch_id") or "")
+            reference = str(record.get("launch_ref") or launch_id or "unknown")
             symbol = str(record.get("symbol") or "?").upper()
             status = parent.cog.launch_status_label(str(record.get("status") or "unknown"))
             options.append(discord.SelectOption(
-                label=("$" + symbol + " • " + reference)[:100],
-                value=str(index),
+                label=(chr(36) + symbol + " • " + reference)[:100],
+                value=launch_id,
                 description=status[:100],
             ))
-        super().__init__(placeholder="Choose a launch to reopen", min_values=1, max_values=1, options=options)
+        super().__init__(
+            placeholder="Choose a launch to reopen", min_values=1, max_values=1, options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
-        record = self.parent_view.records[int(self.values[0])]
+        record = await self.parent_view.cog.get_user_launch_record(
+            None, self.parent_view.user_id, self.values[0]
+        )
+        if record is None:
+            await interaction.response.send_message(
+                "That Clanker launch is no longer available to your account.", ephemeral=True
+            )
+            return
         status = str(record.get("status") or "")
+        guild_id = int(record.get("origin_guild_id", 0) or 0)
+        origin_guild = self.parent_view.cog.bot.get_guild(guild_id) if guild_id else None
+        settings = self.parent_view.settings
+        action_ctx = self.parent_view.ctx
+        if origin_guild is not None:
+            settings = await self.parent_view.cog.settings_for_guild(origin_guild)
+            if getattr(action_ctx, "guild", None) is not origin_guild:
+                action_ctx = SimpleNamespace(
+                    guild=origin_guild,
+                    author=self.parent_view.ctx.author,
+                    clean_prefix=getattr(self.parent_view.ctx, "clean_prefix", "!"),
+                    send=self.parent_view.ctx.send,
+                )
         view = None
         if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
             view = ClankerReceiptRewardsView(
-                self.parent_view.cog, record, self.parent_view.ctx.guild.id,
-                self.parent_view,
+                self.parent_view.cog, record, guild_id, self.parent_view
             )
-        elif status == "awaiting_cryptowallet_approval":
+        elif status == "awaiting_cryptowallet_approval" and origin_guild is not None:
             view = ClankerApprovalResumeView(
-                self.parent_view.cog, self.parent_view.ctx, record,
-                self.parent_view.settings,
+                self.parent_view.cog, action_ctx, record, settings
             )
-        elif status == "internal_failed":
+        elif status == "internal_failed" and origin_guild is not None:
             view = ClankerFailedLaunchView(
-                self.parent_view.cog, self.parent_view.ctx, record,
-                self.parent_view.settings,
+                self.parent_view.cog, action_ctx, record, settings
             )
         if view is None:
             view = discord.ui.View(timeout=900)
@@ -959,7 +980,7 @@ class ClankerLaunchSelect(discord.ui.Select):
 
 
 class ClankerLaunchHistoryView(discord.ui.View):
-    """Let one requester reopen receipt cards from their launch history."""
+    """Let one requester reopen current receipt cards from launch history."""
 
     def __init__(
         self, cog: "Clanker", ctx: commands.Context, records: list[Dict[str, Any]],
@@ -972,66 +993,6 @@ class ClankerLaunchHistoryView(discord.ui.View):
         self.settings = copy.deepcopy(settings)
         self.user_id = int(ctx.author.id)
         self.add_item(ClankerLaunchSelect(self))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.user_id:
-            return True
-        await interaction.response.send_message(
-            "Only the person whose launches are listed can open these cards.", ephemeral=True
-        )
-        return False
-
-
-class ClankerDMLaunchSelect(discord.ui.Select):
-    """Open a fresh launch receipt without replacing the DM activity list."""
-
-    def __init__(self, parent: "ClankerDMLaunchHistoryView", records: list[Dict[str, Any]]):
-        self.parent_view = parent
-        options = []
-        for record in reversed(records[-25:]):
-            launch_id = str(record.get("launch_id") or "")
-            reference = str(record.get("launch_ref") or launch_id or "unknown")
-            symbol = str(record.get("symbol") or "?").upper()
-            status = parent.cog.launch_status_label(str(record.get("status") or "unknown"))
-            options.append(discord.SelectOption(
-                label=(chr(36) + symbol + " • " + reference)[:100],
-                value=launch_id,
-                description=status[:100],
-            ))
-        super().__init__(
-            placeholder="Choose a launch to open", min_values=1, max_values=1, options=options
-        )
-
-    async def callback(self, interaction: discord.Interaction):
-        record = await self.parent_view.cog.get_user_launch_record(
-            None, self.parent_view.user_id, self.values[0]
-        )
-        if record is None:
-            await interaction.response.send_message(
-                "That Clanker launch is no longer available to your account.", ephemeral=True
-            )
-            return
-        view = None
-        status = str(record.get("status") or "")
-        if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
-            view = ClankerReceiptRewardsView(
-                self.parent_view.cog,
-                record,
-                int(record.get("origin_guild_id", 0) or 0),
-            )
-        await interaction.response.send_message(
-            embed=self.parent_view.cog.launch_record_embed(record), view=view
-        )
-
-
-class ClankerDMLaunchHistoryView(discord.ui.View):
-    """Requester-bound selector that opens fresh launch cards in DMs."""
-
-    def __init__(self, cog: "Clanker", user_id: int, records: list[Dict[str, Any]]):
-        super().__init__(timeout=900)
-        self.cog = cog
-        self.user_id = int(user_id)
-        self.add_item(ClankerDMLaunchSelect(self, records))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
