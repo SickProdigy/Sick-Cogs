@@ -14,6 +14,11 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIsNotNone(rlcs.get_command("event"))
         self.assertIsNotNone(RocketLeague.rocketleague.get_command("clips"))
 
+    def test_public_clips_help_explains_the_status_card(self):
+        help_text = RocketLeague.rocketleague_clips.help
+        self.assertIn("posting channel", help_text)
+        self.assertIn("rocketleagueset clips", help_text)
+
     def test_community_tournament_commands_are_registered(self):
         tournaments = RocketLeague.rocketleague.get_command("tournaments")
 

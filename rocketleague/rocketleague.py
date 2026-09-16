@@ -546,7 +546,11 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @commands.bot_has_permissions(embed_links=True)
     async def rocketleague_clips(self, ctx: commands.Context):
-        """Show this server's community clip feed status."""
+        """Show this server's automatic community clip feed.
+
+        Displays the posting channel, enabled state, next scheduled clip, and configured sources.
+        Server administrators configure the feed with ``rocketleagueset clips``.
+        """
         settings = await self.config.guild(ctx.guild).all()
         sources = await self._number_clip_sources(ctx.guild)
         channel_id = settings.get("clip_channel_id")
