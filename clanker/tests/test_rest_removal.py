@@ -945,6 +945,27 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(fingerprint(base), fingerprint(changed_balance))
         self.assertNotEqual(fingerprint(base), fingerprint(changed_gas))
 
+    async def test_notification_receipt_opens_separate_private_reward_card(self):
+        embed = object()
+        cog = SimpleNamespace(reward_preflight_embed=AsyncMock(return_value=(
+            embed, {"treasuries": []}
+        )))
+        record = {"launch_id": "nmt", "symbol": "NMT",
+                  "token_address": "0x" + "ab" * 20}
+        receipt = ClankerReceiptRewardsView(cog, record, 100)
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=7),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+        await receipt.rewards.callback(interaction)
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+        interaction.message.edit.assert_not_awaited()
+        interaction.followup.send.assert_awaited_once()
+        self.assertIs(interaction.followup.send.await_args.kwargs["embed"], embed)
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
+
     def test_reopened_receipt_has_persistent_back_navigation(self):
         cog = SimpleNamespace(
             launch_status_label=lambda status: status,

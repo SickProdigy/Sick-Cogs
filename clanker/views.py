@@ -1014,7 +1014,8 @@ class ClankerReceiptRewardsView(discord.ui.View):
 
     @discord.ui.button(label="Rewards", emoji="\U0001f4b0", style=discord.ButtonStyle.primary)
     async def rewards(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer()
+        standalone_receipt = self.history_view is None
+        await interaction.response.defer(ephemeral=standalone_receipt, thinking=True)
         try:
             embed, snapshot = await self.cog.reward_preflight_embed(
                 [self.record], portfolio=False, include_snapshot=True
@@ -1031,7 +1032,9 @@ class ClankerReceiptRewardsView(discord.ui.View):
         )
         if self.history_view is not None:
             view.add_item(ClankerBackToLaunchesButton(self.history_view))
-        await interaction.message.edit(embed=embed, view=view)
+            await interaction.message.edit(embed=embed, view=view)
+        else:
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 class ClankerVerifiedView(discord.ui.View):
