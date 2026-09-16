@@ -203,7 +203,7 @@ class TokenDeploymentConfirmView(discord.ui.View):
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
         embed.add_field(name="Recipient", value=f"`{self.draft.owner_address}`", inline=False)
         embed.add_field(name="Gas limit", value=f"`{self.execution_terms['gas_limit']:,}`", inline=True)
-        embed.add_field(name="Native value", value="`0 ETH`", inline=True)
+        embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
         embed.add_field(name="Network gas", value="Sponsorship active · paid by CDP paymaster", inline=False)
         embed.add_field(
             name="Authority",

@@ -173,7 +173,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         fields = {field.name: field.value for field in view.embed().fields}
         self.assertEqual(fields["Gas limit"], "`1,500,000`")
-        self.assertEqual(fields["Native value"], "`0 ETH`")
+        self.assertEqual(fields["Native value"], "`0.00000000 ETH`")
         self.assertEqual(
             fields["Network gas"], "Sponsorship active · paid by CDP paymaster"
         )
@@ -217,7 +217,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         sent = ctx.send.await_args.kwargs
         fields = {field.name: field.value for field in sent["embed"].fields}
         self.assertEqual(fields["Gas limit"], "`2,000,000`")
-        self.assertEqual(fields["Native value"], "`0 ETH`")
+        self.assertEqual(fields["Native value"], "`0.00000000 ETH`")
         self.assertEqual(
             fields["Network gas"], "Sponsorship active · paid by CDP paymaster"
         )
@@ -234,7 +234,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "terms.native_value_wei !== 0",
             "terms.gas_sponsored !== false",
             "Gas limit: ${terms.gas_limit.toLocaleString()}",
-            "Native value: 0 ETH",
+            "Native value: 0.00000000 ETH",
             "Not sponsored; connected wallet pays network gas",
             "gas: \"0x\" + terms.gas_limit.toString(16)",
         ):

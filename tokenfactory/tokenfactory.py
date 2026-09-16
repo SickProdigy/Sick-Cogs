@@ -28,7 +28,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
 
     def execution_terms(self, *, route: str, operation: str = "token") -> dict:
         if route not in {"discord", "external"} or operation not in {"token", "factory"}:
@@ -579,7 +579,7 @@ class TokenFactory(commands.Cog):
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
         terms = self.execution_terms(route="discord", operation="factory")
         embed.add_field(name="Gas limit", value=f"`{terms['gas_limit']:,}`", inline=True)
-        embed.add_field(name="Native value", value="`0 ETH`", inline=True)
+        embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
         embed.add_field(
             name="Network gas",
             value="Sponsorship active · paid by CDP paymaster",
