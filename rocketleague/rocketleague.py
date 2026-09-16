@@ -532,9 +532,58 @@ class RocketLeague(commands.Cog):
             value=f"`{prefix}rocketleague tournaments` (recent: `{prefix}rocketleague tournaments recent`)",
             inline=False,
         )
+        embed.add_field(
+            name="Community clips",
+            value=f"`{prefix}rocketleague clips`",
+            inline=False,
+        )
         embed.set_footer(
             text=f"Use {prefix}help rocketleague for the full command and administrator reference."
         )
+        await ctx.send(embed=embed)
+
+    @rocketleague.command(name="clips")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_clips(self, ctx: commands.Context):
+        """Show this server's automatic community clip feed.
+
+        Displays the posting channel, enabled state, next scheduled clip, and configured sources.
+        Server administrators configure the feed with ``rocketleagueset clips``.
+        """
+        settings = await self.config.guild(ctx.guild).all()
+        sources = await self._number_clip_sources(ctx.guild)
+        channel_id = settings.get("clip_channel_id")
+        channel = ctx.guild.get_channel(int(channel_id)) if channel_id else None
+        if not sources:
+            await ctx.send("This server has not configured a Rocket League clip feed.")
+            return
+        status = "enabled" if settings.get("clip_enabled") else "not enabled"
+        description = f"This server follows **{len(sources)}** Rocket League clip source{'s' if len(sources) != 1 else ''}."
+        embed = discord.Embed(
+            title="Rocket League community clips",
+            description=description,
+            color=discord.Color.blue(),
+        )
+        embed.add_field(name="Posting", value=status.title(), inline=True)
+        embed.add_field(name="Channel", value=channel.mention if channel else "Not configured", inline=True)
+        if settings.get("clip_enabled") and settings.get("clip_next_post"):
+            embed.add_field(
+                name="Next clip",
+                value=f"<t:{int(settings['clip_next_post'])}:R>",
+                inline=False,
+            )
+        names = ", ".join(str(source.get("name") or "Unknown source") for source in sources[:10])
+        if len(sources) > 10:
+            names += f" and {len(sources) - 10} more"
+        embed.add_field(name="Sources", value=names[:1024], inline=False)
+        embed.add_field(
+            name="Coming next",
+            value="User clip submissions and community voting are planned. "
+            f"Admins manage automatic sources with `{ctx.clean_prefix}rlset clips`.",
+            inline=False,
+        )
+        embed.set_footer(text="Source clips are chosen automatically from cached public feeds.")
         await ctx.send(embed=embed)
 
     @rocketleague.group(name="tournaments", aliases=["tourney", "tourneys"], invoke_without_command=True)
@@ -709,7 +758,10 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def rocketleagueset(self, ctx: commands.Context):
-        """Admin: configure server-specific tournaments and automatic clips."""
+        """Admin: configure server-specific tournaments and automatic clips.
+
+        ``rlset`` is the shorter alias for this command group.
+        """
         await ctx.send_help()
 
 

@@ -12,6 +12,16 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIsNotNone(rlcs)
         self.assertIsNotNone(rlcs.get_command("upcoming"))
         self.assertIsNotNone(rlcs.get_command("event"))
+        self.assertIsNotNone(RocketLeague.rocketleague.get_command("clips"))
+
+    def test_public_clips_help_explains_the_status_card(self):
+        help_text = RocketLeague.rocketleague_clips.help
+        self.assertIn("posting channel", help_text)
+        self.assertIn("rocketleagueset clips", help_text)
+
+    def test_settings_group_advertises_its_short_alias(self):
+        self.assertIn("rlset", RocketLeague.rocketleagueset.aliases)
+        self.assertIn("rlset", RocketLeague.rocketleagueset.help)
 
     def test_community_tournament_commands_are_registered(self):
         tournaments = RocketLeague.rocketleague.get_command("tournaments")
@@ -77,6 +87,7 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
             + [field.name + " " + field.value for field in embed.fields]
         )
         self.assertIn("!rocketleague rlcs", rendered)
+        self.assertIn("!rocketleague clips", rendered)
         self.assertNotIn("rlcsset", rendered)
 
     def test_full_group_help_mentions_administrator_commands(self):
