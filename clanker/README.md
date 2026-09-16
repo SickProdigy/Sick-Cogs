@@ -70,7 +70,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker draft <launch_id>` — show one of your saved drafts by compact reference.
 - `[p]clanker draftremove <launch_id>` — review and confirm deletion of one unsubmitted draft.
 - `[p]clanker draftsremoveall` — review and confirm deletion of all your unsubmitted drafts; launch activity is never included.
-- `[p]clanker launches [limit]` — use a persistent requester-bound navigator to open launch and reward cards, then return with **Back to launch activity**.
+- `[p]clanker launches [limit]` — open current launch and reward cards from requester-bound controls; DM launch buttons send a fresh detail card without replacing the activity list.
   Never-submitted CryptoWallet approvals offer **Resume approval** on the same renewed immutable record. Failed internal attempts offer **Retry as new draft** and confirmed removal; submitted, pending, uncertain, and confirmed cards remain read-only except for confirmed reward actions.
 - A confirmed launch card’s **Rewards** button opens its one-coin gas review. **Collect via CryptoWallet** and **Collect via external wallet** are alternative routes for the same token-scoped collection. **Review withdrawable balances** is disabled when the preflight finds no deposited treasury balance.
 - `[p]clanker claimall` — DM a paginated portfolio review, select tokens to collect, and review a WETH-profitable treasury-wide withdrawal separately.

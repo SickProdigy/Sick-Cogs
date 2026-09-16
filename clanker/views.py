@@ -982,6 +982,61 @@ class ClankerLaunchHistoryView(discord.ui.View):
         return False
 
 
+class ClankerDMLaunchButton(discord.ui.Button):
+    """Open a fresh launch receipt without replacing the DM activity list."""
+
+    def __init__(self, parent: "ClankerDMLaunchHistoryView", record: Dict[str, Any], index: int):
+        self.parent_view = parent
+        self.launch_id = str(record.get("launch_id") or "")
+        reference = str(record.get("launch_ref") or self.launch_id or "unknown")
+        symbol = str(record.get("symbol") or "?").upper()
+        super().__init__(
+            label=("View " + chr(36) + symbol + " • " + reference)[:80],
+            style=discord.ButtonStyle.secondary,
+            row=index // 5,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        record = await self.parent_view.cog.get_user_launch_record(
+            None, self.parent_view.user_id, self.launch_id
+        )
+        if record is None:
+            await interaction.response.send_message(
+                "That Clanker launch is no longer available to your account.", ephemeral=True
+            )
+            return
+        view = None
+        status = str(record.get("status") or "")
+        if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
+            view = ClankerReceiptRewardsView(
+                self.parent_view.cog,
+                record,
+                int(record.get("origin_guild_id", 0) or 0),
+            )
+        await interaction.response.send_message(
+            embed=self.parent_view.cog.launch_record_embed(record), view=view
+        )
+
+
+class ClankerDMLaunchHistoryView(discord.ui.View):
+    """Requester-bound buttons that open fresh launch cards in DMs."""
+
+    def __init__(self, cog: "Clanker", user_id: int, records: list[Dict[str, Any]]):
+        super().__init__(timeout=900)
+        self.cog = cog
+        self.user_id = int(user_id)
+        for index, record in enumerate(reversed(records[-25:])):
+            self.add_item(ClankerDMLaunchButton(self, record, index))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the person whose launches are listed can open these cards.", ephemeral=True
+        )
+        return False
+
+
 class ClankerBackToLaunchesButton(discord.ui.Button):
     def __init__(self, history_view: "ClankerLaunchHistoryView"):
         super().__init__(label="Back to launch activity", emoji="↩️", style=discord.ButtonStyle.secondary, row=4)

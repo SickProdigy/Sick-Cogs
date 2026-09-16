@@ -49,7 +49,7 @@ from .helpers import (
 from .admin import ClankerAdminMixin
 from .views import (
     ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
-    ClankerDraftView, ClankerLaunchHistoryView,
+    ClankerDraftView, ClankerDMLaunchHistoryView, ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
 )
 
@@ -2624,10 +2624,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         embed = self.launch_list_embed(launches[-limit:], audit_log)
         if ctx.guild is None:
             embed.description = (
-                "Most recent first across your shared servers. Reopen and manage a launch "
-                "from the server where it was created."
+                "Most recent first across your shared servers. Use a View button to open "
+                "a current launch card; server-only management stays where it was created."
             )
-            await ctx.send(embed=embed)
+            await ctx.send(embed=embed, view=ClankerDMLaunchHistoryView(
+                self, ctx.author.id, launches[-limit:]
+            ))
             return
         settings = await self.settings_for_guild(ctx.guild)
         await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
