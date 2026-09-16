@@ -2,11 +2,11 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Post cached Rocket League Championship Series schedules from BLAST with supplemental start.gg lookups.",
+    "description": "Post cached Rocket League schedules from BLAST and configured start.gg or Challonge tournaments.",
     "disabled": false,
     "end_user_data_statement": "This cog stores guild announcement channel settings, cached public tournament information, and identifiers for schedule updates already delivered. It does not store member data.",
     "hidden": false,
-    "install_msg": "Use `[p]rlcsset channel #channel` to enable weekly cached RLCS schedule updates from BLAST. `[p]rlcs upcoming` reads that cache. A private start.gg token is optional and enables supplemental `[p]rlcs event <start.gg URL or slug>` lookups.",
+    "install_msg": "Use `[p]rlcsset channel #channel` for cached RLCS updates. Configure start.gg tokens or Challonge OAuth client credentials before adding provider tournament URLs with `[p]rocketleagueset tournamentadd <url>`.",
     "min_bot_version": "3.5.0",
     "permissions": [
         "embed_links"
@@ -19,8 +19,9 @@
         "rlcs",
         "esports",
         "blast",
-        "start.gg"
+        "start.gg",
+        "challonge"
     ],
     "type": "COG",
-    "version": "1.0.0"
+    "version": "1.1.0"
 }
