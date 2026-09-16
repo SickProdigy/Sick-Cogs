@@ -150,7 +150,7 @@ deployButton.addEventListener("click", async () => {
 Recipient: ${recipient}
 Network: Base Sepolia
 Gas limit: ${terms.gas_limit.toLocaleString()}
-Native value: 0 ETH
+Native value: 0.00000000 ETH
 Sponsorship: Not sponsored; connected wallet pays network gas`
     );
     if (!ok) { deployButton.disabled = false; return; }
@@ -204,7 +204,7 @@ copyButton.addEventListener("click", async () => {
     addDetail("Recipient", "Signing wallet unless you enter another address");
     const terms = executionTerms();
     addDetail("Gas limit", terms.gas_limit.toLocaleString());
-    addDetail("Native value", "0 ETH");
+    addDetail("Native value", "0.00000000 ETH");
     addDetail("Network gas", "Not sponsored — connected external wallet pays");
     details.hidden = false; controls.hidden = false;
     status.textContent = "Protected external-wallet deployment loaded.";
