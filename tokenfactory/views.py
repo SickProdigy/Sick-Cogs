@@ -221,7 +221,7 @@ class TokenDeploymentConfirmView(discord.ui.View):
         )
         return False
 
-    @discord.ui.button(label="Deploy test token", style=discord.ButtonStyle.danger, emoji="⚠️")
+    @discord.ui.button(label="Deploy token", style=discord.ButtonStyle.danger, emoji="⚠️")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.processing:
             await interaction.response.send_message(

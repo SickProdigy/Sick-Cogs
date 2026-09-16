@@ -177,6 +177,16 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             fields["Network gas"], "Sponsorship active · paid by CDP paymaster"
         )
+        self.assertEqual(view.children[0].label, "Deploy token")
+
+    async def test_mixed_crypto_wallet_version_has_actionable_error(self):
+        cog = SimpleNamespace(_cryptowallet=lambda: object())
+        with self.assertRaisesRegex(
+            RuntimeError, "reload CryptoWallet, then reload TokenFactory"
+        ):
+            await TokenFactory._submit_reviewed_call(
+                cog, self.user, {}, "attempt", self.terms
+            )
 
     async def test_confirmation_submits_the_frozen_review_terms(self):
         cog = SimpleNamespace(submit_token_deployment=AsyncMock(return_value={

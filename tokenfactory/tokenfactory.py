@@ -28,7 +28,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.4.1"
+    __version__ = "0.4.2"
 
     def execution_terms(self, *, route: str, operation: str = "token") -> dict:
         if route not in {"discord", "external"} or operation not in {"token", "factory"}:
@@ -162,6 +162,21 @@ class TokenFactory(commands.Cog):
             raise RuntimeError("CryptoWallet must be loaded for factory deployment.")
         return wallet
 
+    async def _submit_reviewed_call(
+        self, user, operation: dict, attempt_id: str, execution_terms: dict
+    ) -> dict:
+        """Use only the current narrow CryptoWallet signer boundary."""
+
+        signer = getattr(
+            self._cryptowallet(), "tokenfactory_submit_reviewed_call", None
+        )
+        if not callable(signer):
+            raise RuntimeError(
+                "CryptoWallet is out of date. Ask the bot owner to reload "
+                "CryptoWallet, then reload TokenFactory."
+            )
+        return await signer(user, operation, attempt_id, execution_terms)
+
     async def deploy_pinned_factory(self, user, creation_code: str, execution_terms: dict) -> dict:
         try:
             pending = await self.config.pending_factory_operation()
@@ -180,7 +195,7 @@ class TokenFactory(commands.Cog):
                     )
             attempt_id = str(uuid.uuid4())
             operation = factory_operation(creation_code)
-            result = await self._cryptowallet().tokenfactory_submit_reviewed_call(
+            result = await self._submit_reviewed_call(
                 user, operation, attempt_id, execution_terms
             )
             if not result.get("already_deployed"):
@@ -268,7 +283,7 @@ class TokenFactory(commands.Cog):
             request_id = "0x" + secrets.token_hex(32)
         attempt_id = str(uuid.uuid4())
         operation = token_operation(draft, request_id, draft.owner_address)
-        result = await wallet.tokenfactory_submit_reviewed_call(
+        result = await self._submit_reviewed_call(
             user, operation, attempt_id, execution_terms
         )
         await user_config.pending_deployment.set({
