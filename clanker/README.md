@@ -42,7 +42,7 @@ The ticker is uppercased automatically. The token name is optional, so `[p]clank
 
 The requester can enter token basics, a separately configurable creator reward treasury, optional details, the configured vault, and an optional airdrop; preview the current payload; and save a bounded guild launch record. When CryptoWallet is loaded, its Discord-bound public Base Sepolia address is prefilled as the editable creator/token-admin default. The card is requester-bound so another member cannot edit or save it.
 
-Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the server-configured platform share and treasury are not user-overridable. After verification, **Launch with CryptoWallet** submits the exact card directly when delegated signing is active. If authorization is missing, the bot sends the general signed authorization link; return to the same verified card afterward. The external-wallet route provides a requester-bound companion link and verifies the submitted transaction directly against Base Sepolia.
+Clanker v4 uses its fixed 100 billion token supply; callers cannot override it. Drafts, launches, receipts, and reward state are stored under the requesting Discord user, with the origin server retained only for policy and moderator audit context. Personal drafts, launch history, receipt details, and reward portfolios can be viewed in DMs. Saved drafts remain resumable; Clanker creates a fresh 15-minute immutable execution window only when a wallet route is chosen. The execution wallet, token administrator, creator reward treasury, and platform treasury are independently validated roles. The creator reward treasury defaults to the token administrator but is editable; the bot-owner platform share and treasury are deployment-global and are not user-overridable. After verification, **Launch with CryptoWallet** submits the exact card directly when delegated signing is active. If authorization is missing, the bot sends the general signed authorization link; return to the same verified card afterward. The external-wallet route provides a requester-bound companion link and verifies the submitted transaction directly against Base Sepolia.
 
 ## Vaults
 
@@ -97,7 +97,6 @@ The first launch of a symbol for each requester uses the lowercase symbol as its
 - `[p]clankerset dailymax <number>` — configure the rolling daily draft limit.
 - `[p]clankerset vault ...` — manage vault allocation, lockup, vesting, recipient, and enablement.
 - `[p]clankerset airdrop ...` — manage default airdrop data and proof exports.
-- `[p]clankerset audit clear` — clear the guild audit log.
 
 ## Base Sepolia acceptance
 

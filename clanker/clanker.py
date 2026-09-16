@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import socket
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse
 
@@ -22,7 +23,6 @@ from .constants import (
     BASE_CHAIN_ID,
     CONFIG_IDENTIFIER,
     DEFAULT_CLANKER_SUPPLY,
-    MAX_AUDIT_RECORDS,
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
     MIN_VAULT_LOCKUP_SECONDS,
@@ -64,13 +64,17 @@ TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523
 
 
 async def clanker_guild_or_dm_history(ctx: commands.Context) -> bool:
-    """Keep Clanker guild-scoped except for requester-owned launch history."""
+    """Allow requester-owned Clanker data commands in DMs."""
     if ctx.guild is not None:
         return True
     dm_commands = {
         "clanker",
         "clanker drafts",
+        "clanker draft",
         "clanker launches",
+        "clanker launchinfo",
+        "clanker claimall",
+        "clanker claimplatform",
     }
     if ctx.command and ctx.command.qualified_name in dm_commands:
         return True
@@ -268,7 +272,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "treasury_address": None,
         "platform_bps": 2000,
         "platform_config_migrated": False,
+        "record_storage_version": 0,
     }
+
+    default_user = {"launch_records": []}
 
     default_guild = {
         "enabled": False,
@@ -297,8 +304,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_global(**self.default_global)
+        self.config.register_user(**self.default_user)
         self.config.register_guild(**self.default_guild)
         self.user_cooldowns: Dict[Tuple[int, int], datetime.datetime] = {}
+        self.record_locks: Dict[int, asyncio.Lock] = {}
         self.confirmation_tasks: set[asyncio.Task] = set()
 
     async def settings_for_guild(self, guild: discord.Guild) -> Dict[str, Any]:
@@ -312,6 +321,32 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     async def cog_load(self):
         guild_data = await self.config.all_guilds()
+        if int(await self.config.record_storage_version()) < 1:
+            migrated_by_user: Dict[int, List[Dict[str, Any]]] = {}
+            for guild_id, data in guild_data.items():
+                guild = self.bot.get_guild(int(guild_id))
+                for source in data.get("audit_log") or []:
+                    user_id = int(source.get("requester_id", 0) or 0)
+                    if not user_id:
+                        log.error("Skipping ownerless Clanker record %s during migration", source.get("launch_id"))
+                        continue
+                    record = copy.deepcopy(source)
+                    record["origin_guild_id"] = int(guild_id)
+                    if guild is not None:
+                        record["origin_guild_name"] = guild.name
+                    migrated_by_user.setdefault(user_id, []).append(record)
+            for user_id, migrated in migrated_by_user.items():
+                async with self.config.user_from_id(user_id).launch_records() as records:
+                    existing = {
+                        (int(item.get("origin_guild_id", 0) or 0), str(item.get("launch_id") or ""))
+                        for item in records
+                    }
+                    records.extend(
+                        item for item in migrated
+                        if (int(item.get("origin_guild_id", 0) or 0), str(item.get("launch_id") or ""))
+                        not in existing
+                    )
+            await self.config.record_storage_version.set(1)
         if not await self.config.platform_config_migrated():
             treasuries = {
                 str(data.get("treasury_address") or "").lower()
@@ -330,32 +365,29 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if len(platform_splits) == 1:
                 await self.config.platform_bps.set(platform_splits.pop())
             await self.config.platform_config_migrated.set(True)
-        for guild_id, data in guild_data.items():
-            for record in data.get("audit_log") or []:
+        for user_id, data in (await self.config.all_users()).items():
+            for record in data.get("launch_records") or []:
+                guild_id = int(record.get("origin_guild_id", 0) or 0)
+                if not guild_id:
+                    log.error("Clanker record %s has no origin guild", record.get("launch_id"))
+                    continue
                 if record.get("status") in {"internal_submitted", "internal_uncertain"}:
-                    self._start_confirmation_task(
-                        int(guild_id), int(record["requester_id"]),
-                        str(record["launch_id"]),
-                    )
-                if (
-                    record.get("status") == "external_pending"
-                    and record.get("transaction_hash")
-                    and record.get("operation")
-                    and record.get("intent")
-                ):
+                    self._start_confirmation_task(guild_id, int(user_id), str(record["launch_id"]))
+                if (record.get("status") == "external_pending"
+                        and record.get("transaction_hash")
+                        and record.get("operation") and record.get("intent")):
                     self._start_external_confirmation_task(
-                        int(guild_id), int(record["requester_id"]),
-                        str(record["launch_id"]),
+                        guild_id, int(user_id), str(record["launch_id"])
                     )
                 if (record.get("reward_collection") or {}).get("status") == "submitted":
                     self._start_reward_confirmation_task(
-                        int(guild_id), int(record["requester_id"]),
-                        str(record["launch_id"]),
+                        guild_id, int(user_id), str(record["launch_id"])
                     )
                 withdrawal = record.get("reward_withdrawal") or {}
                 if withdrawal.get("status") == "submitted" and withdrawal.get("submitted_by"):
                     self._start_treasury_confirmation_task(
-                        int(guild_id), int(withdrawal["submitted_by"]), str(record["launch_id"]))
+                        guild_id, int(withdrawal["submitted_by"]), str(record["launch_id"])
+                    )
 
     def cog_unload(self):
         for task in self.confirmation_tasks:
@@ -380,7 +412,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         task.add_done_callback(self.confirmation_tasks.discard)
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
-        """Remove the Discord identity attached to retained guild audit records."""
+        """Delete canonical user records and anonymize the retained migration backup."""
+        await self.config.user_from_id(int(user_id)).clear()
         for guild_id in (await self.config.all_guilds()):
             async with self.config.guild_from_id(guild_id).audit_log() as audit_log:
                 for record in audit_log:
@@ -698,6 +731,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "created_at": utc_now(),
             "requester_id": requester.id,
             "requester_name": str(requester),
+            "origin_guild_id": int(guild_id),
             "symbol": payload["symbol"],
             "name": payload["name"],
             "chain": "base-sepolia",
@@ -728,7 +762,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "launch_id": Clanker.new_launch_id(payload["symbol"]),
             "payload_hash": None, "intent": None, "operation": None,
             "created_at": utc_now(), "requester_id": requester.id,
-            "requester_name": str(requester), "symbol": payload["symbol"],
+            "requester_name": str(requester), "origin_guild_id": int(guild_id),
+            "symbol": payload["symbol"],
             "name": payload["name"], "chain": "base-sepolia",
             "supply": str(DEFAULT_CLANKER_SUPPLY), "token_admin": payload.get("tokenAdmin"),
             "platform_treasury": platform.get("recipient"),
@@ -854,7 +889,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         daily_max = int(settings.get("daily_max_per_user") or 0)
         if daily_max > 0:
-            audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+            audit_log: List[Dict[str, Any]] = await self.records_for_guild(ctx.guild)
             cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
             recent_count = 0
             for record in audit_log:
@@ -884,11 +919,83 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         return True
 
+    async def user_launch_records(
+        self, user_id: int, guild: Optional[discord.Guild] = None
+    ) -> List[Dict[str, Any]]:
+        """Read requester-owned canonical records, with a test/legacy fallback."""
+        if hasattr(self.config, "user_from_id"):
+            records = await self.config.user_from_id(int(user_id)).launch_records()
+            return [copy.deepcopy(item) for item in records]
+        if guild is None:
+            return []
+        return [
+            item for item in await self.config.guild(guild).audit_log()
+            if int(item.get("requester_id", 0) or 0) == int(user_id)
+        ]
+
+    async def all_launch_records(self) -> List[Dict[str, Any]]:
+        """Read all canonical records for bot-owner platform operations."""
+        records = []
+        for user_records in (await self.config.all_users()).values():
+            records.extend(copy.deepcopy(user_records.get("launch_records") or []))
+        records.sort(key=lambda item: str(item.get("created_at") or ""))
+        return records
+
+    async def records_for_guild(self, guild: discord.Guild) -> List[Dict[str, Any]]:
+        """Project canonical requester records into one origin-guild audit view."""
+        if not hasattr(self.config, "all_users"):
+            return await self.config.guild(guild).audit_log()
+        records = []
+        for user_records in (await self.config.all_users()).values():
+            records.extend(
+                copy.deepcopy(item) for item in user_records.get("launch_records") or []
+                if int(item.get("origin_guild_id", 0) or 0) == int(guild.id)
+            )
+        records.sort(key=lambda item: str(item.get("created_at") or ""))
+        return records
+
+    @asynccontextmanager
+    async def guild_records(self, guild: discord.Guild):
+        """Mutate requester records through an origin-guild audit projection."""
+        if not hasattr(self.config, "all_users"):
+            async with self.config.guild(guild).audit_log() as records:
+                yield records
+            return
+        locks = getattr(self, "record_locks", None)
+        if locks is None:
+            locks = self.record_locks = {}
+        lock = locks.setdefault(int(guild.id), asyncio.Lock())
+        async with lock:
+            records = await self.records_for_guild(guild)
+            original_users = {int(item.get("requester_id", 0) or 0) for item in records}
+            try:
+                yield records
+            except Exception:
+                raise
+            else:
+                final_users = {int(item.get("requester_id", 0) or 0) for item in records}
+                if 0 in final_users:
+                    raise RuntimeError("A Clanker record cannot be persisted without a requester.")
+                for user_id in original_users | final_users:
+                    if not user_id:
+                        continue
+                    replacements = [
+                        copy.deepcopy(item) for item in records
+                        if int(item.get("requester_id", 0) or 0) == user_id
+                    ]
+                    for item in replacements:
+                        item["origin_guild_id"] = int(guild.id)
+                        item.setdefault("origin_guild_name", guild.name)
+                    async with self.config.user_from_id(user_id).launch_records() as owned:
+                        owned[:] = [
+                            item for item in owned
+                            if int(item.get("origin_guild_id", 0) or 0) != int(guild.id)
+                        ] + replacements
+
     async def add_audit_record(self, guild: discord.Guild, record: Dict[str, Any]):
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             audit_log.append(record)
             record["launch_ref"] = self.launch_reference(record, audit_log)
-            del audit_log[:-MAX_AUDIT_RECORDS]
 
     async def notify_approval_channel(self, guild: discord.Guild, settings: Dict[str, Any], record: Dict[str, Any]) -> None:
         channel_id = settings.get("approval_channel_id")
@@ -1180,7 +1287,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         url = await self.create_external_wallet_handoff(user, handoff)
         guild = self.bot.get_guild(int(guild_id))
         if guild is not None:
-            async with self.config.guild(guild).audit_log() as audit_log:
+            async with self.guild_records(guild) as audit_log:
                 match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
                 match["reward_collection"] = {"status": "awaiting_external_wallet",
                     "route": "external", "token_address": token, "expires_at": expires_at}
@@ -1316,7 +1423,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "user_operation_hash": result.get("user_operation_hash"),
             "transaction_hash": result.get("transaction_hash"), "claims": copy.deepcopy(claims),
             "platform_only": bool(platform_only), "submitted_by": int(user_id), "submitted_at": utc_now()}
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
             match["reward_withdrawal"] = withdrawal
         self._start_treasury_confirmation_task(int(guild_id), int(user_id), str(record["launch_id"]))
@@ -1356,7 +1463,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                       "user_operation_hash": result.get("user_operation_hash"),
                       "transaction_hash": result.get("transaction_hash"),
                       "token_address": token, "submitted_at": utc_now()}
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record.get("launch_id"))]
             if len(matches) != 1:
                 raise RuntimeError("The launch changed before collection could be recorded.")
@@ -1407,7 +1514,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         payload: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Persist an unsubmitted verification as the same editable draft."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [
                 (index, item) for index, item in enumerate(audit_log)
                 if str(item.get("launch_id")) == launch_id
@@ -1431,7 +1538,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
     ) -> None:
         """Persist the bounded result of a verified-card launch attempt."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The verified Clanker record changed during launch.")
@@ -1527,7 +1634,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 else:
                     await asyncio.sleep(delay)
                     continue
-                async with self.config.guild(guild).audit_log() as audit_log:
+                async with self.guild_records(guild) as audit_log:
                     match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
                     match["reward_collection"] = reconciled
                 symbol = str(record.get("symbol") or "token").upper()
@@ -1593,7 +1700,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 else:
                     await asyncio.sleep(delay)
                     continue
-                async with self.config.guild(guild).audit_log() as audit_log:
+                async with self.guild_records(guild) as audit_log:
                     match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
                     match["reward_withdrawal"] = reconciled
                 if reconciled["status"] == "confirmed":
@@ -1614,7 +1721,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         message: Optional[discord.Message] = None,
     ) -> None:
         """Track one submitted launch and persist only a public result-card destination."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
             if len(matches) != 1 or matches[0].get("status") != "internal_submitted":
                 return
@@ -1704,7 +1811,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     log.exception("Could not backfill Clanker buy-in receipt %s", launch_id)
         if not timestamps and not buy_tokens:
             return records
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             for record in audit_log:
                 launch_id = str(record.get("launch_id") or "")
                 if launch_id in timestamps:
@@ -1752,7 +1859,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             except (TypeError, ValueError, RuntimeError):
                 log.exception("Could not resolve Clanker block timestamp %s", launch_id)
                 block_timestamp = None
-            async with self.config.guild(guild).audit_log() as audit_log:
+            async with self.guild_records(guild) as audit_log:
                 match = next(item for item in audit_log if str(item.get("launch_id")) == launch_id)
                 match.update({
                     "status": "external_confirmed",
@@ -1785,7 +1892,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def _persist_internal_status(
         self, guild: discord.Guild, launch_id: str, result: Dict[str, Any]
     ) -> Dict[str, Any]:
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1 or matches[0].get("execution_route") != "internal":
                 raise RuntimeError("The internal launch record changed during confirmation.")
@@ -1815,7 +1922,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 verified = await verify_internal_receipt(
                     result["transaction_hash"], record["operation"], record["intent"]
                 )
-                async with self.config.guild(guild).audit_log() as audit_log:
+                async with self.guild_records(guild) as audit_log:
                     match = next(
                         item for item in audit_log
                         if str(item.get("launch_id")) == launch_id
@@ -1824,7 +1931,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 record.update(verified)
                 try:
                     block_timestamp = await self._block_timestamp(verified["block_number"])
-                    async with self.config.guild(guild).audit_log() as audit_log:
+                    async with self.guild_records(guild) as audit_log:
                         match = next(
                             item for item in audit_log
                             if str(item.get("launch_id")) == launch_id
@@ -1835,7 +1942,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     log.exception("Could not resolve Clanker block timestamp %s", launch_id)
             except (KeyError, TypeError, ValueError, RuntimeError):
                 log.exception("Could not verify confirmed Clanker receipt %s", launch_id)
-                async with self.config.guild(guild).audit_log() as audit_log:
+                async with self.guild_records(guild) as audit_log:
                     match = next(
                         item for item in audit_log
                         if str(item.get("launch_id")) == launch_id
@@ -1887,7 +1994,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
 
     async def get_launch_record(self, guild: discord.Guild, launch_id: str) -> Optional[Dict[str, Any]]:
-        audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
+        audit_log: List[Dict[str, Any]] = await self.records_for_guild(guild)
         needle = launch_id.strip().lower()
         for record in reversed(audit_log):
             record_id = str(record.get("launch_id") or "").lower()
@@ -1899,16 +2006,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user_id: int, reference: str
     ) -> Optional[Dict[str, Any]]:
         """Resolve a full internal ID or compact reference within one users records."""
-        audit_log: List[Dict[str, Any]] = await self.config.guild(guild).audit_log()
+        owned = await self.user_launch_records(user_id, guild)
+        if guild is not None:
+            owned = [
+                record for record in owned
+                if int(record.get("origin_guild_id", guild.id) or 0) == int(guild.id)
+            ]
         needle = reference.strip().lower()
-        owned = [
-            record for record in audit_log
-            if int(record.get("requester_id", 0) or 0) == int(user_id)
-        ]
         exact = [
             record for record in owned
             if str(record.get("launch_id") or "").lower() == needle
-            or self.launch_reference(record, audit_log) == needle
+            or str(record.get("launch_ref") or "").lower() == needle
+            or self.launch_reference(record, owned) == needle
         ]
         return exact[-1] if len(exact) == 1 else None
 
@@ -1916,7 +2025,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user: Any, launch_id: str,
     ) -> Dict[str, Any]:
         """Restore one never-submitted CryptoWallet approval to verified review."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The CryptoWallet approval is missing or ambiguous.")
@@ -1965,7 +2074,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user: Any, launch_id: str,
     ) -> None:
         """Hide one failed internal attempt while retaining its audit record."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The failed launch attempt is missing or ambiguous.")
@@ -1982,7 +2091,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         requested = {str(item) for item in launch_ids}
         if not requested:
             raise ValueError("No Clanker drafts were selected.")
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [(index, item) for index, item in enumerate(audit_log)
                        if str(item.get("launch_id")) in requested]
             if len(matches) != len(requested):
@@ -2000,7 +2109,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         replacement: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Update one editable draft in place so resuming cannot create duplicates."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [
                 (index, item) for index, item in enumerate(audit_log)
                 if str(item.get("launch_id")) == launch_id
@@ -2021,7 +2130,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user: Any, launch_id: str,
     ) -> Dict[str, Any]:
         """Renew a verified draft's signing window without changing launch values."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The verified Clanker draft is missing or ambiguous.")
@@ -2047,7 +2156,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user: Any, launch_id: str, signer_address: Optional[str]
     ) -> Dict[str, Any]:
         """Issue a fresh immutable execution window for an unchanged saved draft."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The saved Clanker draft is missing or ambiguous.")
@@ -2131,7 +2240,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         self, guild: discord.Guild, user: Any, launch_id: str
     ) -> Dict[str, Any]:
         """Freeze one freshly materialized draft for its Discord review card."""
-        async with self.config.guild(guild).audit_log() as audit_log:
+        async with self.guild_records(guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
             if len(matches) != 1:
                 raise RuntimeError("The Clanker draft changed during verification.")
@@ -2310,7 +2419,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Displays recent Clanker draft and launch records for server moderators.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        audit_log: List[Dict[str, Any]] = await self.records_for_guild(ctx.guild)
         if not audit_log:
             await ctx.send("No Clanker launch requests have been recorded.")
             return
@@ -2323,7 +2432,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Shows your editable and verified drafts that have not entered a wallet route.
         """
-        if ctx.guild is None:
+        if ctx.guild is None and hasattr(self.config, "user_from_id"):
+            audit_log = await self.user_launch_records(ctx.author.id)
+            for item in audit_log:
+                guild_id = int(item.get("origin_guild_id", 0) or 0)
+                guild = self.bot.get_guild(guild_id)
+                item["history_guild_name"] = (
+                    guild.name if guild is not None else item.get("origin_guild_name")
+                    or "Server {}".format(guild_id)
+                )
+                item["history_reference"] = item.get("launch_ref")
+            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+        elif ctx.guild is None:
             audit_log = []
             for guild_id, guild_data in (await self.config.all_guilds()).items():
                 guild_log = list(guild_data.get("audit_log") or [])
@@ -2337,7 +2457,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     audit_log.append(item)
             audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         else:
-            audit_log = await self.config.guild(ctx.guild).audit_log()
+            audit_log = await self.records_for_guild(ctx.guild)
         drafts = [
             record for record in audit_log
             if record.get("status") in {"dry_run", "verified"}
@@ -2439,7 +2559,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Opens a confirmation before deleting all of your unsubmitted drafts.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        audit_log: List[Dict[str, Any]] = await self.records_for_guild(ctx.guild)
         drafts = [item for item in audit_log
                   if int(item.get("requester_id", 0)) == int(ctx.author.id)
                   and item.get("status") in {"dry_run", "verified"}]
@@ -2465,7 +2585,17 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Shows launch attempts that entered an internal or external wallet route.
         """
-        if ctx.guild is None:
+        if ctx.guild is None and hasattr(self.config, "user_from_id"):
+            audit_log = await self.user_launch_records(ctx.author.id)
+            for item in audit_log:
+                guild_id = int(item.get("origin_guild_id", 0) or 0)
+                guild = self.bot.get_guild(guild_id)
+                item["history_guild_name"] = (
+                    guild.name if guild is not None else item.get("origin_guild_name")
+                    or "Server {}".format(guild_id)
+                )
+            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+        elif ctx.guild is None:
             audit_log = []
             for guild_id, guild_data in (await self.config.all_guilds()).items():
                 guild_log = list(guild_data.get("audit_log") or [])
@@ -2480,7 +2610,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                     audit_log.append(item)
             audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         else:
-            audit_log = await self.config.guild(ctx.guild).audit_log()
+            audit_log = await self.records_for_guild(ctx.guild)
             audit_log = await self._backfill_confirmed_receipts(ctx.guild, audit_log)
         launches = [
             record for record in audit_log
@@ -2520,7 +2650,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             )
             return
         internal_id = str(record.get("launch_id") or "")
-        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+        async with self.guild_records(ctx.guild) as audit_log:
             matches = [
                 item for item in audit_log
                 if str(item.get("launch_id") or "") == internal_id
@@ -2558,7 +2688,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send("Clanker could not verify that reward collection: " + str(exc))
             return
-        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+        async with self.guild_records(ctx.guild) as audit_log:
             match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
             match["reward_collection"] = {"route": "external", **result}
         if result["status"] == "pending":
@@ -2574,11 +2704,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         DMs token selection, combined claims, and profitable treasury withdrawal review.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        audit_log = await self.user_launch_records(ctx.author.id, ctx.guild)
         records = [
             item for item in audit_log
-            if int(item.get("requester_id", 0) or 0) == int(ctx.author.id)
-            and item.get("status") in {"internal_confirmed", "external_confirmed"}
+            if item.get("status") in {"internal_confirmed", "external_confirmed"}
             and item.get("token_address")
         ]
         if not records:
@@ -2588,7 +2717,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             async with ctx.typing():
                 embed = await self.reward_preflight_embed(records, portfolio=True)
                 await ctx.author.send(embed=embed, view=ClankerClaimAllView(
-                    self, records, ctx.author.id, ctx.guild.id
+                    self, records, ctx.author.id,
+                    int(records[0].get("origin_guild_id", 0) or getattr(ctx.guild, "id", 0))
                 ))
         except discord.Forbidden:
             await ctx.send("I could not DM your reward review. Enable DMs and try again.")
@@ -2603,9 +2733,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_claimplatform(self, ctx: commands.Context):
         """Review platform rewards.
 
-        Reviews profitable platform-only treasury deposits across this server.
+        Reviews profitable platform-only treasury deposits across this bot deployment.
         """
-        audit_log: List[Dict[str, Any]] = await self.config.guild(ctx.guild).audit_log()
+        if hasattr(self.config, "all_users"):
+            audit_log = await self.all_launch_records()
+        else:
+            audit_log = await self.records_for_guild(ctx.guild)
         records = [item for item in audit_log
                    if item.get("status") in {"internal_confirmed", "external_confirmed"}
                    and item.get("token_address") and item.get("platform_treasury")]
@@ -2615,7 +2748,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         try:
             embed, claims, profitable = await self.platform_withdrawal_review(records)
             view = ClankerTreasuryWithdrawalView(
-                self, records[0], claims, ctx.author.id, ctx.guild.id, platform_only=True
+                self, records[0], claims, ctx.author.id,
+                int(records[0].get("origin_guild_id", 0) or getattr(ctx.guild, "id", 0)),
+                platform_only=True
             ) if claims and profitable else None
             await ctx.author.send(embed=embed, view=view)
         except discord.Forbidden:
@@ -2627,15 +2762,24 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         await ctx.send("I sent the platform-only treasury review by DM.")
 
     @clanker.command(name="launchinfo", aliases=("record", "info"))
-    @checks.mod_or_permissions(manage_guild=True)
     async def clanker_launchinfo(self, ctx: commands.Context, launch_id: str):
         """Show one launch.
 
         Displays the detailed receipt for one launch reference.
         """
-        record = await self.get_launch_record(ctx.guild, launch_id)
+        if ctx.guild is None:
+            record = await self.get_user_launch_record(None, ctx.author.id, launch_id)
+        else:
+            record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
+            if record is None:
+                permissions = getattr(ctx.author, "guild_permissions", None)
+                is_moderator = bool(permissions and permissions.manage_guild)
+                if not is_moderator:
+                    is_moderator = await self.bot.is_mod(ctx.author)
+                if is_moderator or await self.bot.is_owner(ctx.author):
+                    record = await self.get_launch_record(ctx.guild, launch_id)
         if not record:
-            await ctx.send("No Clanker launch record matched that ID.")
+            await ctx.send("No accessible Clanker launch record matched that ID.")
             return
         await ctx.send(embed=self.launch_record_embed(record))
 
@@ -2708,7 +2852,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             await ctx.send(f"Clanker could not create the external-wallet handoff: {exc}")
             return
-        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+        async with self.guild_records(ctx.guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
             if len(matches) != 1 or matches[0].get("status") != "dry_run":
                 await ctx.send("The launch changed before its external route could be saved.")
@@ -2757,7 +2901,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             await ctx.send(f"External Clanker verification failed: {exc}")
             return
         if not result["verified"]:
-            async with self.config.guild(ctx.guild).audit_log() as audit_log:
+            async with self.guild_records(ctx.guild) as audit_log:
                 for item in audit_log:
                     if str(item.get("launch_id")) == str(record["launch_id"]):
                         item["status"] = "external_pending"
@@ -2770,7 +2914,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 "it automatically; you do not need to run this command again."
             )
             return
-        async with self.config.guild(ctx.guild).audit_log() as audit_log:
+        async with self.guild_records(ctx.guild) as audit_log:
             matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
             if len(matches) != 1:
                 raise RuntimeError("The launch record changed during verification.")

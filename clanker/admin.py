@@ -321,15 +321,3 @@ class ClankerAdminMixin:
             return
         await self.config.guild(ctx.guild).airdrop_admin.set(admin_address)
         await ctx.send("Airdrop admin saved.")
-
-
-    @clankerset.group(name="audit")
-    async def clankerset_audit(self, ctx: commands.Context):
-        """Manage Clanker audit records."""
-        pass
-
-    @clankerset_audit.command(name="clear")
-    async def clankerset_audit_clear(self, ctx: commands.Context):
-        """Clear Clanker audit records for this guild."""
-        await self.config.guild(ctx.guild).audit_log.set([])
-        await ctx.send("Clanker audit log cleared.")

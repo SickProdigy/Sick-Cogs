@@ -578,7 +578,10 @@ class ClankerClaimAllView(discord.ui.View):
         submitted, failures = [], []
         for record in selected:
             try:
-                await self.cog.collect_launch_rewards_internal(interaction.user, record, self.guild_id)
+                await self.cog.collect_launch_rewards_internal(
+                    interaction.user, record,
+                    int(record.get("origin_guild_id", 0) or self.guild_id),
+                )
                 submitted.append(str(record.get("launch_ref") or record.get("launch_id")))
             except (KeyError, TypeError, ValueError, RuntimeError) as exc:
                 failures.append(str(record.get("launch_ref") or record.get("launch_id")) + ": " + str(exc))

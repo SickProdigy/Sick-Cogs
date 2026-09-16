@@ -244,6 +244,38 @@ class ClankerShortcutTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("Token symbols must be 2-12 uppercase letters or numbers.")
 
 
+class AsyncConfigValue:
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self):
+        async def read():
+            return self.value
+        return read()
+
+    async def set(self, value):
+        self.value = value
+
+
+class AsyncConfigList:
+    def __init__(self, records):
+        self.records = records
+
+    def __call__(self):
+        return self
+
+    def __await__(self):
+        async def read():
+            return copy.deepcopy(self.records)
+        return read().__await__()
+
+    async def __aenter__(self):
+        return self.records
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
 class AsyncAuditLog:
     def __init__(self, records):
         self.records = records
@@ -526,11 +558,14 @@ class ClankerRedIntegrationTests(unittest.IsolatedAsyncioTestCase):
         ]
         guild_config = SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
         cog = Clanker.__new__(Clanker)
+        clear_user = AsyncMock()
         cog.config = SimpleNamespace(
             all_guilds=AsyncMock(return_value={100: {}}),
             guild_from_id=lambda guild_id: guild_config,
+            user_from_id=lambda user_id: SimpleNamespace(clear=clear_user),
         )
         await cog.red_delete_data_for_user(requester="discord_deleted_user", user_id=7)
+        clear_user.assert_awaited_once_with()
         self.assertEqual(records[0]["requester_id"], 0)
         self.assertEqual(records[0]["requester_name"], "Deleted User")
         self.assertNotIn("launch_ref", records[0])
@@ -553,6 +588,78 @@ class ClankerRedIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Clanker launch " + chr(36) + "NMT")
         rendered = "\n".join(str(field.value) for field in embed.fields)
         self.assertIn(f"https://www.clanker.world/clanker/{token}", rendered)
+
+
+class RequesterOwnedRecordTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_migration_is_idempotent_and_preserves_origin(self):
+        legacy = {100: {"audit_log": [{
+            "launch_id": "legacy", "requester_id": 7, "status": "verified",
+            "created_at": "2026-09-15T00:00:00+00:00",
+        }]}}
+        users = {}
+
+        def user_from_id(user_id):
+            value = users.setdefault(int(user_id), AsyncConfigList([]))
+            return SimpleNamespace(launch_records=value)
+
+        async def all_users():
+            return {user_id: {"launch_records": copy.deepcopy(value.records)}
+                    for user_id, value in users.items()}
+
+        version = AsyncConfigValue(0)
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_guild=lambda guild_id: SimpleNamespace(name="Origin"))
+        cog.config = SimpleNamespace(
+            all_guilds=AsyncMock(return_value=legacy),
+            all_users=all_users, user_from_id=user_from_id,
+            record_storage_version=version,
+            platform_config_migrated=AsyncConfigValue(True),
+        )
+        cog._start_confirmation_task = unittest.mock.Mock()
+        cog._start_external_confirmation_task = unittest.mock.Mock()
+        cog._start_reward_confirmation_task = unittest.mock.Mock()
+        cog._start_treasury_confirmation_task = unittest.mock.Mock()
+        await cog.cog_load()
+        await cog.cog_load()
+        self.assertEqual(version.value, 1)
+        self.assertEqual(len(users[7].records), 1)
+        self.assertEqual(users[7].records[0]["origin_guild_id"], 100)
+        self.assertEqual(users[7].records[0]["origin_guild_name"], "Origin")
+
+    async def test_guild_projection_mutates_canonical_user_record(self):
+        canonical = [{
+            "launch_id": "mine", "launch_ref": "mine", "requester_id": 7,
+            "origin_guild_id": 100, "status": "verified", "created_at": "2026-09-15",
+        }, {
+            "launch_id": "other-server", "requester_id": 7,
+            "origin_guild_id": 200, "status": "verified", "created_at": "2026-09-15",
+        }]
+        value = AsyncConfigList(canonical)
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            all_users=AsyncMock(return_value={7: {"launch_records": copy.deepcopy(canonical)}}),
+            user_from_id=lambda user_id: SimpleNamespace(launch_records=value),
+        )
+        guild = SimpleNamespace(id=100, name="Origin")
+        async with cog.guild_records(guild) as records:
+            self.assertEqual([item["launch_id"] for item in records], ["mine"])
+            records[0]["status"] = "internal_submitted"
+        by_id = {item["launch_id"]: item for item in canonical}
+        self.assertEqual(by_id["mine"]["status"], "internal_submitted")
+        self.assertEqual(by_id["other-server"]["status"], "verified")
+
+    async def test_user_lookup_can_resolve_dm_record_across_origins(self):
+        canonical = [{
+            "launch_id": "nmt-long", "launch_ref": "nmt", "requester_id": 7,
+            "origin_guild_id": 100, "status": "internal_confirmed",
+        }]
+        value = AsyncConfigList(canonical)
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            user_from_id=lambda user_id: SimpleNamespace(launch_records=value)
+        )
+        record = await cog.get_user_launch_record(None, 7, "nmt")
+        self.assertEqual(record["launch_id"], "nmt-long")
 
 
 class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
