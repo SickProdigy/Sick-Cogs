@@ -4,11 +4,14 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+import logging
 
 
 STARTGG_API_URL = "https://api.start.gg/gql/alpha"
 STARTGG_WEB_URL = "https://www.start.gg"
 ROCKET_LEAGUE_GAME_NAME = "Rocket League"
+
+log = logging.getLogger("red.sick-cogs.RocketLeague.startgg")
 
 
 class StartGGError(RuntimeError):
@@ -21,6 +24,7 @@ class RLCSEvent:
     name: str
     start_at: Optional[int]
     entrants: Optional[int]
+    entrant_size_min: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,10 @@ class StartGGClient:
                 headers=headers,
                 json={"query": query, "variables": variables},
             ) as response:
+                try:
+                    payload = await response.json(content_type=None)
+                except ValueError:
+                    payload = {}
                 if response.status in {401, 403}:
                     raise StartGGError("start.gg rejected the configured API token.")
                 if response.status == 429:
@@ -64,14 +72,47 @@ class StartGGClient:
                 if response.status >= 500:
                     raise StartGGError("start.gg is temporarily unavailable.")
                 if response.status != 200:
-                    raise StartGGError("start.gg could not complete that request.")
-                payload = await response.json(content_type=None)
+                    errors = payload.get("errors") or [] if isinstance(payload, dict) else []
+                    messages = [
+                        str(error.get("message") or "")[:300]
+                        for error in errors
+                        if isinstance(error, dict) and error.get("message")
+                    ]
+                    if messages:
+                        log.warning(
+                            "start.gg HTTP %s GraphQL error: %s",
+                            response.status,
+                            " | ".join(messages),
+                        )
+                        raise StartGGError(f"start.gg rejected that request: {messages[0]}")
+                    message = (
+                        str(payload.get("message") or "")[:300]
+                        if isinstance(payload, dict)
+                        else ""
+                    )
+                    if message:
+                        log.warning(
+                            "start.gg HTTP %s error: %s", response.status, message
+                        )
+                        raise StartGGError(f"start.gg rejected that request: {message}")
+                    raise StartGGError(
+                        f"start.gg could not complete that request (HTTP {response.status})."
+                    )
         except StartGGError:
             raise
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise StartGGError("Could not reach start.gg. Try again shortly.") from exc
 
         if payload.get("errors"):
+            errors = payload.get("errors") or []
+            messages = [
+                str(error.get("message") or "")[:300]
+                for error in errors
+                if isinstance(error, dict) and error.get("message")
+            ]
+            if messages:
+                log.warning("start.gg GraphQL error: %s", " | ".join(messages))
+                raise StartGGError(f"start.gg rejected that request: {messages[0]}")
             raise StartGGError("start.gg could not complete that request.")
         data = payload.get("data")
         if not isinstance(data, dict):
@@ -113,7 +154,7 @@ class StartGGClient:
                 nodes {
                   id name slug startAt endAt isOnline city addrState countryCode
                   events(filter: {videogameId: [$gameId]}) {
-                    id name startAt numEntrants
+                    id name startAt numEntrants entrantSizeMin
                   }
                 }
               }
@@ -133,7 +174,7 @@ class StartGGClient:
               tournament(slug: $slug) {
                 id name slug startAt endAt isOnline city addrState countryCode
                 events(filter: {videogameId: $gameId}) {
-                  id name startAt numEntrants
+                  id name startAt numEntrants entrantSizeMin
                 }
               }
             }
@@ -162,6 +203,7 @@ class StartGGClient:
                 name=str(event.get("name") or "Rocket League"),
                 start_at=_optional_int(event.get("startAt")),
                 entrants=_optional_int(event.get("numEntrants")),
+                entrant_size_min=_optional_int(event.get("entrantSizeMin")),
             )
             for event in (node.get("events") or [])
             if event.get("id") is not None
