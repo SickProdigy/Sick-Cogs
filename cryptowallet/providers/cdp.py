@@ -150,7 +150,7 @@ def _validate_tokenfactory_operation(operation: dict) -> tuple[str, int, str, in
         )
         encoded_request_id = "0x" + calldata[10 + 64 * 5:10 + 64 * 6]
         if (
-            recipient != encoded_recipient
+            recipient.lower() != encoded_recipient.lower()
             or not HASH_PATTERN.fullmatch(request_id)
             or request_id != encoded_request_id
         ):

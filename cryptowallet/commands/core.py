@@ -181,7 +181,8 @@ class WalletCoreCommands:
                 balance_lines.append(
                     f"{item.native_symbol}: **{format_atomic_amount(native_balance, item)}**"
                 )
-            for token_asset in tokens[:6]:
+            visible_tokens = tokens if network is not None else tokens[:15]
+            for token_asset in visible_tokens:
                 amount = format_atomic_amount(
                     int(token_asset["amount_atomic"]),
                     item,
@@ -192,10 +193,13 @@ class WalletCoreCommands:
                 marker = " ✅" if token_asset.get("status") == "recognized" else ""
                 balance_lines.append(
                     f"• {token_asset['symbol']}{marker}: **{amount}** "
-                    f"([{short_contract}]({item.explorer_url}/token/{contract}))"
+                    f"· `{short_contract}`"
                 )
-            if len(tokens) > 6:
-                balance_lines.append(f"• {len(tokens) - 6} more token(s) with a balance")
+            if len(tokens) > len(visible_tokens):
+                balance_lines.append(
+                    f"• **+{len(tokens) - len(visible_tokens)} more** · Use "
+                    f"`{ctx.clean_prefix}wallet balance {item.key}`"
+                )
 
             balance_url = item.explorer_address_url(address)
             badge = self._network_badge(item, network_emojis)
@@ -212,20 +216,9 @@ class WalletCoreCommands:
                 evm_balance_added = True
 
         if evm_lines:
-            embed.add_field(
-                name="━━ EVM WALLET ━━",
-                value="\n".join(evm_lines)[:1024],
-                inline=False,
-            )
+            self._add_wallet_fields(embed, "━━ EVM WALLET ━━", evm_lines)
         if solana_lines:
-            solana_network = next(
-                item for item in networks if item.family is ChainFamily.SOLANA
-            )
-            embed.add_field(
-                name="━━ SOLANA WALLET ━━",
-                value="\n".join(solana_lines)[:1024],
-                inline=False,
-            )
+            self._add_wallet_fields(embed, "━━ SOLANA WALLET ━━", solana_lines)
 
 
         if not embed.fields:
@@ -234,6 +227,33 @@ class WalletCoreCommands:
             text="Testnet assets only · Token names may be spoofed; verify contract addresses"
         )
         return embed
+
+    @staticmethod
+    def _add_wallet_fields(
+        embed: discord.Embed, heading: str, lines: list[str]
+    ) -> None:
+        """Split wallet sections at line boundaries without breaking Markdown links."""
+
+        chunks = []
+        current = []
+        current_length = 0
+        for line in lines:
+            added_length = len(line) + (1 if current else 0)
+            if current and current_length + added_length > 1024:
+                chunks.append("\n".join(current))
+                current = [line]
+                current_length = len(line)
+            else:
+                current.append(line)
+                current_length += added_length
+        if current:
+            chunks.append("\n".join(current))
+        for index, chunk in enumerate(chunks):
+            embed.add_field(
+                name=heading if index == 0 else f"{heading} continued",
+                value=chunk,
+                inline=False,
+            )
 
     @staticmethod
     def _network_compact_label(network, emoji_ids: dict | None = None) -> str:
@@ -451,27 +471,43 @@ class WalletCoreCommands:
 
     @wallet_token.command(name="list", aliases=("tokens",))
     async def wallet_token_list(self, ctx: commands.Context):
-        """List visible shared tokens."""
+        """List shared registered tokens available to wallet commands."""
         registry = await self.config.token_registry()
-        lines = []
+        visible = []
         for network_key, entries in registry.items():
             network = NETWORKS.get(network_key)
             if network is None:
                 continue
+            lines = []
             for contract, entry in entries.items():
                 state = str(entry.get("status") or "community")
                 if state not in {"community", "recognized"}:
                     continue
                 marker = "✅ recognized" if state == "recognized" else "community"
                 lines.append(
-                    f"- **{entry.get('symbol', 'TOKEN')}** · {network.name} · {marker}\n  `{contract}`"
+                    f"- **{entry.get('symbol', 'TOKEN')}** · {network.name} · "
+                    f"{marker} · `{contract}`"
                 )
-        await ctx.send(
-            "**Shared wallet tokens**\n" + "\n".join(lines)
-            if lines else "No shared tokens are registered yet."
+            if lines:
+                visible.append((network, lines))
+        if not visible:
+            await ctx.send("No shared registered tokens are available yet.")
+            return
+        embed = discord.Embed(
+            title="Shared registered tokens",
+            description=(
+                "Tokens this bot recognizes for portfolio balances and sends. "
+                "Native coins such as ETH and SOL are supported automatically and "
+                "are not listed here."
+            ),
+            color=await ctx.embed_color(),
         )
+        for network, lines in visible:
+            self._add_wallet_fields(embed, network.name, lines)
+        embed.set_footer(text="Token names may be spoofed; verify contract addresses")
+        await ctx.send(embed=embed)
 
-    @wallet_token.command(name="default")
+    @wallet_token.command(name="default", aliases=("defaults",))
     async def wallet_token_default(
         self, ctx: commands.Context, network_or_action: str = None, asset: str = None
     ):

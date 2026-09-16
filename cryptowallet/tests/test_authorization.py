@@ -323,6 +323,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             _account_for_network=WalletCoreCommands._account_for_network,
             _network_badge=WalletCoreCommands._network_badge,
             _network_compact_label=WalletCoreCommands._network_compact_label,
+            _add_wallet_fields=WalletCoreCommands._add_wallet_fields,
         )
         ctx = SimpleNamespace(author=SimpleNamespace(id=7, display_name="Member"))
         embed = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
@@ -339,20 +340,20 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             "Networks: <:base:123456789012345678> · Ethereum Sepolia", rendered
         )
         self.assertNotIn("<:base:123456789012345678> Base Sepolia", rendered)
-        evm_field = next(
-            field for field in embed.fields if field.name == "━━ EVM WALLET ━━"
-        )
+        evm_fields = [field for field in embed.fields if "EVM WALLET" in field.name]
+        evm_value = "\n".join(field.value for field in evm_fields)
+        evm_field = evm_fields[0]
         self.assertLess(
             evm_field.value.index("Networks:"), evm_field.value.index(f"`{evm}`")
         )
         self.assertNotIn(f"[{evm}]", evm_field.value)
         self.assertIn(
             f"[Base Sepolia]({BASE_SEPOLIA.explorer_address_url(evm)})",
-            evm_field.value,
+            evm_value,
         )
         self.assertIn(
             f"[Ethereum Sepolia]({ETHEREUM_SEPOLIA.explorer_address_url(evm)})",
-            evm_field.value,
+            evm_value,
         )
         self.assertIn("━━ SOLANA WALLET ━━", rendered)
         solana_field = next(
@@ -362,8 +363,10 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             solana_field.value.index(f"`{solana}`"),
             solana_field.value.index("[Solana Devnet]"),
         )
-        self.assertEqual(len(embed.fields), 2)
+        self.assertTrue(all(len(field.value) <= 1024 for field in embed.fields))
         self.assertIn("OWNED", rendered)
+        self.assertIn(f"`{positive_contract[:8]}…{positive_contract[-6:]}`", rendered)
+        self.assertNotIn(f"/token/{positive_contract}", rendered)
         self.assertNotIn("ZERO", rendered)
         self.assertNotIn("━━ CREATED TOKENS ━━", rendered)
         self.assertNotIn("Automatic token discovery", rendered)
@@ -1846,7 +1849,7 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_signer_independently_rejects_token_call_mutations(self):
-        recipient = "0x1111111111111111111111111111111111111111"
+        recipient = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         request_id = "0x" + "22" * 32
         draft = TokenDraft(
             creator_discord_id=7, name="Reviewed Token", symbol="RVT",
@@ -2443,7 +2446,7 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
-    async def test_explicit_registered_token_send_creates_typed_intent(self):
+    async def test_registered_token_send_uses_default_network(self):
         sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
         contract = "0x1111111111111111111111111111111111111111"
@@ -2464,7 +2467,8 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
                    "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}]}
         cog = SimpleNamespace(
             config=SimpleNamespace(user=lambda user: user_config,
-                                   token_registry=_Value(registry)),
+                                   token_registry=_Value(registry),
+                                   default_network=_Value(BASE_SEPOLIA.key)),
             wallet_provider=provider,
             _wallet_sensitive_allowed=AsyncMock(return_value=True),
             _wallet_read_allowed=AsyncMock(return_value=True),
@@ -2482,7 +2486,7 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
             embed_color=AsyncMock(return_value=None),
         )
         await WalletTransactionCommands.wallet_send.callback(
-            cog, ctx, "usdc", "base", recipient, "1.25"
+            cog, ctx, "usdc", recipient, "1.25"
         )
         self.assertEqual(len(intents.data), 1)
         stored = TransactionIntent.from_dict(next(iter(intents.data.values())))
@@ -2493,6 +2497,82 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored.value_wei, 1_250_000)
         provider.get_registered_token_asset.assert_awaited_once()
         provider.prepare_transaction.assert_awaited_once()
+
+    async def test_empty_send_shows_effective_default_without_provider_read(self):
+        user_config = SimpleNamespace(default_send_asset=_Value(None))
+        cog = object.__new__(WalletTransactionCommands)
+        cog.config = SimpleNamespace(
+            default_network=_Value(BASE_SEPOLIA.key),
+            user=lambda user: user_config,
+        )
+        cog._wallet_sensitive_allowed = AsyncMock(return_value=True)
+        cog._wallet_read_allowed = AsyncMock(return_value=True)
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7),
+            clean_prefix="!",
+            embed_color=AsyncMock(return_value=None),
+            send=AsyncMock(),
+        )
+
+        await WalletTransactionCommands.wallet_send.callback(cog, ctx)
+
+        cog._wallet_read_allowed.assert_not_awaited()
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Send from your testnet wallet")
+        self.assertIn("ETH", embed.fields[0].value)
+        self.assertIn("Base Sepolia", embed.fields[0].value)
+        self.assertIn("!wallet send @member 0.001", embed.fields[1].value)
+        self.assertIn("!wallet send USDC @member 1.50", embed.fields[2].value)
+
+    def test_wallet_token_defaults_is_an_alias_for_default(self):
+        self.assertIn("defaults", WalletCoreCommands.wallet_token_default.aliases)
+
+    async def test_wallet_overview_limits_assets_and_points_to_network_detail(self):
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        tokens = [
+            {
+                "contract_address": f"0x{index:040x}",
+                "symbol": f"T{index}",
+                "decimals": 0,
+                "amount_atomic": index,
+            }
+            for index in range(1, 18)
+        ]
+        profile = {
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": address}]
+        }
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                network_emojis=_Value({}), token_registry=_Value({})
+            ),
+            wallet_provider=SimpleNamespace(
+                get_native_balance=AsyncMock(return_value=0),
+                get_token_balances=AsyncMock(return_value=tokens),
+                get_registered_token_asset=AsyncMock(),
+            ),
+            _account_for_network=WalletCoreCommands._account_for_network,
+            _network_badge=WalletCoreCommands._network_badge,
+            _network_compact_label=WalletCoreCommands._network_compact_label,
+            _add_wallet_fields=WalletCoreCommands._add_wallet_fields,
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7, display_name="Member"), clean_prefix="!"
+        )
+
+        overview = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
+        overview_text = "\n".join(field.value for field in overview.fields)
+        self.assertIn("**+2 more**", overview_text)
+        self.assertIn("!wallet balance base-sepolia", overview_text)
+        self.assertNotIn("T16:", overview_text)
+
+        detail = await WalletCoreCommands._wallet_embed(
+            cog, ctx, profile, network=BASE_SEPOLIA
+        )
+        detail_text = "\n".join(field.value for field in detail.fields)
+        self.assertIn("T16:", detail_text)
+        self.assertIn("T17:", detail_text)
+        self.assertNotIn("more**", detail_text)
+        self.assertTrue(all(len(field.value) <= 1024 for field in detail.fields))
 
 
 class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):
