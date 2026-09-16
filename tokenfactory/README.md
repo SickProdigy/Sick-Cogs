@@ -43,10 +43,12 @@ Member deployment remains disabled and emergency-paused until the bot owner runs
 Sepolia. `pause` immediately blocks both wallet routes without discarding configuration; `disable`
 blocks them and disables the feature. Existing on-chain operations are never reversed by a pause.
 
-The Discord Wallet route requires active CryptoWallet authorization and uses sponsored Base Sepolia
-smart-account execution. The external route does not require a CDP wallet profile or delegation;
-the signer pays its own testnet gas. Both routes use retry-safe request IDs and the same pinned
-`createFixedSupplyToken` method.
+The Discord Wallet route requires active CryptoWallet authorization and shows the active CDP
+paymaster sponsorship, explicit gas limit, and zero native value before submission. The external
+route does not require a CDP wallet profile or delegation; its review shows that the signer pays
+its own testnet gas, the explicit gas limit, and zero native value. The reviewed terms are bound
+to submission; changed or stale terms require a fresh review. Both routes use retry-safe request
+IDs and the same pinned `createFixedSupplyToken` method.
 
 No mainnet network, arbitrary Solidity, arbitrary bytecode, arbitrary calldata, later minting
 authority, upgrade path, administrator, or bot ownership is supported. The external route permits

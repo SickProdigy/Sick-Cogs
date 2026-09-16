@@ -19,7 +19,10 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
+
+    def execution_terms(self, *, route: str, operation: str = "token") -> dict:
+        return self._cryptowallet().tokenfactory_execution_terms(route=route, operation=operation)
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -100,7 +103,7 @@ class TokenFactory(commands.Cog):
             request_id = "0x" + secrets.token_hex(32)
         wallet = self._cryptowallet()
         token, expires_at = await wallet.tokenfactory_create_external_handoff(
-            user.id, draft.to_dict(), request_id
+            user.id, {**draft.to_dict(), "execution_terms": self.execution_terms(route="external")}, request_id
         )
         handle = await wallet.register_recovery_handoff(token, expires_at)
         await user_config.pending_deployment.set({
@@ -130,7 +133,7 @@ class TokenFactory(commands.Cog):
             raise RuntimeError("CryptoWallet must be loaded for factory deployment.")
         return wallet
 
-    async def deploy_pinned_factory(self, user, creation_code: str) -> dict:
+    async def deploy_pinned_factory(self, user, creation_code: str, execution_terms: dict) -> dict:
         try:
             pending = await self.config.pending_factory_operation()
             if isinstance(pending, dict) and pending.get("user_operation_hash"):
@@ -148,7 +151,7 @@ class TokenFactory(commands.Cog):
                     )
             attempt_id = str(uuid.uuid4())
             result = await self._cryptowallet().tokenfactory_deploy_pinned_factory(
-                user, creation_code, attempt_id
+                user, creation_code, attempt_id, execution_terms
             )
             if not result.get("already_deployed"):
                 await self.config.pending_factory_operation.set(
@@ -176,7 +179,7 @@ class TokenFactory(commands.Cog):
             == "0xa4e867671846a61743568f19d897fb5ffe40ad9678c9c06e791ff45dad7136f7"
         )
 
-    async def submit_token_deployment(self, user, draft: TokenDraft) -> dict:
+    async def submit_token_deployment(self, user, draft: TokenDraft, execution_terms: dict) -> dict:
         if not await self.deployment_available():
             raise RuntimeError("Token deployment is disabled or emergency-paused.")
         stored = await self.config.user(user).deployment_draft()
@@ -233,6 +236,7 @@ class TokenFactory(commands.Cog):
             recipient=draft.owner_address,
             request_id=request_id,
             attempt_id=attempt_id,
+            execution_terms=execution_terms,
         )
         await user_config.pending_deployment.set({
             "draft": draft.to_dict(),
@@ -543,6 +547,10 @@ class TokenFactory(commands.Cog):
             color=discord.Color.orange(),
         )
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        terms = self.execution_terms(route="discord", operation="factory")
+        embed.add_field(name="Gas limit", value=f"`{terms['gas_limit']:,}`", inline=True)
+        embed.add_field(name="Native value", value="`0 ETH`", inline=True)
+        embed.add_field(name="Network gas", value="Sponsorship active · paid by CDP paymaster", inline=False)
         embed.add_field(name="Destination", value=f"`{state['address']}`", inline=False)
         embed.add_field(
             name="Runtime code hash",
@@ -550,7 +558,7 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="Owner-only · explicit confirmation · no mainnet path")
-        view = FactoryDeploymentView(self, ctx.author, str(artifact["bytecode"]))
+        view = FactoryDeploymentView(self, ctx.author, str(artifact["bytecode"]), terms)
         await ctx.send(embed=embed, view=view)
 
     @tokenfactoryset.command(name="verifyfactory")
