@@ -1287,7 +1287,7 @@ class ClankerVerifiedView(discord.ui.View):
                 await self.cog.schedule_internal_confirmation(
                     self.ctx.guild, interaction.user, self.record, interaction.message
                 )
-            await interaction.message.edit(embed=self.embed(), view=self)
+            await interaction.edit_original_response(embed=self.embed(), view=self)
             detail = result.get("transaction_hash") or result.get("user_operation_hash")
             if result["status"] == "uncertain":
                 message = (

@@ -1335,7 +1335,7 @@ class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Spent: 0.000001 ETH", fields["Creator buy-in"])
         self.assertIn("10,009.491160428546597517 $TEST1", fields["Creator buy-in"])
 
-    async def test_launch_updates_clicked_card_not_deferred_response(self):
+    async def test_launch_updates_ephemeral_card_through_interaction_token(self):
         payload = Clanker.build_payload(
             "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
             0, 86400, 0, None, 7,
@@ -1368,9 +1368,9 @@ class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):
             followup=SimpleNamespace(send=AsyncMock()),
         )
         await view.launch_internal.callback(interaction)
-        interaction.message.edit.assert_awaited_once()
-        interaction.edit_original_response.assert_not_awaited()
-        sent_embed = interaction.message.edit.await_args.kwargs["embed"]
+        interaction.message.edit.assert_not_awaited()
+        interaction.edit_original_response.assert_awaited_once()
+        sent_embed = interaction.edit_original_response.await_args.kwargs["embed"]
         fields = {field.name: field.value for field in sent_embed.fields}
         self.assertIn("awaiting confirmation", fields["Status"])
 
