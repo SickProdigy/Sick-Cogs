@@ -1,12 +1,15 @@
 import asyncio
+from dataclasses import dataclass
+from enum import Enum
 from io import BytesIO
 import logging
+from typing import Optional
 import xml.etree.ElementTree as ET
 
 import aiohttp
 import discord
 
-from redbot.core import Config, commands
+from redbot.core import commands
 from redbot.core.utils.chat_formatting import box, pagify
 from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
 
@@ -14,10 +17,26 @@ from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
 log = logging.getLogger("red.sick-cogs.wolfram")
 
 
+class RequestFailure(Enum):
+    AUTHENTICATION = "authentication"
+    RATE_LIMIT = "rate_limit"
+    TIMEOUT = "timeout"
+    PROVIDER = "provider"
+    NETWORK = "network"
+
+
+@dataclass(frozen=True)
+class WolframResponse:
+    body: Optional[bytes] = None
+    content_type: str = ""
+    failure: Optional[RequestFailure] = None
+    status: Optional[int] = None
+
+
 class Wolfram(commands.Cog):
     """Ask Wolfram|Alpha any question."""
 
-    __version__ = "2.1.0"
+    __version__ = "2.2.0"
 
     API_BASE_URL = "https://api.wolframalpha.com"
     DEVELOPER_URL = "https://products.wolframalpha.com/api/"
@@ -29,41 +48,6 @@ class Wolfram(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
-        default_global = {"WOLFRAM_API_KEY": None}
-        self.config = Config.get_conf(self, 2788801004, force_registration=True)
-        self.config.register_global(**default_global)
-        # Retain the old guild registration long enough to migrate keys written by v2.0.1.
-        self.config.register_guild(**default_global)
-
-    async def cog_load(self):
-        """Migrate legacy Config AppIDs to Red's shared API-token storage."""
-        shared_tokens = await self.bot.get_shared_api_tokens("wolfram")
-        global_key = await self.config.WOLFRAM_API_KEY()
-        guild_data = await self.config.all_guilds()
-        legacy_keys = {
-            key
-            for key in (
-                global_key,
-                *(data.get("WOLFRAM_API_KEY") for data in guild_data.values()),
-            )
-            if key
-        }
-
-        if "appid" not in shared_tokens and len(legacy_keys) == 1:
-            await self.bot.set_shared_api_tokens("wolfram", appid=legacy_keys.pop())
-            shared_tokens = {"appid": True}
-            log.info("Migrated a legacy Wolfram AppID to Red's shared API-token storage.")
-        elif "appid" not in shared_tokens and len(legacy_keys) > 1:
-            log.warning(
-                "Found conflicting legacy Wolfram AppIDs; use Red's set api command to "
-                "select the AppID. No credential values were logged."
-            )
-
-        if "appid" in shared_tokens:
-            await self.config.WOLFRAM_API_KEY.clear()
-            for guild_id, data in guild_data.items():
-                if data.get("WOLFRAM_API_KEY"):
-                    await self.config.guild_from_id(guild_id).WOLFRAM_API_KEY.clear()
 
     async def _get_api_key(self, ctx):
         api_tokens = await self.bot.get_shared_api_tokens("wolfram")
@@ -77,25 +61,66 @@ class Wolfram(commands.Cog):
         return api_key
 
     async def _request(self, path, *, params):
-        """Request a Wolfram endpoint and return its response body and content type."""
+        """Request a Wolfram endpoint and return structured success or failure details."""
         headers = {"User-Agent": f"Sick-Cogs-Wolfram/{self.__version__}"}
         try:
             async with self.session.get(
                 f"{self.API_BASE_URL}{path}", params=params, headers=headers
             ) as response:
-                response.raise_for_status()
-                return await response.read(), response.headers.get("Content-Type", "")
+                status = response.status
+                if status in {401, 403, 501}:
+                    log.warning("Wolfram|Alpha rejected the configured AppID (HTTP %s).", status)
+                    return WolframResponse(failure=RequestFailure.AUTHENTICATION, status=status)
+                if status == 429:
+                    log.warning("Wolfram|Alpha rate limited a request (HTTP 429).")
+                    return WolframResponse(failure=RequestFailure.RATE_LIMIT, status=status)
+                if status >= 400:
+                    log.warning("Wolfram|Alpha returned HTTP status %s.", status)
+                    return WolframResponse(failure=RequestFailure.PROVIDER, status=status)
+                return WolframResponse(
+                    body=await response.read(),
+                    content_type=response.headers.get("Content-Type", ""),
+                    status=status,
+                )
         except asyncio.TimeoutError:
             log.warning("Wolfram|Alpha request timed out.")
-        except aiohttp.ClientResponseError as exc:
-            log.warning("Wolfram|Alpha returned HTTP status %s.", exc.status)
+            return WolframResponse(failure=RequestFailure.TIMEOUT)
         except aiohttp.ClientError:
             log.warning("Wolfram|Alpha request failed.")
-        return None
+            return WolframResponse(failure=RequestFailure.NETWORK)
+
+    async def _send_request_failure(self, ctx, failure):
+        if failure is RequestFailure.AUTHENTICATION:
+            return await ctx.send(
+                "Wolfram|Alpha rejected the configured AppID. The bot owner should check or "
+                f"replace it with `{ctx.clean_prefix}set api wolfram appid,APP_ID`."
+            )
+        if failure is RequestFailure.RATE_LIMIT:
+            return await ctx.send("Wolfram|Alpha is rate limiting requests. Please try again later.")
+        if failure is RequestFailure.TIMEOUT:
+            return await ctx.send("Wolfram|Alpha took too long to respond. Please try again later.")
+        if failure is RequestFailure.NETWORK:
+            return await ctx.send("Wolfram|Alpha could not be reached. Please try again later.")
+        return await ctx.send("Wolfram|Alpha is temporarily unavailable. Please try again later.")
 
     @commands.command(name="wolfram")
     async def _wolfram(self, ctx, *question: str):
-        """Ask Wolfram|Alpha any question."""
+        """Ask Wolfram|Alpha a factual, mathematical, or scientific question.
+
+        Examples:
+        - `[p]wolfram 2+2`
+        - `[p]wolfram population of Japan`
+        - `[p]wolfram derivative of x^3`
+
+        Related commands:
+        - `[p]wolframimage <question>` returns Wolfram|Alpha's visual result.
+        - `[p]wolframsolve <question>` requests step-by-step math output.
+
+        A Wolfram|Alpha AppID must be configured by the bot owner.
+        """
+        if not question or not any(part.strip() for part in question):
+            return await ctx.send_help(ctx.command)
+
         api_key = await self._get_api_key(ctx)
         if not api_key:
             return
@@ -106,10 +131,10 @@ class Wolfram(commands.Cog):
                 "/v2/query",
                 params={"input": query, "appid": api_key, "format": "plaintext"},
             )
-            if result is None:
-                return await ctx.send("Wolfram|Alpha could not be reached. Please try again later.")
+            if result.failure:
+                return await self._send_request_failure(ctx, result.failure)
             try:
-                root = ET.fromstring(result[0])
+                root = ET.fromstring(result.body or b"")
             except ET.ParseError:
                 log.warning("Wolfram|Alpha returned malformed XML for a text query.")
                 return await ctx.send("Wolfram|Alpha returned an invalid response.")
@@ -154,9 +179,10 @@ class Wolfram(commands.Cog):
 
         async with ctx.typing():
             result = await self._request("/v1/simple", params=params)
-            if result is None:
-                return await ctx.send("Wolfram|Alpha could not be reached. Please try again later.")
-            image_data, content_type = result
+            if result.failure:
+                return await self._send_request_failure(ctx, result.failure)
+            image_data = result.body or b""
+            content_type = result.content_type
             if not content_type.lower().startswith("image/"):
                 return await ctx.send(
                     "There is as yet insufficient data for a meaningful answer."
@@ -185,10 +211,10 @@ class Wolfram(commands.Cog):
 
         async with ctx.typing():
             result = await self._request("/v2/query", params=params)
-            if result is None:
-                return await ctx.send("Wolfram|Alpha could not be reached. Please try again later.")
+            if result.failure:
+                return await self._send_request_failure(ctx, result.failure)
             try:
-                root = ET.fromstring(result[0])
+                root = ET.fromstring(result.body or b"")
             except ET.ParseError:
                 log.warning("Wolfram|Alpha returned malformed XML for a step-by-step query.")
                 return await ctx.send("Wolfram|Alpha returned an invalid response.")
