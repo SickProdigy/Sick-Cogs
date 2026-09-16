@@ -238,17 +238,54 @@ class TokenDeploymentConfirmView(discord.ui.View):
             await interaction.followup.send(f"Token deployment failed: {exc}", ephemeral=True)
             return
         if result.get("already_deployed"):
-            message = (
-                f"This token already exists at `{result['token_address']}`. "
-                "Run `tokenfactory deployment` to verify and record it."
+            embed = discord.Embed(
+                title="Token already deployed",
+                description=(
+                    "The reviewed token already exists on Base Sepolia. "
+                    "Verify it to save it in your TokenFactory history."
+                ),
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="Token contract",
+                value=f"`{result['token_address']}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="Next step",
+                value="Run `tokenfactory deployment` to verify and record it.",
+                inline=False,
             )
         else:
-            message = (
-                "Fixed-supply token deployment submitted. "
-                f"User operation: `{result['user_operation_hash']}`\n"
-                "Run `tokenfactory deployment` after confirmation."
+            embed = discord.Embed(
+                title="Token deployment submitted",
+                description=(
+                    "Your sponsored Base Sepolia deployment was accepted and is now "
+                    "waiting for network confirmation."
+                ),
+                color=discord.Color.gold(),
             )
-        await interaction.followup.send(message, ephemeral=True)
+            embed.add_field(
+                name="Token",
+                value=f"{self.draft.name} ({self.draft.symbol})",
+                inline=False,
+            )
+            embed.add_field(
+                name="User operation",
+                value=f"`{result['user_operation_hash']}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="Next step",
+                value=(
+                    "Wait a few seconds, then run `tokenfactory deployment`. "
+                    "That command verifies this pending deployment and saves it to "
+                    "your token history."
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="Sponsored by CDP paymaster · no native ETH charged")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):

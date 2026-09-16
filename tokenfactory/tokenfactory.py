@@ -28,7 +28,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.4.2"
+    __version__ = "0.5.0"
 
     def execution_terms(self, *, route: str, operation: str = "token") -> dict:
         if route not in {"discord", "external"} or operation not in {"token", "factory"}:
@@ -482,7 +482,8 @@ class TokenFactory(commands.Cog):
             await ctx.send(
                 f"Verified **{result['name']} ({result['symbol']})** at "
                 f"`{result['contract_address']}` on Base Sepolia. It was added to the "
-                "community token registry."
+                "community token registry. Run `tokenfactory tokens` to view all of "
+                "your verified deployments."
             )
             return
         status = result.get("provider_status", "pending")
@@ -495,6 +496,46 @@ class TokenFactory(commands.Cog):
         else:
             message += " No matching token is confirmed yet; check again shortly."
         await ctx.send(message)
+
+    @tokenfactory.command(
+        name="tokens", aliases=("history", "deployments", "list")
+    )
+    async def tokenfactory_tokens(self, ctx: commands.Context):
+        """List your verified TokenFactory token deployments."""
+
+        deployments = await self.config.user(ctx.author).deployed_tokens()
+        if not deployments:
+            await ctx.send(
+                "You have no verified TokenFactory tokens yet. Start with "
+                "`tokenfactory create`."
+            )
+            return
+        valid = [item for item in deployments if isinstance(item, dict)]
+        newest = list(reversed(valid[-10:]))
+        embed = discord.Embed(
+            title="Your TokenFactory tokens",
+            description=(
+                f"{len(valid)} verified fixed-supply deployment"
+                f"{'s' if len(valid) != 1 else ''} on Base Sepolia."
+            ),
+            color=await ctx.embed_color(),
+        )
+        for item in newest:
+            name = str(item.get("name") or "Unnamed token")
+            symbol = str(item.get("symbol") or "TOKEN")
+            contract = str(item.get("contract_address") or "Unavailable")
+            deployed_at = int(item.get("deployed_at", 0) or 0)
+            when = f" · <t:{deployed_at}:R>" if deployed_at > 0 else ""
+            embed.add_field(
+                name=f"{name} ({symbol})",
+                value=f"`{contract}`{when}",
+                inline=False,
+            )
+        if len(valid) > len(newest):
+            embed.set_footer(text=f"Showing the latest {len(newest)} deployments")
+        else:
+            embed.set_footer(text="Testnet tokens only")
+        await ctx.send(embed=embed)
 
     @tokenfactory.command(name="status")
     async def tokenfactory_status(self, ctx: commands.Context):

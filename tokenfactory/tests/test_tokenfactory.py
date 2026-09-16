@@ -203,6 +203,11 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         cog.submit_token_deployment.assert_awaited_once_with(
             self.user, self.draft, self.terms
         )
+        sent = interaction.followup.send.await_args.kwargs
+        self.assertTrue(sent["ephemeral"])
+        self.assertEqual(sent["embed"].title, "Token deployment submitted")
+        fields = {field.name: field.value for field in sent["embed"].fields}
+        self.assertIn("tokenfactory deployment", fields["Next step"])
 
     async def test_factory_review_discloses_and_freezes_execution_terms(self):
         terms = {
@@ -233,6 +238,37 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsInstance(sent["view"], FactoryDeploymentView)
         self.assertIs(sent["view"].execution_terms, terms)
+
+    async def test_token_history_lists_all_verified_deployments_newest_first(self):
+        deployments = [
+            {
+                "name": "First Token", "symbol": "ONE",
+                "contract_address": "0x" + "11" * 20, "deployed_at": 100,
+            },
+            {
+                "name": "Second Token", "symbol": "TWO",
+                "contract_address": "0x" + "22" * 20, "deployed_at": 200,
+            },
+        ]
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                user=lambda user: SimpleNamespace(
+                    deployed_tokens=AsyncMock(return_value=deployments)
+                )
+            )
+        )
+        ctx = SimpleNamespace(
+            author=self.user,
+            embed_color=AsyncMock(return_value=None),
+            send=AsyncMock(),
+        )
+
+        await TokenFactory.tokenfactory_tokens.callback(cog, ctx)
+
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertIn("2 verified", embed.description)
+        self.assertEqual(embed.fields[0].name, "Second Token (TWO)")
+        self.assertEqual(embed.fields[1].name, "First Token (ONE)")
 
     def test_external_companion_discloses_and_binds_execution_terms(self):
         source = (

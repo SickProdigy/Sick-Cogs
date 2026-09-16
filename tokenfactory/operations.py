@@ -1,18 +1,11 @@
 import re
 from hashlib import sha256
+from importlib import import_module
 from typing import Any
 
-from cryptowallet.core.networks import BASE_SEPOLIA
-from cryptowallet.core.validation import normalize_evm_address
-from cryptowallet.providers.base_rpc import (
-    BaseRpcError,
-    get_contract_code,
-    get_erc20_asset,
-    get_factory_token_deployment,
-    get_transaction,
-)
-
+from .constants import NETWORK_KEY
 from .models import TokenDraft
+from .validation import normalize_owner_address
 
 
 TOKEN_FACTORY_SINGLETON = "0xce0042b868300000d44a59004da54a005ffdcf9f"
@@ -33,6 +26,57 @@ class TokenFactoryOperationError(RuntimeError):
     """A TokenFactory operation could not be constructed or verified safely."""
 
 
+class _BaseRpcFailure(RuntimeError):
+    """A lazily imported CryptoWallet RPC request failed."""
+
+
+def _base_rpc():
+    try:
+        return import_module("cryptowallet.providers.base_rpc")
+    except ImportError as exc:
+        raise TokenFactoryOperationError(
+            "CryptoWallet RPC support is unavailable. Load CryptoWallet and try again."
+        ) from exc
+
+
+async def get_contract_code(address: str, network: str) -> str:
+    rpc = _base_rpc()
+    try:
+        return await rpc.get_contract_code(address, network)
+    except rpc.BaseRpcError as exc:
+        raise _BaseRpcFailure from exc
+
+
+async def get_erc20_asset(
+    contract: str, owner: str, network: str, *, include_metadata: bool = False
+) -> dict:
+    rpc = _base_rpc()
+    try:
+        return await rpc.get_erc20_asset(
+            contract, owner, network, include_metadata=include_metadata
+        )
+    except rpc.BaseRpcError as exc:
+        raise _BaseRpcFailure from exc
+
+
+async def get_factory_token_deployment(
+    factory: str, request_id: str, network: str
+) -> dict:
+    rpc = _base_rpc()
+    try:
+        return await rpc.get_factory_token_deployment(factory, request_id, network)
+    except rpc.BaseRpcError as exc:
+        raise _BaseRpcFailure from exc
+
+
+async def get_transaction(transaction_hash: str, network: str) -> dict | None:
+    rpc = _base_rpc()
+    try:
+        return await rpc.get_transaction(transaction_hash, network)
+    except rpc.BaseRpcError as exc:
+        raise _BaseRpcFailure from exc
+
+
 def _abi_dynamic_text(value: str) -> str:
     raw = value.encode("utf-8")
     return format(len(raw), "064x") + raw.hex().ljust(((len(raw) + 31) // 32) * 64, "0")
@@ -43,7 +87,7 @@ def fixed_supply_token_data(draft: TokenDraft, request_id: str, recipient: str) 
 
     name_tail = _abi_dynamic_text(draft.name)
     symbol_tail = _abi_dynamic_text(draft.symbol)
-    address = normalize_evm_address(recipient)
+    address = normalize_owner_address(recipient)
     if not draft.name or len(draft.name.encode("utf-8")) > 64:
         raise ValueError("Invalid token name")
     if not draft.symbol or len(draft.symbol.encode("utf-8")) > 10:
@@ -93,12 +137,12 @@ def singleton_deploy_data(creation_code: str) -> str:
 def token_operation(draft: TokenDraft, request_id: str, recipient: str) -> dict[str, Any]:
     return {
         "kind": "fixed_supply_token",
-        "network": BASE_SEPOLIA.key,
+        "network": NETWORK_KEY,
         "to": TOKEN_FACTORY_ADDRESS,
         "value_wei": 0,
         "data": fixed_supply_token_data(draft, request_id, recipient),
         "gas_limit": TOKEN_DEPLOY_GAS_LIMIT,
-        "recipient": normalize_evm_address(recipient),
+        "recipient": normalize_owner_address(recipient),
         "request_id": request_id.lower(),
     }
 
@@ -106,7 +150,7 @@ def token_operation(draft: TokenDraft, request_id: str, recipient: str) -> dict[
 def factory_operation(creation_code: str) -> dict[str, Any]:
     return {
         "kind": "factory",
-        "network": BASE_SEPOLIA.key,
+        "network": NETWORK_KEY,
         "to": TOKEN_FACTORY_SINGLETON,
         "value_wei": 0,
         "data": singleton_deploy_data(creation_code),
@@ -119,10 +163,10 @@ async def factory_deployment_status() -> dict[str, Any]:
 
     try:
         singleton_code = await get_contract_code(
-            TOKEN_FACTORY_SINGLETON, BASE_SEPOLIA.key
+            TOKEN_FACTORY_SINGLETON, NETWORK_KEY
         )
         factory_code = await get_contract_code(
-            TOKEN_FACTORY_ADDRESS, BASE_SEPOLIA.key
+            TOKEN_FACTORY_ADDRESS, NETWORK_KEY
         )
         singleton_hash = sha256(bytes.fromhex(singleton_code[2:])).hexdigest()
         if singleton_hash != TOKEN_FACTORY_SINGLETON_SHA256:
@@ -137,7 +181,7 @@ async def factory_deployment_status() -> dict[str, Any]:
                 "Unexpected code exists at the deterministic TokenFactory address."
             )
         return {"deployed": True, "address": TOKEN_FACTORY_ADDRESS}
-    except (BaseRpcError, ValueError) as exc:
+    except (_BaseRpcFailure, ValueError) as exc:
         raise TokenFactoryOperationError(
             "Base Sepolia could not verify the TokenFactory deployment state."
         ) from exc
@@ -149,15 +193,15 @@ async def verify_fixed_supply_token(
     """Verify a factory record and the token's immutable public properties."""
 
     try:
-        recipient = normalize_evm_address(recipient)
+        recipient = normalize_owner_address(recipient)
         deployment = await get_factory_token_deployment(
-            TOKEN_FACTORY_ADDRESS, request_id, BASE_SEPOLIA.key
+            TOKEN_FACTORY_ADDRESS, request_id, NETWORK_KEY
         )
         token = deployment["token_address"]
         if not token:
             return {"deployed": False}
         asset = await get_erc20_asset(
-            token, recipient, BASE_SEPOLIA.key, include_metadata=True
+            token, recipient, NETWORK_KEY, include_metadata=True
         )
         if (
             asset["name"] != draft.name
@@ -175,7 +219,7 @@ async def verify_fixed_supply_token(
             "parameters_hash": deployment["parameters_hash"],
             **asset,
         }
-    except BaseRpcError as exc:
+    except _BaseRpcFailure as exc:
         raise TokenFactoryOperationError(
             "Base Sepolia could not verify the token deployment."
         ) from exc
@@ -189,16 +233,16 @@ async def verify_external_transaction(
     if not HASH_PATTERN.fullmatch(transaction_hash):
         raise TokenFactoryOperationError("The external transaction hash is invalid.")
     try:
-        recipient = normalize_evm_address(recipient)
+        recipient = normalize_owner_address(recipient)
         expected_data = fixed_supply_token_data(draft, request_id, recipient)
-        transaction = await get_transaction(transaction_hash, BASE_SEPOLIA.key)
+        transaction = await get_transaction(transaction_hash, NETWORK_KEY)
         if transaction is None or transaction.get("success") is None:
             return {"deployed": False, "provider_status": "pending"}
         if transaction.get("success") is not True:
             raise TokenFactoryOperationError(
                 "The external deployment transaction failed on-chain."
             )
-        transaction_to = normalize_evm_address(
+        transaction_to = normalize_owner_address(
             str(transaction.get("to_address") or "")
         )
         transaction_input = str(transaction.get("input_data") or "").lower()
@@ -223,7 +267,7 @@ async def verify_external_transaction(
             raise TokenFactoryOperationError(
                 "The external transaction does not match the reviewed token draft."
             )
-    except BaseRpcError as exc:
+    except _BaseRpcFailure as exc:
         raise TokenFactoryOperationError(
             "Base Sepolia could not verify the external deployment transaction."
         ) from exc
@@ -232,5 +276,5 @@ async def verify_external_transaction(
         **verified,
         "provider_status": "complete" if verified.get("deployed") else "pending",
         "transaction_hash": transaction_hash.lower(),
-        "signer_address": normalize_evm_address(transaction["from_address"]),
+        "signer_address": normalize_owner_address(transaction["from_address"]),
     }
