@@ -2427,55 +2427,39 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def clanker_drafts(self, ctx: commands.Context, limit: commands.Range[int, 1, 20] = 10):
         """List your drafts.
 
-        Shows your editable and verified drafts that have not entered a wallet route.
+        Shows requester-owned editable and verified drafts independent of origin.
         """
-        if ctx.guild is None and hasattr(self.config, "user_from_id"):
+        if hasattr(self.config, "user_from_id"):
             audit_log = await self.user_launch_records(ctx.author.id)
-            for item in audit_log:
-                guild_id = int(item.get("origin_guild_id", 0) or 0)
-                guild = self.bot.get_guild(guild_id)
-                item["history_guild_name"] = (
-                    guild.name if guild is not None else item.get("origin_guild_name")
-                    or "Server {}".format(guild_id)
-                )
-                item["history_reference"] = item.get("launch_ref")
-            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         elif ctx.guild is None:
             audit_log = []
-            for guild_id, guild_data in (await self.config.all_guilds()).items():
-                guild_log = list(guild_data.get("audit_log") or [])
-                guild = self.bot.get_guild(int(guild_id))
-                for record in guild_log:
-                    item = copy.deepcopy(record)
-                    item["history_guild_name"] = (
-                        guild.name if guild is not None else "Server {}".format(guild_id)
-                    )
-                    item["history_reference"] = self.launch_reference(record, guild_log)
-                    audit_log.append(item)
-            audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
+            for guild_data in (await self.config.all_guilds()).values():
+                audit_log.extend(copy.deepcopy(guild_data.get("audit_log") or []))
         else:
             audit_log = await self.records_for_guild(ctx.guild)
+        audit_log.sort(key=lambda item: str(item.get("created_at") or ""))
         drafts = [
             record for record in audit_log
             if record.get("status") in {"dry_run", "verified"}
-            and record.get("requester_id") == ctx.author.id
+            and int(record.get("requester_id", 0) or 0) == int(ctx.author.id)
         ]
         if not drafts:
             await ctx.send("You have no saved Clanker drafts.")
             return
+        for record in drafts:
+            record["launch_ref"] = (
+                record.get("launch_ref") or self.launch_reference(record, audit_log)
+            )
         embed = discord.Embed(
             title="Your Clanker drafts",
             description=(
-                "Not submitted to a wallet. Editable drafts can be changed; verified drafts "
-                "are ready for a final route choice."
+                "Not submitted to a wallet. Choose a draft below to open its current card. "
+                "Editable drafts can be changed; verified drafts are ready for a final route choice."
             ),
             color=discord.Color.blurple(),
         )
         for record in reversed(drafts[-limit:]):
-            reference = (
-                record.get("launch_ref") or record.get("history_reference")
-                or self.launch_reference(record, audit_log)
-            )
+            reference = str(record.get("launch_ref") or record.get("launch_id") or "unknown")
             symbol = str(record.get("symbol") or "?").upper()
             status = (
                 "✅ Verified — ready to launch"
@@ -2490,22 +2474,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 )
             except ValueError:
                 created = created or "Unknown"
-            details = "**Status:** " + status + "\n**Created:** " + created
-            if record.get("history_guild_name"):
-                details += "\n**Server:** " + str(record["history_guild_name"])
             embed.add_field(
-                name=chr(36) + symbol + "  •  " + str(reference),
-                value=details,
+                name=chr(36) + symbol,
+                value=(
+                    "**Status:** " + status + "\n**Draft ID:** " + reference
+                    + "\n**Created:** " + created
+                ),
                 inline=False,
             )
-        if ctx.guild is None:
-            embed.description = (
-                "Not submitted to a wallet. Most recent first across your shared servers. "
-                "Reopen or edit a draft from the server where it was created."
-            )
-            await ctx.send(embed=embed)
-            return
-        settings = await self.settings_for_guild(ctx.guild)
+        settings = await self.settings_for_guild(ctx.guild) if ctx.guild is not None else {}
         await ctx.send(
             embed=embed,
             view=ClankerDraftHistoryView(self, ctx, drafts[-limit:], settings),
@@ -2525,7 +2502,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         ):
             await ctx.send("No saved Clanker draft of yours matched that ID.")
             return
-        await ctx.send(embed=self.launch_record_embed(record))
+        settings = await self.settings_for_guild(ctx.guild) if ctx.guild is not None else {}
+        history = ClankerDraftHistoryView(self, ctx, [record], settings)
+        try:
+            current, view = await history.open_draft(ctx.author, str(record["launch_id"]))
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(str(exc))
+            return
+        await ctx.send(embed=view.embed(), view=view)
 
     @clanker.command(name="draftremove", aliases=("removedraft", "deletedraft"))
     async def clanker_draftremove(self, ctx: commands.Context, launch_id: str):
@@ -2744,19 +2728,29 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
         Displays the detailed receipt for one launch reference.
         """
-        if ctx.guild is None:
-            record = await self.get_user_launch_record(None, ctx.author.id, launch_id)
-        else:
-            record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
-            if record is None:
-                permissions = getattr(ctx.author, "guild_permissions", None)
-                is_moderator = bool(permissions and permissions.manage_guild)
-                if not is_moderator:
-                    is_moderator = await self.bot.is_mod(ctx.author)
-                if is_moderator or await self.bot.is_owner(ctx.author):
-                    record = await self.get_launch_record(ctx.guild, launch_id)
+        record = await self.get_user_launch_record(None, ctx.author.id, launch_id)
+        requester_owned = record is not None
+        if record is None and ctx.guild is not None:
+            permissions = getattr(ctx.author, "guild_permissions", None)
+            is_moderator = bool(permissions and permissions.manage_guild)
+            if not is_moderator:
+                is_moderator = await self.bot.is_mod(ctx.author)
+            if is_moderator or await self.bot.is_owner(ctx.author):
+                record = await self.get_launch_record(ctx.guild, launch_id)
         if not record:
             await ctx.send("No accessible Clanker launch record matched that ID.")
+            return
+        if requester_owned:
+            settings = await self.settings_for_guild(ctx.guild) if ctx.guild is not None else {}
+            history = ClankerLaunchHistoryView(self, ctx, [record], settings)
+            try:
+                current, view = await history.open_launch(
+                    str(record["launch_id"]), standalone=True
+                )
+            except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+                await ctx.send(str(exc))
+                return
+            await ctx.send(embed=self.launch_record_embed(current), view=view)
             return
         await ctx.send(embed=self.launch_record_embed(record))
 

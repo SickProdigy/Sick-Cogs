@@ -712,42 +712,26 @@ class ClankerDraftSelect(discord.ui.Select):
     def __init__(self, parent: "ClankerDraftHistoryView"):
         self.parent_view = parent
         options = []
-        for index, record in enumerate(parent.records):
-            reference = str(record.get("launch_ref") or record.get("launch_id") or "unknown")
+        for record in parent.records:
+            launch_id = str(record.get("launch_id") or "")
+            reference = str(record.get("launch_ref") or launch_id or "unknown")
             symbol = str(record.get("symbol") or "?").upper()
             status = "Verified — ready to launch" if record.get("status") == "verified" else "Editable draft"
             options.append(discord.SelectOption(
-                label=("$" + symbol + " • " + reference)[:100],
-                value=str(index),
+                label=(chr(36) + symbol + " • " + reference)[:100],
+                value=launch_id,
                 description=status,
             ))
         super().__init__(placeholder="Choose a draft to reopen", options=options)
 
     async def callback(self, interaction: discord.Interaction):
-        record = self.parent_view.records[int(self.values[0])]
-        draft = draft_values_from_record(record)
-        if record.get("status") == "verified":
-            try:
-                record = await self.parent_view.cog.refresh_verified_draft(
-                    self.parent_view.ctx.guild, interaction.user, str(record["launch_id"])
-                )
-            except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-                await interaction.response.send_message(str(exc), ephemeral=True)
-                return
-            view = ClankerVerifiedView(
-                self.parent_view.cog, self.parent_view.ctx, record,
-                self.parent_view.settings, draft,
+        try:
+            record, view = await self.parent_view.open_draft(
+                interaction.user, self.values[0]
             )
-        else:
-            view = ClankerDraftView(
-                self.parent_view.cog, self.parent_view.ctx, self.parent_view.settings,
-                saved_record=record,
-            )
-            view.draft = draft
-        view.add_item(ClankerDeleteDraftButton(
-            self.parent_view.cog, self.parent_view.ctx.guild,
-            self.parent_view.user_id, str(record["launch_id"]),
-        ))
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 
@@ -763,6 +747,40 @@ class ClankerDraftHistoryView(discord.ui.View):
         self.settings = copy.deepcopy(settings)
         self.user_id = int(ctx.author.id)
         self.add_item(ClankerDraftSelect(self))
+
+    async def open_draft(
+        self, user: Any, launch_id: str
+    ) -> tuple[Dict[str, Any], discord.ui.View]:
+        record = await self.cog.get_user_launch_record(None, self.user_id, launch_id)
+        if (record is None or record.get("status") not in {"dry_run", "verified"}
+                or int(record.get("requester_id", 0) or 0) != self.user_id):
+            raise RuntimeError("That Clanker draft is no longer available to your account.")
+        guild_id = int(record.get("origin_guild_id", 0) or 0)
+        origin_guild = self.cog.bot.get_guild(guild_id) if guild_id else getattr(self.ctx, "guild", None)
+        if origin_guild is None:
+            raise RuntimeError("The server needed to edit this draft is unavailable.")
+        settings = await self.cog.settings_for_guild(origin_guild)
+        action_ctx = self.ctx
+        if getattr(action_ctx, "guild", None) is not origin_guild:
+            action_ctx = SimpleNamespace(
+                guild=origin_guild, author=self.ctx.author,
+                clean_prefix=getattr(self.ctx, "clean_prefix", "!"), send=self.ctx.send,
+            )
+        draft = draft_values_from_record(record)
+        if record.get("status") == "verified":
+            record = await self.cog.refresh_verified_draft(
+                origin_guild, user, str(record["launch_id"])
+            )
+            view = ClankerVerifiedView(self.cog, action_ctx, record, settings, draft)
+        else:
+            view = ClankerDraftView(
+                self.cog, action_ctx, settings, saved_record=record
+            )
+            view.draft = draft
+        view.add_item(ClankerDeleteDraftButton(
+            self.cog, origin_guild, self.user_id, str(record["launch_id"])
+        ))
+        return record, view
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -935,45 +953,11 @@ class ClankerLaunchSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        record = await self.parent_view.cog.get_user_launch_record(
-            None, self.parent_view.user_id, self.values[0]
-        )
-        if record is None:
-            await interaction.response.send_message(
-                "That Clanker launch is no longer available to your account.", ephemeral=True
-            )
+        try:
+            record, view = await self.parent_view.open_launch(self.values[0])
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        status = str(record.get("status") or "")
-        guild_id = int(record.get("origin_guild_id", 0) or 0)
-        origin_guild = self.parent_view.cog.bot.get_guild(guild_id) if guild_id else None
-        settings = self.parent_view.settings
-        action_ctx = self.parent_view.ctx
-        if origin_guild is not None:
-            settings = await self.parent_view.cog.settings_for_guild(origin_guild)
-            if getattr(action_ctx, "guild", None) is not origin_guild:
-                action_ctx = SimpleNamespace(
-                    guild=origin_guild,
-                    author=self.parent_view.ctx.author,
-                    clean_prefix=getattr(self.parent_view.ctx, "clean_prefix", "!"),
-                    send=self.parent_view.ctx.send,
-                )
-        view = None
-        if status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
-            view = ClankerReceiptRewardsView(
-                self.parent_view.cog, record, guild_id, self.parent_view
-            )
-        elif status == "awaiting_cryptowallet_approval" and origin_guild is not None:
-            view = ClankerApprovalResumeView(
-                self.parent_view.cog, action_ctx, record, settings
-            )
-        elif status == "internal_failed" and origin_guild is not None:
-            view = ClankerFailedLaunchView(
-                self.parent_view.cog, action_ctx, record, settings
-            )
-        if view is None:
-            view = discord.ui.View(timeout=900)
-        if not any(isinstance(item, ClankerBackToLaunchesButton) for item in view.children):
-            view.add_item(ClankerBackToLaunchesButton(self.parent_view))
         await interaction.response.edit_message(
             embed=self.parent_view.cog.launch_record_embed(record), view=view
         )
@@ -993,6 +977,41 @@ class ClankerLaunchHistoryView(discord.ui.View):
         self.settings = copy.deepcopy(settings)
         self.user_id = int(ctx.author.id)
         self.add_item(ClankerLaunchSelect(self))
+
+    async def open_launch(
+        self, launch_id: str, *, read_only: bool = False, standalone: bool = False
+    ) -> tuple[Dict[str, Any], discord.ui.View]:
+        record = await self.cog.get_user_launch_record(None, self.user_id, launch_id)
+        if record is None:
+            raise RuntimeError("That Clanker launch is no longer available to your account.")
+        status = str(record.get("status") or "")
+        guild_id = int(record.get("origin_guild_id", 0) or 0)
+        origin_guild = self.cog.bot.get_guild(guild_id) if guild_id else None
+        settings = self.settings
+        action_ctx = self.ctx
+        if origin_guild is not None:
+            settings = await self.cog.settings_for_guild(origin_guild)
+            if getattr(action_ctx, "guild", None) is not origin_guild:
+                action_ctx = SimpleNamespace(
+                    guild=origin_guild, author=self.ctx.author,
+                    clean_prefix=getattr(self.ctx, "clean_prefix", "!"), send=self.ctx.send,
+                )
+        view = None
+        if not read_only and status in {"internal_confirmed", "external_confirmed"} and record.get("token_address"):
+            view = ClankerReceiptRewardsView(
+                self.cog, record, guild_id, None if standalone else self
+            )
+        elif not read_only and status == "awaiting_cryptowallet_approval" and origin_guild is not None:
+            view = ClankerApprovalResumeView(self.cog, action_ctx, record, settings)
+        elif not read_only and status == "internal_failed" and origin_guild is not None:
+            view = ClankerFailedLaunchView(self.cog, action_ctx, record, settings)
+        if view is None:
+            view = discord.ui.View(timeout=900)
+        if not read_only and not standalone and not any(
+            isinstance(item, ClankerBackToLaunchesButton) for item in view.children
+        ):
+            view.add_item(ClankerBackToLaunchesButton(self))
+        return record, view
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

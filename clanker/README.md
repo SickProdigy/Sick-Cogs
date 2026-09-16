@@ -66,8 +66,8 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker card` — open an empty interactive draft flow.
 - `[p]clanker launch <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
 - `[p]clanker status` — show draft and guild-control configuration.
-- `[p]clanker drafts [limit]` — show readable unsubmitted drafts and reopen editable or verified cards from a requester-bound selector.
-- `[p]clanker draft <launch_id>` — show one of your saved drafts by compact reference.
+- `[p]clanker drafts [limit]` — show the same requester-owned draft navigator in servers and DMs, then reopen the current editable or verified card.
+- `[p]clanker draft <launch_id>` — reopen one current interactive draft card by compact reference.
 - `[p]clanker draftremove <launch_id>` — review and confirm deletion of one unsubmitted draft.
 - `[p]clanker draftsremoveall` — review and confirm deletion of all your unsubmitted drafts; launch activity is never included.
 - `[p]clanker launches [limit]` — open current launch and reward cards from requester-bound controls; server and DM history use the same requester-bound navigator and current launch receipts.
@@ -76,14 +76,14 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker claimall` — DM a paginated portfolio review, select tokens to collect, and review a WETH-profitable treasury-wide withdrawal separately.
 - `[p]clanker rewardverify <launch_id> <transaction_hash>` — reconcile an external-wallet collection against its token administrator, exact locker call, and `ClaimedRewards` event.
 - `[p]clanker claimplatform` — bot-owner review for profitable platform-treasury withdrawals only; creator balances cannot be included.
-- `[p]clanker dismiss <launch_id>` — hide a failed, uncertain, or abandoned attempt from your list while retaining the moderator audit record.
+- `[p]clanker dismiss <launch_id>` — hide a failed attempt or never-submitted approval from your list while retaining the moderator audit record.
 - `[p]clanker audit [limit]` — view all recent draft and launch records (moderator).
 
 The first launch of a symbol for each requester uses the lowercase symbol as its command reference (for example, `nmt`). Additional launches of the same symbol receive a short suffix. Full immutable launch IDs remain accepted for compatibility and internal binding.
 - `[p]clanker refresh <launch_id>` — synchronize a persisted CryptoWallet launch after approval or restart.
 - `[p]clanker external <launch_id>` — DM the requester the exact Base Sepolia operation.
 - `[p]clanker verify <launch_id> <transaction_hash>` — verify the exact transaction, TokenCreated event, and deployed bytecode.
-- `[p]clanker launchinfo <launch_id>` — show one launch record.
+- `[p]clanker launchinfo <launch_id>` — show one current requester receipt with its status controls; moderator audit access remains read-only.
 - `[p]clanker airdropproofs <launch_id>` — export generated proof metadata.
 - `[p]clankerset view` — show owner configuration.
 - `[p]clankerset enabled <true|false>` — enable draft creation.

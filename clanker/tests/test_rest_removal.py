@@ -778,10 +778,68 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(guild=None, author=SimpleNamespace(id=7), send=AsyncMock())
         await Clanker.clanker_drafts.callback(cog, ctx, 10)
         embed = ctx.send.await_args.kwargs["embed"]
-        self.assertNotIn("view", ctx.send.await_args.kwargs)
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIsInstance(view, ClankerDraftHistoryView)
+        self.assertEqual(view.children[0].options[0].label, chr(36) + "MINE • mine")
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("MINE", embed.fields[0].name)
-        self.assertIn("Server 100", embed.fields[0].value)
+        self.assertIn("Draft ID:** mine", embed.fields[0].value)
+        self.assertNotIn("Server:", embed.fields[0].value)
+
+    async def test_dm_draft_selection_uses_origin_internally_without_displaying_it(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_draft_record(SimpleNamespace(id=7), payload, 100)
+        record["launch_ref"] = "test"
+        guild = SimpleNamespace(id=100)
+        cog = SimpleNamespace(
+            bot=SimpleNamespace(get_guild=lambda guild_id: guild),
+            get_user_launch_record=AsyncMock(return_value=record),
+            settings_for_guild=AsyncMock(return_value={
+                "treasury_address": TREASURY, "platform_bps": 2000, "vault_enabled": False,
+            }),
+        )
+        ctx = SimpleNamespace(guild=None, author=SimpleNamespace(id=7), send=AsyncMock())
+        history = ClankerDraftHistoryView(cog, ctx, [record], {})
+        current, view = await history.open_draft(ctx.author, record["launch_id"])
+        self.assertEqual(current["launch_id"], record["launch_id"])
+        self.assertIsInstance(view, ClankerDraftView)
+        cog.settings_for_guild.assert_awaited_once_with(guild)
+
+    async def test_owner_launchinfo_uses_current_standalone_receipt_controls(self):
+        record = {
+            "launch_id": "mine-long", "launch_ref": "mine", "requester_id": 7,
+            "status": "internal_confirmed", "symbol": "MINE",
+            "token_address": "0x" + "ab" * 20, "origin_guild_id": 100,
+        }
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_guild=lambda guild_id: None)
+        cog.get_user_launch_record = AsyncMock(return_value=record)
+        ctx = SimpleNamespace(guild=None, author=SimpleNamespace(id=7), send=AsyncMock())
+        await Clanker.clanker_launchinfo.callback(cog, ctx, "mine")
+        sent = ctx.send.await_args.kwargs
+        self.assertIsInstance(sent["view"], ClankerReceiptRewardsView)
+        self.assertEqual([item.label for item in sent["view"].children], ["Rewards"])
+
+    async def test_moderator_launchinfo_remains_read_only(self):
+        record = {"launch_id": "other", "requester_id": 8, "status": "internal_confirmed"}
+        cog = Clanker.__new__(Clanker)
+        cog.get_user_launch_record = AsyncMock(return_value=None)
+        cog.get_launch_record = AsyncMock(return_value=record)
+        cog.bot = SimpleNamespace(
+            is_mod=AsyncMock(return_value=False), is_owner=AsyncMock(return_value=False)
+        )
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=100),
+            author=SimpleNamespace(id=7, guild_permissions=SimpleNamespace(manage_guild=True)),
+            send=AsyncMock(),
+        )
+        with patch.object(Clanker, "launch_record_embed", return_value="audit"):
+            await Clanker.clanker_launchinfo.callback(cog, ctx, "other")
+        ctx.send.assert_awaited_once_with(embed="audit")
+        self.assertNotIn("view", ctx.send.await_args.kwargs)
 
     async def test_dismiss_hides_inactive_attempt_but_retains_audit_record(self):
         record = {
@@ -1201,15 +1259,22 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reopened["operation"]["payload_hash"], reopened["payload_hash"])
 
     async def test_draft_detail_is_requester_bound(self):
-        record = {"launch_id": "draft-id", "status": "dry_run", "requester_id": 7}
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_draft_record(SimpleNamespace(id=7), payload, 100)
+        record["launch_ref"] = "test"
         cog, ctx = self.make_cog_and_context([record])
+        cog.bot = SimpleNamespace(get_guild=lambda guild_id: ctx.guild if guild_id == 100 else None)
         cog.get_user_launch_record = AsyncMock(return_value=record)
-        with patch.object(Clanker, "launch_record_embed", return_value="draft-embed"):
-            await Clanker.clanker_draft.callback(cog, ctx, "draft-id")
-        ctx.send.assert_awaited_once_with(embed="draft-embed")
+        await Clanker.clanker_draft.callback(cog, ctx, "test")
+        sent = ctx.send.await_args.kwargs
+        self.assertIsInstance(sent["view"], ClankerDraftView)
+        self.assertEqual(sent["embed"].title, "Clanker launch draft")
         ctx.send.reset_mock()
         ctx.author.id = 8
-        await Clanker.clanker_draft.callback(cog, ctx, "draft-id")
+        await Clanker.clanker_draft.callback(cog, ctx, "test")
         ctx.send.assert_awaited_once_with("No saved Clanker draft of yours matched that ID.")
 
 
