@@ -982,23 +982,29 @@ class ClankerLaunchHistoryView(discord.ui.View):
         return False
 
 
-class ClankerDMLaunchButton(discord.ui.Button):
+class ClankerDMLaunchSelect(discord.ui.Select):
     """Open a fresh launch receipt without replacing the DM activity list."""
 
-    def __init__(self, parent: "ClankerDMLaunchHistoryView", record: Dict[str, Any], index: int):
+    def __init__(self, parent: "ClankerDMLaunchHistoryView", records: list[Dict[str, Any]]):
         self.parent_view = parent
-        self.launch_id = str(record.get("launch_id") or "")
-        reference = str(record.get("launch_ref") or self.launch_id or "unknown")
-        symbol = str(record.get("symbol") or "?").upper()
+        options = []
+        for record in reversed(records[-25:]):
+            launch_id = str(record.get("launch_id") or "")
+            reference = str(record.get("launch_ref") or launch_id or "unknown")
+            symbol = str(record.get("symbol") or "?").upper()
+            status = parent.cog.launch_status_label(str(record.get("status") or "unknown"))
+            options.append(discord.SelectOption(
+                label=(chr(36) + symbol + " • " + reference)[:100],
+                value=launch_id,
+                description=status[:100],
+            ))
         super().__init__(
-            label=("View " + chr(36) + symbol + " • " + reference)[:80],
-            style=discord.ButtonStyle.secondary,
-            row=index // 5,
+            placeholder="Choose a launch to open", min_values=1, max_values=1, options=options
         )
 
     async def callback(self, interaction: discord.Interaction):
         record = await self.parent_view.cog.get_user_launch_record(
-            None, self.parent_view.user_id, self.launch_id
+            None, self.parent_view.user_id, self.values[0]
         )
         if record is None:
             await interaction.response.send_message(
@@ -1019,14 +1025,13 @@ class ClankerDMLaunchButton(discord.ui.Button):
 
 
 class ClankerDMLaunchHistoryView(discord.ui.View):
-    """Requester-bound buttons that open fresh launch cards in DMs."""
+    """Requester-bound selector that opens fresh launch cards in DMs."""
 
     def __init__(self, cog: "Clanker", user_id: int, records: list[Dict[str, Any]]):
         super().__init__(timeout=900)
         self.cog = cog
         self.user_id = int(user_id)
-        for index, record in enumerate(reversed(records[-25:])):
-            self.add_item(ClankerDMLaunchButton(self, record, index))
+        self.add_item(ClankerDMLaunchSelect(self, records))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

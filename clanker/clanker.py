@@ -827,14 +827,19 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     ) -> discord.Embed:
         embed = discord.Embed(
             title="Your Clanker launch activity",
-            description="Most recent first. Use the short reference with Clanker commands.",
+            description="Most recent first. Choose a launch below to open its current receipt.",
             color=discord.Color.blue(),
         )
+        server_names = {
+            str(record.get("history_guild_name") or "") for record in records
+            if record.get("history_guild_name")
+        }
+        show_server = len(server_names) > 1
         for record in reversed(records):
             reference = record.get("launch_ref") or Clanker.launch_reference(record, audit_log)
             symbol = str(record.get("symbol") or "?").upper()
             status = Clanker.launch_status_label(str(record.get("status") or "unknown"))
-            lines = [f"**Status:** {status}"]
+            lines = [f"**Status:** {status}", f"**Launch ID:** {reference}"]
             created = str(record.get("created_at") or "")
             try:
                 moment = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
@@ -845,10 +850,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 if created:
                     lines.append(f"**Created:** {created}")
             server_name = str(record.get("history_guild_name") or "")
-            if server_name:
+            if show_server and server_name:
                 lines.append(f"**Server:** {server_name}")
             route = str(record.get("execution_route") or "").replace("_", " ").title()
-            if route:
+            if route and route.lower() != "internal":
                 lines.append(f"**Route:** {route}")
             token = record.get("token_address")
             if token:
@@ -860,7 +865,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if transaction:
                 lines.append(f"[Transaction](https://sepolia.basescan.org/tx/{transaction})")
             embed.add_field(
-                name="$" + symbol + "  •  " + reference,
+                name=chr(36) + symbol,
                 value="\n".join(lines),
                 inline=False,
             )
@@ -2621,11 +2626,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if not launches:
             await ctx.send("No Clanker drafts have entered an execution route.")
             return
+        for record in launches:
+            record["launch_ref"] = (
+                record.get("launch_ref") or self.launch_reference(record, audit_log)
+            )
         embed = self.launch_list_embed(launches[-limit:], audit_log)
         if ctx.guild is None:
             embed.description = (
-                "Most recent first across your shared servers. Use a View button to open "
-                "a current launch card; server-only management stays where it was created."
+                "Most recent first across your shared servers. Choose a launch below to open "
+                "its current receipt."
             )
             await ctx.send(embed=embed, view=ClankerDMLaunchHistoryView(
                 self, ctx.author.id, launches[-limit:]

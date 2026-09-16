@@ -735,19 +735,21 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         view = ctx.send.await_args.kwargs["view"]
         self.assertIsInstance(view, ClankerDMLaunchHistoryView)
         self.assertEqual(len(view.children), 1)
-        self.assertEqual(view.children[0].label, "View " + chr(36) + "MINE • mine")
+        self.assertEqual(view.children[0].options[0].label, chr(36) + "MINE • mine")
         self.assertEqual(len(embed.fields), 1)
         self.assertIn("MINE", embed.fields[0].name)
-        self.assertIn("Server 100", embed.fields[0].value)
+        self.assertIn("Launch ID:** mine", embed.fields[0].value)
+        self.assertNotIn("Server:", embed.fields[0].value)
         self.assertNotIn("OTHER", embed.fields[0].name)
 
-    async def test_dm_launch_button_fetches_fresh_record_and_sends_new_card(self):
+    async def test_dm_launch_selection_fetches_fresh_record_and_sends_new_card(self):
         listed = {"launch_id": "mine-long", "launch_ref": "mine",
                   "status": "internal_submitted", "requester_id": 7, "symbol": "MINE"}
         fresh = dict(listed, status="internal_confirmed",
                      token_address="0x" + "ab" * 20, origin_guild_id=100)
         cog = SimpleNamespace(
             get_user_launch_record=AsyncMock(return_value=fresh),
+            launch_status_label=lambda status: status,
             launch_record_embed=lambda record: record["status"],
         )
         view = ClankerDMLaunchHistoryView(cog, 7, [listed])
@@ -755,6 +757,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
             user=SimpleNamespace(id=7),
             response=SimpleNamespace(send_message=AsyncMock()),
         )
+        view.children[0]._values = ["mine-long"]
         await view.children[0].callback(interaction)
         cog.get_user_launch_record.assert_awaited_once_with(None, 7, "mine-long")
         sent = interaction.response.send_message.await_args.kwargs
