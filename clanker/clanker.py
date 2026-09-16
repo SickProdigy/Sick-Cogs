@@ -2508,7 +2508,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             )
             await ctx.send(embed=embed)
             return
-        settings = await self.config.guild(ctx.guild).all()
+        settings = await self.settings_for_guild(ctx.guild)
         await ctx.send(
             embed=embed,
             view=ClankerDraftHistoryView(self, ctx, drafts[-limit:], settings),
@@ -2629,7 +2629,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             )
             await ctx.send(embed=embed)
             return
-        settings = await self.config.guild(ctx.guild).all()
+        settings = await self.settings_for_guild(ctx.guild)
         await ctx.send(embed=embed, view=ClankerLaunchHistoryView(
             self, ctx, launches[-limit:], settings
         ))

@@ -668,8 +668,10 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         cog.config = SimpleNamespace(
             guild=lambda guild: SimpleNamespace(
                 audit_log=AsyncMock(return_value=records),
-                all=AsyncMock(return_value={"treasury_address": TREASURY, "platform_bps": 2000}),
-            )
+                all=AsyncMock(return_value={"enabled": True}),
+            ),
+            treasury_address=AsyncMock(return_value=TREASURY),
+            platform_bps=AsyncMock(return_value=2000),
         )
         ctx = SimpleNamespace(
             guild=SimpleNamespace(id=100), author=SimpleNamespace(id=author_id), send=AsyncMock()
@@ -687,6 +689,8 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         embed = ctx.send.await_args.kwargs["embed"]
         view = ctx.send.await_args.kwargs["view"]
         self.assertIsInstance(view, ClankerDraftHistoryView)
+        self.assertEqual(view.settings["treasury_address"], TREASURY)
+        self.assertEqual(view.settings["platform_bps"], 2000)
         self.assertEqual(embed.title, "Your Clanker drafts")
         rendered = "\n".join(field.name for field in embed.fields)
         self.assertIn("$MINE", rendered)
@@ -705,6 +709,8 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         embed = ctx.send.await_args.kwargs["embed"]
         view = ctx.send.await_args.kwargs["view"]
         self.assertIsInstance(view, ClankerLaunchHistoryView)
+        self.assertEqual(view.settings["treasury_address"], TREASURY)
+        self.assertEqual(view.settings["platform_bps"], 2000)
         self.assertEqual(view.user_id, 7)
         self.assertEqual(len(view.records), 1)
         self.assertEqual(embed.title, "Your Clanker launch activity")
