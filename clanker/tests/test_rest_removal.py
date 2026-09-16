@@ -1388,30 +1388,10 @@ class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "pending")
 
 
-    async def test_external_verify_rejects_terminal_state_and_hash_replacement(self):
-        tx_hash = "0x" + "ab" * 32
-        other_hash = "0x" + "cd" * 32
-        cog = Clanker.__new__(Clanker)
-        ctx = SimpleNamespace(
-            guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7), send=AsyncMock()
-        )
-        cog.get_user_launch_record = AsyncMock(return_value={
-            "launch_id": "launch", "requester_id": 7, "status": "external_confirmed",
-            "transaction_hash": tx_hash, "operation": {}, "intent": {},
-        })
-        with patch.object(clanker_module, "verify_external_operation", AsyncMock()) as verify:
-            await Clanker.clanker_verify.callback(cog, ctx, "launch", tx_hash)
-            verify.assert_not_awaited()
-        ctx.send.assert_awaited_with("That launch is not awaiting external-wallet verification.")
-
-        ctx.send.reset_mock()
-        cog.get_user_launch_record.return_value["status"] = "external_pending"
-        with patch.object(clanker_module, "verify_external_operation", AsyncMock()) as verify:
-            await Clanker.clanker_verify.callback(cog, ctx, "launch", other_hash)
-            verify.assert_not_awaited()
-        ctx.send.assert_awaited_with(
-            "That launch is already bound to a different pending transaction."
-        )
+    def test_external_wallet_commands_are_not_public(self):
+        self.assertFalse(hasattr(Clanker, "clanker_external"))
+        self.assertFalse(hasattr(Clanker, "clanker_verify"))
+        self.assertFalse(hasattr(Clanker, "clanker_rewardverify"))
 
 
 class ClankerVaultAndGasRegressionTests(unittest.IsolatedAsyncioTestCase):

@@ -2352,7 +2352,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             companion_url = "Not configured"
         embed = discord.Embed(title="Clanker status", color=discord.Color.blue())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
-        embed.add_field(name="Execution", value="Protected CryptoWallet or external-wallet handoff", inline=False)
+        embed.add_field(name="Execution", value="Protected CryptoWallet signing", inline=False)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
         launch_channel = ctx.guild.get_channel(settings.get("launch_channel_id") or 0)
@@ -2628,37 +2628,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "The server audit record was retained."
         )
 
-    @clanker.command(name="rewardverify")
-    async def clanker_rewardverify(
-        self, ctx: commands.Context, launch_id: str, transaction_hash: str
-    ):
-        """Verify an external reward claim.
-
-        Reconciles an external-wallet reward transaction for your token.
-        """
-        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
-        if not record:
-            await ctx.send("No matching confirmed Clanker launch belongs to you.")
-            return
-        recipients = (record.get("payload") or {}).get("rewards", {}).get("recipients") or []
-        try:
-            result = await verify_external_collection(
-                transaction_hash, str(record["token_address"]), str(record["token_admin"]),
-                len(recipients), clanker_rpc,
-            )
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await ctx.send("Clanker could not verify that reward collection: " + str(exc))
-            return
-        async with self.guild_records(ctx.guild) as audit_log:
-            match = next(item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"]))
-            match["reward_collection"] = {"route": "external", **result}
-        if result["status"] == "pending":
-            await ctx.send("That external collection is still pending; run this command again after confirmation.")
-        else:
-            await ctx.send("External reward collection " + chr(96) + result["status"] + chr(96)
-                           + " and reconciled for " + chr(96)
-                           + str(record.get("launch_ref") or record["launch_id"]) + chr(96) + ".")
-
     @clanker.command(name="claimall")
     async def clanker_claimall(self, ctx: commands.Context):
         """Review all rewards.
@@ -2779,122 +2748,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             return
         await ctx.send(f"CryptoWallet Clanker status: `{result['status']}`.")
 
-    @clanker.command(name="external")
-    async def clanker_external(self, ctx: commands.Context, launch_id: str):
-        """Use an external wallet.
-
-        DMs a requester-bound companion handoff for the exact launch transaction.
-        """
-        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
-        if not record:
-            await ctx.send("No Clanker launch record matched that ID.")
-            return
-        if int(record.get("requester_id", 0)) != int(ctx.author.id):
-            await ctx.send("Only the launch requester can choose its execution wallet.")
-            return
-        if record.get("status") != "dry_run":
-            await ctx.send("That launch has already entered an execution route.")
-            return
-        execution_created_at = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-        execution_expires_at = execution_created_at + 900
-        template_record = {**record, "execution_created_at": execution_created_at,
-                           "execution_expires_at": execution_expires_at}
-        try:
-            intent_template = self.build_external_template(
-                ctx.guild.id, ctx.author.id, template_record
-            )
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await ctx.send(f"Clanker could not prepare the saved draft: {exc}")
-            return
-        handoff = {"version": 1, "kind": "clanker-v4-external-template",
-                   "requester_id": str(ctx.author.id), "expires_at": execution_expires_at,
-                   "intent": intent_template, "operation": None,
-                   "verification_command": f"{ctx.clean_prefix}clanker verify {record['launch_id']} <transaction_hash>"}
-        try:
-            external_url = await self.create_external_wallet_handoff(ctx.author, handoff)
-            await ctx.author.send(
-                "Review and submit your exact Base Sepolia Clanker operation here:\n"
-                + external_url
-                + "\nThis protected link is short-lived and bound to your launch."
-            )
-        except discord.Forbidden:
-            await ctx.send("I could not DM the external-wallet handoff. Enable DMs and try again.")
-            return
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await ctx.send(f"Clanker could not create the external-wallet handoff: {exc}")
-            return
-        async with self.guild_records(ctx.guild) as audit_log:
-            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
-            if len(matches) != 1 or matches[0].get("status") != "dry_run":
-                await ctx.send("The launch changed before its external route could be saved.")
-                return
-            matches[0]["status"] = "awaiting_external_wallet"
-            matches[0]["execution_route"] = "external"
-            matches[0]["execution_created_at"] = execution_created_at
-            matches[0]["execution_expires_at"] = execution_expires_at
-            matches[0]["intent_template"] = intent_template
-        await ctx.send("I sent the exact external-wallet operation and verification command by DM.")
-
-    @clanker.command(name="verify")
-    async def clanker_verify(self, ctx: commands.Context, launch_id: str, transaction_hash: str):
-        """Verify an external launch.
-
-        Checks a Base Sepolia transaction against the exact saved launch operation.
-        """
-        record = await self.get_user_launch_record(ctx.guild, ctx.author.id, launch_id)
-        if not record or int(record.get("requester_id", 0)) != int(ctx.author.id):
-            await ctx.send("No matching external-wallet launch belongs to you.")
-            return
-        if record.get("status") not in {"awaiting_external_wallet", "external_pending"}:
-            await ctx.send("That launch is not awaiting external-wallet verification.")
-            return
-        bound_hash = str(record.get("transaction_hash") or "").lower()
-        if bound_hash and bound_hash != str(transaction_hash).lower():
-            await ctx.send("That launch is already bound to a different pending transaction.")
-            return
-        if record.get("status") == "external_pending" and bound_hash:
-            await ctx.send(
-                "That pending transaction is already bound. Clanker is reconciling it "
-                "automatically; no additional verification request is needed."
-            )
-            return
-        try:
-            if not record.get("operation") or not record.get("intent"):
-                transaction = await clanker_rpc("eth_getTransactionByHash", [transaction_hash])
-                signer_address = str((transaction or {}).get("from") or "")
-                if not is_eth_address(signer_address):
-                    raise RuntimeError("The external transaction signer is not available yet.")
-                record = await self.prepare_draft_execution(
-                    ctx.guild, ctx.author, str(record["launch_id"]), signer_address
-                )
-            result = await verify_external_operation(transaction_hash, record["operation"], record["intent"])
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
-            await ctx.send(f"External Clanker verification failed: {exc}")
-            return
-        if not result["verified"]:
-            async with self.guild_records(ctx.guild) as audit_log:
-                for item in audit_log:
-                    if str(item.get("launch_id")) == str(record["launch_id"]):
-                        item["status"] = "external_pending"
-                        item["transaction_hash"] = result["transaction_hash"]
-            self._start_external_confirmation_task(
-                ctx.guild.id, ctx.author.id, str(record["launch_id"])
-            )
-            await ctx.send(
-                "That transaction is pending a Base Sepolia receipt. Clanker will reconcile "
-                "it automatically; you do not need to run this command again."
-            )
-            return
-        async with self.guild_records(ctx.guild) as audit_log:
-            matches = [item for item in audit_log if str(item.get("launch_id")) == str(record["launch_id"])]
-            if len(matches) != 1:
-                raise RuntimeError("The launch record changed during verification.")
-            matches[0].update({"status": "external_confirmed",
-                "transaction_hash": result["transaction_hash"],
-                "signer_address": result["signer_address"],
-                "block_number": result["block_number"],
-                "token_address": result["token_address"]})
-        await ctx.send(f"Verified Clanker token `{result['token_address']}` in Base Sepolia block {result['block_number']}. Transaction: `{result['transaction_hash']}`")
     @clanker.command(name="airdropproofs", aliases=("proofs", "airdropexport"))
     @checks.mod_or_permissions(manage_guild=True)
     async def clanker_airdropproofs(self, ctx: commands.Context, launch_id: str):
