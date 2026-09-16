@@ -2,9 +2,12 @@ import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from cryptowallet.providers.cdp import _fixed_supply_token_data, _singleton_deploy_data
+from ..operations import (
+    TokenFactoryOperationError,
+    fixed_supply_token_data, singleton_deploy_data, verify_fixed_supply_token,
+)
 from ..models import TokenDraft
 from ..tokenfactory import TokenFactory
 from ..views import FactoryDeploymentView, TokenDeploymentConfirmView
@@ -66,13 +69,13 @@ class TokenFactoryValidationTests(unittest.TestCase):
         self.assertEqual(restored.owner_address, "")
 
     def test_fixed_supply_encoder_matches_ethers_reference(self):
-        encoded = _fixed_supply_token_data(
-            "Sick Gaming Token",
-            "SGT",
-            6,
-            1_000_000_250_000,
+        draft = TokenDraft(
+            creator_discord_id=7, name="Sick Gaming Token", symbol="SGT",
+            decimals=6, supply_atomic=1_000_000_250_000,
+        )
+        encoded = fixed_supply_token_data(
+            draft, "0x" + "22" * 32,
             "0x1111111111111111111111111111111111111111",
-            "0x" + "22" * 32,
         )
         expected = (
             "0x8b08cf96"
@@ -97,14 +100,57 @@ class TokenFactoryValidationTests(unittest.TestCase):
             / "SickGamingTokenFactory.json"
         )
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-        calldata = _singleton_deploy_data(artifact["bytecode"])
+        calldata = singleton_deploy_data(artifact["bytecode"])
         self.assertTrue(calldata.startswith("0x4af63f02"))
         self.assertEqual(calldata[10 + 64 : 10 + 128], "0" * 64)
         mutated = artifact["bytecode"][:-2] + (
             "00" if artifact["bytecode"][-2:] != "00" else "01"
         )
         with self.assertRaisesRegex(ValueError, "Unrecognized"):
-            _singleton_deploy_data(mutated)
+            singleton_deploy_data(mutated)
+
+
+class TokenFactoryOperationVerificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tokenfactory_owns_immutable_token_verification(self):
+        draft = TokenDraft(
+            creator_discord_id=7, name="Verified Token", symbol="VFT",
+            decimals=6, supply_atomic=1_000_000,
+        )
+        deployment = {
+            "token_address": "0x2222222222222222222222222222222222222222",
+            "parameters_hash": "0x" + "33" * 32,
+        }
+        asset = {
+            "name": draft.name, "symbol": draft.symbol,
+            "decimals": draft.decimals, "amount_atomic": draft.supply_atomic,
+            "total_supply_atomic": draft.supply_atomic,
+        }
+        with patch(
+            "tokenfactory.operations.get_factory_token_deployment",
+            AsyncMock(return_value=deployment),
+        ), patch(
+            "tokenfactory.operations.get_erc20_asset",
+            AsyncMock(return_value=asset),
+        ):
+            result = await verify_fixed_supply_token(
+                draft, "0x" + "44" * 32,
+                "0x1111111111111111111111111111111111111111",
+            )
+        self.assertTrue(result["deployed"])
+        self.assertEqual(result["token_address"], deployment["token_address"])
+
+        mismatched = {**asset, "total_supply_atomic": draft.supply_atomic + 1}
+        with patch(
+            "tokenfactory.operations.get_factory_token_deployment",
+            AsyncMock(return_value=deployment),
+        ), patch(
+            "tokenfactory.operations.get_erc20_asset",
+            AsyncMock(return_value=mismatched),
+        ), self.assertRaises(TokenFactoryOperationError):
+            await verify_fixed_supply_token(
+                draft, "0x" + "44" * 32,
+                "0x1111111111111111111111111111111111111111",
+            )
 
 
 class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
@@ -153,17 +199,20 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "gas_limit": 2_000_000, "native_value_wei": 0,
             "gas_sponsored": True, "gas_payer": "CDP paymaster",
         }
-        wallet = SimpleNamespace(tokenfactory_deployment_status=AsyncMock(return_value={
-            "deployed": False, "address": "0xcba30318008035bb5a855a8684cea954d573c2c3",
-        }))
         cog = SimpleNamespace(
-            _cryptowallet=lambda: wallet,
             _factory_artifact=lambda: {"bytecode": "0x1234"},
             execution_terms=lambda **kwargs: terms,
         )
         ctx = SimpleNamespace(author=self.user, send=AsyncMock())
 
-        await TokenFactory.tokenfactoryset_deploy_factory.callback(cog, ctx)
+        with patch(
+            "tokenfactory.tokenfactory.factory_deployment_status",
+            AsyncMock(return_value={
+                "deployed": False,
+                "address": "0xcba30318008035bb5a855a8684cea954d573c2c3",
+            }),
+        ):
+            await TokenFactory.tokenfactoryset_deploy_factory.callback(cog, ctx)
 
         sent = ctx.send.await_args.kwargs
         fields = {field.name: field.value for field in sent["embed"].fields}

@@ -4,6 +4,16 @@ TokenFactory is the testnet-first fixed-supply ERC-20 deployment workflow introd
 and extended with provider-independent wallet deployment in issue #112. It is deliberately separate
 from the Clanker launch cog.
 
+## Ownership boundary
+
+TokenFactory owns its drafts, validation, canonical factory calldata, execution terms, pending
+deployment lifecycle, external-transaction verification, on-chain token verification, and result
+records. CryptoWallet is a narrow signer and transport dependency: it binds the Discord wallet,
+enforces authorization, pause and security-lock state, independently checks the pinned call
+allowlist, submits the reviewed operation through CDP, and hosts the shared static companion and
+opaque relay. CryptoWallet does not construct TokenFactory operations or decide whether a token
+deployment is valid.
+
 ## Protected Base Sepolia deployment
 
 ```text
