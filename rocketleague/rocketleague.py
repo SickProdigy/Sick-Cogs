@@ -16,6 +16,7 @@ from redbot.core.bot import Red
 
 from .api import RLCSTournament, StartGGClient, StartGGError, normalize_tournament_slug
 from .blast import BlastClient, BlastError, BlastTournament, upcoming_tournaments
+from .clips import ClipProviders, ClipSourceError, clip_identity, detect_clip_source
 
 
 log = logging.getLogger("red.sick-cogs.RocketLeague")
@@ -23,11 +24,17 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.2.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
 CHALLONGE_DAILY_TOURNAMENT_LIMIT = 7
+CLIP_CACHE_INTERVAL = 24 * 60 * 60
+CLIP_DEFAULT_INTERVAL = 12 * 60 * 60
+CLIP_DEFAULT_MAX_LENGTH = 180
+CLIP_HISTORY_LIMIT = 500
+CLIP_SOURCE_LIMIT = 25
+CLIP_CACHE_VERSION = 2
 CONFIG_IDENTIFIER = 0x5347524C4353
 
 
@@ -41,7 +48,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.2.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -54,19 +61,31 @@ class RocketLeague(commands.Cog):
             blast_last_error=None,
             challonge_refresh_day=0,
             challonge_refresh_count=0,
+            clip_cache={},
         )
         self.config.register_guild(
             channel_id=None,
             enabled=False,
             announced={},
             tournament_sources=[],
+            clip_channel_id=None,
+            clip_enabled=False,
+            clip_sources=[],
+            clip_interval=CLIP_DEFAULT_INTERVAL,
+            clip_max_length=CLIP_DEFAULT_MAX_LENGTH,
+            clip_last_post=0,
+            clip_next_post=0,
+            clip_last_source_id=None,
+            clip_posted=[],
         )
         self._blast_lock = asyncio.Lock()
         self._challonge_token_lock = asyncio.Lock()
         self._challonge_access_token: Optional[str] = None
         self._challonge_token_expires_at = 0.0
+        self._clip_providers: Optional[ClipProviders] = None
         self.schedule_loop.start()
         self.community_refresh_loop.start()
+        self.clip_post_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
         """This cog stores no user data."""
@@ -75,6 +94,7 @@ class RocketLeague(commands.Cog):
     def cog_unload(self):
         self.schedule_loop.cancel()
         self.community_refresh_loop.cancel()
+        self.clip_post_loop.cancel()
         if self.session and not self.session.closed:
             self.bot.loop.create_task(self.session.close())
 
@@ -298,6 +318,143 @@ class RocketLeague(commands.Cog):
     async def before_community_refresh_loop(self) -> None:
         await self.bot.wait_until_red_ready()
         await asyncio.sleep(random.randint(60, 600))
+
+    async def get_clip_providers(self) -> ClipProviders:
+        if self._clip_providers is None:
+            self._clip_providers = ClipProviders(self.bot, await self.get_session())
+        return self._clip_providers
+
+    @staticmethod
+    def _clip_cache_key(source: dict) -> str:
+        return f"{source.get('provider')}:{source.get('kind')}:{source.get('key')}"
+
+    async def _number_clip_sources(self, guild) -> list[dict]:
+        async with self.config.guild(guild).clip_sources() as sources:
+            used = {int(item["id"]) for item in sources if str(item.get("id") or "").isdigit()}
+            next_id = 1
+            for item in sources:
+                if str(item.get("id") or "").isdigit():
+                    continue
+                while next_id in used:
+                    next_id += 1
+                item["id"] = next_id
+                used.add(next_id)
+            return [dict(item) for item in sources]
+
+    async def _cached_clips(self, source: dict, *, force: bool = False) -> list[dict]:
+        cache = dict(await self.config.clip_cache())
+        key = self._clip_cache_key(source)
+        entry = cache.get(key) if isinstance(cache.get(key), dict) else {}
+        now = int(time.time())
+        cached_clips = list(entry.get("clips") or [])
+        current_format = int(entry.get("version") or 0) == CLIP_CACHE_VERSION
+        if (
+            not force
+            and current_format
+            and now - int(entry.get("cached_at") or 0) < CLIP_CACHE_INTERVAL
+        ):
+            return cached_clips
+        try:
+            clips = await (await self.get_clip_providers()).fetch(source)
+        except ClipSourceError:
+            if entry.get("clips"):
+                log.warning("Using stale clip cache for %s after provider refresh failure", key)
+                return list(entry.get("clips") or [])
+            raise
+        cache[key] = {
+            "version": CLIP_CACHE_VERSION,
+            "cached_at": now,
+            "clips": clips[:100],
+        }
+        await self.config.clip_cache.set(cache)
+        return clips[:100]
+
+    @staticmethod
+    def _next_clip_post(interval: int) -> int:
+        jitter = max(300, int(interval * 0.15))
+        return int(time.time()) + interval + random.randint(-jitter, jitter)
+
+    @staticmethod
+    def _preferred_clip(clips: list[dict]) -> dict:
+        """Prefer the highest-view unseen clip; keep random choice only for tied views."""
+        highest_views = max(int(clip.get("views") or 0) for clip in clips)
+        top = [clip for clip in clips if int(clip.get("views") or 0) == highest_views]
+        return random.choice(top)
+
+    async def _choose_clip(self, guild, *, force_refresh: bool = False):
+        settings = await self.config.guild(guild).all()
+        sources = await self._number_clip_sources(guild)
+        if not sources:
+            raise ClipSourceError("This server has no clip sources configured.")
+        posted = set(settings.get("clip_posted") or [])
+        max_length = int(settings.get("clip_max_length") or CLIP_DEFAULT_MAX_LENGTH)
+        candidates = []
+        errors = []
+        for source in sources:
+            try:
+                clips = await self._cached_clips(source, force=force_refresh)
+            except ClipSourceError as exc:
+                errors.append(str(exc))
+                continue
+            eligible = [
+                clip for clip in clips
+                if 0 < float(clip.get("duration") or 0) <= max_length
+                and clip_identity(clip) not in posted
+            ]
+            if eligible:
+                candidates.append((source, eligible))
+        if not candidates:
+            if errors and len(errors) == len(sources):
+                raise ClipSourceError(errors[0])
+            raise ClipSourceError("No unseen clips within this server’s length limit are available yet.")
+        last_source = int(settings.get("clip_last_source_id") or 0)
+        ordered = sorted(candidates, key=lambda item: int(item[0].get("id") or 0))
+        source, clips = next(
+            (item for item in ordered if int(item[0].get("id") or 0) > last_source),
+            ordered[0],
+        )
+        return source, self._preferred_clip(clips)
+
+    async def _post_clip_for_guild(self, guild, *, force_refresh: bool = False) -> dict:
+        settings = await self.config.guild(guild).all()
+        channel_id = settings.get("clip_channel_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is None:
+            raise ClipSourceError("Choose a clip channel first.")
+        source, clip = await self._choose_clip(guild, force_refresh=force_refresh)
+        await channel.send(
+            str(clip.get("url") or ""),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        history = list(settings.get("clip_posted") or [])
+        history.append(clip_identity(clip))
+        await self.config.guild(guild).clip_posted.set(history[-CLIP_HISTORY_LIMIT:])
+        await self.config.guild(guild).clip_last_source_id.set(source.get("id"))
+        await self.config.guild(guild).clip_last_post.set(int(time.time()))
+        interval = int(settings.get("clip_interval") or CLIP_DEFAULT_INTERVAL)
+        await self.config.guild(guild).clip_next_post.set(self._next_clip_post(interval))
+        return clip
+
+    @tasks.loop(minutes=15)
+    async def clip_post_loop(self) -> None:
+        now = int(time.time())
+        for guild in self.bot.guilds:
+            settings = await self.config.guild(guild).all()
+            if not settings.get("clip_enabled"):
+                continue
+            next_post = int(settings.get("clip_next_post") or 0)
+            if next_post and next_post > now:
+                continue
+            try:
+                await self._post_clip_for_guild(guild)
+            except (ClipSourceError, discord.Forbidden, discord.HTTPException) as exc:
+                log.warning("Automatic clip post failed for guild %s: %s", guild.id, exc)
+                await self.config.guild(guild).clip_next_post.set(now + CLIP_CACHE_INTERVAL)
+
+    @clip_post_loop.before_loop
+    async def before_clip_post_loop(self) -> None:
+        await self.bot.wait_until_red_ready()
+        await asyncio.sleep(random.randint(30, 180))
 
     @commands.group(name="rlcs", invoke_without_command=True)
     @commands.bot_has_permissions(embed_links=True)
@@ -552,8 +709,196 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def rocketleagueset(self, ctx: commands.Context):
-        """Admin: configure server-specific Rocket League tournaments."""
+        """Admin: configure server-specific tournaments and automatic clips."""
         await ctx.send_help()
+
+
+    @rocketleagueset.group(name="clips", aliases=["clip"], invoke_without_command=True)
+    async def rocketleagueset_clips(self, ctx: commands.Context):
+        """Admin: configure automatic short Rocket League clips."""
+        await ctx.send_help()
+
+    @rocketleagueset_clips.command(name="channel")
+    async def rocketleagueset_clips_channel(
+        self, ctx: commands.Context, channel: discord.TextChannel
+    ):
+        """Choose the channel for automatic clip posts."""
+        permissions = channel.permissions_for(ctx.guild.me)
+        if not permissions.send_messages or not permissions.embed_links:
+            await ctx.send("I need Send Messages and Embed Links in that channel.")
+            return
+        await self.config.guild(ctx.guild).clip_channel_id.set(channel.id)
+        await ctx.send(f"Rocket League clips will be posted in {channel.mention} when enabled.")
+
+    @rocketleagueset_clips.command(name="sourceadd")
+    async def rocketleagueset_clips_sourceadd(
+        self, ctx: commands.Context, *, source_input: str
+    ):
+        """Add a Medal, Twitch, or YouTube source by URL or provider and name."""
+        pieces = source_input.strip().split(maxsplit=1)
+        provider = None
+        value = source_input
+        if len(pieces) == 2 and pieces[0].casefold() in {"medal", "twitch", "youtube", "yt"}:
+            provider, value = pieces
+        try:
+            provider, value = detect_clip_source(value, provider)
+            async with ctx.typing():
+                source, clips = await (await self.get_clip_providers()).resolve(provider, value)
+        except ClipSourceError as exc:
+            await ctx.send(str(exc))
+            return
+        sources = await self._number_clip_sources(ctx.guild)
+        identity = (source.get("provider"), source.get("kind"), source.get("key"))
+        if any(
+            (item.get("provider"), item.get("kind"), item.get("key")) == identity
+            for item in sources
+        ):
+            await ctx.send(f"**{source.get('name')}** is already a clip source for this server.")
+            return
+        if len(sources) >= CLIP_SOURCE_LIMIT:
+            await ctx.send(f"A server can configure at most {CLIP_SOURCE_LIMIT} clip sources.")
+            return
+        used = [int(item.get("id")) for item in sources if str(item.get("id") or "").isdigit()]
+        source["id"] = max(used, default=0) + 1
+        async with self.config.guild(ctx.guild).clip_sources() as stored:
+            stored.append(source)
+        cache = dict(await self.config.clip_cache())
+        cache[self._clip_cache_key(source)] = {
+            "version": CLIP_CACHE_VERSION,
+            "cached_at": int(time.time()),
+            "clips": clips[:100],
+        }
+        await self.config.clip_cache.set(cache)
+        max_length = int(await self.config.guild(ctx.guild).clip_max_length())
+        eligible = sum(0 < float(clip.get("duration") or 0) <= max_length for clip in clips)
+        await ctx.send(
+            f"Added clip source ID `{source['id']}`: **{source.get('name')}** ({provider.title()}). "
+            f"Cached {eligible} eligible clip{'s' if eligible != 1 else ''}."
+        )
+
+    @rocketleagueset_clips.command(name="sourceremove")
+    async def rocketleagueset_clips_sourceremove(
+        self, ctx: commands.Context, source_id: int
+    ):
+        """Remove a configured clip source by its server ID."""
+        sources = await self._number_clip_sources(ctx.guild)
+        matched = next((item for item in sources if int(item.get("id") or 0) == source_id), None)
+        if matched is None:
+            await ctx.send("That clip source ID is not configured for this server.")
+            return
+        async with self.config.guild(ctx.guild).clip_sources() as stored:
+            stored[:] = [item for item in stored if int(item.get("id") or 0) != source_id]
+        await ctx.send(f"Removed clip source `{source_id}`: **{matched.get('name')}**.")
+
+    @rocketleagueset_clips.command(name="sources")
+    async def rocketleagueset_clips_sources(self, ctx: commands.Context):
+        """List configured clip sources and their removal IDs."""
+        sources = await self._number_clip_sources(ctx.guild)
+        if not sources:
+            await ctx.send("This server has no clip sources configured.")
+            return
+        lines = [
+            f"- ID `{item.get('id')}` • **{item.get('name')}** • {str(item.get('provider')).title()} • <{item.get('url')}>"
+            for item in sources
+        ]
+        lines.append(
+            f"\nRemove one with `{ctx.clean_prefix}rocketleagueset clips sourceremove <id>`."
+        )
+        await ctx.send("**Configured Rocket League clip sources**\n" + "\n".join(lines))
+
+    @rocketleagueset_clips.command(name="interval")
+    async def rocketleagueset_clips_interval(
+        self, ctx: commands.Context, hours: commands.Range[int, 1, 168]
+    ):
+        """Set the approximate posting interval in hours (1-168)."""
+        seconds = int(hours) * 60 * 60
+        await self.config.guild(ctx.guild).clip_interval.set(seconds)
+        await self.config.guild(ctx.guild).clip_next_post.set(self._next_clip_post(seconds))
+        await ctx.send(f"Automatic clips will post about every **{hours} hour{'s' if hours != 1 else ''}**.")
+
+    @rocketleagueset_clips.command(name="maxlength")
+    async def rocketleagueset_clips_maxlength(
+        self, ctx: commands.Context, seconds: commands.Range[int, 15, 600]
+    ):
+        """Set the longest eligible clip in seconds (15-600)."""
+        await self.config.guild(ctx.guild).clip_max_length.set(int(seconds))
+        await ctx.send(f"Only clips up to **{seconds} seconds** long will be posted.")
+
+    @rocketleagueset_clips.command(name="enable")
+    async def rocketleagueset_clips_enable(self, ctx: commands.Context):
+        """Enable automatic random clip posts."""
+        settings = await self.config.guild(ctx.guild).all()
+        if not settings.get("clip_channel_id"):
+            await ctx.send(
+                f"Choose a channel first with `{ctx.clean_prefix}rocketleagueset clips channel #channel`."
+            )
+            return
+        if not settings.get("clip_sources"):
+            await ctx.send(
+                f"Add a source first with `{ctx.clean_prefix}rocketleagueset clips sourceadd <url>`."
+            )
+            return
+        interval = int(settings.get("clip_interval") or CLIP_DEFAULT_INTERVAL)
+        await self.config.guild(ctx.guild).clip_enabled.set(True)
+        await self.config.guild(ctx.guild).clip_next_post.set(self._next_clip_post(interval))
+        await ctx.send("Automatic Rocket League clip posts are enabled.")
+
+    @rocketleagueset_clips.command(name="disable")
+    async def rocketleagueset_clips_disable(self, ctx: commands.Context):
+        """Disable automatic clip posts without removing settings."""
+        await self.config.guild(ctx.guild).clip_enabled.set(False)
+        await ctx.send("Automatic Rocket League clip posts are disabled.")
+
+    @rocketleagueset_clips.command(name="status")
+    async def rocketleagueset_clips_status(self, ctx: commands.Context):
+        """Show this server's automatic clip settings."""
+        settings = await self.config.guild(ctx.guild).all()
+        channel = ctx.guild.get_channel(int(settings["clip_channel_id"])) if settings.get("clip_channel_id") else None
+        sources = await self._number_clip_sources(ctx.guild)
+        interval = int(settings.get("clip_interval") or CLIP_DEFAULT_INTERVAL) // 3600
+        next_post = int(settings.get("clip_next_post") or 0)
+        lines = [
+            f"Status: **{'enabled' if settings.get('clip_enabled') else 'disabled'}**",
+            f"Channel: {channel.mention if channel else 'not configured'}",
+            f"Sources: **{len(sources)}**",
+            f"Maximum length: **{int(settings.get('clip_max_length') or CLIP_DEFAULT_MAX_LENGTH)} seconds**",
+            f"Approximate interval: **{interval} hour{'s' if interval != 1 else ''}**",
+        ]
+        if settings.get("clip_enabled") and next_post:
+            lines.append(f"Next post: <t:{next_post}:R>")
+        await ctx.send("**Rocket League clip posting**\n" + "\n".join(lines))
+
+    @rocketleagueset_clips.command(name="refresh")
+    async def rocketleagueset_clips_refresh(self, ctx: commands.Context):
+        """Refresh all configured clip-source caches now."""
+        sources = await self._number_clip_sources(ctx.guild)
+        if not sources:
+            await ctx.send("This server has no clip sources configured.")
+            return
+        refreshed = 0
+        failures = []
+        async with ctx.typing():
+            for source in sources:
+                try:
+                    await self._cached_clips(source, force=True)
+                    refreshed += 1
+                except ClipSourceError as exc:
+                    failures.append(f"{source.get('name')}: {exc}")
+        message = f"Refreshed **{refreshed}/{len(sources)}** clip sources."
+        if failures:
+            message += "\n" + "\n".join(f"- {item}" for item in failures[:5])
+        await ctx.send(message)
+
+    @rocketleagueset_clips.command(name="postnow")
+    async def rocketleagueset_clips_postnow(self, ctx: commands.Context):
+        """Post one unseen eligible clip in the configured channel now."""
+        try:
+            async with ctx.typing():
+                clip = await self._post_clip_for_guild(ctx.guild)
+        except (ClipSourceError, discord.Forbidden, discord.HTTPException) as exc:
+            await ctx.send(f"A clip could not be posted: {exc}")
+            return
+        await ctx.send(f"Posted **{discord.utils.escape_markdown(str(clip.get('title') or 'Rocket League clip'))}**.")
 
     async def _number_tournament_sources(self, guild) -> list[dict]:
         async with self.config.guild(guild).tournament_sources() as sources:
