@@ -61,7 +61,11 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers.base import WalletProviderError
-from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
+from ..providers.cdp import (
+    CdpWalletProvider, _erc20_transfer_data, _validate_tokenfactory_operation,
+)
+from tokenfactory.models import TokenDraft
+from tokenfactory.operations import token_operation
 from ..providers.clanker import clanker_deployment_calldata
 from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
@@ -1802,41 +1806,64 @@ class _ClankerLifecycleHarness(ClankerLifecycleMixin):
         self.wallet_provider = provider
 
 
-class TokenFactoryExecutionTermsTests(unittest.IsolatedAsyncioTestCase):
-    def test_terms_match_bounded_provider_policy_for_each_route(self):
-        self.assertEqual(
-            CryptoWallet.tokenfactory_execution_terms(route="discord"),
-            {
-                "gas_limit": 1_500_000,
-                "native_value_wei": 0,
-                "gas_sponsored": True,
-                "gas_payer": "CDP paymaster",
-            },
-        )
-        self.assertEqual(
-            CryptoWallet.tokenfactory_execution_terms(route="external"),
-            {
-                "gas_limit": 1_500_000,
-                "native_value_wei": 0,
-                "gas_sponsored": False,
-                "gas_payer": "connected external wallet",
-            },
-        )
-        self.assertEqual(
-            CryptoWallet.tokenfactory_execution_terms(
-                route="discord", operation="factory"
-            )["gas_limit"],
-            2_000_000,
-        )
-
+class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_changed_terms_fail_before_wallet_or_provider_access(self):
         wallet = object.__new__(CryptoWallet)
         wallet.get_or_create_wallet_profile = AsyncMock()
+        operation = {"gas_limit": 1_500_000, "value_wei": 0}
         with self.assertRaisesRegex(RuntimeError, "Review it again"):
-            await wallet.tokenfactory_deploy_fixed_supply_token(
-                object(), execution_terms={"gas_limit": 1}
+            await wallet.tokenfactory_submit_reviewed_call(
+                object(), operation, "attempt", {"gas_limit": 1}
             )
         wallet.get_or_create_wallet_profile.assert_not_awaited()
+
+    async def test_valid_reviewed_call_is_forwarded_to_provider(self):
+        wallet = object.__new__(CryptoWallet)
+        profile = {"profile_id": "profile"}
+        operation = {"gas_limit": 1_500_000, "value_wei": 0}
+        terms = {
+            "gas_limit": 1_500_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
+        wallet.config = SimpleNamespace(
+            provider_paused=AsyncMock(return_value=False),
+            user=lambda user: SimpleNamespace(
+                security_locked=AsyncMock(return_value=False)
+            ),
+        )
+        wallet.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        wallet.wallet_provider = SimpleNamespace(
+            submit_reviewed_tokenfactory_call=AsyncMock(return_value={"ok": True})
+        )
+
+        result = await wallet.tokenfactory_submit_reviewed_call(
+            object(), operation, "attempt", terms
+        )
+
+        self.assertEqual(result, {"ok": True})
+        wallet.wallet_provider.submit_reviewed_tokenfactory_call.assert_awaited_once_with(
+            profile, operation, "attempt"
+        )
+
+    def test_signer_independently_rejects_token_call_mutations(self):
+        recipient = "0x1111111111111111111111111111111111111111"
+        request_id = "0x" + "22" * 32
+        draft = TokenDraft(
+            creator_discord_id=7, name="Reviewed Token", symbol="RVT",
+            decimals=18, supply_atomic=10**18,
+        )
+        operation = token_operation(draft, request_id, recipient)
+        self.assertEqual(
+            _validate_tokenfactory_operation(operation)[-1], "fixed_supply_token"
+        )
+        for field, value in (
+            ("value_wei", 1), ("gas_limit", 1),
+            ("recipient", "0x" + "33" * 20),
+            ("request_id", "0x" + "44" * 32),
+        ):
+            mutated = {**operation, field: value}
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                _validate_tokenfactory_operation(mutated)
 
 
 class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):

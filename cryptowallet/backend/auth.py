@@ -169,10 +169,17 @@ class JwtAuthMixin:
             discord_user_id, profile, purpose="recovery"
         )
 
-    async def create_tokenfactory_handoff(
-        self, discord_user_id: int, draft: dict, request_id: str
+    async def create_external_companion_handoff(
+        self, discord_user_id: int, purpose: str, payload: dict
     ) -> tuple[str, int]:
-        """Sign a short-lived, CDP-independent external deployment handoff."""
+        """Sign a short-lived product payload for the shared static companion."""
+
+        claim_names = {
+            "tokenfactory_external": "sickwallet_tokenfactory",
+        }
+        claim_name = claim_names.get(purpose)
+        if claim_name is None or not isinstance(payload, dict):
+            raise ValueError("Unsupported external companion handoff")
         configuration = await self.jwt_configuration()
         if configuration is None:
             raise RuntimeError("The protected companion signing key is not configured")
@@ -190,11 +197,11 @@ class JwtAuthMixin:
             "nbf": now,
             "exp": expires_at,
             "jti": secrets.token_urlsafe(18),
-            "sickwallet_purpose": "tokenfactory_external",
+            "sickwallet_purpose": purpose,
             "sickwallet_deployment": deployment_id,
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
-            "sickwallet_tokenfactory": {**draft, "request_id": request_id},
+            claim_name: dict(payload),
         }
         token = jwt.encode(
             claims,

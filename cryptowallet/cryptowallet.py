@@ -18,11 +18,7 @@ from .core.models import IntentStatus
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_SEPOLIA
 from .providers import CdpWalletProvider
-from .providers.cdp import (
-    CLANKER_DEPLOY_GAS_LIMIT,
-    TOKEN_DEPLOY_GAS_LIMIT,
-    TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
-)
+from .providers.cdp import CLANKER_DEPLOY_GAS_LIMIT
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
@@ -89,46 +85,32 @@ class CryptoWallet(
             "chain_id": BASE_SEPOLIA.chain_id,
         }
 
-    async def tokenfactory_deployment_status(self) -> dict:
-        """Expose only the reviewed TokenFactory deployment state."""
-
-        return await self.wallet_provider.token_factory_deployment_status()
-
-    @staticmethod
-    def tokenfactory_execution_terms(*, route: str, operation: str = "token") -> dict:
-        """Return the exact bounded spending policy shown on TokenFactory reviews."""
-        if route not in {"discord", "external"} or operation not in {"token", "factory"}:
-            raise ValueError("Unsupported TokenFactory execution-terms request.")
-        if route == "external" and operation != "token":
-            raise ValueError("External wallets cannot deploy TokenFactory infrastructure.")
-        gas_limit = (
-            TOKEN_FACTORY_DEPLOY_GAS_LIMIT
-            if operation == "factory"
-            else TOKEN_DEPLOY_GAS_LIMIT
-        )
-        sponsored = route == "discord"
-        return {
-            "gas_limit": gas_limit,
-            "native_value_wei": 0,
-            "gas_sponsored": sponsored,
-            "gas_payer": "CDP paymaster" if sponsored else "connected external wallet",
-        }
-
-    async def tokenfactory_deploy_pinned_factory(
-        self, user, creation_code: str, attempt_id: str, execution_terms: dict
+    async def tokenfactory_submit_reviewed_call(
+        self, user, operation: dict, attempt_id: str, execution_terms: dict
     ) -> dict:
-        """Deploy only the provider-pinned TokenFactory artifact for this wallet user."""
+        """Submit one immutable TokenFactory-owned call through the narrow signer."""
 
-        if execution_terms != self.tokenfactory_execution_terms(
-            route="discord", operation="factory"
-        ):
+        try:
+            expected_terms = {
+                "gas_limit": int(operation["gas_limit"]),
+                "native_value_wei": int(operation["value_wei"]),
+                "gas_sponsored": True,
+                "gas_payer": "CDP paymaster",
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("The reviewed TokenFactory operation is incomplete.") from exc
+        if execution_terms != expected_terms:
             raise RuntimeError(
                 "The reviewed TokenFactory gas or spending policy no longer matches "
                 "CryptoWallet. Review it again."
             )
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
         profile = await self.get_or_create_wallet_profile(user)
-        return await self.wallet_provider.deploy_token_factory(
-            profile, creation_code, attempt_id
+        return await self.wallet_provider.submit_reviewed_tokenfactory_call(
+            profile, operation, attempt_id
         )
 
     async def tokenfactory_operation_status(
@@ -139,43 +121,6 @@ class CryptoWallet(
         profile = await self.get_or_create_wallet_profile(user)
         return await self.wallet_provider.token_factory_operation_status(
             profile, user_operation_hash
-        )
-
-    async def tokenfactory_deploy_fixed_supply_token(
-        self, user, **parameters
-    ) -> dict:
-        """Submit one structured fixed-supply token deployment."""
-
-        execution_terms = parameters.pop("execution_terms", None)
-        if execution_terms != self.tokenfactory_execution_terms(route="discord"):
-            raise RuntimeError(
-                "The reviewed TokenFactory gas or spending policy no longer matches "
-                "CryptoWallet. Review it again."
-            )
-        profile = await self.get_or_create_wallet_profile(user)
-        return await self.wallet_provider.deploy_fixed_supply_token(
-            profile, **parameters
-        )
-
-    async def tokenfactory_verify_fixed_supply_token(self, **parameters) -> dict:
-        """Verify one fixed-supply token through the pinned factory."""
-
-        return await self.wallet_provider.verify_fixed_supply_token(**parameters)
-
-    async def tokenfactory_verify_external_transaction(self, **parameters) -> dict:
-        """Verify one external wallet submitted the exact pinned factory call."""
-
-        return await self.wallet_provider.verify_external_fixed_supply_transaction(
-            **parameters
-        )
-
-    async def tokenfactory_create_external_handoff(
-        self, discord_user_id: int, draft: dict, request_id: str
-    ) -> tuple[str, int]:
-        """Create a protected handoff that requires no CDP wallet profile."""
-
-        return await self.create_tokenfactory_handoff(
-            discord_user_id, draft, request_id
         )
 
     async def clanker_collect_rewards(
