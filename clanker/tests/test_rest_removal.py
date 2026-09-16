@@ -963,7 +963,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Delete all drafts", bulk_labels)
         self.assertIn("Keep drafts", bulk_labels)
 
-    async def test_reward_card_explains_shared_treasury_without_double_counting(self):
+    async def test_reward_card_avoids_destination_jargon_without_double_counting(self):
         token = "0x" + "ab" * 20
         snapshot = {
             "launches": [{
@@ -1000,7 +1000,7 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.thumbnail.url, "https://example.com/nmt.png")
         self.assertIn("Claimable WETH: 0.01000000", rendered)
         self.assertIn("Claimable $NMT: 2.00000000", rendered)
-        self.assertIn("Destination: shared creator/platform treasury", rendered)
+        self.assertNotIn("Destination", rendered)
         self.assertIn("Claim all: 100,000 gas", rendered)
         self.assertIn("WETH only: 50,000 gas", rendered)
         self.assertIn("$NMT only: 50,000 gas", rendered)
@@ -1052,6 +1052,35 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(interaction.followup.send.await_args.kwargs["embed"], embed)
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
+    async def test_reopened_receipt_updates_card_without_thinking_response(self):
+        embed = object()
+        snapshot = {"treasuries": []}
+        cog = SimpleNamespace(
+            reward_preflight_embed=AsyncMock(return_value=(embed, snapshot)),
+            launch_status_label=lambda status: status,
+            launch_list_embed=lambda records, audit: "history",
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), guild=SimpleNamespace(id=100))
+        record = {
+            "launch_id": "nmt-long", "launch_ref": "nmt", "symbol": "NMT",
+            "status": "internal_confirmed", "token_address": "0x" + "ab" * 20,
+        }
+        history = ClankerLaunchHistoryView(cog, ctx, [record], {})
+        receipt = ClankerReceiptRewardsView(cog, record, 100, history)
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=7),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+
+        await receipt.rewards.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.message.edit.assert_awaited_once()
+        interaction.followup.send.assert_not_awaited()
+        self.assertIs(interaction.message.edit.await_args.kwargs["embed"], embed)
+
     def test_reopened_receipt_has_persistent_back_navigation(self):
         cog = SimpleNamespace(
             launch_status_label=lambda status: status,
@@ -1077,6 +1106,29 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         labels = [item.label for item in view.children]
         self.assertEqual(labels, ["Resume approval"])
         self.assertNotIn("Refresh status", labels)
+
+    async def test_resume_approval_updates_card_without_thinking_response(self):
+        record = {
+            "launch_id": "approval",
+            "payload": {"rewards": {"recipients": []}},
+        }
+        cog = SimpleNamespace(resume_approval_launch=AsyncMock(return_value=record))
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=100), author=SimpleNamespace(id=7))
+        view = ClankerApprovalResumeView(cog, ctx, record, {})
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=7),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+        verified = SimpleNamespace(embed=lambda: "verified")
+
+        with patch("clanker.views.ClankerVerifiedView", return_value=verified):
+            await view.resume.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.message.edit.assert_awaited_once_with(embed="verified", view=verified)
+        interaction.followup.send.assert_awaited_once()
 
     async def test_resume_approval_reuses_record_and_renews_window(self):
         payload = Clanker.build_payload(

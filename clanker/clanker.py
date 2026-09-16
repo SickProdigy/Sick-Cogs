@@ -1215,10 +1215,6 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 "Claimable WETH: {:,.8f}".format(weth / 10**18),
                 "Claimable ${}: {:,.8f}".format(launch["symbol"], token / 10**18),
             ]
-            if launch["creator"] == launch["platform"]:
-                lines.append("Destination: shared creator/platform treasury")
-            else:
-                lines.append("Destinations: creator and platform treasuries")
             embed.add_field(
                 name="$" + launch["symbol"] + " • " + launch["reference"],
                 value=chr(10).join(lines), inline=False,

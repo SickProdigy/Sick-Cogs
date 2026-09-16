@@ -855,7 +855,7 @@ class ClankerApprovalResumeView(discord.ui.View):
             )
             return
         self.processing = True
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer()
         try:
             record = await self.cog.resume_approval_launch(
                 self.ctx.guild, interaction.user, str(self.record["launch_id"])
@@ -870,7 +870,7 @@ class ClankerApprovalResumeView(discord.ui.View):
                 "card, then use its launch control.",
                 ephemeral=True,
             )
-        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        except (KeyError, TypeError, ValueError, RuntimeError, discord.HTTPException) as exc:
             self.processing = False
             await interaction.followup.send(str(exc), ephemeral=True)
 
@@ -1055,7 +1055,12 @@ class ClankerReceiptRewardsView(discord.ui.View):
     @discord.ui.button(label="Rewards", emoji="\U0001f4b0", style=discord.ButtonStyle.primary)
     async def rewards(self, interaction: discord.Interaction, button: discord.ui.Button):
         standalone_receipt = self.history_view is None
-        await interaction.response.defer(ephemeral=standalone_receipt, thinking=True)
+        if standalone_receipt:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        else:
+            # A deferred component update acknowledges the button without creating
+            # a separate "thinking" response that must later be completed.
+            await interaction.response.defer()
         try:
             embed, snapshot = await self.cog.reward_preflight_embed(
                 [self.record], portfolio=False, include_snapshot=True
