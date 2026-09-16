@@ -2,6 +2,7 @@
 
 const FACTORY = "0xcba30318008035bb5a855a8684cea954d573c2c3";
 const CHAIN_ID = 84532;
+const TOKEN_DEPLOY_GAS_LIMIT = 1500000;
 const status = document.querySelector("#external-status");
 const details = document.querySelector("#external-details");
 const controls = document.querySelector("#external-controls");
@@ -15,6 +16,16 @@ const copyButton = document.querySelector("#copy-verification");
 let draft;
 let signer;
 let resultHandle;
+
+function executionTerms() {
+  const terms = draft?.execution_terms;
+  if (!terms || terms.gas_limit !== TOKEN_DEPLOY_GAS_LIMIT ||
+      terms.native_value_wei !== 0 || terms.gas_sponsored !== false ||
+      terms.gas_payer !== "connected external wallet") {
+    throw new Error("The gas or spending policy changed. Return to Discord for a new review link.");
+  }
+  return terms;
+}
 
 function padWord(hex) { return hex.replace(/^0x/, "").padStart(64, "0"); }
 function encodeText(value) {
@@ -130,18 +141,23 @@ deployButton.addEventListener("click", async () => {
   try {
     await requireChain();
     const recipient = normalizedRecipient();
+    const terms = executionTerms();
     const ok = window.confirm(
       `Deploy ${draft.name} (${draft.symbol}) with fixed supply ${draft.supply_display}?
 
 ` +
       `Signer / gas payer: ${signer}
 Recipient: ${recipient}
-Network: Base Sepolia`
+Network: Base Sepolia
+Gas limit: ${terms.gas_limit.toLocaleString()}
+Native value: 0 ETH
+Sponsorship: Not sponsored; connected wallet pays network gas`
     );
     if (!ok) { deployButton.disabled = false; return; }
     result.textContent = "Confirm the transaction in your wallet…";
     const txHash = await window.ethereum.request({method: "eth_sendTransaction", params: [{
-      from: signer, to: FACTORY, value: "0x0", data: calldata(recipient)
+      from: signer, to: FACTORY, value: "0x0",
+      gas: "0x" + terms.gas_limit.toString(16), data: calldata(recipient)
     }]});
     commandText.value = `!tokenfactory deployment ${txHash} ${recipient}`;
     commandBox.hidden = false;
@@ -186,6 +202,10 @@ copyButton.addEventListener("click", async () => {
     addDetail("Network", "Base Sepolia (84532)");
     addDetail("Factory", FACTORY);
     addDetail("Recipient", "Signing wallet unless you enter another address");
+    const terms = executionTerms();
+    addDetail("Gas limit", terms.gas_limit.toLocaleString());
+    addDetail("Native value", "0 ETH");
+    addDetail("Network gas", "Not sponsored — connected external wallet pays");
     details.hidden = false; controls.hidden = false;
     status.textContent = "Protected external-wallet deployment loaded.";
   } catch (error) { status.textContent = error instanceof Error ? error.message : "The deployment link could not be loaded."; }

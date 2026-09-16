@@ -5,6 +5,7 @@ from redbot.core import commands
 
 from ..core.networks import (
     BASE_SEPOLIA,
+    ETHEREUM_SEPOLIA,
     KNOWN_NETWORKS,
     NETWORKS,
     ChainFamily,
@@ -166,7 +167,12 @@ class WalletCoreCommands:
                 }
 
             tokens = list(merged.values())
-            if network is None and not native_balance and not tokens:
+            if (
+                network is None
+                and item.key not in {BASE_SEPOLIA.key, ETHEREUM_SEPOLIA.key}
+                and not native_balance
+                and not tokens
+            ):
                 continue
             balance_lines = []
             if native_balance is None:

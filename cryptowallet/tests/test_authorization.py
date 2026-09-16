@@ -346,6 +346,10 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             f"[Base Sepolia]({BASE_SEPOLIA.explorer_address_url(evm)})",
             evm_field.value,
         )
+        self.assertIn(
+            f"[Ethereum Sepolia]({ETHEREUM_SEPOLIA.explorer_address_url(evm)})",
+            evm_field.value,
+        )
         self.assertIn("━━ SOLANA WALLET ━━", rendered)
         solana_field = next(
             field for field in embed.fields if "━━ SOLANA WALLET ━━" in field.name
@@ -1796,6 +1800,43 @@ class _ClankerLifecycleHarness(ClankerLifecycleMixin):
             )
         )
         self.wallet_provider = provider
+
+
+class TokenFactoryExecutionTermsTests(unittest.IsolatedAsyncioTestCase):
+    def test_terms_match_bounded_provider_policy_for_each_route(self):
+        self.assertEqual(
+            CryptoWallet.tokenfactory_execution_terms(route="discord"),
+            {
+                "gas_limit": 1_500_000,
+                "native_value_wei": 0,
+                "gas_sponsored": True,
+                "gas_payer": "CDP paymaster",
+            },
+        )
+        self.assertEqual(
+            CryptoWallet.tokenfactory_execution_terms(route="external"),
+            {
+                "gas_limit": 1_500_000,
+                "native_value_wei": 0,
+                "gas_sponsored": False,
+                "gas_payer": "connected external wallet",
+            },
+        )
+        self.assertEqual(
+            CryptoWallet.tokenfactory_execution_terms(
+                route="discord", operation="factory"
+            )["gas_limit"],
+            2_000_000,
+        )
+
+    async def test_changed_terms_fail_before_wallet_or_provider_access(self):
+        wallet = object.__new__(CryptoWallet)
+        wallet.get_or_create_wallet_profile = AsyncMock()
+        with self.assertRaisesRegex(RuntimeError, "Review it again"):
+            await wallet.tokenfactory_deploy_fixed_supply_token(
+                object(), execution_terms={"gas_limit": 1}
+            )
+        wallet.get_or_create_wallet_profile.assert_not_awaited()
 
 
 class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):
