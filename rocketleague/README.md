@@ -68,6 +68,61 @@ each rich refresh can use one tournament request and one participant-count reque
 `tournamentrefresh` remains available when an organizer changes a date or status. Each server
 can save up to 25 tournament URLs.
 
+## Automatic community clips
+
+Each Discord server can follow a mix of creator feeds and general Rocket League feeds.
+The cog rotates between sources, avoids reposting remembered clips, and posts the provider's
+canonical URL so Discord can render its native player. It never downloads or re-uploads video.
+Provider results are cached for 24 hours, while the posting interval defaults to about 12 hours
+with timing jitter. The default maximum clip length is 180 seconds.
+
+Configure a channel and add sources:
+
+```text
+[p]rocketleagueset clips channel #rocket-league-clips
+[p]rocketleagueset clips sourceadd https://medal.tv/games/rocket-league
+[p]rocketleagueset clips sourceadd https://medal.tv/u/creator
+[p]rocketleagueset clips sourceadd twitch creator_name
+[p]rocketleagueset clips sourceadd https://www.youtube.com/@creator
+[p]rocketleagueset clips sourceadd https://www.youtube.com/playlist?list=PLAYLIST_ID
+[p]rocketleagueset clips sources
+[p]rocketleagueset clips enable
+```
+
+A recognized Medal, Twitch, or YouTube URL selects its provider automatically. For a bare
+creator name, put `medal`, `twitch`, or `youtube` before the name. A Medal clip URL follows
+that clip's creator; the Rocket League game URL follows Medal's general discovery feed.
+YouTube channels are filtered by duration because YouTube does not expose a dependable
+Shorts-only API flag; a dedicated clips playlist provides the most precise source.
+
+Twitch reuses the same Red shared API credentials as the core Streams cog:
+
+```text
+[p]set api twitch client_id,YOUR_ID client_secret,YOUR_SECRET
+```
+
+YouTube uses Red's shared `youtube` API-key namespace (also recognized by core Streams):
+
+```text
+[p]set api youtube api_key,YOUR_API_KEY
+```
+
+Medal uses a developer API key stored in Red.s shared token namespace:
+
+```text
+[p]set api medal api_key,YOUR_API_KEY
+```
+
+Useful controls:
+
+- `[p]rocketleagueset clips sourceremove <id>` - remove a source listed by `sources`.
+- `[p]rocketleagueset clips interval <hours>` - set an approximate 1-168 hour interval.
+- `[p]rocketleagueset clips maxlength <seconds>` - allow clips from 15-600 seconds.
+- `[p]rocketleagueset clips refresh` - refresh every configured source now.
+- `[p]rocketleagueset clips postnow` - post one unseen eligible clip for testing.
+- `[p]rocketleagueset clips status` - display the current server settings.
+- `[p]rocketleagueset clips disable` - pause posting without deleting configuration.
+
 The separate `[p]rlcsset` group is server-administrator configuration:
 
 - `[p]rlcsset channel #channel` - enable automatic schedule updates for a server.

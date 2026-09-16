@@ -2,26 +2,30 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Post cached Rocket League schedules from BLAST and configured start.gg or Challonge tournaments.",
+    "description": "Post cached Rocket League schedules, configured tournaments, and random short clips from guild-selected sources.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores guild announcement channel settings, cached public tournament information, and identifiers for schedule updates already delivered. It does not store member data.",
+    "end_user_data_statement": "This cog stores guild channels and settings, cached public tournament and clip metadata, configured public creator identifiers, and delivery history. It does not store member data.",
     "hidden": false,
-    "install_msg": "Use `[p]rlcsset channel #channel` for cached RLCS updates. Configure start.gg tokens or Challonge OAuth client credentials before adding provider tournament URLs with `[p]rocketleagueset tournamentadd <url>`.",
+    "install_msg": "Use `[p]rlcsset channel #channel` for RLCS updates. Use `[p]rocketleagueset clips` for cached Medal, Twitch, and YouTube clip posting. Provider credentials are documented in the cog README.",
     "min_bot_version": "3.5.0",
     "permissions": [
         "embed_links"
     ],
     "name": "RocketLeague",
     "requirements": [],
-    "short": "Cached RLCS schedules and guild announcements",
+    "short": "Cached RLCS schedules, community tournaments, and short clips",
     "tags": [
         "rocket league",
         "rlcs",
         "esports",
         "blast",
         "start.gg",
-        "challonge"
+        "challonge",
+        "medal",
+        "twitch",
+        "youtube",
+        "clips"
     ],
     "type": "COG",
-    "version": "1.1.0"
+    "version": "1.2.0"
 }
