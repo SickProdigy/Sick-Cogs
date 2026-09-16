@@ -19,6 +19,10 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIn("posting channel", help_text)
         self.assertIn("rocketleagueset clips", help_text)
 
+    def test_settings_group_advertises_its_short_alias(self):
+        self.assertIn("rlset", RocketLeague.rocketleagueset.aliases)
+        self.assertIn("rlset", RocketLeague.rocketleagueset.help)
+
     def test_community_tournament_commands_are_registered(self):
         tournaments = RocketLeague.rocketleague.get_command("tournaments")
 
