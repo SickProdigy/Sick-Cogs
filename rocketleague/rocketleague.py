@@ -577,6 +577,12 @@ class RocketLeague(commands.Cog):
         if len(sources) > 10:
             names += f" and {len(sources) - 10} more"
         embed.add_field(name="Sources", value=names[:1024], inline=False)
+        embed.add_field(
+            name="Coming next",
+            value="User clip submissions and community voting are planned. "
+            f"Admins manage automatic sources with `{ctx.clean_prefix}rlset clips`.",
+            inline=False,
+        )
         embed.set_footer(text="Source clips are chosen automatically from cached public feeds.")
         await ctx.send(embed=embed)
 
@@ -752,7 +758,10 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def rocketleagueset(self, ctx: commands.Context):
-        """Admin: configure server-specific tournaments and automatic clips."""
+        """Admin: configure server-specific tournaments and automatic clips.
+
+        ``rlset`` is the shorter alias for this command group.
+        """
         await ctx.send_help()
 
 
