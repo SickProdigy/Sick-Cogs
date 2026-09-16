@@ -1,5 +1,4 @@
 import logging
-import re
 from typing import Optional
 from urllib.parse import quote
 
@@ -11,69 +10,19 @@ from redbot.core import commands
 log = logging.getLogger("red.sick-cogs.Dictionary")
 
 API_BASE = "https://api.dictionaryapi.dev/api/v2/entries/en"
-URBAN_API_URL = "https://api.urbandictionary.com/v0/define"
 PROVIDER_URL = "https://dictionaryapi.dev/"
-URBAN_PROVIDER_URL = "https://www.urbandictionary.com/"
-USER_AGENT = "Sick-Cogs-Dictionary/2.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Dictionary/2.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 MAX_ENTRIES = 3
 MAX_MEANINGS = 4
 MAX_DEFINITIONS = 3
 MAX_RELATED_WORDS = 25
 
 
-class UrbanDictionaryView(discord.ui.View):
-    """Requester-bound pagination for Urban Dictionary results."""
-
-    def __init__(self, author_id: int, embeds: list[discord.Embed]):
-        super().__init__(timeout=120)
-        self.author_id = author_id
-        self.embeds = embeds
-        self.index = 0
-        self.message: Optional[discord.Message] = None
-        self._update_buttons()
-
-    def _update_buttons(self) -> None:
-        self.previous.disabled = self.index == 0
-        self.next.disabled = self.index >= len(self.embeds) - 1
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.author_id:
-            return True
-        await interaction.response.send_message(
-            "Only the person who requested this lookup can change its result page.", ephemeral=True
-        )
-        return False
-
-    async def _show_page(self, interaction: discord.Interaction) -> None:
-        self._update_buttons()
-        await interaction.response.edit_message(embed=self.embeds[self.index], view=self)
-
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary)
-    async def previous(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        self.index = max(0, self.index - 1)
-        await self._show_page(interaction)
-
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary)
-    async def next(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        self.index = min(len(self.embeds) - 1, self.index + 1)
-        await self._show_page(interaction)
-
-    async def on_timeout(self) -> None:
-        if self.message is None:
-            return
-        for item in self.children:
-            item.disabled = True
-        try:
-            await self.message.edit(view=self)
-        except discord.HTTPException:
-            pass
-
-
 class Dictionary(commands.Cog):
     """Look up English definitions and related words."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "2.0.0"
+    __version__ = "2.1.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -237,78 +186,17 @@ class Dictionary(commands.Cog):
         embed.set_footer(text="Results provided by Free Dictionary API")
         await ctx.send(embed=embed)
 
-    @staticmethod
-    def _clean_urban_text(value: str) -> str:
-        """Remove Urban Dictionary's bracket-link markup."""
-
-        return re.sub(r"\[([^\]]+)]", r"\1", str(value or "")).strip()
-
-    async def _send_urban(self, ctx: commands.Context, term: str) -> None:
-        session = await self._get_session()
-        try:
-            async with ctx.typing():
-                async with session.get(URBAN_API_URL, params={"term": term}) as response:
-                    if response.status != 200:
-                        await ctx.send(
-                            f"Urban Dictionary returned HTTP {response.status}. Please try again later."
-                        )
-                        return
-                    payload = await response.json(content_type=None)
-        except aiohttp.ClientError:
-            log.warning("Urban Dictionary API request failed for %r", term, exc_info=True)
-            await ctx.send("I could not reach Urban Dictionary. Please try again later.")
-            return
-        except Exception:
-            log.exception("Unexpected Urban Dictionary lookup failure for %r", term)
-            await ctx.send("Something unexpected went wrong during that Urban Dictionary lookup.")
-            return
-
-        results = [item for item in payload.get("list", []) if isinstance(item, dict)]
-        if not results:
-            await ctx.send(f"Urban Dictionary does not have an entry for **{term}**.")
-            return
-        results.sort(
-            key=lambda item: int(item.get("thumbs_up", 0) or 0) - int(item.get("thumbs_down", 0) or 0),
-            reverse=True,
-        )
-
-        visible_results = results[:5]
-        embeds = []
-        for index, item in enumerate(visible_results, start=1):
-            definition = self._clean_urban_text(item.get("definition"))
-            example = self._clean_urban_text(item.get("example"))
-            embed = discord.Embed(
-                title=f"Urban Dictionary: {item.get('word') or term}",
-                description=definition[:3800] or "No definition text.",
-                color=0xEFFF00,
-                url=str(item.get("permalink") or URBAN_PROVIDER_URL),
-            )
-            if example:
-                embed.add_field(name="Example", value=example[:1024], inline=False)
-            embed.add_field(
-                name="Votes",
-                value=(
-                    f"👍 {int(item.get('thumbs_up', 0) or 0):,}   "
-                    f"👎 {int(item.get('thumbs_down', 0) or 0):,}"
-                ),
-                inline=True,
-            )
-            embed.add_field(name="Author", value=str(item.get("author") or "Unknown")[:1024], inline=True)
-            embed.add_field(
-                name="Notice",
-                value="Community-written definitions may be inaccurate or offensive.",
-                inline=False,
-            )
-            embed.set_footer(text=f"Result {index} of {len(visible_results)} · Urban Dictionary")
-            embeds.append(embed)
-
-        view = UrbanDictionaryView(ctx.author.id, embeds)
-        view.message = await ctx.send(embed=embeds[0], view=view)
-
-    @commands.group(name="dictionary", aliases=["dict"], invoke_without_command=True)
+    @commands.group(name="dictionary", aliases=["dict", "define"], invoke_without_command=True)
     @commands.bot_has_permissions(embed_links=True)
     async def dictionary(self, ctx: commands.Context, *, term: str = None):
-        """Look up an English word or phrase."""
+        """Look up an English word or phrase.
+
+        Related commands:
+        - `[p]define <word or phrase>` looks up a definition.
+        - `[p]syn <word>` is the short form of `[p]synonym`.
+        - `[p]ant <word>` is the short form of `[p]antonym`.
+        - `[p]urban <term>` is provided by Red's General cog.
+        """
 
         if term is None:
             await ctx.send_help(ctx.command)
@@ -319,32 +207,16 @@ class Dictionary(commands.Cog):
             return
         await self._send_definition(ctx, term)
 
-    @commands.command(name="define")
-    async def define(self, ctx: commands.Context, *, term: str):
-        """Look up an English definition."""
-
-        await self.dictionary.callback(self, ctx, term=term)
-
-    @commands.command(name="synonym", aliases=["synonyms"])
+    @commands.command(name="synonym", aliases=["synonyms", "syn"])
     async def synonym(self, ctx: commands.Context, *, term: str):
         """Show synonyms for an English word."""
 
         term = self._clean_term(term)
         await self._send_related(ctx, term, "synonyms")
 
-    @commands.command(name="antonym", aliases=["antonyms"])
+    @commands.command(name="antonym", aliases=["antonyms", "ant"])
     async def antonym(self, ctx: commands.Context, *, term: str):
         """Show antonyms for an English word."""
 
         term = self._clean_term(term)
         await self._send_related(ctx, term, "antonyms")
-
-    @commands.command(name="urban", aliases=["urbandictionary", "ud"])
-    async def urban_dictionary(self, ctx: commands.Context, *, term: str):
-        """Look up community-written slang."""
-
-        term = self._clean_term(term)
-        if not term or len(term) > 100:
-            await ctx.send("Enter a word or short phrase up to 100 characters.")
-            return
-        await self._send_urban(ctx, term)
