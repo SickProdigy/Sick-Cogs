@@ -8,7 +8,7 @@ from redbot.core import commands
 from redbot.core.commands import Context
 
 from .abc import RoleToolsMixin
-from .picker import PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE
+from .picker import LEGACY_DEFAULT_DESCRIPTIONS, PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE, picker_description
 
 roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -174,15 +174,20 @@ class RemovePublishedMenuView(discord.ui.View):
 
 class SelfRoleAppearanceModal(discord.ui.Modal):
     def __init__(self, cog, guild: discord.Guild, data: dict):
-        super().__init__(title="Self-role card appearance")
+        super().__init__(title="Role menu text")
         self.cog = cog
         self.guild = guild
+        saved_description = (data.get("description") or "").strip()
+        self.uses_adaptive_default = (
+            not saved_description or saved_description in LEGACY_DEFAULT_DESCRIPTIONS
+        )
+        self.default_description = picker_description(data)
         self.title_input = discord.ui.TextInput(
-            label="Card title", default=data.get("title") or "Choose your roles", max_length=256
+            label="Menu title", default=data.get("title") or "Choose your roles", max_length=256
         )
         self.description_input = discord.ui.TextInput(
-            label="Instructions",
-            default=data.get("description") or "Click Choose roles to open your private role list.",
+            label="Member instructions",
+            default=self.default_description,
             style=discord.TextStyle.paragraph,
             max_length=1000,
         )
@@ -192,7 +197,12 @@ class SelfRoleAppearanceModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         pickers, data = await self.cog.ensure_setup_picker(self.guild)
         data["title"] = str(self.title_input.value).strip() or "Choose your roles"
-        data["description"] = str(self.description_input.value).strip()
+        submitted_description = str(self.description_input.value).strip()
+        data["description"] = (
+            ""
+            if self.uses_adaptive_default and submitted_description == self.default_description
+            else submitted_description
+        )
         pickers[SETUP_PICKER_NAME] = data
         await self.cog.config.guild(self.guild).pickers.set(pickers)
         await self.cog.refresh_setup_picker(self.guild)
@@ -235,7 +245,7 @@ class RoleToolsSetupView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Appearance", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Menu text", style=discord.ButtonStyle.secondary, row=0)
     async def appearance(self, interaction: discord.Interaction, button: discord.ui.Button):
         _, data = await self.cog.ensure_setup_picker(interaction.guild)
         await interaction.response.send_modal(
@@ -263,7 +273,7 @@ class RoleToolsSetupView(discord.ui.View):
     @discord.ui.button(label="Remove published menu", style=discord.ButtonStyle.danger, row=1)
     async def remove_published(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Remove the published role menu? Your Basic and Advanced role lists and Appearance settings will be kept.",
+            "Remove the published role menu? Your Basic and Advanced role lists and Menu text settings will be kept.",
             view=RemovePublishedMenuView(self.cog, interaction.user),
             ephemeral=True,
         )
@@ -566,7 +576,7 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.config.guild(guild).pickers.set(pickers)
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = pickers
-        return True, f"Removed {removed} published role-menu message{'s' if removed != 1 else ''}. Role catalogs and Appearance settings were kept."
+        return True, f"Removed {removed} published role-menu message{'s' if removed != 1 else ''}. Role catalogs and Menu text settings were kept."
 
     @roletools.command(name="setup")
     @commands.admin_or_permissions(manage_roles=True)

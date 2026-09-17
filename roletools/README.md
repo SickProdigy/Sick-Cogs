@@ -56,14 +56,14 @@ Run `[p]roletools setup` to open a manager-only setup card inspired by the Clank
 - **Basic self-roles** use Red Admin's canonical `selfroles` list, so they work through `[p]selfrole` and on RoleTools cards.
 - **Advanced self-roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
 
-The setup card uses Discord role and channel selectors to add/remove roles, edit appearance, publish the selected menu layout, and synchronize it. Managers do not need to create internal option names. When publishing, choose one layout:
+The setup card uses Discord role and channel selectors to add/remove roles, edit menu text, publish the selected menu layout, and synchronize it. Managers do not need to create internal option names. When publishing, choose one layout:
 
 - **Button Role Menu** puts one button on the public card and opens private 25-role pages. This is the cleanest choice for very large catalogs.
 - **Public dropdowns** puts as many as five 25-role dropdowns directly on the public message, supporting up to 125 roles.
 - **Single Reaction Card** assigns a distinct emoji to every role. RoleTools keeps 20 roles on each message, creates overflow messages automatically, and rebuilds its mappings when the shared catalogs change.
 - **Managed Reaction Channel** publishes one bot message per role with 👍. Synchronization retains and edits existing message slots without clearing reactions, creates only the additional bottom messages it needs, removes surplus bottom messages, and remaps each slot to the alphabetized shared catalog.
 
-Use **Sync published menu** after changing the catalogs. **Remove published menu** deletes every tracked public menu message and its reaction bindings while preserving the shared catalogs and Appearance settings. Existing Red `selfroleset` changes and changes made inside the setup card also trigger synchronization. If Managed Reaction Channel slots are remapped, existing member roles are not transferred; the optional RoleTools notification channel receives a notice explaining that members can remove and add 👍 again for a newly displayed role.
+Use **Sync published menu** after changing the catalogs. **Remove published menu** deletes every tracked public menu message and its reaction bindings while preserving the shared catalogs and Menu text settings. Existing Red `selfroleset` changes and changes made inside the setup card also trigger synchronization. If Managed Reaction Channel slots are remapped, existing member roles are not transferred; the optional RoleTools notification channel receives a notice explaining that members can remove and add 👍 again for a newly displayed role.
 
 Every layout reads the same Basic and Advanced catalogs, so roles only need to be managed once.
 
