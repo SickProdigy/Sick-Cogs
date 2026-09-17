@@ -18,6 +18,8 @@ channel destinations, templates, and delivery state are stored in Red's Config s
 
 ```text
 [p]rsspublisher list
+[p]rsspublisher listall
+[p]rsspublisher view news #updates
 [p]rsspublisher force news
 [p]rsspublisher template news #updates <template>
 [p]rsspublisher announce news #updates <announcement>
@@ -29,10 +31,30 @@ channel destinations, templates, and delivery state are stored in Red's Config s
 `[p]rss` is an alias for `[p]rsspublisher`. Replace `[p]` with the bot's configured
 prefix. Use `[p]help rsspublisher` and its subcommands for the full syntax.
 
+## Inspecting feeds
+
+`[p]rss list [channel]` shows every feed in one channel. `[p]rss listall` shows the
+same compact settings for every server channel. Both include the source URL, effective
+delivery style, active/paused state, latest/catch-up mode, and whether an announcement
+is configured.
+
+Use `[p]rss view <feed> [channel]` for one complete settings and health card. `info`
+and `settings` are aliases. Existing `showtemplate` and `status` commands remain
+available as focused compatibility views.
+
+To let Discord build its native preview from a site's Open Graph metadata, use a
+link-only template and disable RSSPublisher's custom embed:
+
+```text
+[p]rss template news #updates $link
+[p]rss embed toggle news #updates
+```
+
+These feeds are labeled **Native link preview** in `list`, `listall`, and `view`.
+
 Role mentions in announcements are limited to roles both the configuring moderator and
 the bot are permitted to mention. User and everyone mentions from feed content are
 suppressed.
-
 
 ## Replacing legacy RSS
 

@@ -81,6 +81,34 @@ def entry_identity(entry: Mapping[str, Any]) -> str:
     )
     return f"hash:{hashlib.sha256(fallback.encode('utf-8')).hexdigest()}"
 
+
+def feed_delivery_style(feed: Mapping[str, Any]) -> str:
+    """Describe the effective Discord delivery format for a saved feed."""
+    migrated, _ = migrate_feed_data(feed)
+    if migrated["embed"]:
+        return "RSS embed"
+    normalized_template = "".join(str(migrated["template"]).split())
+    if normalized_template in {"$link", "${link}"}:
+        return "Native link preview"
+    return "Plain text"
+
+
+def feed_summary(name: str, feed: Mapping[str, Any]) -> str:
+    """Build a safe compact feed summary for list commands."""
+    migrated, _ = migrate_feed_data(feed)
+    state = "Paused" if migrated["paused"] else "Active"
+    announcement = "Configured" if migrated.get("announcement") else "None"
+    source = migrated.get("url") or "Unknown"
+    mode = migrated["mode"]
+    return (
+        f"{name}\n"
+        f"  Source: {source}\n"
+        f"  Delivery: {feed_delivery_style(migrated)}\n"
+        f"  State: {state} · {mode}\n"
+        f"  Announcement: {announcement}"
+    )
+
+
 class RssFeed:
     """Serializable RSS feed configuration and delivery state."""
 
