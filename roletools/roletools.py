@@ -5,12 +5,12 @@ from typing import Any, Dict, List, Optional, Union
 
 import discord
 from red_commons.logging import getLogger
-from redbot.core import Config, commands
+from redbot.core import Config, bank, commands
 from redbot.core.bot import Red
 from redbot.core.commands import Context
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils import AsyncIter, bounded_gather
-from redbot.core.utils.chat_formatting import humanize_list
+from redbot.core.utils.chat_formatting import humanize_list, humanize_timedelta
 from redbot.core.utils.menus import start_adding_reactions
 from redbot.core.utils.predicates import ReactionPredicate
 
@@ -20,7 +20,7 @@ from .converter import RawUserIds, RoleHierarchyConverter, SelfRoleConverter
 from .events import RoleToolsEvents
 from .exclusive import RoleToolsExclusive
 from .inclusive import RoleToolsInclusive
-from .menus import BaseMenu, ConfirmView, RolePages
+from .menus import BaseMenu, ConfirmView, EmbedPages, RolePages
 from .messages import RoleToolsMessages
 from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
@@ -97,7 +97,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.6.3"
+    __version__ = "1.7.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -662,25 +662,157 @@ class RoleTools(
             await ctx.channel.send("".join([e for e in errors]))
 
     @roletools.command(aliases=["viewrole"])
-    @commands.bot_has_permissions(read_message_history=True, add_reactions=True, embed_links=True)
-    async def viewroles(self, ctx: Context, *, role: Optional[discord.Role] = None) -> None:
-        """
-        View current roletools setup for each role in the server
+    @commands.bot_has_permissions(embed_links=True)
+    async def viewroles(self, ctx: Context, *, selection: Optional[str] = None) -> None:
+        """View available self-roles or the complete manager configuration.
 
-        `[role]` The role you want to see settings for.
+        `[selection]` may be `available`, `configured`, or a role mention, ID, or name.
+        Members see availability by default. Managers can use `configured` for the full report.
         """
-        page_start = 0
-        if role:
-            page_start = ctx.guild.roles.index(role)
+        requested = (selection or "available").strip()
+        mode = requested.lower()
+        manager = ctx.author.guild_permissions.manage_roles
+        role = None
+        if mode not in {"available", "configured"}:
+            role = await commands.RoleConverter().convert(ctx, requested)
+            if manager:
+                await BaseMenu(
+                    source=RolePages(roles=[role]),
+                    delete_message_after=False,
+                    clear_reactions_after=True,
+                    timeout=60,
+                    cog=self,
+                ).start(ctx=ctx)
+                return
+            mode = "available"
+
+        if mode == "configured" and not manager:
+            await ctx.send(
+                f"The configured-role report requires Manage Roles. "
+                f"Use `{ctx.clean_prefix}roletools viewroles` for available self-roles."
+            )
+            return
+
+        raw_settings = await self.config.all_roles()
+        settings_by_id = {int(role_id): data for role_id, data in raw_settings.items()}
+        guild_roles = {item.id: item for item in ctx.guild.roles}
+        pages = []
+
+        if mode == "available":
+            lines = []
+            member_role_ids = {item.id for item in ctx.author.roles}
+            currency = await bank.get_currency_name(ctx.guild)
+            candidates = [role] if role else ctx.guild.roles
+            for item in candidates:
+                data = settings_by_id.get(item.id, {})
+                can_add = bool(data.get("selfassignable")) and item.id not in member_role_ids
+                can_remove = bool(data.get("selfremovable")) and item.id in member_role_ids
+                if not can_add and not can_remove:
+                    continue
+                details = []
+                blockers = []
+                required_ids = {int(role_id) for role_id in data.get("required", [])}
+                required = [guild_roles.get(role_id) for role_id in required_ids]
+                required_mentions = [required_role.mention for required_role in required if required_role]
+                conflicts = [guild_roles.get(int(role_id)) for role_id in data.get("exclusive_to", [])]
+                conflicts = [conflict.mention for conflict in conflicts if conflict]
+                if required_mentions:
+                    qualifier = "any" if data.get("require_any") else "all"
+                    details.append(f"requires {qualifier}: {humanize_list(required_mentions)}")
+                    has_required = bool(member_role_ids & required_ids)
+                    if not data.get("require_any"):
+                        has_required = required_ids <= member_role_ids
+                    if can_add and not has_required:
+                        blockers.append("missing required role")
+                if conflicts:
+                    details.append(f"removes conflicts: {humanize_list(conflicts)}")
+                if data.get("cost"):
+                    details.append(f"cost: {data['cost']} {currency}")
+                    if can_add and not await bank.can_spend(ctx.author, data["cost"]):
+                        blockers.append("insufficient credits")
+                if data.get("duration"):
+                    details.append(f"temporary: {humanize_timedelta(seconds=data['duration'])}")
+                if item >= ctx.guild.me.top_role:
+                    blockers.append("above the bot's highest role")
+                action = "can remove now" if can_remove else "can add now"
+                if blockers:
+                    action = f"cannot {'remove' if can_remove else 'add'} yet ({humanize_list(blockers)})"
+                suffix = f" — {'; '.join(details)}" if details else ""
+                lines.append(f"**{item.name}** — {action}{suffix}")
+
+            if not lines:
+                await ctx.send(
+                    "No self-roles are currently available to you. A server manager can configure "
+                    f"them with `{ctx.clean_prefix}roletools adminhelp`."
+                )
+                return
+            intro = f"Use `{ctx.clean_prefix}roletools selfrole @Role` to add or remove one."
+            title = "Available self-roles"
+        else:
+            lines = []
+            for role_id, data in sorted(settings_by_id.items()):
+                if role_id not in guild_roles:
+                    continue
+                if not any(data.get(key) for key in ROLE_DEFAULTS):
+                    continue
+                item = guild_roles.get(role_id)
+                label = item.mention if item else f"Deleted role (`{role_id}`) — cleanup needed"
+                flags = []
+                for key, name in (
+                    ("selfassignable", "self-assignable"),
+                    ("selfremovable", "self-removable"),
+                    ("sticky", "sticky"),
+                    ("auto", "autorole"),
+                ):
+                    if data.get(key):
+                        flags.append(name)
+                if data.get("duration"):
+                    flags.append(f"temporary {humanize_timedelta(seconds=data['duration'])}")
+                if data.get("cost"):
+                    flags.append(f"cost {data['cost']}")
+                for key, name in (
+                    ("required", "required"),
+                    ("inclusive_with", "included"),
+                    ("exclusive_to", "excluded"),
+                ):
+                    references = [guild_roles.get(int(value)) for value in data.get(key, [])]
+                    present = [ref.mention for ref in references if ref]
+                    missing = len(references) - len(present)
+                    if present or missing:
+                        value = humanize_list(present) if present else ""
+                        if missing:
+                            value = f"{value}{', ' if value else ''}{missing} deleted"
+                        flags.append(f"{name}: {value}")
+                for key, name in (
+                    ("reactions", "reactions"),
+                    ("buttons", "buttons"),
+                    ("select_options", "select options"),
+                ):
+                    if data.get(key):
+                        flags.append(f"{name}: {len(data[key])}")
+                lines.append(f"**{label}** — {', '.join(flags) or 'stored configuration'}")
+
+            if not lines:
+                await ctx.send(
+                    f"No RoleTools role configuration exists yet. Start with `{ctx.clean_prefix}roletools adminhelp`."
+                )
+                return
+            intro = "Only roles with stored RoleTools settings are shown. Deleted IDs are flagged for cleanup."
+            title = "RoleTools configuration"
+
+        for start in range(0, len(lines), 10):
+            embed = discord.Embed(
+                title=title,
+                description=f"{intro}\n\n" + "\n".join(lines[start : start + 10]),
+                color=discord.Color.blurple(),
+            )
+            pages.append(embed)
         await BaseMenu(
-            source=RolePages(
-                roles=ctx.guild.roles,
-            ),
+            source=EmbedPages(pages),
             delete_message_after=False,
             clear_reactions_after=True,
             timeout=60,
             cog=self,
-            page_start=page_start,
         ).start(ctx=ctx)
 
     # @roletools.group(name="slash")

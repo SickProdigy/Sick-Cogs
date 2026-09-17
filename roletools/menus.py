@@ -280,6 +280,17 @@ class SelfRemToggleButton(discord.ui.Button):
         await self.view.show_page(self.view.current_page, interaction)
 
 
+class EmbedPages(menus.ListPageSource):
+    """Paginate pre-built report embeds with the RoleTools button menu."""
+
+    def __init__(self, pages: List[discord.Embed]):
+        super().__init__(pages, per_page=1)
+
+    async def format_page(self, menu: BaseMenu, page: discord.Embed):
+        page.set_footer(text=f"Page {menu.current_page + 1}/{self.get_max_pages()}")
+        return page
+
+
 class RolePages(menus.ListPageSource):
     def __init__(self, roles: List[discord.Role]):
         super().__init__(roles, per_page=1)

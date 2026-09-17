@@ -25,7 +25,9 @@ Run `[p]roletools adminhelp` for the short setup path.
 - `[p]roletools removerole <role> <target...>` - Remove a role from members, roles, channels, or groups.
 - `[p]roletools forcerole <users...> <role>` - Force a sticky role for one or more users.
 - `[p]roletools forceroleremove <users...> <role>` - Remove a forced sticky role entry.
-- `[p]roletools viewroles [role]` - View RoleTools settings for server roles.
+- `[p]roletools viewroles` - Show self-roles available to the current member.
+- `[p]roletools viewroles configured` - Show managers all stored RoleTools settings, including deleted role IDs.
+- `[p]roletools viewroles <role>` - Inspect one role; managers receive the complete role report.
 - `[p]roletools notify channel #channel` - Opt in to a channel notice for successful reaction, button, and select role changes.
 - `[p]roletools notify disable` - Stop those notices.
 
