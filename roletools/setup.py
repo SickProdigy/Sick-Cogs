@@ -130,11 +130,11 @@ class SetupLayoutView(discord.ui.View):
     async def dropdown(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.choose(interaction, "dropdown", "Dropdowns appear directly on the public card, up to 125 roles.")
 
-    @discord.ui.button(label="Combined reactions", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Single Reaction Card", style=discord.ButtonStyle.secondary)
     async def reactions(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.choose(interaction, "reactions", "One managed message holds 20 distinct reactions; overflow messages are added automatically.")
 
-    @discord.ui.button(label="Managed role channel", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Managed Reaction Channel", style=discord.ButtonStyle.secondary)
     async def role_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.choose(
             interaction,
@@ -412,8 +412,8 @@ class RoleToolsSetup(RoleToolsMixin):
         layout_names = {
             "private": "Private menu",
             "dropdown": "Public dropdowns",
-            "reactions": "Combined reaction menu",
-            "role_channel": "Managed role channel",
+            "reactions": "Single Reaction Card",
+            "role_channel": "Managed Reaction Channel",
         }
         embed.add_field(name="Public card", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Private menu"))
@@ -527,8 +527,8 @@ class RoleToolsSetup(RoleToolsMixin):
         layout_name = {
             "private": "private role menu",
             "dropdown": "public dropdowns",
-            "reactions": "combined reaction menu",
-            "role_channel": "managed role channel",
+            "reactions": "Single Reaction Card",
+            "role_channel": "Managed Reaction Channel",
         }[layout]
         return True, f"Published {layout_name} in {channel.mention}."
 
