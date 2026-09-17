@@ -122,7 +122,7 @@ class SetupLayoutView(discord.ui.View):
             view=SetupPublishView(self.cog, self.author, layout),
         )
 
-    @discord.ui.button(label="Private menu", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Button Role Menu", style=discord.ButtonStyle.primary)
     async def private_picker(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.choose(interaction, "private", "One public button opens a private, paged role menu for each member. Best for large catalogs.")
 
@@ -410,13 +410,13 @@ class RoleToolsSetup(RoleToolsMixin):
             if any(settings.get(key) for key in ADVANCED_KEYS):
                 unsafe.append(role.name)
         layout_names = {
-            "private": "Private menu",
+            "private": "Button Role Menu",
             "dropdown": "Public dropdowns",
             "reactions": "Single Reaction Card",
             "role_channel": "Managed Reaction Channel",
         }
         embed.add_field(name="Public card", value=published, inline=False)
-        embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Private menu"))
+        embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:
             embed.add_field(
                 name="Needs attention",
@@ -446,7 +446,7 @@ class RoleToolsSetup(RoleToolsMixin):
         pickers, data = await self.ensure_setup_picker(guild)
         data["role_ids"] = await self.combined_catalog_ids(guild)
         if layout == "dropdown" and len(data["role_ids"]) > PUBLIC_SELECT_PAGE_SIZE * PUBLIC_SELECT_MAX_PAGES:
-            return False, "The public dropdown supports up to 125 roles. Use the private menu or a reaction layout for this catalog."
+            return False, "The public dropdown supports up to 125 roles. Use the Button Role Menu or a reaction layout for this catalog."
         if layout == "role_channel" and not data["role_ids"]:
             return False, "Add at least one Basic or Advanced self-role before publishing a managed role channel."
         permissions = channel.permissions_for(guild.me)
@@ -525,7 +525,7 @@ class RoleToolsSetup(RoleToolsMixin):
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = await self.config.guild(guild).pickers()
         layout_name = {
-            "private": "private role menu",
+            "private": "Button Role Menu",
             "dropdown": "public dropdowns",
             "reactions": "Single Reaction Card",
             "role_channel": "Managed Reaction Channel",
