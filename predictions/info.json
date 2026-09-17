@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Server-local prediction games for bragging rights and leaderboard points.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server prediction questions, outcomes, votes, creator IDs, and server-local leaderboard scores. It does not store or transfer currency, tokens, or real-world value.",
+  "hidden": false,
+  "install_msg": "Use `[p]help predict` to create and vote on server-local prediction games. This cog has no money, tokens, or wallet connection.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "Predictions",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Server-local prediction games and leaderboard points.",
+  "tags": ["predictions", "polls", "games", "leaderboard"],
+  "type": "COG",
+  "version": "0.1.0"
+}
