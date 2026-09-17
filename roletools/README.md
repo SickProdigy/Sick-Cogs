@@ -28,7 +28,7 @@ Run `[p]roletools adminhelp` for the short setup path.
 - `[p]roletools viewroles` - Show self-roles available to the current member.
 - `[p]roletools viewroles configured` - Show managers all stored RoleTools settings, including deleted role IDs.
 - `[p]roletools viewroles <role>` - Inspect one role; managers receive the complete role report.
-- `[p]roletools notify channel #channel` - Opt in to a channel notice for successful reaction, button, and select role changes.
+- `[p]roletools notify channel #channel` - Opt in to a channel notice for successful self-role, reaction, button, and select changes.
 - `[p]roletools notify disable` - Stop those notices.
 
 ## Role Rules
