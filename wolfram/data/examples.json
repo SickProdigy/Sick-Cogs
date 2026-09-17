@@ -1,0 +1,19 @@
+{
+  "categories": {
+    "mathematics": [
+      "derivative of x^3", "integral of sin(x)^2", "solve x^2 - 5x + 6 = 0", "prime factors of 123456", "plot x^2 - 4x + 3"
+    ],
+    "science": [
+      "speed of light", "molar mass of caffeine", "distance from Earth to Mars", "half life of carbon 14", "electron configuration of iron"
+    ],
+    "society": [
+      "population of Japan", "GDP of Canada", "life expectancy in Germany", "largest cities in Brazil", "unemployment rate in the United States"
+    ],
+    "everyday": [
+      "calories in a banana", "convert 72 Fahrenheit to Celsius", "sunset in New York", "how many cups in a gallon", "time in Tokyo"
+    ],
+    "surprises": [
+      "number of hearts in a deck of cards", "distance around the Moon", "words that rhyme with orange", "random word", "how many piano keys"
+    ]
+  }
+}
