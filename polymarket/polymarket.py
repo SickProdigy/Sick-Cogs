@@ -46,6 +46,24 @@ def _active_search_markets(payload: Any) -> list[dict]:
     return markets
 
 
+def future_handoff_reasons(market: dict) -> tuple[str, ...]:
+    """Return only objective market-level blockers for a future CLOB V2 handoff."""
+    reasons = []
+    if not market.get("active") or market.get("closed"):
+        reasons.append("market is not active")
+    if not market.get("enableOrderBook"):
+        reasons.append("no order book")
+    if not market.get("acceptingOrders"):
+        reasons.append("not accepting orders")
+    if not _json_list(market.get("clobTokenIds")):
+        reasons.append("no CLOB outcome tokens")
+    return tuple(reasons)
+
+
+def technically_handoff_ready(market: dict) -> bool:
+    return isinstance(market, dict) and not future_handoff_reasons(market)
+
+
 def market_path(reference: str) -> str | None:
     value = reference.strip()
     if value.isdigit():
@@ -67,7 +85,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.8"
+    __version__ = "0.1.9"
 
     def __init__(self, bot):
         self.bot = bot
@@ -124,6 +142,34 @@ class Polymarket(commands.Cog):
             details = probability or "Probability unavailable"
             details += f"\nID `{market.get('id')}` · [Open market]({market_url(market)})"
             embed.add_field(name=str(market.get("question") or "Untitled market")[:256], value=details[:1024], inline=False)
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="compatible", aliases=["ready"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_compatible(self, ctx: commands.Context, *, query: str = ""):
+        """List technically order-ready markets for a future Polygon CLOB V2 handoff."""
+        try:
+            if query.strip():
+                markets = _active_search_markets(await self._get_json("/public-search", {"q": query.strip()}))
+            else:
+                markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"})
+        except (aiohttp.ClientError, RuntimeError, ValueError):
+            await ctx.send("Polymarket market data could not be reached right now.")
+            return
+        ready = [market for market in markets if technically_handoff_ready(market)][:10] if isinstance(markets, list) else []
+        if not ready:
+            await ctx.send("No technically order-ready active Polymarket markets matched that search.")
+            return
+        embed = discord.Embed(
+            title="Future CryptoWallet-compatible markets",
+            description="Technical CLOB V2 readiness only—not user eligibility or trading availability.",
+        )
+        for market in ready:
+            outcomes, prices = _json_list(market.get("outcomes")), _json_list(market.get("outcomePrices"))
+            probability = " · ".join(f"{outcome}: {float(price):.0%}" for outcome, price in zip(outcomes, prices) if str(price).replace(".", "", 1).isdigit())
+            value = (probability or "Probability unavailable") + f"\nID `{market.get('id')}` · [Open market]({market_url(market)})"
+            embed.add_field(name=str(market.get("question") or "Untitled market")[:256], value=value[:1024], inline=False)
+        embed.set_footer(text="Future path: Polygon mainnet · pUSD · user-controlled approval · eligibility required")
         await ctx.send(embed=embed)
 
     @polymarket.command(name="market", aliases=["info"])

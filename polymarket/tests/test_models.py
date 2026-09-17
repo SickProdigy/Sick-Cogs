@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 from polymarket import setup
 
-from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, market_path, market_url
+from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, future_handoff_reasons, market_path, market_url, technically_handoff_ready
 
 
 class PolymarketModelTests(unittest.TestCase):
@@ -14,6 +14,11 @@ class PolymarketModelTests(unittest.TestCase):
 
     def test_market_url_uses_canonical_event_slug(self):
         self.assertEqual(market_url({"slug": "example-market"}), "https://polymarket.com/event/example-market")
+
+    def test_future_handoff_requires_an_active_order_ready_clob_market(self):
+        ready = {"active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "clobTokenIds": '["yes"]'}
+        self.assertTrue(technically_handoff_ready(ready))
+        self.assertEqual(future_handoff_reasons({**ready, "acceptingOrders": False}), ("not accepting orders",))
 
     def test_market_path_accepts_ids_slugs_and_polymarket_links(self):
         self.assertEqual(market_path("42"), "/markets/42")
