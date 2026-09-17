@@ -25,10 +25,14 @@ class PolymarketModelTests(unittest.TestCase):
             "outcomes": '["Yes", "No"]', "clobTokenIds": '["yes-token", "no-token"]',
             "outcomePrices": '["0.6", "0.4"]', "orderMinSize": 5,
         }
-        snapshot = MarketSnapshot.from_market(market)
+        snapshot = MarketSnapshot.from_market(market, quote_timestamp=100)
         self.assertEqual(snapshot.outcome_token_ids, ("yes-token", "no-token"))
+        self.assertEqual(snapshot.chain_id, 137)
+        self.assertEqual(snapshot.collateral_symbol, "pUSD")
+        self.assertEqual(snapshot.quote_timestamp, 100)
+        self.assertEqual(str(snapshot.minimum_order_size), "5")
         with self.assertRaises(MarketSnapshotError):
-            MarketSnapshot.from_market({**market, "acceptingOrders": False})
+            MarketSnapshot.from_market({**market, "acceptingOrders": False}, quote_timestamp=100)
         intent = FutureHandoffIntent.create(
             requester_id=7, snapshot=snapshot, outcome_index=0, max_pusd="12.50",
             created_at=100, expires_at=160,

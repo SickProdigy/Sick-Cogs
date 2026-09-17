@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -263,7 +264,7 @@ class Polymarket(commands.Cog):
             return
         try:
             market = await self._get_json(path)
-            snapshot = MarketSnapshot.from_market(market)
+            snapshot = MarketSnapshot.from_market(market, quote_timestamp=int(time.time()))
         except (aiohttp.ClientError, RuntimeError, ValueError, MarketSnapshotError):
             await ctx.send("That market is not technically ready for the staged future handoff.")
             return
