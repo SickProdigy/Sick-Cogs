@@ -43,6 +43,8 @@ class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
             message.edit = AsyncMock()
             message.add_reaction = AsyncMock()
             message.clear_reactions = AsyncMock()
+            message.clear_reaction = AsyncMock()
+            message.reactions = []
             messages.append(message)
         channel.fetch_message = AsyncMock(side_effect=messages)
         guild = SimpleNamespace(
@@ -76,6 +78,51 @@ class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("@Alpha", messages[0].edit.await_args.kwargs["content"])
         self.assertIn("@Charlie", messages[1].edit.await_args.kwargs["content"])
         cog._notify_role_channel_reorder.assert_awaited_once_with(guild, 1)
+
+    async def test_sync_removes_old_combined_controls_but_keeps_thumb(self):
+        role = SimpleNamespace(id=1, mention="@Alpha")
+        channel = SimpleNamespace(id=99)
+        message = SimpleNamespace(
+            id=10,
+            channel=channel,
+            reactions=[
+                SimpleNamespace(emoji="1️⃣"),
+                SimpleNamespace(emoji="2️⃣"),
+                SimpleNamespace(emoji="👍"),
+            ],
+        )
+        message.edit = AsyncMock()
+        message.add_reaction = AsyncMock()
+        message.clear_reaction = AsyncMock()
+        channel.fetch_message = AsyncMock(return_value=message)
+        guild = SimpleNamespace(
+            id=42,
+            get_channel=lambda channel_id: channel,
+            get_role=lambda role_id: role if role_id == 1 else None,
+        )
+        reaction_roles = AsyncMock(return_value={"99-10-👍": 1})
+        pickers = AsyncMock(return_value={})
+        pickers.set = AsyncMock()
+        guild_config = SimpleNamespace(reaction_roles=reaction_roles, pickers=pickers)
+        cog = object.__new__(__import__("roletools.roletools", fromlist=["RoleTools"]).RoleTools)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=guild_config))
+        cog.settings = {}
+        cog._replace_role_channel_mappings = AsyncMock()
+        cog._notify_role_channel_reorder = AsyncMock()
+        data = {
+            "channel_id": 99,
+            "message_id": 10,
+            "role_ids": [1],
+            "role_channel_message_ids": [10],
+        }
+
+        self.assertTrue(await cog.sync_role_channel(guild, "_selfroles", data))
+
+        self.assertEqual(
+            [call.args[0] for call in message.clear_reaction.await_args_list],
+            ["1️⃣", "2️⃣"],
+        )
+        message.add_reaction.assert_awaited_once_with("👍")
 
 
 class PickerViewTests(unittest.IsolatedAsyncioTestCase):

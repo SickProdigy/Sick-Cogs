@@ -488,6 +488,9 @@ class RoleToolsPicker(RoleToolsMixin):
                         content=content, embed=None, view=None,
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
+                    for reaction in getattr(message, "reactions", []):
+                        if str(reaction.emoji).strip("\N{VARIATION SELECTOR-16}") != emoji_key:
+                            await message.clear_reaction(reaction.emoji)
                 await message.add_reaction("👍")
                 messages.append((message, role_id))
             for message_id in old_ids[len(role_ids):]:

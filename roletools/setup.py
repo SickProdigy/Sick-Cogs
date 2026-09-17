@@ -424,7 +424,7 @@ class RoleToolsSetup(RoleToolsMixin):
             required.add("embed_links")
         if layout in {"reactions", "role_channel"}:
             required.update({"add_reactions", "read_message_history"})
-        if layout == "reactions":
+        if layout in {"reactions", "role_channel"}:
             required.add("manage_messages")
         missing = [permission.replace("_", " ") for permission in sorted(required) if not getattr(permissions, permission, False)]
         if missing:
@@ -450,6 +450,8 @@ class RoleToolsSetup(RoleToolsMixin):
         data["layout"] = layout
         data["channel_id"] = channel.id
         if layout == "reactions":
+            if not same_managed_layout:
+                data["message_id"] = None
             data["reaction_message_ids"] = reuse_ids
             data["role_channel_message_ids"] = []
             pickers[SETUP_PICKER_NAME] = data
@@ -458,6 +460,8 @@ class RoleToolsSetup(RoleToolsMixin):
                 return False, f"I could not publish the combined reaction menu in {channel.mention}."
             new_ids = set(data.get("reaction_message_ids", []))
         elif layout == "role_channel":
+            if not same_managed_layout:
+                data["message_id"] = None
             data["role_channel_message_ids"] = reuse_ids
             data["reaction_message_ids"] = []
             pickers[SETUP_PICKER_NAME] = data
