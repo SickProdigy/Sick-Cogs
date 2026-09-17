@@ -33,7 +33,7 @@ Use `[p]help cocset` for all server configuration. Show every server setting wit
 
 ## Commands
 
-Show configured clan information:
+Show the configured clan information followed by a concise list of related commands:
 
 ```text
 [p]coc

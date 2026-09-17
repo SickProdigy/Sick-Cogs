@@ -245,7 +245,7 @@ class Coc(commands.Cog):
             "If this is 404, check the clan tag."
         )
 
-    async def _send_clan_info(self, ctx: commands.Context, api_key: str, clan_tag: str) -> None:
+    async def _send_clan_info(self, ctx: commands.Context, api_key: str, clan_tag: str, *, show_commands: bool = False) -> None:
         """Fetch and display one clan profile."""
 
         headers = self._api_headers(api_key)
@@ -282,6 +282,20 @@ class Coc(commands.Cog):
         embed.add_field(name="Join Tag", value=clan.get("tag", "Unknown"))
         embed.add_field(name="Member Count", value=clan.get("members", "Unknown"))
         embed.add_field(name="War Frequency", value=clan.get("warFrequency", "Unknown"))
+        if show_commands:
+            prefix = ctx.clean_prefix
+            embed.add_field(
+                name="More Clash of Clans commands",
+                value=(
+                    f"`{prefix}coc player <tag>` — player profile\n"
+                    f"`{prefix}coc war` — current war\n"
+                    f"`{prefix}coc attacks` — attack status\n"
+                    f"`{prefix}coc warlog` — recent regular wars\n"
+                    f"`{prefix}coc cwl` — active CWL rounds\n"
+                    f"`{prefix}cocset info` — this server’s setup"
+                ),
+                inline=False,
+            )
         embed.set_footer(text="Brought to you by SickGaming.net", icon_url="https://i.imgur.com/TFTXZvP.png")
         await self._send_embed_with_optional_image(ctx, embed, self.clan_banner_path, "clan-banner.png")
 
@@ -1477,20 +1491,24 @@ class Coc(commands.Cog):
     @commands.bot_has_permissions(embed_links=True, attach_files=True)
     async def command_coc(self, ctx):
         """
-        Show Clash of Clans clan information and war results.
+        View this server's configured Clash of Clans clan and related war information.
 
-        Use `[p]coc clan <clan tag>` to look up another clan, `[p]coc war`
-        for the configured clan's current war, or `[p]coc attacks` for its
-        attack-status card. Use `[p]coc player <player tag>` for a player profile,
-        or `[p]coc warlog [clan tag]` for recent regular wars. Use `[p]coc cwl [clan tag]`
-        to view rounds in the currently active Clan War League group.
+        Look up any clan with `[p]coc clan <clan tag>` or a player with
+        `[p]coc player <player tag>`. For the configured clan, use `[p]coc war`,
+        `[p]coc attacks`, `[p]coc warlog`, or `[p]coc cwl`.
+
+        Server admins, moderators, and the configured CoC manager role can review
+        setup with `[p]cocset info`. Use `[p]help cocset` for configuration commands.
         """
 
-        setup = await self._require_server_setup(ctx)
-        if setup is None:
+        api_key = await self._get_api_key()
+        if not api_key:
+            return await ctx.send(self._missing_api_key_message(ctx))
+        clan_key = await self._get_clan_tag(ctx)
+        if not clan_key:
+            await ctx.send_help(ctx.command)
             return
-        api_key, clan_key, _ = setup
-        await self._send_clan_info(ctx, api_key, clan_key)
+        await self._send_clan_info(ctx, api_key, clan_key, show_commands=True)
 
     @command_coc.command(name="clan")
     async def command_coc_clan(self, ctx, clan_tag: str):
