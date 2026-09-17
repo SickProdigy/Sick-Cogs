@@ -41,6 +41,19 @@ class RSSFeedViewModelTests(unittest.TestCase):
         self.assertIn("Announcement: Configured", summary)
         self.assertNotIn("hidden text", summary)
 
+    def test_mixed_channel_summaries_keep_delivery_states_distinct(self):
+        channels = {
+            "news": {"newsalert": {"url": "https://example.test/news", "embed": False, "template": "$link"}},
+            "dev": {"devcorner": {"url": "https://example.test/dev", "embed": True, "paused": True, "mode": "catchup"}},
+        }
+        rendered = {
+            channel: [feed_summary(name, data) for name, data in feeds.items()]
+            for channel, feeds in channels.items()
+        }
+        self.assertIn("Delivery: Native link preview", rendered["news"][0])
+        self.assertIn("Delivery: RSS embed", rendered["dev"][0])
+        self.assertIn("State: Paused · catchup", rendered["dev"][0])
+
     def test_summary_uses_safe_defaults_for_partial_legacy_feed(self):
         summary = feed_summary("legacy", {"url": "https://example.test/legacy"})
         self.assertIn("Delivery: RSS embed", summary)
