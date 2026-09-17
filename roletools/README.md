@@ -61,3 +61,16 @@ It is intended for servers that need more flexible role management than Discord'
 - `[p]roletools temporary list [member]` - List pending temporary role removals.
 
 This cog stores role configuration, message/component IDs, and user IDs needed for sticky and temporary role behavior.
+
+
+## Replacing external RoleTools
+
+Sick-Cogs RoleTools uses a new Config namespace. Its first load imports the external RoleTools namespace plus legacy StickyRoles and Autorole data as read-only sources before persistent component views and temporary-role scheduling start. Do not clear legacy Red data during replacement.
+
+After installing and loading Sick-Cogs RoleTools, a bot owner can run:
+
+```text
+[p]roletools migrationstatus
+```
+
+Review any warnings before testing existing reaction roles, button/select messages, sticky/automatic roles, temporary roles, and member self roles with `[p]roletools selfrole <role>`.
