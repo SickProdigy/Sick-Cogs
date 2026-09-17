@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 from polymarket import setup
 
-from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, market_url
+from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, market_path, market_url
 
 
 class PolymarketModelTests(unittest.TestCase):
@@ -14,6 +14,12 @@ class PolymarketModelTests(unittest.TestCase):
 
     def test_market_url_uses_canonical_event_slug(self):
         self.assertEqual(market_url({"slug": "example-market"}), "https://polymarket.com/event/example-market")
+
+    def test_market_path_accepts_ids_slugs_and_polymarket_links(self):
+        self.assertEqual(market_path("42"), "/markets/42")
+        self.assertEqual(market_path("example-market"), "/markets/slug/example-market")
+        self.assertEqual(market_path("https://polymarket.com/event/example-market?x=1"), "/markets/slug/example-market")
+        self.assertIsNone(market_path("https://example.com/event/example-market"))
 
     def test_cog_accepts_red_bot_instance(self):
         bot = object()

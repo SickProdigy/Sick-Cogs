@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from urllib.parse import quote, urlparse
 
 import aiohttp
 import discord
@@ -45,11 +46,28 @@ def _active_search_markets(payload: Any) -> list[dict]:
     return markets
 
 
+def market_path(reference: str) -> str | None:
+    value = reference.strip()
+    if value.isdigit():
+        return f"/markets/{value}"
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc:
+        if parsed.netloc.casefold() not in {"polymarket.com", "www.polymarket.com"}:
+            return None
+        parts = [part for part in parsed.path.split("/") if part]
+        if len(parts) < 2 or parts[0] not in {"event", "market"}:
+            return None
+        value = parts[1]
+    if not value or "/" in value or any(char.isspace() for char in value):
+        return None
+    return f"/markets/slug/{quote(value, safe='-_')}"
+
+
 class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.5"
+    __version__ = "0.1.6"
 
     def __init__(self, bot):
         self.bot = bot
@@ -102,12 +120,16 @@ class Polymarket(commands.Cog):
 
     @polymarket.command(name="market", aliases=["info"])
     @commands.bot_has_permissions(embed_links=True)
-    async def polymarket_market(self, ctx: commands.Context, market_id: str):
-        """Show a market's outcomes, probabilities, rules, resolution source, and link by ID."""
+    async def polymarket_market(self, ctx: commands.Context, reference: str):
+        """Show outcomes, probabilities, rules, and links from a market ID, slug, or Polymarket link."""
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or `polymarket.com/event/...` link.")
+            return
         try:
-            market = await self._get_json(f"/markets/{market_id.strip()}")
+            market = await self._get_json(path)
         except (aiohttp.ClientError, RuntimeError, ValueError):
-            await ctx.send("That Polymarket market could not be reached. Use an ID from `polymarket markets`.")
+            await ctx.send("That Polymarket market could not be reached. Use an ID, slug, or Polymarket link from `polymarket markets`.")
             return
         if not isinstance(market, dict):
             await ctx.send("Polymarket returned an unexpected market response.")
