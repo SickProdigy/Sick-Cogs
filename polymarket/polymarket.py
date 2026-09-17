@@ -67,7 +67,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.6"
+    __version__ = "0.1.7"
 
     def __init__(self, bot):
         self.bot = bot
@@ -86,7 +86,15 @@ class Polymarket(commands.Cog):
 
         This cog does not connect wallets, custody funds, sign transactions, or place orders.
         """
-        await ctx.send_help()
+        embed = discord.Embed(
+            title="Polymarket discovery",
+            description="Public market information only. Market-implied probabilities are not financial advice.",
+        )
+        embed.add_field(name="Browse active markets", value="`polymarket markets`\nRanked by 24-hour volume.", inline=False)
+        embed.add_field(name="Search", value="`polymarket markets <words>`\nExample: `polymarket markets bitcoin`", inline=False)
+        embed.add_field(name="Market details", value="`polymarket market <ID, slug, or Polymarket link>`\nShows probabilities, rules, resolution source, and the canonical link.", inline=False)
+        embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
+        await ctx.send(embed=embed)
 
     @polymarket.command(name="markets", aliases=["search", "browse"])
     @commands.bot_has_permissions(embed_links=True)

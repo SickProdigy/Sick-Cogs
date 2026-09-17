@@ -70,3 +70,13 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
             {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"},
         )
         ctx.send.assert_awaited_once()
+
+    async def test_group_shows_a_read_only_discovery_card(self):
+        class Context:
+            def __init__(self):
+                self.send = AsyncMock()
+
+        ctx = Context()
+        await Polymarket.polymarket.callback(Polymarket(object()), ctx)
+        ctx.send.assert_awaited_once()
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket discovery")
