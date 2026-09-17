@@ -50,7 +50,13 @@ Run `[p]roletools setup` to open a manager-only setup card inspired by the Clank
 - **Basic self-roles** use Red Admin's canonical `selfroles` list, so they work through `[p]selfrole` and on RoleTools cards.
 - **Advanced self-roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
 
-The setup card uses Discord role and channel selectors to add/remove roles, edit appearance, publish or move the public card, and refresh it. Managers do not need to create internal select-option names. The member card automatically divides larger catalogs into private 25-role pages; 100 roles become four pages.
+The setup card uses Discord role and channel selectors to add/remove roles, edit appearance, publish or move the public card, and refresh it. Managers do not need to create internal option names. When publishing, choose one layout:
+
+- **Private picker** puts one button on the public card and opens private 25-role pages. This is the cleanest choice for very large catalogs.
+- **Dropdown card** puts as many as five 25-role dropdowns directly on the public message, supporting up to 125 roles.
+- **Reaction roles** assigns a distinct emoji to every role. RoleTools keeps 20 roles on each message, creates overflow messages automatically, reuses existing messages where possible, and rebuilds the mappings and reactions whenever the shared catalogs change.
+
+Every layout reads the same Basic and Advanced catalogs, so roles only need to be managed once.
 
 The legacy `[p]roletools select`, button, reaction, and message commands remain available for advanced layouts and compatibility.
 

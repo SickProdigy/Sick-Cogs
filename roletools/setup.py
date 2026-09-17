@@ -8,7 +8,7 @@ from redbot.core import commands
 from redbot.core.commands import Context
 
 from .abc import RoleToolsMixin
-from .picker import PickerLaunchView
+from .picker import PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE
 
 roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -89,16 +89,50 @@ class SetupPublishSelect(discord.ui.ChannelSelect):
     async def callback(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         channel = self.values[0]
-        ok, message = await self.parent_view.cog.publish_setup_picker(interaction.guild, channel)
+        ok, message = await self.parent_view.cog.publish_setup_picker(
+            interaction.guild, channel, self.parent_view.layout
+        )
         await interaction.message.edit(content=message, embed=None, view=None)
 
 
 class SetupPublishView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, layout: str):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.author = author
+        self.layout = layout
+        self.add_item(SetupPublishSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
+class SetupLayoutView(discord.ui.View):
     def __init__(self, cog, author: discord.Member):
         super().__init__(timeout=300)
         self.cog = cog
         self.author = author
-        self.add_item(SetupPublishSelect(self))
+
+    async def choose(self, interaction: discord.Interaction, layout: str, explanation: str) -> None:
+        await interaction.response.edit_message(
+            content=explanation + "\n\nNow choose the channel to publish or move it to.",
+            view=SetupPublishView(self.cog, self.author, layout),
+        )
+
+    @discord.ui.button(label="Private picker", style=discord.ButtonStyle.primary)
+    async def private_picker(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.choose(interaction, "private", "One public button opens private, paged role lists. Best for large catalogs.")
+
+    @discord.ui.button(label="Dropdown card", style=discord.ButtonStyle.secondary)
+    async def dropdown(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.choose(interaction, "dropdown", "Dropdowns appear directly on the public card, up to 125 roles.")
+
+    @discord.ui.button(label="Reaction roles", style=discord.ButtonStyle.secondary)
+    async def reactions(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.choose(interaction, "reactions", "One managed message holds 20 reactions; overflow messages are added automatically.")
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -180,8 +214,8 @@ class RoleToolsSetupView(discord.ui.View):
     @discord.ui.button(label="Publish / Move", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Choose where the public self-role card belongs.",
-            view=SetupPublishView(self.cog, interaction.user),
+            "Choose how members should use the public self-role card.",
+            view=SetupLayoutView(self.cog, interaction.user),
             ephemeral=True,
         )
 
@@ -221,7 +255,11 @@ class RoleToolsSetup(RoleToolsMixin):
             "message_id": None,
             "role_ids": [],
             "sort": "alphabetical",
+            "layout": "private",
+            "reaction_message_ids": [],
         })
+        data.setdefault("layout", "private")
+        data.setdefault("reaction_message_ids", [])
         return pickers, data
 
     async def combined_catalog_ids(self, guild: discord.Guild) -> List[int]:
@@ -330,7 +368,9 @@ class RoleToolsSetup(RoleToolsMixin):
             settings = await self.config.role(role).all()
             if any(settings.get(key) for key in ADVANCED_KEYS):
                 unsafe.append(role.name)
+        layout_names = {"private": "Private picker", "dropdown": "Dropdown card", "reactions": "Reaction roles"}
         embed.add_field(name="Public card", value=published, inline=False)
+        embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Private picker"))
         if unsafe:
             embed.add_field(
                 name="Needs attention",
@@ -350,32 +390,61 @@ class RoleToolsSetup(RoleToolsMixin):
         }:
             await self.refresh_setup_picker(ctx.guild)
 
-    async def publish_setup_picker(self, guild: discord.Guild, channel: discord.TextChannel):
+    async def publish_setup_picker(
+        self, guild: discord.Guild, channel: discord.TextChannel, layout: str = "private"
+    ):
         channel_id = int(getattr(channel, "id", 0) or 0)
         channel = guild.get_channel(channel_id)
         if not isinstance(channel, discord.TextChannel):
             return False, "That channel is unavailable or is not a text channel."
         pickers, data = await self.ensure_setup_picker(guild)
         data["role_ids"] = await self.combined_catalog_ids(guild)
+        if layout == "dropdown" and len(data["role_ids"]) > PUBLIC_SELECT_PAGE_SIZE * PUBLIC_SELECT_MAX_PAGES:
+            return False, "The public dropdown supports up to 125 roles. Use the private picker or reaction layout for this catalog."
+
+        old_layout = data.get("layout", "private")
         old_channel = guild.get_channel(data.get("channel_id"))
-        old_message_id = data.get("message_id")
-        view = PickerLaunchView(self, guild.id, SETUP_PICKER_NAME)
-        try:
-            message = await channel.send(embed=self.picker_embed(data), view=view)
-        except discord.HTTPException:
-            return False, f"I could not publish the self-role card in {channel.mention}."
+        old_ids = list(data.get("reaction_message_ids", []))
+        if not old_ids and data.get("message_id"):
+            old_ids = [data["message_id"]]
+        if old_layout == "reactions":
+            await self._replace_managed_reaction_mappings(guild, data, [])
+
+        data["layout"] = layout
         data["channel_id"] = channel.id
-        data["message_id"] = message.id
-        pickers[SETUP_PICKER_NAME] = data
-        await self.config.guild(guild).pickers.set(pickers)
-        self.picker_views.append(view)
-        if old_channel is not None and old_message_id and old_message_id != message.id:
+        if layout == "reactions":
+            data["reaction_message_ids"] = old_ids
+            pickers[SETUP_PICKER_NAME] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            if not await self.sync_reaction_picker(guild, SETUP_PICKER_NAME, data):
+                return False, f"I could not publish reaction roles in {channel.mention}."
+            new_ids = set(data.get("reaction_message_ids", []))
+            view = None
+        else:
+            data["reaction_message_ids"] = []
+            view = self.public_picker_view(guild, SETUP_PICKER_NAME, data)
             try:
-                old_message = await old_channel.fetch_message(old_message_id)
-                await old_message.delete()
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                log.warning("Could not remove the previous self-role card in guild %s", guild.id)
-        return True, f"Published the self-role card in {channel.mention}."
+                message = await channel.send(embed=self.picker_embed(data), view=view)
+            except discord.HTTPException:
+                return False, f"I could not publish the self-role card in {channel.mention}."
+            data["message_id"] = message.id
+            pickers[SETUP_PICKER_NAME] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            self.picker_views.append(view)
+            new_ids = {message.id}
+
+        if old_channel is not None:
+            for old_message_id in old_ids:
+                if old_message_id in new_ids and old_channel.id == channel.id:
+                    continue
+                try:
+                    await (await old_channel.fetch_message(old_message_id)).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    log.warning("Could not remove an earlier self-role card in guild %s", guild.id)
+        if guild.id in self.settings:
+            self.settings[guild.id]["pickers"] = await self.config.guild(guild).pickers()
+        layout_name = {"private": "private picker", "dropdown": "dropdown card", "reactions": "managed reaction roles"}[layout]
+        return True, f"Published {layout_name} in {channel.mention}."
 
     @roletools.command(name="setup")
     @commands.admin_or_permissions(manage_roles=True)

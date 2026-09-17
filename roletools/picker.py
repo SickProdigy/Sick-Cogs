@@ -17,6 +17,13 @@ roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
 
 PICKER_PAGE_SIZE = 25
+PUBLIC_SELECT_PAGE_SIZE = 25
+PUBLIC_SELECT_MAX_PAGES = 5
+REACTION_PAGE_SIZE = 20
+REACTION_EMOJIS = [
+    "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟",
+    "🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭", "🇮", "🇯",
+]
 PICKER_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
 
 
@@ -204,6 +211,66 @@ class PickerLaunchView(discord.ui.View):
         self.add_item(PickerLaunchButton(guild_id, picker_name))
 
 
+class PublicPickerSelect(discord.ui.Select):
+    def __init__(self, cog, guild_id: int, picker_name: str, roles: List[discord.Role], page: int):
+        self.cog = cog
+        options = [discord.SelectOption(label=role.name[:100], value=str(role.id)) for role in roles]
+        super().__init__(
+            placeholder=f"Choose roles · group {page + 1}", min_values=1,
+            max_values=max(1, len(options)), options=options,
+            custom_id=f"RTPublicPicker:{guild_id}:{picker_name}:{page}", row=page,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        added, removed, errors = [], [], []
+        for value in self.values:
+            role = interaction.guild.get_role(int(value))
+            if role is None:
+                errors.append("A selected role was deleted.")
+                continue
+            if role in interaction.user.roles:
+                if not await self.cog.config.role(role).selfremovable():
+                    errors.append(f"{role.name} is not self-removable.")
+                    continue
+                response = await self.cog.remove_roles(interaction.user, [role], "Public role picker")
+                if response:
+                    errors.extend(item.reason for item in response)
+                    continue
+                removed.append(role)
+                await self.cog.notify_role_change(interaction.user, role, "removed")
+            else:
+                if not await self.cog.config.role(role).selfassignable():
+                    errors.append(f"{role.name} is not self-assignable.")
+                    continue
+                if getattr(interaction.user, "pending", False):
+                    errors.append("Finish the server membership screening before choosing roles.")
+                    continue
+                if await self.cog.check_guild_verification(interaction.user, interaction.guild):
+                    errors.append("You must spend more time in this server before choosing roles.")
+                    continue
+                response = await self.cog.give_roles(interaction.user, [role], "Public role picker")
+                if response:
+                    errors.extend(item.reason for item in response)
+                    continue
+                added.append(role)
+                await self.cog.notify_role_change(interaction.user, role, "received")
+        result = []
+        if added:
+            result.append("Added: " + humanize_list([role.mention for role in added]))
+        if removed:
+            result.append("Removed: " + humanize_list([role.mention for role in removed]))
+        result.extend(errors)
+        await interaction.followup.send("\n".join(result) or "No roles changed.", ephemeral=True)
+
+
+class PublicPickerView(discord.ui.View):
+    def __init__(self, cog, guild_id: int, picker_name: str, roles: List[discord.Role]):
+        super().__init__(timeout=None)
+        for page, page_roles in enumerate(picker_pages(roles, PUBLIC_SELECT_PAGE_SIZE)):
+            self.add_item(PublicPickerSelect(cog, guild_id, picker_name, page_roles, page))
+
+
 class RoleToolsPicker(RoleToolsMixin):
     """High-level scalable self-role picker commands."""
 
@@ -220,16 +287,111 @@ class RoleToolsPicker(RoleToolsMixin):
             color=discord.Color.blurple(),
         ).set_footer(text=f"{count} roles · {pages} page{'s' if pages != 1 else ''}")
 
+    def public_picker_view(self, guild: discord.Guild, name: str, data: dict):
+        roles = [guild.get_role(int(role_id)) for role_id in data.get("role_ids", [])]
+        roles = [role for role in roles if role is not None]
+        if data.get("layout") == "dropdown" and roles:
+            return PublicPickerView(self, guild.id, name, roles)
+        return PickerLaunchView(self, guild.id, name)
+
+    @staticmethod
+    def reaction_picker_embed(data: dict, roles: List[discord.Role], page: int, pages: int) -> discord.Embed:
+        lines = [f"{emoji}  {role.mention}" for emoji, role in zip(REACTION_EMOJIS, roles)]
+        description = data.get("description") or "React to add a role; remove your reaction to remove it."
+        if lines:
+            description += "\n\n" + "\n".join(lines)
+        embed = discord.Embed(title=data.get("title") or "Choose your roles", description=description, color=discord.Color.blurple())
+        embed.set_footer(text=f"Reaction roles · page {page + 1} of {pages}")
+        return embed
+
+    async def _replace_managed_reaction_mappings(self, guild: discord.Guild, data: dict, messages) -> None:
+        old_ids = {int(mid) for mid in data.get("reaction_message_ids", [])}
+        if data.get("message_id"):
+            old_ids.add(int(data["message_id"]))
+        current = dict(await self.config.guild(guild).reaction_roles())
+        kept = {}
+        for key, role_id in current.items():
+            try:
+                _, message_id, _ = key.split("-", 2)
+            except ValueError:
+                kept[key] = role_id
+                continue
+            if int(message_id) not in old_ids:
+                kept[key] = role_id
+            else:
+                async with self.config.role_from_id(role_id).reactions() as reactions:
+                    if key in reactions:
+                        reactions.remove(key)
+        for message, role_ids in messages:
+            for emoji, role_id in zip(REACTION_EMOJIS, role_ids):
+                key = f"{message.channel.id}-{message.id}-{emoji.strip(chr(0xfe0f))}"
+                kept[key] = role_id
+                async with self.config.role_from_id(role_id).reactions() as reactions:
+                    if key not in reactions:
+                        reactions.append(key)
+        await self.config.guild(guild).reaction_roles.set(kept)
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
+        self.settings[guild.id]["reaction_roles"] = kept
+
+    async def sync_reaction_picker(self, guild: discord.Guild, name: str, data: dict) -> bool:
+        channel = guild.get_channel(data.get("channel_id"))
+        if channel is None:
+            return False
+        pages = picker_pages(list(data.get("role_ids", [])), REACTION_PAGE_SIZE) or [[]]
+        old_ids = list(data.get("reaction_message_ids", []))
+        if not old_ids and data.get("message_id"):
+            old_ids = [data["message_id"]]
+        messages = []
+        # Disable the old bindings before clearing reactions so Discord's raw
+        # removal events cannot take roles away while the managed card rebuilds.
+        await self._replace_managed_reaction_mappings(guild, data, [])
+        try:
+            for page, role_ids in enumerate(pages):
+                roles = [guild.get_role(int(role_id)) for role_id in role_ids]
+                roles = [role for role in roles if role is not None]
+                message = None
+                if page < len(old_ids):
+                    try:
+                        message = await channel.fetch_message(int(old_ids[page]))
+                    except discord.NotFound:
+                        pass
+                embed = self.reaction_picker_embed(data, roles, page, len(pages))
+                if message is None:
+                    message = await channel.send(embed=embed)
+                else:
+                    await message.edit(embed=embed, view=None)
+                    await message.clear_reactions()
+                for emoji in REACTION_EMOJIS[:len(roles)]:
+                    await message.add_reaction(emoji)
+                messages.append((message, [role.id for role in roles]))
+            for message_id in old_ids[len(pages):]:
+                try:
+                    await (await channel.fetch_message(int(message_id))).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            await self._replace_managed_reaction_mappings(guild, data, messages)
+            data["reaction_message_ids"] = [message.id for message, _ in messages]
+            data["message_id"] = messages[0][0].id
+            pickers = await self.config.guild(guild).pickers()
+            pickers[name] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            if guild.id in self.settings:
+                self.settings[guild.id]["pickers"] = pickers
+        except (discord.Forbidden, discord.HTTPException):
+            log.exception("Could not synchronize managed reaction picker %s in guild %s", name, guild.id)
+            return False
+        return True
+
     async def sync_picker(self, guild: discord.Guild, name: str, data: dict) -> bool:
         channel = guild.get_channel(data.get("channel_id"))
         if channel is None or not data.get("message_id"):
             return False
+        if data.get("layout") == "reactions":
+            return await self.sync_reaction_picker(guild, name, data)
         try:
             message = await channel.fetch_message(data["message_id"])
-            await message.edit(
-                embed=self.picker_embed(data),
-                view=PickerLaunchView(self, guild.id, name),
-            )
+            await message.edit(embed=self.picker_embed(data), view=self.public_picker_view(guild, name, data))
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             log.exception("Could not synchronize RoleTools picker %s in guild %s", name, guild.id)
             return False
@@ -239,8 +401,11 @@ class RoleToolsPicker(RoleToolsMixin):
         for guild_id, data in (await self.config.all_guilds()).items():
             for name, picker in data.get("pickers", {}).items():
                 message_id = picker.get("message_id")
-                if message_id:
-                    view = PickerLaunchView(self, int(guild_id), name)
+                if message_id and picker.get("layout") != "reactions":
+                    guild = self.bot.get_guild(int(guild_id))
+                    if guild is None:
+                        continue
+                    view = self.public_picker_view(guild, name, picker)
                     self.bot.add_view(view, message_id=int(message_id))
                     self.picker_views.append(view)
 
