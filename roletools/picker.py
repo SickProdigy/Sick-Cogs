@@ -101,8 +101,12 @@ class PickerRoleSelect(discord.ui.Select):
         refreshed = await PickerMemberView.create(
             cog, interaction.guild, interaction.user, self.parent_view.picker_name, self.parent_view.page
         )
-        await interaction.edit_original_response(embed=refreshed.embed, view=refreshed)
-        await interaction.followup.send("\n".join(result) or "No roles changed.", ephemeral=True)
+        refreshed.embed.add_field(
+            name="Last change",
+            value=("\n".join(result) or "No roles changed.")[:1024],
+            inline=False,
+        )
+        await interaction.message.edit(embed=refreshed.embed, view=refreshed)
 
 
 class PickerPageButton(discord.ui.Button):

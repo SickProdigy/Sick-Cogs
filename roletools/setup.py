@@ -45,12 +45,12 @@ class CatalogRoleSelect(discord.ui.RoleSelect):
         embed = await self.parent_view.cog.catalog_embed(
             interaction.guild, restricted=self.parent_view.restricted
         )
-        await interaction.edit_original_response(embed=embed, view=refreshed)
         action = "Added" if self.add else "Removed"
         summary = f"{action} {changed} role(s)."
         if notes:
             summary += "\n" + "\n".join(notes)
-        await interaction.followup.send(summary, ephemeral=True)
+        embed.add_field(name="Last change", value=summary[:1024], inline=False)
+        await interaction.message.edit(embed=embed, view=refreshed)
 
 
 class CatalogEditorView(discord.ui.View):
@@ -62,6 +62,12 @@ class CatalogEditorView(discord.ui.View):
         self.catalog_name = "Restricted RoleTools" if restricted else "Basic Red self-role"
         self.add_item(CatalogRoleSelect(self, add=True))
         self.add_item(CatalogRoleSelect(self, add=False))
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=2)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Role catalog changes saved.", embed=None, view=None
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -84,7 +90,7 @@ class SetupPublishSelect(discord.ui.ChannelSelect):
         await interaction.response.defer(ephemeral=True, thinking=True)
         channel = self.values[0]
         ok, message = await self.parent_view.cog.publish_setup_picker(interaction.guild, channel)
-        await interaction.edit_original_response(content=message, embed=None, view=None)
+        await interaction.message.edit(content=message, embed=None, view=None)
 
 
 class SetupPublishView(discord.ui.View):
@@ -125,7 +131,10 @@ class SelfRoleAppearanceModal(discord.ui.Modal):
         pickers[SETUP_PICKER_NAME] = data
         await self.cog.config.guild(self.guild).pickers.set(pickers)
         await self.cog.refresh_setup_picker(self.guild)
-        await interaction.response.send_message("Self-role card appearance saved.", ephemeral=True)
+        embed = await self.cog.setup_embed(self.guild)
+        await interaction.response.edit_message(
+            embed=embed, view=RoleToolsSetupView(self.cog, interaction.user)
+        )
 
 
 class RoleToolsSetupView(discord.ui.View):
