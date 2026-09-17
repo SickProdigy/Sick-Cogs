@@ -8,6 +8,7 @@ class RoleToolsMigrationTests(unittest.TestCase):
         self.assertEqual(value["buttons"]["a"]["role_id"], 2)
         self.assertEqual(value["reaction_roles"], {})
         self.assertIsNone(value["notification_channel"])
+        self.assertEqual(value["pickers"], {})
         self.assertEqual(notes, [])
 
     def test_unknown_and_malformed_records_are_reported(self):

@@ -22,6 +22,7 @@ from .exclusive import RoleToolsExclusive
 from .inclusive import RoleToolsInclusive
 from .menus import BaseMenu, ConfirmView, EmbedPages, RolePages
 from .messages import RoleToolsMessages
+from .picker import RoleToolsPicker
 from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
 from .select import RoleToolsSelect
@@ -33,7 +34,7 @@ roletools = RoleToolsMixin.roletools
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
 ROLETOOLS_SCHEMA_VERSION = 1
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
 
@@ -84,6 +85,7 @@ class RoleTools(
     RoleToolsExclusive,
     RoleToolsInclusive,
     RoleToolsMessages,
+    RoleToolsPicker,
     RoleToolsReactions,
     RoleToolsRequires,
     RoleToolsSettings,
@@ -97,7 +99,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.7.1"
+    __version__ = "1.8.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -113,6 +115,7 @@ class RoleTools(
         self._ready: asyncio.Event = asyncio.Event()
         self.views: Dict[int, Dict[str, discord.ui.View]] = {}
         self.layouts: Dict[int, Dict[str, discord.ui.LayoutView]] = {}
+        self.picker_views: List[discord.ui.View] = []
         self._repo = ""
         self._commit = ""
         self.is_discord: bool = discord.utils.oauth_url("").startswith("https://discord.com/")
@@ -164,6 +167,10 @@ class RoleTools(
             await self.initialize_buttons()
         except Exception:
             log.exception("Error initializing Buttons")
+        try:
+            await self.register_picker_views()
+        except Exception:
+            log.exception("Error initializing role picker cards")
         for guild_id, guild_views in self.views.items():
             for msg_ids, view in guild_views.items():
                 log.debug("Adding view %r to %s", view, guild_id)
@@ -246,6 +253,10 @@ class RoleTools(
                 # Don't forget to remove persistent views when the cog is unloaded.
                 log.debug("Stopping view %s", view)
                 view.stop()
+        for view in self.picker_views:
+            log.debug("Stopping picker view %s", view)
+            view.stop()
+        self.picker_views.clear()
         try:
             self.bot.remove_dev_env_value("roletools")
         except Exception:
@@ -324,7 +335,13 @@ class RoleTools(
             inline=False,
         )
         embed.add_field(
-            name="3. Optional role-change notices",
+            name="3. Large role collections",
+            value=(f"`{prefix}roletools picker create games #roles` publishes one card with "
+                   "private 25-role pages that scale to large collections."),
+            inline=False,
+        )
+        embed.add_field(
+            name="4. Optional role-change notices",
             value=(f"`{prefix}roletools notify channel #role-log` posts successful reaction, "
                    "button, and select role changes there. Use "
                    f"`{prefix}roletools notify disable` to stop them."),
