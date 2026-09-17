@@ -92,7 +92,7 @@ class SetupPublishSelect(discord.ui.ChannelSelect):
         ok, message = await self.parent_view.cog.publish_setup_picker(
             interaction.guild, channel, self.parent_view.layout
         )
-        await interaction.message.edit(content=message, embed=None, view=None)
+        await interaction.edit_original_response(content=message, embed=None, view=None)
 
 
 class SetupPublishView(discord.ui.View):
