@@ -1,5 +1,7 @@
 from typing import Optional, Union
 
+import discord
+
 from red_commons.logging import getLogger
 from redbot.core import bank, commands
 from redbot.core.commands import Context
@@ -336,3 +338,35 @@ class RoleToolsSettings(RoleToolsMixin):
                 role=role.mention
             )
             await ctx.send(msg)
+
+    @roletools.group(name="notify", aliases=["notifications"], invoke_without_command=True)
+    @commands.admin_or_permissions(manage_roles=True)
+    async def roletools_notify(self, ctx: Context) -> None:
+        """Configure an opt-in channel for successful member role-change notices."""
+        channel_id = await self.config.guild(ctx.guild).notification_channel()
+        channel = ctx.guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            await ctx.send(
+                f"RoleTools role-change notifications are disabled. Set one with `{ctx.clean_prefix}roletools notify channel #channel`."
+            )
+            return
+        await ctx.send(
+            f"RoleTools posts successful reaction, button, and select role changes in {channel.mention}. "
+            f"Disable them with `{ctx.clean_prefix}roletools notify disable`."
+        )
+
+    @roletools_notify.command(name="channel")
+    async def roletools_notify_channel(self, ctx: Context, channel: discord.TextChannel) -> None:
+        """Send successful member role-change notices to this channel."""
+        await self.config.guild(ctx.guild).notification_channel.set(channel.id)
+        if ctx.guild.id in self.settings:
+            self.settings[ctx.guild.id]["notification_channel"] = channel.id
+        await ctx.send(f"RoleTools will post successful role-change notices in {channel.mention}.")
+
+    @roletools_notify.command(name="disable", aliases=["off", "clear"])
+    async def roletools_notify_disable(self, ctx: Context) -> None:
+        """Disable public RoleTools role-change notices for this server."""
+        await self.config.guild(ctx.guild).notification_channel.set(None)
+        if ctx.guild.id in self.settings:
+            self.settings[ctx.guild.id]["notification_channel"] = None
+        await ctx.send("RoleTools role-change notices are now disabled.")

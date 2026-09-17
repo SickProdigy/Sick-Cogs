@@ -31,6 +31,23 @@ class RoleToolsEvents(RoleToolsMixin):
     """This class contains all the event listeners as well as the core
     logic for handling adding/removing roles with our settings."""
 
+    async def notify_role_change(self, member: discord.Member, role: discord.Role, action: str) -> None:
+        """Post an explicitly enabled member role change without disrupting the action."""
+        channel_id = await self.config.guild(member.guild).notification_channel()
+        if not channel_id:
+            return
+        channel = member.guild.get_channel(channel_id)
+        if channel is None:
+            log.warning("RoleTools notification channel %s is unavailable in guild %s", channel_id, member.guild.id)
+            return
+        try:
+            await channel.send(
+                f"{member.mention} {action} {role.mention}.",
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+            )
+        except discord.HTTPException:
+            log.exception("Could not post RoleTools notification in guild %s", member.guild.id)
+
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         await self._ready.wait()
@@ -83,7 +100,9 @@ class RoleToolsEvents(RoleToolsMixin):
             if getattr(member, "pending", False):
                 return
             log.debug("Adding role to %s in %s", member.name, member.guild)
-            await self.give_roles(member, [role], _("Reaction Role"))
+            response = await self.give_roles(member, [role], _("Reaction Role"))
+            if not response:
+                await self.notify_role_change(member, role, "received")
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent) -> None:
@@ -127,7 +146,9 @@ class RoleToolsEvents(RoleToolsMixin):
             if member.bot:
                 return
             log.debug("Removing role from %s in %s", member.name, member.guild)
-            await self.remove_roles(member, [role], _("Reaction Role"))
+            response = await self.remove_roles(member, [role], _("Reaction Role"))
+            if not response:
+                await self.notify_role_change(member, role, "removed")
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:

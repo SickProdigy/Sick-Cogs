@@ -6,9 +6,13 @@ It is intended for servers that need more flexible role management than Discord'
 
 ## User Commands
 
+Run `[p]roletools` in a server for a short member guide. Use `[p]help roletools selfrole` when you need the detailed command syntax.
+
 - `[p]roletools selfrole <role>` - Add or remove a role that has been configured as self-assignable or self-removable.
 
 ## Moderator Commands
+
+Run `[p]roletools adminhelp` for the short setup path.
 
 - `[p]roletools selfassignable <true_or_false> <role>` - Allow or block users from adding a role to themselves.
 - `[p]roletools selfremovable <true_or_false> <role>` - Allow or block users from removing a role from themselves.
@@ -20,6 +24,8 @@ It is intended for servers that need more flexible role management than Discord'
 - `[p]roletools forcerole <users...> <role>` - Force a sticky role for one or more users.
 - `[p]roletools forceroleremove <users...> <role>` - Remove a forced sticky role entry.
 - `[p]roletools viewroles [role]` - View RoleTools settings for server roles.
+- `[p]roletools notify channel #channel` - Opt in to a channel notice for successful reaction, button, and select role changes.
+- `[p]roletools notify disable` - Stop those notices.
 
 ## Role Rules
 
