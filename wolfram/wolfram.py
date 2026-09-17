@@ -1,9 +1,12 @@
 import asyncio
+import json
+import random
 from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
+from pathlib import Path
 import logging
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 import xml.etree.ElementTree as ET
 
 import aiohttp
@@ -15,6 +18,37 @@ from redbot.core.utils.menus import DEFAULT_CONTROLS, menu
 
 
 log = logging.getLogger("red.sick-cogs.wolfram")
+
+EXAMPLES_URL = "https://www.wolframalpha.com/examples"
+EXAMPLE_CATEGORY_URLS = {
+    "mathematics": f"{EXAMPLES_URL}/mathematics",
+    "science": f"{EXAMPLES_URL}/science",
+    "society": f"{EXAMPLES_URL}/society",
+    "everyday": f"{EXAMPLES_URL}/everyday-life",
+    "surprises": f"{EXAMPLES_URL}/surprises",
+}
+
+
+def load_examples(path: Path) -> Dict[str, List[str]]:
+    """Load a small, deliberately curated catalog of safe example queries."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        categories = raw["categories"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ValueError("Wolfram example catalog is invalid.") from exc
+    if not isinstance(categories, dict):
+        raise ValueError("Wolfram example catalog categories must be an object.")
+    validated = {}
+    for category, examples in categories.items():
+        if category not in EXAMPLE_CATEGORY_URLS or not isinstance(examples, list):
+            raise ValueError("Wolfram example catalog has an unsupported category.")
+        queries = [query.strip() for query in examples if isinstance(query, str) and query.strip()]
+        if not queries or len(queries) != len(examples):
+            raise ValueError("Wolfram example catalog has an invalid query.")
+        validated[category] = queries
+    if set(validated) != set(EXAMPLE_CATEGORY_URLS):
+        raise ValueError("Wolfram example catalog is incomplete.")
+    return validated
 
 
 class RequestFailure(Enum):
@@ -36,7 +70,7 @@ class WolframResponse:
 class Wolfram(commands.Cog):
     """Ask Wolfram|Alpha any question."""
 
-    __version__ = "2.2.0"
+    __version__ = "2.3.1"
 
     API_BASE_URL = "https://api.wolframalpha.com"
     DEVELOPER_URL = "https://products.wolframalpha.com/api/"
@@ -48,6 +82,21 @@ class Wolfram(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        self.examples = load_examples(Path(__file__).with_name("data") / "examples.json")
+        self._last_example: Optional[str] = None
+
+    def choose_example(self, category: Optional[str] = None) -> Tuple[str, str]:
+        """Choose a catalog entry while avoiding an immediate repeat when possible."""
+        normalized = category.casefold().strip() if category else None
+        if normalized is not None and normalized not in self.examples:
+            raise ValueError("Unknown Wolfram example category.")
+        candidates = [(name, query) for name, queries in self.examples.items() for query in queries]
+        if normalized is not None:
+            candidates = [(normalized, query) for query in self.examples[normalized]]
+        alternatives = [item for item in candidates if item[1] != self._last_example]
+        chosen = random.choice(alternatives or candidates)
+        self._last_example = chosen[1]
+        return chosen
 
     async def _get_api_key(self, ctx):
         api_tokens = await self.bot.get_shared_api_tokens("wolfram")
@@ -103,6 +152,35 @@ class Wolfram(commands.Cog):
             return await ctx.send("Wolfram|Alpha could not be reached. Please try again later.")
         return await ctx.send("Wolfram|Alpha is temporarily unavailable. Please try again later.")
 
+    @commands.command(name="wolframexample", aliases=["wolframrandom"])
+    async def wolfram_example(self, ctx, *, category: Optional[str] = None):
+        """Show a curated Wolfram example.
+
+        Categories: mathematics, science, society, everyday, surprises.
+        Run the shown query with `[p]wolfram <query>` when you want an answer.
+        """
+        try:
+            chosen_category, query = self.choose_example(category)
+        except ValueError:
+            choices = ", ".join(EXAMPLE_CATEGORY_URLS)
+            await ctx.send(f"Unknown category. Choose one of: {choices}.")
+            return
+        prefix = ctx.clean_prefix
+        title = f"Wolfram example: {chosen_category.title()}"
+        embed = discord.Embed(
+            title=title,
+            url=EXAMPLE_CATEGORY_URLS[chosen_category],
+            description=f"`{query}`",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="Try it",
+            value=f"Run `{prefix}wolfram {query}` to ask Wolfram|Alpha.",
+            inline=False,
+        )
+        embed.set_footer(text="Curated example • Source: Wolfram|Alpha Examples")
+        await ctx.send(embed=embed)
+
     @commands.command(name="wolfram")
     async def _wolfram(self, ctx, *question: str):
         """Ask Wolfram|Alpha a factual, mathematical, or scientific question.
@@ -115,6 +193,9 @@ class Wolfram(commands.Cog):
         Related commands:
         - `[p]wolframimage <question>` returns Wolfram|Alpha's visual result.
         - `[p]wolframsolve <question>` requests step-by-step math output.
+        - `[p]wolframexample [category]` shows a curated Knowledgebase example.
+          Categories: `mathematics`, `science`, `society`, `everyday`, `surprises`.
+          `[p]wolframrandom` is an alias.
 
         A Wolfram|Alpha AppID must be configured by the bot owner.
         """

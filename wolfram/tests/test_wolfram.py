@@ -89,6 +89,14 @@ class WolframRequestTests(unittest.IsolatedAsyncioTestCase):
         ctx.send_help.assert_awaited_once_with(ctx.command)
         cog._get_api_key.assert_not_awaited()
 
+    async def test_primary_help_mentions_example_discovery(self):
+        help_text = Wolfram._wolfram.help
+        self.assertIn("[p]wolframexample [category]", help_text)
+        self.assertIn("[p]wolframrandom", help_text)
+        for category in ("mathematics", "science", "society", "everyday", "surprises"):
+            self.assertIn(category, help_text)
+        self.assertLess(len(help_text), 1024)
+
     async def test_provider_failure_is_distinct(self):
         cog = self.make_cog(FakeSession(FakeResponse(status=503)))
 
@@ -118,3 +126,19 @@ class WolframRequestTests(unittest.IsolatedAsyncioTestCase):
         message = ctx.send.await_args.args[0]
         self.assertIn("rejected", message)
         self.assertNotIn("secret", message)
+
+class WolframExampleCatalogTests(unittest.TestCase):
+    def test_bundled_catalog_has_all_supported_categories(self):
+        from pathlib import Path
+        from wolfram.wolfram import EXAMPLE_CATEGORY_URLS, load_examples
+
+        catalog = load_examples(Path(__file__).parents[1] / "data" / "examples.json")
+        self.assertEqual(set(catalog), set(EXAMPLE_CATEGORY_URLS))
+        self.assertTrue(all(catalog.values()))
+
+    def test_choose_example_rejects_unknown_category(self):
+        cog = object.__new__(Wolfram)
+        cog.examples = {"mathematics": ["2+2"]}
+        cog._last_example = None
+        with self.assertRaises(ValueError):
+            cog.choose_example("unknown")
