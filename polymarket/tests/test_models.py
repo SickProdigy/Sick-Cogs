@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from polymarket import setup
-from polymarket.handoff import MarketSnapshot, MarketSnapshotError
+from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 
 from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, future_handoff_reasons, market_path, market_url, technically_handoff_ready
 
@@ -23,6 +23,11 @@ class PolymarketModelTests(unittest.TestCase):
         self.assertEqual(snapshot.outcome_token_ids, ("yes-token", "no-token"))
         with self.assertRaises(MarketSnapshotError):
             MarketSnapshot.from_market({**market, "acceptingOrders": False})
+        intent = FutureHandoffIntent.create(requester_id=7, snapshot=snapshot, outcome_index=0, max_pusd="12.50", created_at=100, expires_at=160)
+        self.assertEqual(intent.selected_outcome, "Yes")
+        self.assertEqual(len(intent.fingerprint), 64)
+        with self.assertRaises(MarketSnapshotError):
+            FutureHandoffIntent.create(requester_id=7, snapshot=snapshot, outcome_index=2, max_pusd="12.50", created_at=100, expires_at=160)
 
     def test_future_handoff_requires_an_active_order_ready_clob_market(self):
         ready = {"active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "clobTokenIds": '["yes"]'}
