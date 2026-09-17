@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from polymarket import setup
+from polymarket.handoff import MarketSnapshot, MarketSnapshotError
 
 from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, future_handoff_reasons, market_path, market_url, technically_handoff_ready
 
@@ -14,6 +15,14 @@ class PolymarketModelTests(unittest.TestCase):
 
     def test_market_url_uses_canonical_event_slug(self):
         self.assertEqual(market_url({"slug": "example-market"}), "https://polymarket.com/event/example-market")
+
+
+    def test_market_snapshot_rejects_non_ready_or_malformed_markets(self):
+        market = {"id": "1", "conditionId": "condition", "slug": "example", "question": "Example?", "active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "outcomes": '["Yes", "No"]', "clobTokenIds": '["yes-token", "no-token"]', "outcomePrices": '["0.6", "0.4"]', "orderMinSize": 5}
+        snapshot = MarketSnapshot.from_market(market)
+        self.assertEqual(snapshot.outcome_token_ids, ("yes-token", "no-token"))
+        with self.assertRaises(MarketSnapshotError):
+            MarketSnapshot.from_market({**market, "acceptingOrders": False})
 
     def test_future_handoff_requires_an_active_order_ready_clob_market(self):
         ready = {"active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "clobTokenIds": '["yes"]'}
