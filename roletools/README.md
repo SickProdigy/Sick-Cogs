@@ -6,9 +6,11 @@ It is intended for servers that need more flexible role management than Discord'
 
 ## User Commands
 
-Run `[p]roletools` in a server for a short member guide. Use `[p]help roletools selfrole` when you need the detailed command syntax.
+Run `[p]roletools` in a server for a short member guide. These commands use RoleTools’ own server configuration; Red’s separate core `[p]selfrole` command is not a substitute.
 
-- `[p]roletools selfrole <role>` - Add or remove a role that has been configured as self-assignable or self-removable.
+- `[p]roletools viewroles` - View the self-roles currently available to you.
+- `[p]roletools selfrole <role>` - Add or remove an available self-role by mention, ID, or name.
+- `[p]help roletools selfrole` - View detailed command syntax and behavior.
 
 ## Moderator Commands
 
