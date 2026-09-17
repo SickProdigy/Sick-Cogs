@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Create server events with portable calendar exports and Google Calendar links.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server event details and the Discord user ID of each event creator. Event creators may remove their own events; administrators may remove any server event.",
+  "hidden": false,
+  "install_msg": "Use [p]help calendar to create server events and export them without granting the bot calendar-account access.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "CalendarEvents",
+  "permissions": ["embed_links", "attach_files"],
+  "requirements": [],
+  "short": "Portable server events and calendar exports.",
+  "tags": ["calendar", "events", "ics", "google-calendar"],
+  "type": "COG",
+  "version": "0.1.0"
+}
