@@ -1,15 +1,14 @@
 # Polymarket
 
-An early Sick-Cogs foundation for prediction-market discovery and information.
+An early, develop-only Sick-Cogs cog for read-only prediction-market discovery and information.
 
 ## Current boundary
 
-This scaffold deliberately does **not** connect a provider, create or custody wallets, accept deposits, sign transactions, or place orders. It exists to establish the public cog name and a safe command surface while #15 is designed.
+Version `0.1.1` provides active-market search plus individual market cards with market-implied probabilities, rules, resolution source, and canonical Polymarket links. It deliberately does **not** connect a provider, create or custody wallets, accept deposits, sign transactions, or place orders.
 
 ## Planned direction
 
-1. Read-only market discovery, probability, rules, and canonical links.
-2. Optional alerts and saved watchlists.
-3. A separate, reviewed CryptoWallet handoff for testnet-only transaction intent—never Discord-held funds or automatic orders.
+1. Optional alerts and saved watchlists.
+2. A separate security, legal, and provider review for a user-controlled CryptoWallet mainnet handoff—never Discord-held funds or automatic orders.
 
 Perpetuals, spot trading, and other market types remain separate future scopes.
