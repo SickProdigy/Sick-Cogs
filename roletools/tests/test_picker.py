@@ -29,6 +29,55 @@ class PickerPagingTests(unittest.TestCase):
         self.assertEqual(picker_page_index(0, 0), 0)
 
 
+class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sync_reuses_slots_without_clearing_reactions(self):
+        roles = {
+            1: SimpleNamespace(id=1, mention="@Alpha"),
+            3: SimpleNamespace(id=3, mention="@Charlie"),
+        }
+        channel = SimpleNamespace(id=99)
+        channel.send = AsyncMock()
+        messages = []
+        for message_id in (10, 11):
+            message = SimpleNamespace(id=message_id, channel=channel)
+            message.edit = AsyncMock()
+            message.add_reaction = AsyncMock()
+            message.clear_reactions = AsyncMock()
+            messages.append(message)
+        channel.fetch_message = AsyncMock(side_effect=messages)
+        guild = SimpleNamespace(
+            id=42,
+            get_channel=lambda channel_id: channel if channel_id == 99 else None,
+            get_role=lambda role_id: roles.get(role_id),
+        )
+        reaction_roles = AsyncMock(return_value={"99-10-👍": 1, "99-11-👍": 2})
+        pickers = AsyncMock(return_value={})
+        pickers.set = AsyncMock()
+        guild_config = SimpleNamespace(reaction_roles=reaction_roles, pickers=pickers)
+        cog = object.__new__(__import__("roletools.roletools", fromlist=["RoleTools"]).RoleTools)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=guild_config))
+        cog.settings = {}
+        cog._replace_role_channel_mappings = AsyncMock()
+        cog._notify_role_channel_reorder = AsyncMock()
+        data = {
+            "channel_id": 99,
+            "message_id": 10,
+            "role_ids": [1, 3],
+            "role_channel_message_ids": [10, 11],
+        }
+
+        synced = await cog.sync_role_channel(guild, "_selfroles", data)
+
+        self.assertTrue(synced)
+        self.assertEqual(data["role_channel_message_ids"], [10, 11])
+        for message in messages:
+            message.clear_reactions.assert_not_awaited()
+            message.add_reaction.assert_awaited_once_with("👍")
+        self.assertIn("@Alpha", messages[0].edit.await_args.kwargs["content"])
+        self.assertIn("@Charlie", messages[1].edit.await_args.kwargs["content"])
+        cog._notify_role_channel_reorder.assert_awaited_once_with(guild, 1)
+
+
 class PickerViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_hundred_roles_render_as_four_private_pages(self):
         roles = []

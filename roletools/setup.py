@@ -50,7 +50,7 @@ class CatalogRoleSelect(discord.ui.RoleSelect):
         if notes:
             summary += "\n" + "\n".join(notes)
         embed.add_field(name="Last change", value=summary[:1024], inline=False)
-        await interaction.message.edit(embed=embed, view=refreshed)
+        await interaction.edit_original_response(embed=embed, view=refreshed)
 
 
 class CatalogEditorView(discord.ui.View):
@@ -122,17 +122,25 @@ class SetupLayoutView(discord.ui.View):
             view=SetupPublishView(self.cog, self.author, layout),
         )
 
-    @discord.ui.button(label="Private picker", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Private menu", style=discord.ButtonStyle.primary)
     async def private_picker(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.choose(interaction, "private", "One public button opens private, paged role lists. Best for large catalogs.")
+        await self.choose(interaction, "private", "One public button opens a private, paged role menu for each member. Best for large catalogs.")
 
-    @discord.ui.button(label="Dropdown card", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Public dropdowns", style=discord.ButtonStyle.secondary)
     async def dropdown(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.choose(interaction, "dropdown", "Dropdowns appear directly on the public card, up to 125 roles.")
 
-    @discord.ui.button(label="Reaction roles", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Combined reactions", style=discord.ButtonStyle.secondary)
     async def reactions(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.choose(interaction, "reactions", "One managed message holds 20 reactions; overflow messages are added automatically.")
+        await self.choose(interaction, "reactions", "One managed message holds 20 distinct reactions; overflow messages are added automatically.")
+
+    @discord.ui.button(label="Managed role channel", style=discord.ButtonStyle.secondary)
+    async def role_channel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.choose(
+            interaction,
+            "role_channel",
+            "One bot message per role uses 👍. Synchronizing reuses message slots and preserves retained reaction counts.",
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -211,7 +219,7 @@ class RoleToolsSetupView(discord.ui.View):
             SelfRoleAppearanceModal(self.cog, interaction.guild, data)
         )
 
-    @discord.ui.button(label="Publish / Move", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Publish role menu", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "Choose how members should use the public self-role card.",
@@ -219,13 +227,13 @@ class RoleToolsSetupView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Refresh card", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Sync published menu", style=discord.ButtonStyle.secondary, row=1)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
         synced = await self.cog.refresh_setup_picker(interaction.guild)
         embed = await self.cog.setup_embed(interaction.guild)
         await interaction.response.edit_message(embed=embed, view=RoleToolsSetupView(self.cog, interaction.user))
         await interaction.followup.send(
-            "Published card refreshed." if synced else "Setup refreshed; publish a card when ready.",
+            "Published role menu synchronized." if synced else "Setup synchronized; publish a role menu when ready.",
             ephemeral=True,
         )
 
@@ -257,9 +265,11 @@ class RoleToolsSetup(RoleToolsMixin):
             "sort": "alphabetical",
             "layout": "private",
             "reaction_message_ids": [],
+            "role_channel_message_ids": [],
         })
         data.setdefault("layout", "private")
         data.setdefault("reaction_message_ids", [])
+        data.setdefault("role_channel_message_ids", [])
         return pickers, data
 
     async def combined_catalog_ids(self, guild: discord.Guild) -> List[int]:
@@ -368,9 +378,14 @@ class RoleToolsSetup(RoleToolsMixin):
             settings = await self.config.role(role).all()
             if any(settings.get(key) for key in ADVANCED_KEYS):
                 unsafe.append(role.name)
-        layout_names = {"private": "Private picker", "dropdown": "Dropdown card", "reactions": "Reaction roles"}
+        layout_names = {
+            "private": "Private menu",
+            "dropdown": "Public dropdowns",
+            "reactions": "Combined reaction menu",
+            "role_channel": "Managed role channel",
+        }
         embed.add_field(name="Public card", value=published, inline=False)
-        embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Private picker"))
+        embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Private menu"))
         if unsafe:
             embed.add_field(
                 name="Needs attention",
@@ -400,33 +415,64 @@ class RoleToolsSetup(RoleToolsMixin):
         pickers, data = await self.ensure_setup_picker(guild)
         data["role_ids"] = await self.combined_catalog_ids(guild)
         if layout == "dropdown" and len(data["role_ids"]) > PUBLIC_SELECT_PAGE_SIZE * PUBLIC_SELECT_MAX_PAGES:
-            return False, "The public dropdown supports up to 125 roles. Use the private picker or reaction layout for this catalog."
+            return False, "The public dropdown supports up to 125 roles. Use the private menu or a reaction layout for this catalog."
+        if layout == "role_channel" and not data["role_ids"]:
+            return False, "Add at least one Basic or Advanced self-role before publishing a managed role channel."
+        permissions = channel.permissions_for(guild.me)
+        required = {"view_channel", "send_messages"}
+        if layout != "role_channel":
+            required.add("embed_links")
+        if layout in {"reactions", "role_channel"}:
+            required.update({"add_reactions", "read_message_history"})
+        if layout == "reactions":
+            required.add("manage_messages")
+        missing = [permission.replace("_", " ") for permission in sorted(required) if not getattr(permissions, permission, False)]
+        if missing:
+            return False, f"I need these permissions in {channel.mention}: {', '.join(missing)}."
 
         old_layout = data.get("layout", "private")
         old_channel = guild.get_channel(data.get("channel_id"))
         old_ids = list(data.get("reaction_message_ids", []))
+        if not old_ids:
+            old_ids = list(data.get("role_channel_message_ids", []))
         if not old_ids and data.get("message_id"):
             old_ids = [data["message_id"]]
-        if old_layout == "reactions":
+        same_managed_layout = (
+            old_layout == layout
+            and old_channel is not None
+            and old_channel.id == channel.id
+            and layout in {"reactions", "role_channel"}
+        )
+        if old_layout in {"reactions", "role_channel"} and not same_managed_layout:
             await self._replace_managed_reaction_mappings(guild, data, [])
+        reuse_ids = old_ids if same_managed_layout else []
 
         data["layout"] = layout
         data["channel_id"] = channel.id
         if layout == "reactions":
-            data["reaction_message_ids"] = old_ids
+            data["reaction_message_ids"] = reuse_ids
+            data["role_channel_message_ids"] = []
             pickers[SETUP_PICKER_NAME] = data
             await self.config.guild(guild).pickers.set(pickers)
             if not await self.sync_reaction_picker(guild, SETUP_PICKER_NAME, data):
-                return False, f"I could not publish reaction roles in {channel.mention}."
+                return False, f"I could not publish the combined reaction menu in {channel.mention}."
             new_ids = set(data.get("reaction_message_ids", []))
-            view = None
+        elif layout == "role_channel":
+            data["role_channel_message_ids"] = reuse_ids
+            data["reaction_message_ids"] = []
+            pickers[SETUP_PICKER_NAME] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            if not await self.sync_role_channel(guild, SETUP_PICKER_NAME, data):
+                return False, f"I could not publish the managed role channel in {channel.mention}."
+            new_ids = set(data.get("role_channel_message_ids", []))
         else:
             data["reaction_message_ids"] = []
+            data["role_channel_message_ids"] = []
             view = self.public_picker_view(guild, SETUP_PICKER_NAME, data)
             try:
                 message = await channel.send(embed=self.picker_embed(data), view=view)
             except discord.HTTPException:
-                return False, f"I could not publish the self-role card in {channel.mention}."
+                return False, f"I could not publish the self-role menu in {channel.mention}."
             data["message_id"] = message.id
             pickers[SETUP_PICKER_NAME] = data
             await self.config.guild(guild).pickers.set(pickers)
@@ -440,10 +486,15 @@ class RoleToolsSetup(RoleToolsMixin):
                 try:
                     await (await old_channel.fetch_message(old_message_id)).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    log.warning("Could not remove an earlier self-role card in guild %s", guild.id)
+                    log.warning("Could not remove an earlier self-role menu message in guild %s", guild.id)
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = await self.config.guild(guild).pickers()
-        layout_name = {"private": "private picker", "dropdown": "dropdown card", "reactions": "managed reaction roles"}[layout]
+        layout_name = {
+            "private": "private role menu",
+            "dropdown": "public dropdowns",
+            "reactions": "combined reaction menu",
+            "role_channel": "managed role channel",
+        }[layout]
         return True, f"Published {layout_name} in {channel.mention}."
 
     @roletools.command(name="setup")

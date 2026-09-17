@@ -38,6 +38,7 @@ def picker_description(data: dict) -> str:
     return {
         "dropdown": "Use the dropdowns below to add or remove roles.",
         "reactions": "React to add a role; remove your reaction to remove it.",
+        "role_channel": "React with 👍 to join; remove 👍 to leave.",
     }.get(data.get("layout"), "Click **Choose roles** to open your private role list.")
 
 
@@ -315,10 +316,19 @@ class RoleToolsPicker(RoleToolsMixin):
         embed.set_footer(text=f"Reaction roles · page {page + 1} of {pages}")
         return embed
 
-    async def _replace_managed_reaction_mappings(self, guild: discord.Guild, data: dict, messages) -> None:
-        old_ids = {int(mid) for mid in data.get("reaction_message_ids", [])}
+    @staticmethod
+    def managed_message_ids(data: dict):
+        ids = {
+            int(mid)
+            for key in ("reaction_message_ids", "role_channel_message_ids")
+            for mid in data.get(key, [])
+        }
         if data.get("message_id"):
-            old_ids.add(int(data["message_id"]))
+            ids.add(int(data["message_id"]))
+        return ids
+
+    async def _replace_managed_reaction_mappings(self, guild: discord.Guild, data: dict, messages) -> None:
+        old_ids = self.managed_message_ids(data)
         current = dict(await self.config.guild(guild).reaction_roles())
         kept = {}
         for key, role_id in current.items():
@@ -394,12 +404,120 @@ class RoleToolsPicker(RoleToolsMixin):
             return False
         return True
 
+    async def _replace_role_channel_mappings(self, guild: discord.Guild, old_ids, messages) -> None:
+        old_ids = {int(message_id) for message_id in old_ids}
+        current = dict(await self.config.guild(guild).reaction_roles())
+        kept = {}
+        for key, role_id in current.items():
+            try:
+                _, message_id, _ = key.split("-", 2)
+            except ValueError:
+                kept[key] = role_id
+                continue
+            if int(message_id) not in old_ids:
+                kept[key] = role_id
+                continue
+            async with self.config.role_from_id(role_id).reactions() as reactions:
+                if key in reactions:
+                    reactions.remove(key)
+        emoji_key = "👍".strip("\N{VARIATION SELECTOR-16}")
+        for message, role_id in messages:
+            key = f"{message.channel.id}-{message.id}-{emoji_key}"
+            kept[key] = role_id
+            async with self.config.role_from_id(role_id).reactions() as reactions:
+                if key not in reactions:
+                    reactions.append(key)
+        await self.config.guild(guild).reaction_roles.set(kept)
+        if guild.id not in self.settings:
+            self.settings[guild.id] = await self.config.guild(guild).all()
+        self.settings[guild.id]["reaction_roles"] = kept
+
+    async def _notify_role_channel_reorder(self, guild: discord.Guild, changed: int) -> None:
+        if not changed:
+            return
+        channel_id = await self.config.guild(guild).notification_channel()
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            return
+        try:
+            await channel.send(
+                f"The self-role channel was reordered and {changed} existing role "
+                f"entr{'y was' if changed == 1 else 'ies were'} remapped. Existing roles were not changed. "
+                "If a retained 👍 now appears beside a different role, remove it and add it again "
+                "to select that newly displayed role."
+            )
+        except discord.HTTPException:
+            log.exception("Could not post managed role-channel reorder notice in guild %s", guild.id)
+
+    async def sync_role_channel(self, guild: discord.Guild, name: str, data: dict) -> bool:
+        channel = guild.get_channel(data.get("channel_id"))
+        if channel is None:
+            return False
+        role_ids = [
+            int(role_id) for role_id in data.get("role_ids", [])
+            if guild.get_role(int(role_id)) is not None
+        ]
+        old_ids = list(data.get("role_channel_message_ids", []))
+        if not old_ids and data.get("message_id"):
+            old_ids = [int(data["message_id"])]
+        current = dict(await self.config.guild(guild).reaction_roles())
+        emoji_key = "👍".strip("\N{VARIATION SELECTOR-16}")
+        old_roles = {}
+        for message_id in old_ids:
+            key = f"{channel.id}-{int(message_id)}-{emoji_key}"
+            if key in current:
+                old_roles[int(message_id)] = int(current[key])
+        messages = []
+        changed = 0
+        try:
+            for position, role_id in enumerate(role_ids):
+                role = guild.get_role(role_id)
+                message = None
+                if position < len(old_ids):
+                    try:
+                        message = await channel.fetch_message(int(old_ids[position]))
+                    except discord.NotFound:
+                        pass
+                content = f"{role.mention} — React with 👍 to join!"
+                if message is None:
+                    message = await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    if old_roles.get(message.id) not in {None, role_id}:
+                        changed += 1
+                    await message.edit(
+                        content=content, embed=None, view=None,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                await message.add_reaction("👍")
+                messages.append((message, role_id))
+            for message_id in old_ids[len(role_ids):]:
+                try:
+                    await (await channel.fetch_message(int(message_id))).delete()
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+            await self._replace_role_channel_mappings(guild, old_ids, messages)
+            data["role_channel_message_ids"] = [message.id for message, _ in messages]
+            data["reaction_message_ids"] = []
+            data["message_id"] = messages[0][0].id if messages else None
+            pickers = await self.config.guild(guild).pickers()
+            pickers[name] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            if guild.id in self.settings:
+                self.settings[guild.id]["pickers"] = pickers
+            await self._notify_role_channel_reorder(guild, changed)
+        except (discord.Forbidden, discord.HTTPException):
+            log.exception("Could not synchronize managed role channel %s in guild %s", name, guild.id)
+            return False
+        return True
+
     async def sync_picker(self, guild: discord.Guild, name: str, data: dict) -> bool:
         channel = guild.get_channel(data.get("channel_id"))
         if channel is None or not data.get("message_id"):
             return False
         if data.get("layout") == "reactions":
             return await self.sync_reaction_picker(guild, name, data)
+        if data.get("layout") == "role_channel":
+            return await self.sync_role_channel(guild, name, data)
         try:
             message = await channel.fetch_message(data["message_id"])
             await message.edit(embed=self.picker_embed(data), view=self.public_picker_view(guild, name, data))
@@ -412,7 +530,7 @@ class RoleToolsPicker(RoleToolsMixin):
         for guild_id, data in (await self.config.all_guilds()).items():
             for name, picker in data.get("pickers", {}).items():
                 message_id = picker.get("message_id")
-                if message_id and picker.get("layout") != "reactions":
+                if message_id and picker.get("layout") not in {"reactions", "role_channel"}:
                     guild = self.bot.get_guild(int(guild_id))
                     if guild is None:
                         continue
