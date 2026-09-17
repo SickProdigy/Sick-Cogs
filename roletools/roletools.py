@@ -338,7 +338,7 @@ class RoleTools(
         )
         embed.add_field(
             name="3. Interactive setup",
-            value=(f"`{prefix}roletools setup` manages Red self-roles, restricted roles, and the "
+            value=(f"`{prefix}roletools setup` manages Red self-roles, advanced self-roles, and the "
                    "published member card without internal option names."),
             inline=False,
         )

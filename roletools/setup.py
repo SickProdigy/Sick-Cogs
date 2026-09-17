@@ -59,7 +59,7 @@ class CatalogEditorView(discord.ui.View):
         self.cog = cog
         self.author = author
         self.restricted = restricted
-        self.catalog_name = "Restricted RoleTools" if restricted else "Basic Red self-role"
+        self.catalog_name = "Advanced self-role" if restricted else "Basic Red self-role"
         self.add_item(CatalogRoleSelect(self, add=True))
         self.add_item(CatalogRoleSelect(self, add=False))
 
@@ -161,7 +161,7 @@ class RoleToolsSetupView(discord.ui.View):
             ephemeral=True,
         )
 
-    @discord.ui.button(label="Restricted roles", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Advanced self-roles", style=discord.ButtonStyle.secondary, row=0)
     async def restricted_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         embed = await self.cog.catalog_embed(interaction.guild, restricted=True)
         await interaction.response.send_message(
@@ -269,7 +269,7 @@ class RoleToolsSetup(RoleToolsMixin):
                 if active:
                     notes.append(
                         f"Skipped {role.name}: it has RoleTools-only rules ({', '.join(active)}). "
-                        "Add it under Restricted roles so !selfrole cannot bypass them."
+                        "Add it under Advanced self-roles so !selfrole cannot bypass them."
                     )
                     continue
             if add:
@@ -293,7 +293,7 @@ class RoleToolsSetup(RoleToolsMixin):
         role_ids = await (self.restricted_role_ids(guild) if restricted else self.admin_selfrole_ids(guild))
         roles = [guild.get_role(role_id) for role_id in role_ids]
         roles = [role for role in roles if role is not None]
-        title = "Restricted RoleTools roles" if restricted else "Basic Red self-roles"
+        title = "Advanced self-roles" if restricted else "Basic Red self-roles"
         explanation = (
             "These roles use RoleTools-only assignment so costs, requirements, conflicts, and durations cannot be bypassed."
             if restricted else
@@ -316,12 +316,12 @@ class RoleToolsSetup(RoleToolsMixin):
             title="RoleTools setup",
             description=(
                 "Manage one shared self-role catalog without creating internal option names. "
-                "Basic roles also work with Red's `selfrole`; restricted roles stay inside RoleTools."
+                "Basic roles also work with Red's `selfrole`; advanced self-roles stay inside RoleTools."
             ),
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Basic self-roles", value=str(len(basic)))
-        embed.add_field(name="Restricted roles", value=str(len(restricted)))
+        embed.add_field(name="Advanced self-roles", value=str(len(restricted)))
         unsafe = []
         for role_id in basic:
             role = guild.get_role(role_id)

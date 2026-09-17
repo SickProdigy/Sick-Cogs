@@ -48,7 +48,7 @@ Run `[p]roletools adminhelp` for the short setup path.
 Run `[p]roletools setup` to open a manager-only setup card inspired by the Clanker launch workflow. It manages two catalogs:
 
 - **Basic self-roles** use Red Admin's canonical `selfroles` list, so they work through `[p]selfrole` and on RoleTools cards.
-- **Restricted roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
+- **Advanced self-roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
 
 The setup card uses Discord role and channel selectors to add/remove roles, edit appearance, publish or move the public card, and refresh it. Managers do not need to create internal select-option names. The member card automatically divides larger catalogs into private 25-role pages; 100 roles become four pages.
 
