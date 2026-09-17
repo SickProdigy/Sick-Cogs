@@ -66,6 +66,7 @@ from ..core.polymarket import (
     POLYMARKET_COLLATERAL_SYMBOL,
     POLYMARKET_NETWORK_KEY,
     PolymarketHandoffAvailability,
+    PolymarketHandoffContext,
     PolymarketHandoffSession,
 )
 from ..providers.base import WalletProviderError
@@ -1192,14 +1193,24 @@ class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
     def test_polymarket_handoff_contract_is_explicitly_disabled(self):
         handoff = PolymarketHandoffAvailability()
+        context = PolymarketHandoffContext(7, "profile", "0x" + "1" * 40)
         self.assertEqual(handoff.chain_id, POLYMARKET_CHAIN_ID)
         self.assertEqual(handoff.network, POLYMARKET_NETWORK_KEY)
         self.assertEqual(handoff.collateral_symbol, POLYMARKET_COLLATERAL_SYMBOL)
         self.assertFalse(handoff.enabled)
+        self.assertEqual(context.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(context.reviewed_capabilities, ())
+        self.assertFalse(context.enabled)
+        with self.assertRaises(ValueError):
+            PolymarketHandoffContext(7, "profile", "not-an-address")
+        with self.assertRaises(ValueError):
+            PolymarketHandoffContext(7, "profile", reviewed_capabilities=("send",))
 
         handle, session = PolymarketHandoffSession.create(7, "profile", "a" * 64, 200)
         consumed = session.consume(handle, 7, 100)
         self.assertEqual(consumed.consumed_at, 100)
+        self.assertEqual(consumed.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(consumed.purpose, "polymarket-order-review")
         with self.assertRaises(ValueError):
             consumed.consume(handle, 7, 101)
 
