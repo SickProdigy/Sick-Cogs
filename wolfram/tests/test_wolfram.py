@@ -89,6 +89,14 @@ class WolframRequestTests(unittest.IsolatedAsyncioTestCase):
         ctx.send_help.assert_awaited_once_with(ctx.command)
         cog._get_api_key.assert_not_awaited()
 
+    async def test_primary_help_mentions_example_discovery(self):
+        help_text = Wolfram._wolfram.help
+        self.assertIn("[p]wolframexample [category]", help_text)
+        self.assertIn("[p]wolframrandom", help_text)
+        for category in ("mathematics", "science", "society", "everyday", "surprises"):
+            self.assertIn(category, help_text)
+        self.assertLess(len(help_text), 1024)
+
     async def test_provider_failure_is_distinct(self):
         cog = self.make_cog(FakeSession(FakeResponse(status=503)))
 
