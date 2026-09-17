@@ -80,6 +80,17 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([])
 
+    async def test_publish_resolves_selected_channel_and_rejects_missing_target(self):
+        cog = object.__new__(RoleTools)
+        selected = SimpleNamespace(id=123)
+        guild = SimpleNamespace(get_channel=MagicMock(return_value=None))
+
+        ok, message = await cog.publish_setup_picker(guild, selected)
+
+        self.assertFalse(ok)
+        self.assertIn("unavailable", message)
+        guild.get_channel.assert_called_once_with(123)
+
     async def test_restricted_role_is_removed_from_red_catalog(self):
         cog, admin_selfroles, restricted, _ = self.make_cog(basic=[2])
         role = FakeRole(2, "Paid")

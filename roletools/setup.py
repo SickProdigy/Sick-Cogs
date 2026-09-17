@@ -351,6 +351,10 @@ class RoleToolsSetup(RoleToolsMixin):
             await self.refresh_setup_picker(ctx.guild)
 
     async def publish_setup_picker(self, guild: discord.Guild, channel: discord.TextChannel):
+        channel_id = int(getattr(channel, "id", 0) or 0)
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return False, "That channel is unavailable or is not a text channel."
         pickers, data = await self.ensure_setup_picker(guild)
         data["role_ids"] = await self.combined_catalog_ids(guild)
         old_channel = guild.get_channel(data.get("channel_id"))
