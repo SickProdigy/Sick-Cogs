@@ -1,4 +1,5 @@
 import asyncio
+from copy import deepcopy
 from abc import ABC
 from typing import Any, Dict, List, Optional, Union
 
@@ -28,6 +29,13 @@ from .settings import RoleToolsSettings
 from .temprole import RoleToolsTemporary
 
 roletools = RoleToolsMixin.roletools
+
+LEGACY_CONFIG_IDENTIFIER = 218773382617890828
+SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
+ROLETOOLS_SCHEMA_VERSION = 1
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "MIGRATION_REVIEW": []}
+ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
+MEMBER_DEFAULTS = {"sticky_roles": []}
 
 log = getLogger("red.Sick-Cogs.RoleTools")
 _ = Translator("RoleTools", __file__)
@@ -89,48 +97,24 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.6.0"
+    __version__ = "1.6.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
-        self.config = Config.get_conf(self, identifier=218773382617890828, force_registration=True)
+        self.config = Config.get_conf(self, identifier=SICK_COGS_CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_global(
-            version="0.0.0",
-            atomic=True,
-            enable_slash=False,
+            version="0.0.0", atomic=True, enable_slash=False, schema_version=0,
+            legacy_migration={"state": "not_started", "review": []},
         )
-        self.config.register_guild(
-            reaction_roles={},
-            auto_roles=[],
-            atomic=None,
-            buttons={},
-            select_options={},
-            select_menus={},
-            temporary_roles=[],
-        )
-        self.config.register_role(
-            sticky=False,
-            auto=False,
-            reactions=[],
-            buttons=[],
-            select_options=[],
-            selfassignable=False,
-            selfremovable=False,
-            exclusive_to=[],
-            inclusive_with=[],
-            required=[],
-            require_any=False,
-            cost=0,
-            duration=None,
-        )
-        self.config.register_member(sticky_roles=[])
+        self.config.register_guild(**GUILD_DEFAULTS)
+        self.config.register_role(**ROLE_DEFAULTS)
+        self.config.register_member(**MEMBER_DEFAULTS)
         self.settings: Dict[int, Any] = {}
         self._ready: asyncio.Event = asyncio.Event()
         self.views: Dict[int, Dict[str, discord.ui.View]] = {}
         self.layouts: Dict[int, Dict[str, discord.ui.LayoutView]] = {}
         self._repo = ""
         self._commit = ""
-        self.temporary_roles_task.start()
         self.is_discord: bool = discord.utils.oauth_url("").startswith("https://discord.com/")
 
     def cog_check(self, ctx: commands.Context) -> bool:
@@ -189,42 +173,68 @@ class RoleTools(
                 # and we should track them seperately
         self._ready.set()
 
+    @staticmethod
+    def _normalise(defaults, data, scope):
+        data = data if isinstance(data, dict) else {}
+        review = []
+        unknown = sorted(set(data).difference(defaults))
+        if unknown:
+            review.append(f"{scope}: unrecognized keys: {', '.join(unknown)}")
+        result = deepcopy(defaults)
+        for key, default in defaults.items():
+            value = data.get(key, deepcopy(default))
+            if isinstance(default, dict) and isinstance(value, dict):
+                merged = deepcopy(default)
+                merged.update(value)
+                value = merged
+            elif value is not None and isinstance(default, list) and not isinstance(value, list):
+                review.append(f"{scope}.{key}: malformed value")
+                value = deepcopy(default)
+            result[key] = value
+        return result, review
+
+    async def _migrate_legacy_config(self):
+        if await self.config.schema_version() >= ROLETOOLS_SCHEMA_VERSION:
+            return
+        target_data = await self.config.all_guilds()
+        state = await self.config.legacy_migration()
+        if target_data and state.get("state") != "migrating":
+            await self.config.legacy_migration.set({"state": "needs_owner_review", "review": ["Target namespace already has guild data."]})
+            return
+        legacy = Config.get_conf(None, identifier=LEGACY_CONFIG_IDENTIFIER, cog_name="RoleTools")
+        await self.config.legacy_migration.set({"state": "migrating", "review": []})
+        review = []
+        for guild_id, data in (await legacy.all_guilds()).items():
+            value, notes = self._normalise(GUILD_DEFAULTS, data, f"guild {guild_id}")
+            await self.config.guild_from_id(int(guild_id)).set(value)
+            review.extend(notes)
+        for role_id, data in (await legacy.all_roles()).items():
+            value, notes = self._normalise(ROLE_DEFAULTS, data, f"role {role_id}")
+            await self.config.role_from_id(int(role_id)).set(value)
+            review.extend(notes)
+        for guild_id, members in (await legacy.all_members()).items():
+            for member_id, data in members.items():
+                value, notes = self._normalise(MEMBER_DEFAULTS, data, f"member {member_id}")
+                await self.config.member_from_ids(int(guild_id), int(member_id)).set(value)
+                review.extend(notes)
+        sticky = Config.get_conf(None, identifier=1358454876, cog_name="StickyRoles")
+        for guild_id, data in (await sticky.all_guilds()).items():
+            for role_id in data.get("sticky_roles", []):
+                await self.config.role_from_id(int(role_id)).sticky.set(True)
+        autorole = Config.get_conf(None, identifier=45463543548, cog_name="Autorole")
+        for guild_id, data in (await autorole.all_guilds()).items():
+            if data.get("ENABLED", True) and data.get("AGREE_CHANNEL") is None:
+                for role_id in data.get("ROLE", []):
+                    await self.config.role_from_id(int(role_id)).auto.set(True)
+                    async with self.config.guild_from_id(int(guild_id)).auto_roles() as roles:
+                        if int(role_id) not in roles:
+                            roles.append(int(role_id))
+        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
+        await self.config.legacy_migration.set({"state": "completed", "review": review, "legacy_identifier": LEGACY_CONFIG_IDENTIFIER})
+
     async def cog_load(self) -> None:
-        if await self.config.version() < "1.0.1":
-            sticky_role_config = Config.get_conf(
-                None, identifier=1358454876, cog_name="StickyRoles"
-            )
-            sticky_settings = await sticky_role_config.all_guilds()
-            for guild_id, data in sticky_settings.items():
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
-                    continue
-                for role_id in data["sticky_roles"]:
-                    role = guild.get_role(role_id)
-                    if role:
-                        await self.config.role(role).sticky.set(True)
-            auto_role_config = Config.get_conf(None, identifier=45463543548, cog_name="Autorole")
-            auto_settings = await auto_role_config.all_guilds()
-            for guild_id, data in auto_settings.items():
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
-                    continue
-                if ("ENABLED" in data and not data["ENABLED"]) or (
-                    "AGREE_CHANNEL" in data and data["AGREE_CHANNEL"] is not None
-                ):
-                    continue
-                if "ROLE" not in data:
-                    continue
-                for role_id in data["ROLE"]:
-                    role = guild.get_role(role_id)
-                    if role:
-                        await self.config.role(role).auto.set(True)
-                        async with self.config.guild_from_id(
-                            int(guild_id)
-                        ).auto_roles() as auto_roles:
-                            if role.id not in auto_roles:
-                                auto_roles.append(role.id)
-            await self.config.version.set("1.0.1")
+        await self._migrate_legacy_config()
+        self.temporary_roles_task.start()
         loop = asyncio.get_running_loop()
         loop.create_task(self.load_views())
         loop.create_task(self.add_cog_to_dev_env())
@@ -283,6 +293,13 @@ class RoleTools(
                         roles=role_list
                     )
                 )
+
+    @roletools.command(name="migrationstatus")
+    @commands.is_owner()
+    async def roletools_migration_status(self, ctx: Context) -> None:
+        """Owner: show legacy RoleTools import status."""
+        status = await self.config.legacy_migration()
+        await ctx.send(f"**RoleTools migration status**\nState: `{status.get('state')}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
 
     @roletools.command()
     @commands.guild_only()
