@@ -70,6 +70,7 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
             {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"},
         )
         ctx.send.assert_awaited_once()
+        self.assertIn("trending", Polymarket.polymarket_markets.aliases)
 
     async def test_group_shows_a_read_only_discovery_card(self):
         class Context:

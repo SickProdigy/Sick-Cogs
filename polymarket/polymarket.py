@@ -67,7 +67,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.7"
+    __version__ = "0.1.8"
 
     def __init__(self, bot):
         self.bot = bot
@@ -96,7 +96,7 @@ class Polymarket(commands.Cog):
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
-    @polymarket.command(name="markets", aliases=["search", "browse"])
+    @polymarket.command(name="markets", aliases=["search", "browse", "trending"])
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_markets(self, ctx: commands.Context, *, query: str = ""):
         """List active markets ranked by 24-hour volume, optionally filtered by question words."""
