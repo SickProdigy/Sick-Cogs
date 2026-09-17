@@ -299,13 +299,19 @@ class Coc(commands.Cog):
         embed.set_footer(text="Brought to you by SickGaming.net", icon_url="https://i.imgur.com/TFTXZvP.png")
         await self._send_embed_with_optional_image(ctx, embed, self.clan_banner_path, "clan-banner.png")
 
-    async def _fetch_api_json(self, ctx: commands.Context, api_key: str, path: str) -> dict | None:
+    async def _fetch_api_json(
+        self, ctx: commands.Context, api_key: str, path: str, *,
+        not_found_message: str | None = None,
+    ) -> dict | None:
         """Fetch one API resource and report user-facing errors."""
 
         try:
             async with aiohttp.request(
                 "GET", f"{COC_API_BASE}{path}", headers=self._api_headers(api_key), timeout=COC_HTTP_TIMEOUT
             ) as response:
+                if response.status == 404 and not_found_message:
+                    await ctx.send(not_found_message)
+                    return None
                 if response.status != 200:
                     await self._send_api_error(ctx, response)
                     return None
@@ -399,6 +405,7 @@ class Coc(commands.Cog):
             ctx,
             api_key,
             f"/clans/{self._clean_clan_tag(clan_tag)}/currentwar/leaguegroup",
+            not_found_message="That clan is not currently in an active Clan War League group.",
         )
         if group is None:
             return
