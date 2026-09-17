@@ -10,6 +10,11 @@ from .handoff import MarketSnapshot, MarketSnapshotError
 
 GAMMA_API = "https://gamma-api.polymarket.com"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=4)
+CATEGORIES = {
+    "politics": ("Politics", "2"),
+    "crypto": ("Crypto", "21"),
+    "sports": ("Sports", "1"),
+}
 
 
 def _json_list(value: Any) -> list:
@@ -87,7 +92,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.12"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -100,51 +105,112 @@ class Polymarket(commands.Cog):
                 payload = await response.json(content_type=None)
         return payload
 
-    @commands.group(invoke_without_command=True)
+    @commands.group(aliases=["poly"], invoke_without_command=True)
     async def polymarket(self, ctx: commands.Context):
         """Browse read-only Polymarket market information.
 
         This cog does not connect wallets, custody funds, sign transactions, or place orders.
         """
+        prefix = ctx.clean_prefix
         embed = discord.Embed(
             title="Polymarket discovery",
             description="Public market information only. Market-implied probabilities are not financial advice.",
         )
-        embed.add_field(name="Browse active markets", value="`polymarket markets`\nRanked by 24-hour volume.", inline=False)
-        embed.add_field(name="Search", value="`polymarket markets <words>`\nExample: `polymarket markets bitcoin`", inline=False)
-        embed.add_field(name="Market details", value="`polymarket market <ID, slug, or Polymarket link>`\nShows probabilities, rules, resolution source, and the canonical link.", inline=False)
+        embed.add_field(name="Choose a category", value=f"`{prefix}poly markets` or `{prefix}poly categories`\nPolitics, crypto, and sports.", inline=False)
+        embed.add_field(name="Search", value=f"`{prefix}poly markets <words>`\nExample: `{prefix}poly markets bitcoin`", inline=False)
+        embed.add_field(name="Trending", value=f"`{prefix}poly trending`\nActive markets ranked by 24-hour volume.", inline=False)
+        embed.add_field(name="Market details", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
+        embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
+        embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
-    @polymarket.command(name="markets", aliases=["search", "browse", "trending"])
+    @polymarket.command(name="markets", aliases=["search", "browse"])
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_markets(self, ctx: commands.Context, *, query: str = ""):
-        """List active markets ranked by 24-hour volume, optionally filtered by question words."""
+        """Choose a category or search active markets by question words."""
+        if not query.strip():
+            await ctx.invoke(self.polymarket_categories)
+            return
         try:
-            if query.strip():
-                markets = _active_search_markets(await self._get_json("/public-search", {"q": query.strip()}))
-            else:
-                markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"})
+            markets = _active_search_markets(await self._get_json("/public-search", {"q": query.strip()}))
         except (aiohttp.ClientError, RuntimeError, ValueError):
             await ctx.send("Polymarket market data could not be reached right now.")
             return
-        if not isinstance(markets, list):
-            await ctx.send("Polymarket returned an unexpected market response.")
-            return
         terms = query.casefold().split()
-        filtered = [m for m in markets if isinstance(m, dict) and all(term in str(m.get("question", "")).casefold() for term in terms)]
-        selected = filtered[:10]
+        selected = [
+            market for market in markets
+            if all(term in str(market.get("question", "")).casefold() for term in terms)
+        ][:10]
         if not selected:
             await ctx.send("No active Polymarket markets matched that search.")
             return
-        embed = discord.Embed(title="Polymarket markets", description="Read-only market-implied probabilities; not financial advice.")
-        for market in selected:
+        await self._send_market_list(ctx, "Polymarket search", selected)
+
+    async def _send_market_list(self, ctx, title, markets):
+        embed = discord.Embed(title=title, description="Read-only market-implied probabilities; not financial advice.")
+        for market in markets[:10]:
             outcomes, prices = _json_list(market.get("outcomes")), _json_list(market.get("outcomePrices"))
-            probability = " · ".join(f"{outcome}: {float(price):.0%}" for outcome, price in zip(outcomes, prices) if str(price).replace(".", "", 1).isdigit())
-            details = probability or "Probability unavailable"
-            details += f"\nID `{market.get('id')}` · [Open market]({market_url(market)})"
-            embed.add_field(name=str(market.get("question") or "Untitled market")[:256], value=details[:1024], inline=False)
+            probability = " · ".join(
+                f"{outcome}: {float(price):.0%}" for outcome, price in zip(outcomes, prices)
+                if str(price).replace(".", "", 1).isdigit()
+            )
+            details = (probability or "Probability unavailable")
+            details += "\nID `" + str(market.get("id")) + "` · [Open market](" + market_url(market) + ")"
+            embed.add_field(name=str(market.get("question") or "Untitled market")[:256],
+                            value=details[:1024], inline=False)
         await ctx.send(embed=embed)
+
+    @polymarket.command(name="categories", aliases=["types"])
+    async def polymarket_categories(self, ctx: commands.Context):
+        """Show the curated market categories."""
+        prefix = ctx.clean_prefix
+        lines = [f"**{label}** - `{prefix}poly category {slug}`" for slug, (label, _) in CATEGORIES.items()]
+        embed = discord.Embed(
+            title="Polymarket categories",
+            description="Choose a category instead of browsing unrelated markets.\n\n" + "\n".join(lines),
+        )
+        embed.set_footer(text=f"Search anything: {prefix}poly markets bitcoin")
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="category", aliases=["type"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_category(self, ctx: commands.Context, category: str):
+        """List active politics, crypto, or sports markets."""
+        selected = CATEGORIES.get(category.casefold())
+        if not selected:
+            await ctx.send("Choose one of: **politics**, **crypto**, or **sports**.")
+            return
+        label, tag_id = selected
+        try:
+            markets = await self._get_json("/markets", {
+                "active": "true", "closed": "false", "tag_id": tag_id, "limit": 10,
+                "order": "volume24hr", "ascending": "false",
+            })
+        except (aiohttp.ClientError, RuntimeError, ValueError):
+            await ctx.send("Polymarket market data could not be reached right now.")
+            return
+        if not isinstance(markets, list) or not markets:
+            await ctx.send(f"No active {label.lower()} markets were returned.")
+            return
+        await self._send_market_list(ctx, f"Polymarket: {label}", markets)
+
+    @polymarket.command(name="trending", aliases=["top"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_trending(self, ctx: commands.Context):
+        """List active markets ranked by 24-hour volume across all categories."""
+        try:
+            markets = await self._get_json("/markets", {
+                "active": "true", "closed": "false", "limit": 10,
+                "order": "volume24hr", "ascending": "false",
+            })
+        except (aiohttp.ClientError, RuntimeError, ValueError):
+            await ctx.send("Polymarket market data could not be reached right now.")
+            return
+        if not isinstance(markets, list) or not markets:
+            await ctx.send("No active Polymarket markets were returned.")
+            return
+        await self._send_market_list(ctx, "Trending Polymarket markets", markets)
 
     @polymarket.command(name="compatible", aliases=["ready"])
     @commands.bot_has_permissions(embed_links=True)
@@ -206,6 +272,10 @@ class Polymarket(commands.Cog):
         try:
             market = await self._get_json(path)
         except (aiohttp.ClientError, RuntimeError, ValueError):
+            if reference.isalpha():
+                await ctx.send(f"No exact market matched **{reference}**. Here are active search results instead:")
+                await ctx.invoke(self.polymarket_markets, query=reference)
+                return
             await ctx.send("That Polymarket market could not be reached. Use an ID, slug, or Polymarket link from `polymarket markets`.")
             return
         if not isinstance(market, dict):

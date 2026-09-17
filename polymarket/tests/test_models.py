@@ -3,8 +3,10 @@ from unittest.mock import AsyncMock
 
 from polymarket import setup
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
-
-from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, future_handoff_reasons, market_path, market_url, technically_handoff_ready
+from polymarket.polymarket import (
+    CATEGORIES, Polymarket, _active_search_markets, _json_list,
+    future_handoff_reasons, market_path, market_url, technically_handoff_ready,
+)
 
 
 class PolymarketModelTests(unittest.TestCase):
@@ -16,29 +18,53 @@ class PolymarketModelTests(unittest.TestCase):
     def test_market_url_uses_canonical_event_slug(self):
         self.assertEqual(market_url({"slug": "example-market"}), "https://polymarket.com/event/example-market")
 
-
     def test_market_snapshot_rejects_non_ready_or_malformed_markets(self):
-        market = {"id": "1", "conditionId": "condition", "slug": "example", "question": "Example?", "active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "outcomes": '["Yes", "No"]', "clobTokenIds": '["yes-token", "no-token"]', "outcomePrices": '["0.6", "0.4"]', "orderMinSize": 5}
+        market = {
+            "id": "1", "conditionId": "condition", "slug": "example", "question": "Example?",
+            "active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True,
+            "outcomes": '["Yes", "No"]', "clobTokenIds": '["yes-token", "no-token"]',
+            "outcomePrices": '["0.6", "0.4"]', "orderMinSize": 5,
+        }
         snapshot = MarketSnapshot.from_market(market)
         self.assertEqual(snapshot.outcome_token_ids, ("yes-token", "no-token"))
         with self.assertRaises(MarketSnapshotError):
             MarketSnapshot.from_market({**market, "acceptingOrders": False})
-        intent = FutureHandoffIntent.create(requester_id=7, snapshot=snapshot, outcome_index=0, max_pusd="12.50", created_at=100, expires_at=160)
+        intent = FutureHandoffIntent.create(
+            requester_id=7, snapshot=snapshot, outcome_index=0, max_pusd="12.50",
+            created_at=100, expires_at=160,
+        )
         self.assertEqual(intent.selected_outcome, "Yes")
         self.assertEqual(len(intent.fingerprint), 64)
         with self.assertRaises(MarketSnapshotError):
-            FutureHandoffIntent.create(requester_id=7, snapshot=snapshot, outcome_index=2, max_pusd="12.50", created_at=100, expires_at=160)
+            FutureHandoffIntent.create(
+                requester_id=7, snapshot=snapshot, outcome_index=2, max_pusd="12.50",
+                created_at=100, expires_at=160,
+            )
 
     def test_future_handoff_requires_an_active_order_ready_clob_market(self):
-        ready = {"active": True, "closed": False, "enableOrderBook": True, "acceptingOrders": True, "clobTokenIds": '["yes"]'}
+        ready = {
+            "active": True, "closed": False, "enableOrderBook": True,
+            "acceptingOrders": True, "clobTokenIds": '["yes"]',
+        }
         self.assertTrue(technically_handoff_ready(ready))
-        self.assertEqual(future_handoff_reasons({**ready, "acceptingOrders": False}), ("not accepting orders",))
+        self.assertEqual(
+            future_handoff_reasons({**ready, "acceptingOrders": False}),
+            ("not accepting orders",),
+        )
 
     def test_market_path_accepts_ids_slugs_and_polymarket_links(self):
         self.assertEqual(market_path("42"), "/markets/42")
         self.assertEqual(market_path("example-market"), "/markets/slug/example-market")
-        self.assertEqual(market_path("https://polymarket.com/event/example-market?x=1"), "/markets/slug/example-market")
+        self.assertEqual(
+            market_path("https://polymarket.com/event/example-market?x=1"),
+            "/markets/slug/example-market",
+        )
         self.assertIsNone(market_path("https://example.com/event/example-market"))
+
+    def test_categories_use_verified_public_tag_ids(self):
+        self.assertEqual(CATEGORIES["politics"], ("Politics", "2"))
+        self.assertEqual(CATEGORIES["crypto"], ("Crypto", "21"))
+        self.assertEqual(CATEGORIES["sports"], ("Sports", "1"))
 
     def test_cog_accepts_red_bot_instance(self):
         bot = object()
@@ -50,7 +76,10 @@ class PolymarketModelTests(unittest.TestCase):
             {"id": "closed", "active": True, "closed": True},
             {"id": "active", "active": True, "closed": False},
         ]}]}
-        self.assertEqual(_active_search_markets(payload), [{"id": "active", "active": True, "closed": False}])
+        self.assertEqual(
+            _active_search_markets(payload),
+            [{"id": "active", "active": True, "closed": False}],
+        )
 
 
 class PolymarketSetupTests(unittest.IsolatedAsyncioTestCase):
@@ -68,35 +97,73 @@ class PolymarketSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(bot.cogs[0], Polymarket)
 
 
+class Context:
+    def __init__(self):
+        self.clean_prefix = "!"
+        self.send = AsyncMock()
+        self.invoke = AsyncMock()
+
+
 class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_markets_requests_active_24_hour_volume_ranking(self):
-        class Context:
-            def __init__(self):
-                self.send = AsyncMock()
-
-        cog = Polymarket(object())
-        cog._get_json = AsyncMock(return_value=[{
-            "id": "42",
-            "question": "Example question?",
-            "slug": "example-question",
-            "outcomes": '["Yes", "No"]',
-            "outcomePrices": '["0.6", "0.4"]',
-        }])
-        ctx = Context()
-        await Polymarket.polymarket_markets.callback(cog, ctx, query="")
-        cog._get_json.assert_awaited_once_with(
-            "/markets",
-            {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"},
-        )
-        ctx.send.assert_awaited_once()
-        self.assertIn("trending", Polymarket.polymarket_markets.aliases)
-
-    async def test_group_shows_a_read_only_discovery_card(self):
-        class Context:
-            def __init__(self):
-                self.send = AsyncMock()
-
+    async def test_group_shows_complete_guide_and_has_poly_alias(self):
         ctx = Context()
         await Polymarket.polymarket.callback(Polymarket(object()), ctx)
-        ctx.send.assert_awaited_once()
-        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket discovery")
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Polymarket discovery")
+        self.assertIn("poly", Polymarket.polymarket.aliases)
+        fields = "\n".join(field.name + " " + field.value for field in embed.fields)
+        for command in ("categories", "trending", "market", "compatible", "readiness", "status"):
+            self.assertIn(command, fields)
+
+    async def test_markets_without_words_opens_category_chooser(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        await Polymarket.polymarket_markets.callback(cog, ctx, query="")
+        ctx.invoke.assert_awaited_once_with(cog.polymarket_categories)
+
+    async def test_market_search_uses_public_search(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(return_value={"events": [{"markets": [{
+            "id": "42", "active": True, "closed": False, "question": "Will bitcoin rise?",
+            "slug": "bitcoin-rise", "outcomes": '["Yes", "No"]',
+            "outcomePrices": '["0.6", "0.4"]',
+        }]}]})
+        await Polymarket.polymarket_markets.callback(cog, ctx, query="bitcoin")
+        cog._get_json.assert_awaited_once_with("/public-search", {"q": "bitcoin"})
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket search")
+
+    async def test_category_requests_ranked_active_tag(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(return_value=[{
+            "id": "42", "question": "Crypto question?", "slug": "crypto-question",
+            "outcomes": '["Yes", "No"]', "outcomePrices": '["0.6", "0.4"]',
+        }])
+        await Polymarket.polymarket_category.callback(cog, ctx, category="crypto")
+        cog._get_json.assert_awaited_once_with("/markets", {
+            "active": "true", "closed": "false", "tag_id": "21", "limit": 10,
+            "order": "volume24hr", "ascending": "false",
+        })
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket: Crypto")
+
+    async def test_trending_is_explicit_and_ranked(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(return_value=[{
+            "id": "42", "question": "Example?", "slug": "example",
+            "outcomes": '["Yes", "No"]', "outcomePrices": '["0.6", "0.4"]',
+        }])
+        await Polymarket.polymarket_trending.callback(cog, ctx)
+        cog._get_json.assert_awaited_once_with("/markets", {
+            "active": "true", "closed": "false", "limit": 10,
+            "order": "volume24hr", "ascending": "false",
+        })
+        self.assertIn("top", Polymarket.polymarket_trending.aliases)
+
+    async def test_plain_word_market_failure_falls_back_to_search(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(side_effect=RuntimeError("not found"))
+        await Polymarket.polymarket_market.callback(cog, ctx, reference="bitcoin")
+        ctx.invoke.assert_awaited_once_with(cog.polymarket_markets, query="bitcoin")
