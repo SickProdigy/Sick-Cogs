@@ -112,14 +112,20 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("categories", "trending", "market", "compatible", "readiness", "status"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status"):
             self.assertIn(command, fields)
 
     async def test_markets_without_words_opens_category_chooser(self):
         ctx = Context()
         cog = Polymarket(object())
-        await Polymarket.polymarket_markets.callback(cog, ctx, query="")
+        await Polymarket.polymarket_markets.callback(cog, ctx, category="")
         ctx.invoke.assert_awaited_once_with(cog.polymarket_categories)
+
+    async def test_markets_category_routes_to_curated_category(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        await Polymarket.polymarket_markets.callback(cog, ctx, category="crypto")
+        ctx.invoke.assert_awaited_once_with(cog.polymarket_category, category="crypto")
 
     async def test_market_search_uses_public_search(self):
         ctx = Context()
@@ -129,9 +135,9 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
             "slug": "bitcoin-rise", "outcomes": '["Yes", "No"]',
             "outcomePrices": '["0.6", "0.4"]',
         }]}]})
-        await Polymarket.polymarket_markets.callback(cog, ctx, query="bitcoin")
+        await Polymarket.polymarket_search.callback(cog, ctx, query="bitcoin")
         cog._get_json.assert_awaited_once_with("/public-search", {"q": "bitcoin"})
-        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket search")
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title, "Polymarket search: bitcoin")
 
     async def test_category_requests_ranked_active_tag(self):
         ctx = Context()
@@ -161,9 +167,20 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertIn("top", Polymarket.polymarket_trending.aliases)
 
-    async def test_plain_word_market_failure_falls_back_to_search(self):
+    async def test_category_word_is_not_treated_as_one_market(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock()
+        await Polymarket.polymarket_market.callback(cog, ctx, reference="crypto")
+        cog._get_json.assert_not_awaited()
+        message = ctx.send.await_args.args[0]
+        self.assertIn("poly markets crypto", message)
+        self.assertIn("poly search crypto", message)
+
+    async def test_failed_exact_market_suggests_explicit_search(self):
         ctx = Context()
         cog = Polymarket(object())
         cog._get_json = AsyncMock(side_effect=RuntimeError("not found"))
         await Polymarket.polymarket_market.callback(cog, ctx, reference="bitcoin")
-        ctx.invoke.assert_awaited_once_with(cog.polymarket_markets, query="bitcoin")
+        ctx.invoke.assert_not_awaited()
+        self.assertIn("poly search bitcoin", ctx.send.await_args.args[0])

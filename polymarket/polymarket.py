@@ -92,7 +92,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -116,22 +116,35 @@ class Polymarket(commands.Cog):
             title="Polymarket discovery",
             description="Public market information only. Market-implied probabilities are not financial advice.",
         )
-        embed.add_field(name="Choose a category", value=f"`{prefix}poly markets` or `{prefix}poly categories`\nPolitics, crypto, and sports.", inline=False)
-        embed.add_field(name="Search", value=f"`{prefix}poly markets <words>`\nExample: `{prefix}poly markets bitcoin`", inline=False)
+        embed.add_field(name="Choose a category", value=f"`{prefix}poly markets` or `{prefix}poly markets crypto`\nPolitics, crypto, and sports.", inline=False)
+        embed.add_field(name="Search market questions", value=f"`{prefix}poly search <words>`\nExamples: bitcoin, ethereum, fed rates, trump.", inline=False)
         embed.add_field(name="Trending", value=f"`{prefix}poly trending`\nActive markets ranked by 24-hour volume.", inline=False)
-        embed.add_field(name="Market details", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
+        embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
-    @polymarket.command(name="markets", aliases=["search", "browse"])
+    @polymarket.command(name="markets", aliases=["browse"])
     @commands.bot_has_permissions(embed_links=True)
-    async def polymarket_markets(self, ctx: commands.Context, *, query: str = ""):
-        """Choose a category or search active markets by question words."""
-        if not query.strip():
+    async def polymarket_markets(self, ctx: commands.Context, category: str = ""):
+        """Choose politics, crypto, or sports markets."""
+        if not category:
             await ctx.invoke(self.polymarket_categories)
             return
+        category = category.casefold()
+        if category not in CATEGORIES:
+            await ctx.send(
+                f"Choose **politics**, **crypto**, or **sports**. For keywords, try "
+                f"`{ctx.clean_prefix}poly search bitcoin`."
+            )
+            return
+        await ctx.invoke(self.polymarket_category, category=category)
+
+    @polymarket.command(name="search", aliases=["find"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_search(self, ctx: commands.Context, *, query: str):
+        """Search active market questions, e.g. bitcoin, ethereum, fed rates, or trump."""
         try:
             markets = _active_search_markets(await self._get_json("/public-search", {"q": query.strip()}))
         except (aiohttp.ClientError, RuntimeError, ValueError):
@@ -145,7 +158,7 @@ class Polymarket(commands.Cog):
         if not selected:
             await ctx.send("No active Polymarket markets matched that search.")
             return
-        await self._send_market_list(ctx, "Polymarket search", selected)
+        await self._send_market_list(ctx, f"Polymarket search: {query.strip()}", selected)
 
     async def _send_market_list(self, ctx, title, markets):
         embed = discord.Embed(title=title, description="Read-only market-implied probabilities; not financial advice.")
@@ -170,7 +183,7 @@ class Polymarket(commands.Cog):
             title="Polymarket categories",
             description="Choose a category instead of browsing unrelated markets.\n\n" + "\n".join(lines),
         )
-        embed.set_footer(text=f"Search anything: {prefix}poly markets bitcoin")
+        embed.set_footer(text=f"Search anything: {prefix}poly search bitcoin")
         await ctx.send(embed=embed)
 
     @polymarket.command(name="category", aliases=["type"])
@@ -265,6 +278,14 @@ class Polymarket(commands.Cog):
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_market(self, ctx: commands.Context, reference: str):
         """Show outcomes, probabilities, rules, and links from a market ID, slug, or Polymarket link."""
+        reference_key = reference.casefold()
+        if reference_key in CATEGORIES:
+            await ctx.send(
+                f"**{reference_key}** is a category. Use "
+                f"`{ctx.clean_prefix}poly markets {reference_key}`. "
+                f"For keyword matching, use `{ctx.clean_prefix}poly search {reference_key}`."
+            )
+            return
         path = market_path(reference)
         if not path:
             await ctx.send("Use a Polymarket market ID, slug, or `polymarket.com/event/...` link.")
@@ -272,11 +293,10 @@ class Polymarket(commands.Cog):
         try:
             market = await self._get_json(path)
         except (aiohttp.ClientError, RuntimeError, ValueError):
-            if reference.isalpha():
-                await ctx.send(f"No exact market matched **{reference}**. Here are active search results instead:")
-                await ctx.invoke(self.polymarket_markets, query=reference)
-                return
-            await ctx.send("That Polymarket market could not be reached. Use an ID, slug, or Polymarket link from `polymarket markets`.")
+            await ctx.send(
+                f"That exact market could not be reached. Use an ID, slug, or Polymarket link, "
+                f"or try `{ctx.clean_prefix}poly search {reference}`."
+            )
             return
         if not isinstance(market, dict):
             await ctx.send("Polymarket returned an unexpected market response.")
