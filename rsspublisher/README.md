@@ -32,3 +32,16 @@ prefix. Use `[p]help rsspublisher` and its subcommands for the full syntax.
 Role mentions in announcements are limited to roles both the configuring moderator and
 the bot are permitted to mention. User and everyone mentions from feed content are
 suppressed.
+
+
+## Replacing legacy RSS
+
+RSSPublisher 3.0.1 uses a new Sick-Cogs Config namespace. On first initialization it imports legacy RSS channel feeds and their delivery markers from identifier `2761331001` before scheduling any feed checks. The legacy data remains unchanged.
+
+After updating and reloading RSSPublisher, a bot owner can verify the one-time import with:
+
+```text
+[p]rss migrationstatus
+```
+
+Do not clear legacy Red data during replacement. Confirm retained feeds with `[p]rss listall`; existing last-entry markers are retained so already delivered entries are not replayed.

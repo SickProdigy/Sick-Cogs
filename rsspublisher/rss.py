@@ -8,7 +8,7 @@ from redbot.core import commands
 from redbot.core.utils import can_user_send_messages_in
 
 from .commands import RSSCommands
-from .config import RSS_VERSION, create_config, migrate_stored_feeds
+from .config import RSS_VERSION, create_config, migrate_legacy_rss, migrate_stored_feeds
 from .delivery import RSSDeliveryMixin
 from .fetcher import RSSFetcherMixin
 from .models import migrate_feed_data
@@ -60,6 +60,7 @@ class RSS(RSSCommands, RSSFetcherMixin, RSSDeliveryMixin, commands.Cog):
 
     async def _initialize(self):
         try:
+            await migrate_legacy_rss(self.config, log)
             await self._get_http_session()
             await migrate_stored_feeds(self.config, log)
             await self.read_feeds()
