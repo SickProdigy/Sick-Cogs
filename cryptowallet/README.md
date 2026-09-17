@@ -16,6 +16,8 @@ Polygon Mainnet, OP Mainnet, BNB Chain, and Zora are staged as disabled metadata
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
+See [Polygon / Polymarket handoff boundary](docs/polygon-polymarket-handoff.md) for the develop-only provider-neutral execution decision record.
+
 ## Intended experience
 
 ```text
