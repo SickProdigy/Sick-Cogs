@@ -12,13 +12,18 @@ _ = Translator("Nsfw", __file__)
 
 
 @cog_i18n(_)
-class Nsfw(Core):
+class Nsfw(Core, name="nsfw"):
     """
     Send random NSFW images from random subreddits
 
     If `[p]help Nsfw` or any other Nsfw commands are used in a non-nsfw channel,
     you will not be able to see the list of commands for this category.
     """
+
+    @commands.command(name="Nsfw", hidden=True)
+    async def legacy_nsfw_help(self, ctx: commands.Context):
+        """Compatibility entry: use ``help nsfw`` for this category."""
+        await ctx.send_help("nsfw")
 
     @commands.command()
     async def nsfwversion(self, ctx: commands.Context):
