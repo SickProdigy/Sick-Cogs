@@ -14,7 +14,7 @@ from redbot.core.utils.chat_formatting import bold, box, pagify
 from .color import Color
 from .config import RSS_VERSION
 from .fetcher import MAX_PAGE_BYTES, NoFeedContent, UnsafeFeedURL, fetch_limited, validate_http_url
-from .models import FeedMode, feed_delivery_style, feed_summary, migrate_feed_data, normalize_mode
+from .models import FeedMode, feed_delivery_style, feed_filter_summary, feed_summary, migrate_feed_data, normalize_author, normalize_mode
 from .models import INTERNAL_TAGS, TagType
 from .renderer import TemplateValidationError, validate_template
 
@@ -605,8 +605,8 @@ class RSSCommands:
             value="Unlimited" if not limit_value else f"{limit_value} characters",
             inline=True,
         )
-        restrictions = ", ".join(str(tag) for tag in feed.get("allowed_tags", [])) or "None"
-        embed.add_field(name="Tag restrictions", value=restrictions[:1024], inline=True)
+        restrictions = feed_filter_summary(feed)
+        embed.add_field(name="Entry filters", value=restrictions[:1024], inline=False)
         embed.add_field(name="Template", value=f"```text\n{template[:900]}\n```", inline=False)
         embed_enabled = "Yes" if feed["embed"] else "No"
         embed_details = [
@@ -835,6 +835,84 @@ class RSSCommands:
 
         for page in pagify(msg, delims=["\n"], page_length=1800):
             await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
+
+    @rss.group(name="filter", brief="Filter entries by title or author.")
+    async def _rss_filter(self, ctx):
+        """Filter feed entries by title prefix or exact author."""
+        pass
+
+    @_rss_filter.command(name="show")
+    async def _rss_filter_show(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
+        """Show active title, author, and tag filters for a feed."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        await ctx.send(box(f"[ Filters for {feed_name} ]\n\n{feed_filter_summary(raw_feed)}", lang="ini"))
+
+    @_rss_filter.command(name="titleprefix", aliases=["title"] )
+    async def _rss_filter_title(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, prefix: str = None):
+        """Set a case-insensitive title prefix; use `clear` to remove it."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        value = None if not prefix or prefix.strip().casefold() == "clear" else prefix.strip()
+        async with self.config.channel(channel).feeds() as feeds:
+            feeds[feed_name]["title_prefix"] = value
+        if value:
+            await ctx.send(f"{bold(feed_name)} will only post entries whose title starts with **{value}** (case-insensitive).")
+        else:
+            await ctx.send(f"The title-prefix filter for {bold(feed_name)} was cleared.")
+
+    @_rss_filter.group(name="author")
+    async def _rss_filter_author(self, ctx):
+        """Manage the exact author allowlist."""
+        pass
+
+    @_rss_filter_author.command(name="allow", aliases=["add"] )
+    async def _rss_filter_author_allow(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, author: str):
+        """Allow an exact author name after plaintext normalization."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        author = normalize_author(author)
+        if not author:
+            return await ctx.send("Provide a non-empty author name.")
+        async with self.config.channel(channel).feeds() as feeds:
+            authors = feeds[feed_name].get("allowed_authors", [])
+            if author.casefold() in {item.casefold() for item in authors}:
+                return await ctx.send(f"**{author}** is already allowed for {bold(feed_name)}.")
+            authors.append(author)
+            feeds[feed_name]["allowed_authors"] = authors
+        await ctx.send(f"**{author}** was added to the exact author allowlist for {bold(feed_name)}.")
+
+    @_rss_filter_author.command(name="remove", aliases=["delete"] )
+    async def _rss_filter_author_remove(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, author: str):
+        """Remove an exact author from the allowlist."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        key = normalize_author(author).casefold()
+        async with self.config.channel(channel).feeds() as feeds:
+            authors = feeds[feed_name].get("allowed_authors", [])
+            remaining = [item for item in authors if item.casefold() != key]
+            if len(remaining) == len(authors):
+                return await ctx.send(f"That author is not allowed for {bold(feed_name)}.")
+            feeds[feed_name]["allowed_authors"] = remaining
+        await ctx.send(f"The author was removed from {bold(feed_name)}.")
+
+    @_rss_filter_author.command(name="list")
+    async def _rss_filter_author_list(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
+        """List exact allowed authors for a feed."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        authors = migrate_feed_data(raw_feed)[0]["allowed_authors"]
+        await ctx.send(box("\n".join(authors) if authors else "All authors are allowed.", lang="ini"))
 
     @rss.group(name="tag", brief="Manage tag filters.")
     async def _rss_tag(self, ctx):
