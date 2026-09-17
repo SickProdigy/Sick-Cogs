@@ -61,6 +61,12 @@ from ..core.validation import (
     parse_asset_amount,
     parse_native_amount,
 )
+from ..core.polymarket import (
+    POLYMARKET_CHAIN_ID,
+    POLYMARKET_COLLATERAL_SYMBOL,
+    POLYMARKET_NETWORK_KEY,
+    PolymarketHandoffAvailability,
+)
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
     CdpWalletProvider, _erc20_transfer_data, _validate_tokenfactory_operation,
@@ -1183,6 +1189,13 @@ class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
+    def test_polymarket_handoff_contract_is_explicitly_disabled(self):
+        handoff = PolymarketHandoffAvailability()
+        self.assertEqual(handoff.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(handoff.network, POLYMARKET_NETWORK_KEY)
+        self.assertEqual(handoff.collateral_symbol, POLYMARKET_COLLATERAL_SYMBOL)
+        self.assertFalse(handoff.enabled)
+
     def test_base_capabilities_are_explicit_and_provider_declared(self):
         self.assertEqual(
             set(NETWORKS),
