@@ -26,11 +26,30 @@ def market_url(market: dict) -> str:
     return f"https://polymarket.com/event/{slug}" if slug else "https://polymarket.com"
 
 
+def _active_search_markets(payload: Any) -> list[dict]:
+    if not isinstance(payload, dict):
+        return []
+    markets = []
+    seen = set()
+    for event in payload.get("events", []):
+        if not isinstance(event, dict):
+            continue
+        for market in event.get("markets", []):
+            if not isinstance(market, dict) or not market.get("active") or market.get("closed"):
+                continue
+            market_id = market.get("id")
+            if market_id in seen:
+                continue
+            seen.add(market_id)
+            markets.append(market)
+    return markets
+
+
 class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.4"
+    __version__ = "0.1.5"
 
     def __init__(self, bot):
         self.bot = bot
@@ -56,7 +75,10 @@ class Polymarket(commands.Cog):
     async def polymarket_markets(self, ctx: commands.Context, *, query: str = ""):
         """List active markets ranked by 24-hour volume, optionally filtered by question words."""
         try:
-            markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"})
+            if query.strip():
+                markets = _active_search_markets(await self._get_json("/public-search", {"q": query.strip()}))
+            else:
+                markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"})
         except (aiohttp.ClientError, RuntimeError, ValueError):
             await ctx.send("Polymarket market data could not be reached right now.")
             return

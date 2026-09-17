@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 
 from polymarket import setup
 
-from polymarket.polymarket import Polymarket, _json_list, market_url
+from polymarket.polymarket import Polymarket, _active_search_markets, _json_list, market_url
 
 
 class PolymarketModelTests(unittest.TestCase):
@@ -18,6 +18,14 @@ class PolymarketModelTests(unittest.TestCase):
     def test_cog_accepts_red_bot_instance(self):
         bot = object()
         self.assertIs(Polymarket(bot).bot, bot)
+
+    def test_search_filters_closed_and_duplicate_markets(self):
+        payload = {"events": [{"markets": [
+            {"id": "active", "active": True, "closed": False},
+            {"id": "closed", "active": True, "closed": True},
+            {"id": "active", "active": True, "closed": False},
+        ]}]}
+        self.assertEqual(_active_search_markets(payload), [{"id": "active", "active": True, "closed": False}])
 
 
 class PolymarketSetupTests(unittest.IsolatedAsyncioTestCase):

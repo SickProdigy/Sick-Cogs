@@ -12,5 +12,5 @@
   "short": "Read-only prediction-market discovery",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.1.4"
+  "version": "0.1.5"
 }
