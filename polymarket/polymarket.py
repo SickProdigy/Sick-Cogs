@@ -30,7 +30,10 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
+
+    def __init__(self, bot):
+        self.bot = bot
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
