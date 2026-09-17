@@ -33,7 +33,7 @@ roletools = RoleToolsMixin.roletools
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
 ROLETOOLS_SCHEMA_VERSION = 1
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "MIGRATION_REVIEW": []}
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
 
@@ -97,7 +97,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.6.1"
+    __version__ = "1.6.2"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -300,6 +300,37 @@ class RoleTools(
         """Owner: show legacy RoleTools import status."""
         status = await self.config.legacy_migration()
         await ctx.send(f"**RoleTools migration status**\nState: `{status.get('state')}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
+
+    @roletools.command(name="adminhelp", aliases=["setuphelp"])
+    @commands.admin_or_permissions(manage_roles=True)
+    async def roletools_admin_help(self, ctx: Context) -> None:
+        """Show the most useful RoleTools setup commands for server managers."""
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="RoleTools setup guide",
+            description="Start by allowing a role, then give members a clear way to choose it.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="1. Allow a self-role",
+            value=f"`{prefix}roletools selfassignable true @Role`\n`{prefix}roletools selfremovable true @Role`",
+            inline=False,
+        )
+        embed.add_field(
+            name="2. Choose the member experience",
+            value=(f"Use `{prefix}roletools selfrole @Role` for a command, or configure "
+                   f"reaction roles, buttons, or select menus with `{prefix}help roletools buttons`."),
+            inline=False,
+        )
+        embed.add_field(
+            name="3. Optional role-change notices",
+            value=(f"`{prefix}roletools notify channel #role-log` posts successful reaction, "
+                   "button, and select role changes there. Use "
+                   f"`{prefix}roletools notify disable` to stop them."),
+            inline=False,
+        )
+        embed.set_footer(text=f"More detail: {prefix}help roletools <command>")
+        await ctx.send(embed=embed)
 
     @roletools.command()
     @commands.guild_only()

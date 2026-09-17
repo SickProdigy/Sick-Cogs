@@ -44,12 +44,34 @@ class RoleToolsMixin(ABC):
         self.views: Dict[int, Dict[str, discord.ui.View]]
         self.is_discord: bool
 
-    @commands.group()
+    @commands.group(invoke_without_command=True)
     @commands.guild_only()
     async def roletools(self, ctx: Context) -> None:
-        """
-        Commands for creating custom role settings
-        """
+        """Member role help and server role-management commands."""
+        if ctx.invoked_subcommand is not None:
+            return
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="RoleTools",
+            description="Choose roles your server has made available to you.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="Get or remove a self-role",
+            value=f"`{prefix}roletools selfrole @Role` toggles an allowed role.",
+            inline=False,
+        )
+        embed.add_field(
+            name="Use a role menu",
+            value="Reaction, button, and select role messages can be used directly. Their result is shown to you privately.",
+            inline=False,
+        )
+        embed.add_field(
+            name="Need more detail?",
+            value=f"`{prefix}help roletools selfrole` explains the command. Server managers can use `{prefix}roletools adminhelp`.",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
 
     #######################################################################
     # roletools.py                                                        #
