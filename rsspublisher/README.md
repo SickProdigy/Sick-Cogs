@@ -29,7 +29,7 @@ channel destinations, templates, and delivery state are stored in Red's Config s
 ```
 
 `[p]rss` is an alias for `[p]rsspublisher`. Replace `[p]` with the bot's configured
-prefix. Use `[p]help rsspublisher` and its subcommands for the full syntax.
+prefix. The root help keeps every subcommand visible with a compact description; use `[p]help rss <command>` for complete syntax and details.
 
 ## Inspecting feeds
 
