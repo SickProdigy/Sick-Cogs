@@ -23,6 +23,9 @@ channel destinations, templates, and delivery state are stored in Red's Config s
 [p]rsspublisher force news
 [p]rsspublisher template news #updates <template>
 [p]rsspublisher announce news #updates <announcement>
+[p]rsspublisher filter titleprefix news #updates News -
+[p]rsspublisher filter author allow news #updates xSicKxBot
+[p]rsspublisher filter show news #updates
 [p]rsspublisher pause news #updates
 [p]rsspublisher resume news #updates
 [p]rsspublisher remove news #updates
@@ -51,6 +54,12 @@ link-only template and disable RSSPublisher's custom embed:
 ```
 
 These feeds are labeled **Native link preview** in `list`, `listall`, and `view`.
+
+## Entry filters
+
+Feeds are unrestricted by default. Administrators can require a case-insensitive title prefix, exact normalized author names, and/or the existing tag allowlist. Every configured filter family must pass. Author markup from feeds is reduced to plaintext before exact matching.
+
+Use `clear` with `filter titleprefix` to remove the title restriction, and `filter author remove` to remove an author. Automatic checks intentionally advance past rejected entries so spam is not reconsidered every cycle; `rss force` reports a rejection without advancing the marker. Active filters appear in `list`, `listall`, `view`, and `filter show`.
 
 Role mentions in announcements are limited to roles both the configuring moderator and
 the bot are permitted to mention. User and everyone mentions from feed content are

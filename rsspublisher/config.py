@@ -6,7 +6,7 @@ from .models import migrate_feed_data
 
 LEGACY_CONFIG_IDENTIFIER = 2761331001
 CONFIG_IDENTIFIER = 842719563204817695
-RSS_VERSION = "3.1.4"
+RSS_VERSION = "3.2.0"
 RSS_SCHEMA_VERSION = 1
 
 def create_config(cog) -> Config:
