@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Delegate tightly scoped game and clan role management to trusted server roles.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server role IDs used for game-role delegation. It does not store member data.",
+  "hidden": false,
+  "install_msg": "Use `[p]help gameroles` to configure delegated Rust, Ark, or other game roles.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "GameRoles",
+  "permissions": ["manage_roles", "embed_links"],
+  "requirements": [],
+  "short": "Delegated game and clan role management.",
+  "tags": ["roles", "games", "clans", "rust", "ark"],
+  "type": "COG",
+  "version": "0.1.0"
+}
