@@ -31,6 +31,13 @@ class RSSCommands:
         """RSS feed stuff."""
         pass
 
+    @rss.command(name="migrationstatus")
+    @commands.is_owner()
+    async def _rss_migration_status(self, ctx):
+        """Owner: show legacy RSS migration status."""
+        status = await self.config.migration_status()
+        await ctx.send(f"**RSSPublisher migration status**\nState: `{status.get('state')}`\nImported feeds: `{status.get('imported_feeds', 0)}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
+
     @rss.command(name="add")
     async def _rss_add(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, url: str):
         """

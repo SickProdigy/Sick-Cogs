@@ -13,5 +13,5 @@
     "short": "Publish RSS and Atom feed updates",
     "tags": ["rss", "atom", "feeds", "news", "notifications"],
     "type": "COG",
-    "version": "3.0.0"
+    "version": "3.0.1"
 }
