@@ -25,6 +25,20 @@ REACTION_EMOJIS = [
     "🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭", "🇮", "🇯",
 ]
 PICKER_NAME = re.compile(r"^[a-z0-9_-]{1,40}$")
+LEGACY_DEFAULT_DESCRIPTIONS = {
+    "Click Choose roles to open your private role list.",
+    "Click **Choose roles** to open your private role list. Selecting a role adds it; selecting one you have removes it.",
+}
+
+
+def picker_description(data: dict) -> str:
+    description = (data.get("description") or "").strip()
+    if description and description not in LEGACY_DEFAULT_DESCRIPTIONS:
+        return description
+    return {
+        "dropdown": "Use the dropdowns below to add or remove roles.",
+        "reactions": "React to add a role; remove your reaction to remove it.",
+    }.get(data.get("layout"), "Click **Choose roles** to open your private role list.")
 
 
 def picker_pages(role_ids: List[int], page_size: int = PICKER_PAGE_SIZE) -> List[List[int]]:
@@ -280,10 +294,7 @@ class RoleToolsPicker(RoleToolsMixin):
         pages = max(1, math.ceil(count / PICKER_PAGE_SIZE))
         return discord.Embed(
             title=data.get("title") or "Choose your roles",
-            description=(data.get("description") or
-                "Click **Choose roles** to open your private role list. "
-                "Selecting a role adds it; selecting one you have removes it."
-            ),
+            description=picker_description(data),
             color=discord.Color.blurple(),
         ).set_footer(text=f"{count} roles · {pages} page{'s' if pages != 1 else ''}")
 
@@ -297,7 +308,7 @@ class RoleToolsPicker(RoleToolsMixin):
     @staticmethod
     def reaction_picker_embed(data: dict, roles: List[discord.Role], page: int, pages: int) -> discord.Embed:
         lines = [f"{emoji}  {role.mention}" for emoji, role in zip(REACTION_EMOJIS, roles)]
-        description = data.get("description") or "React to add a role; remove your reaction to remove it."
+        description = picker_description(data)
         if lines:
             description += "\n\n" + "\n".join(lines)
         embed = discord.Embed(title=data.get("title") or "Choose your roles", description=description, color=discord.Color.blurple())

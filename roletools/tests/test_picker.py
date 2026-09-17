@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from roletools.picker import PICKER_PAGE_SIZE, REACTION_PAGE_SIZE, PickerMemberView, picker_page_index, picker_pages
+from roletools.picker import PICKER_PAGE_SIZE, REACTION_PAGE_SIZE, PickerMemberView, picker_description, picker_page_index, picker_pages
 
 
 class PickerPagingTests(unittest.TestCase):
@@ -12,6 +12,16 @@ class PickerPagingTests(unittest.TestCase):
         self.assertEqual([len(page) for page in picker_pages(list(range(100)))], [25, 25, 25, 25])
         self.assertEqual([len(page) for page in picker_pages(list(range(101)))], [25, 25, 25, 25, 1])
         self.assertEqual([len(page) for page in picker_pages(list(range(41)), REACTION_PAGE_SIZE)], [20, 20, 1])
+
+    def test_stock_description_follows_published_layout(self):
+        legacy = {"description": "Click Choose roles to open your private role list."}
+        self.assertIn("private role list", picker_description(legacy))
+        legacy["layout"] = "dropdown"
+        self.assertIn("dropdowns below", picker_description(legacy))
+        legacy["layout"] = "reactions"
+        self.assertIn("React to add", picker_description(legacy))
+        legacy["description"] = "Pick your game alerts."
+        self.assertEqual(picker_description(legacy), "Pick your game alerts.")
 
     def test_navigation_wraps_without_mutating_shared_state(self):
         self.assertEqual(picker_page_index(-1, 4), 3)
