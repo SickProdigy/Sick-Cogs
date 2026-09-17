@@ -66,6 +66,7 @@ from ..core.polymarket import (
     POLYMARKET_COLLATERAL_SYMBOL,
     POLYMARKET_NETWORK_KEY,
     PolymarketHandoffAvailability,
+    PolymarketHandoffSession,
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
@@ -1195,6 +1196,12 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(handoff.network, POLYMARKET_NETWORK_KEY)
         self.assertEqual(handoff.collateral_symbol, POLYMARKET_COLLATERAL_SYMBOL)
         self.assertFalse(handoff.enabled)
+
+        handle, session = PolymarketHandoffSession.create(7, "profile", "a" * 64, 200)
+        consumed = session.consume(handle, 7, 100)
+        self.assertEqual(consumed.consumed_at, 100)
+        with self.assertRaises(ValueError):
+            consumed.consume(handle, 7, 101)
 
     def test_base_capabilities_are_explicit_and_provider_declared(self):
         self.assertEqual(
