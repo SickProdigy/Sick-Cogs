@@ -6,6 +6,8 @@ import aiohttp
 import discord
 from redbot.core import commands
 
+from .handoff import MarketSnapshot, MarketSnapshotError
+
 GAMMA_API = "https://gamma-api.polymarket.com"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=4)
 
@@ -85,7 +87,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.9"
+    __version__ = "0.1.12"
 
     def __init__(self, bot):
         self.bot = bot
@@ -170,6 +172,27 @@ class Polymarket(commands.Cog):
             value = (probability or "Probability unavailable") + f"\nID `{market.get('id')}` · [Open market]({market_url(market)})"
             embed.add_field(name=str(market.get("question") or "Untitled market")[:256], value=value[:1024], inline=False)
         embed.set_footer(text="Future path: Polygon mainnet · pUSD · user-controlled approval · eligibility required")
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="readiness", aliases=["handoff"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_readiness(self, ctx: commands.Context, reference: str):
+        """Show public technical readiness for a future disabled Polygon handoff."""
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or link.")
+            return
+        try:
+            market = await self._get_json(path)
+            snapshot = MarketSnapshot.from_market(market)
+        except (aiohttp.ClientError, RuntimeError, ValueError, MarketSnapshotError):
+            await ctx.send("That market is not technically ready for the staged future handoff.")
+            return
+        embed = discord.Embed(title="Future handoff readiness", url=market_url(market), description=snapshot.question)
+        embed.add_field(name="Technical market state", value="Active CLOB market with accepting order book and outcome tokens.", inline=False)
+        embed.add_field(name="Future target", value=f"Polygon mainnet (`137`) · pUSD\nSelected-market minimum size: `{snapshot.minimum_order_size or 'not supplied'}`", inline=False)
+        embed.add_field(name="Execution state", value="Disabled. No wallet lookup, account creation, balance check, approval, signature, or order occurs.", inline=False)
+        embed.set_footer(text="A later protected approval, eligibility, security, and release review is required.")
         await ctx.send(embed=embed)
 
     @polymarket.command(name="market", aliases=["info"])
