@@ -1,0 +1,16 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Prediction-market information foundation with future CryptoWallet handoff planning.",
+  "disabled": false,
+  "end_user_data_statement": "This scaffold stores no user data and does not create wallets, process payments, or place trades.",
+  "hidden": false,
+  "install_msg": "This is an read-only prediction-market discovery cog. It does not connect wallets or place trades.",
+  "min_bot_version": "3.5.0",
+  "permissions": [],
+  "name": "Polymarket",
+  "requirements": [],
+  "short": "Prediction-market information foundation",
+  "tags": ["prediction", "markets", "polymarket", "information"],
+  "type": "COG",
+  "version": "0.2.0"
+}
