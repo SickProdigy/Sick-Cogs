@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import AsyncMock
 
 from polymarket import setup
 
@@ -32,3 +33,26 @@ class PolymarketSetupTests(unittest.IsolatedAsyncioTestCase):
         await setup(bot)
         self.assertEqual(len(bot.cogs), 1)
         self.assertIsInstance(bot.cogs[0], Polymarket)
+
+
+class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_markets_requests_active_24_hour_volume_ranking(self):
+        class Context:
+            def __init__(self):
+                self.send = AsyncMock()
+
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(return_value=[{
+            "id": "42",
+            "question": "Example question?",
+            "slug": "example-question",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": '["0.6", "0.4"]',
+        }])
+        ctx = Context()
+        await Polymarket.polymarket_markets.callback(cog, ctx, query="")
+        cog._get_json.assert_awaited_once_with(
+            "/markets",
+            {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"},
+        )
+        ctx.send.assert_awaited_once()

@@ -30,7 +30,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.3"
+    __version__ = "0.1.4"
 
     def __init__(self, bot):
         self.bot = bot
@@ -54,9 +54,9 @@ class Polymarket(commands.Cog):
     @polymarket.command(name="markets", aliases=["search", "browse"])
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_markets(self, ctx: commands.Context, *, query: str = ""):
-        """List active markets, optionally filtered by words in their question."""
+        """List active markets ranked by 24-hour volume, optionally filtered by question words."""
         try:
-            markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50})
+            markets = await self._get_json("/markets", {"active": "true", "closed": "false", "limit": 50, "order": "volume24hr", "ascending": "false"})
         except (aiohttp.ClientError, RuntimeError, ValueError):
             await ctx.send("Polymarket market data could not be reached right now.")
             return
