@@ -10,7 +10,7 @@
     "permissions": ["attach_files"],
     "requirements": [],
     "short": "Query Wolfram|Alpha for answers",
-    "tags": ["wolfram", "wolframalpha", "math", "answers"],
+    "tags": ["wolfram", "wolframalpha", "math", "answers", "examples"],
     "type": "COG",
-    "version": "2.2.0"
+    "version": "2.3.0"
 }

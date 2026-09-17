@@ -22,6 +22,8 @@ Wolfram stores no cog configuration or credentials. The AppID lives only in Red'
 [p]wolfram <question>
 [p]wolframimage <question>
 [p]wolframsolve <question>
+[p]wolframexample [mathematics|science|society|everyday|surprises]
+[p]wolframrandom [category]
 ```
 
 Running `[p]wolfram` without a question displays command help without contacting Wolfram|Alpha.
@@ -36,3 +38,7 @@ The cog distinguishes between:
 - request timeouts;
 - network failures; and
 - temporary provider errors.
+
+## Curated examples
+
+`[p]wolframexample` picks a bundled example without making an API request. Use an optional category — `mathematics`, `science`, `society`, `everyday`, or `surprises` — to narrow it. The response links to the attributed Wolfram|Alpha Examples category and shows the normal `[p]wolfram` command to run it.
