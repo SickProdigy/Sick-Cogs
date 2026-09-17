@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional, Sequence, Union
 import discord
 import feedparser
 
-from .models import FeedMode, entry_identity, normalize_mode
+from .models import FeedMode, entry_identity, feed_filter_failures, normalize_mode
 
 @dataclass(frozen=True)
 class EntryCandidate:
@@ -184,22 +184,23 @@ class RSSDeliveryMixin:
             curr_time = feedparser_plus_obj.get("_sick_entry_time")
             curr_entry_id = feedparser_plus_obj.get("_sick_entry_id")
 
-            # allowed tag verification section
-            allowed_tags = rss_feed.get("allowed_tags", [])
-            if len(allowed_tags) > 0:
-                allowed_post_tags = [x.lower() for x in allowed_tags]
-                feed_tag_list = [x.lower() for x in feedparser_plus_obj.get("tags_list", [])]
-                intersection = list(set(feed_tag_list).intersection(allowed_post_tags))
-                if len(intersection) == 0:
-                    log.debug(
-                        f"{name} feed post in {channel.name} ({channel.id}) was denied because of an allowed tag mismatch."
+            filter_failures = feed_filter_failures(feedparser_plus_obj, rss_feed)
+            if filter_failures:
+                reason = "; ".join(filter_failures)
+                log.debug(
+                    f"{name} feed post in {channel.name} ({channel.id}) was denied: {reason}."
+                )
+                if force:
+                    await channel.send(
+                        f"The newest entry for **{name}** was not posted because {reason}.",
+                        allowed_mentions=discord.AllowedMentions.none(),
                     )
-                    if not force:
-                        await self._update_last_scraped(
-                            channel, name, curr_title, curr_link, curr_time, curr_entry_id,
-                            delivered=False,
-                        )
-                    continue
+                else:
+                    await self._update_last_scraped(
+                        channel, name, curr_title, curr_link, curr_time, curr_entry_id,
+                        delivered=False,
+                    )
+                continue
 
             message = self._renderer.render_message(
                 name, template, feedparser_plus_obj, rss_feed.get("limit", 0)

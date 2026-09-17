@@ -14,7 +14,7 @@ from redbot.core.utils.chat_formatting import bold, box, pagify
 from .color import Color
 from .config import RSS_VERSION
 from .fetcher import MAX_PAGE_BYTES, NoFeedContent, UnsafeFeedURL, fetch_limited, validate_http_url
-from .models import FeedMode, migrate_feed_data, normalize_mode
+from .models import FeedMode, feed_delivery_style, feed_filter_summary, feed_summary, migrate_feed_data, normalize_author, normalize_mode
 from .models import INTERNAL_TAGS, TagType
 from .renderer import TemplateValidationError, validate_template
 
@@ -25,20 +25,23 @@ class RSSCommands:
     """Public RSS command groups and command-specific helpers."""
 
     @commands.guild_only()
-    @commands.group(name="rsspublisher", aliases=["rss"])
+    @commands.group(name="rsspublisher", aliases=["rss"], invoke_without_command=True)
     @checks.mod_or_permissions(manage_channels=True)
     async def rss(self, ctx):
-        """RSS feed stuff."""
-        pass
+        """Manage this server's RSS and Atom feeds.
 
-    @rss.command(name="migrationstatus")
+        Use `[p]help rss <command>` for syntax and details.
+        """
+        await ctx.send_help(ctx.command)
+
+    @rss.command(name="migrationstatus", brief="Show migration status.")
     @commands.is_owner()
     async def _rss_migration_status(self, ctx):
         """Owner: show legacy RSS migration status."""
         status = await self.config.migration_status()
         await ctx.send(f"**RSSPublisher migration status**\nState: `{status.get('state')}`\nImported feeds: `{status.get('imported_feeds', 0)}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
 
-    @rss.command(name="add")
+    @rss.command(name="add", brief="Add a feed.")
     async def _rss_add(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, url: str):
         """
         Add an RSS feed to a channel.
@@ -68,7 +71,7 @@ class RSSCommands:
             else:
                 await ctx.send("Invalid or unavailable URL.")
 
-    @rss.group(name="embed")
+    @rss.group(name="embed", brief="Configure feed embeds.")
     async def _rss_embed(self, ctx):
         """Embed feed settings."""
         pass
@@ -257,7 +260,7 @@ class RSSCommands:
 
         await ctx.send(f"Embeds for {bold(feed_name)} are {toggle_text}.")
 
-    @rss.command(name="find")
+    @rss.command(name="find", brief="Find feeds on a website.")
     async def _rss_find(self, ctx, website_url: str):
         """
         Attempts to find RSS feeds from a URL/website.
@@ -336,7 +339,7 @@ class RSSCommands:
         else:
             await ctx.send("No RSS feeds found in the link provided.")
 
-    @rss.group(name="privatehost")
+    @rss.group(name="privatehost", brief="Manage trusted private hosts.")
     @checks.is_owner()
     async def _rss_private_host(self, ctx):
         """Manage private feed hosts that the bot owner intentionally trusts."""
@@ -393,7 +396,7 @@ class RSSCommands:
         message = "\n".join(sorted(hosts)) if hosts else "No private hosts are allowed."
         await ctx.send(box(message, lang="ini"))
 
-    @rss.command(name="force", aliases=["test", "preview"])
+    @rss.command(name="force", aliases=["test", "preview"], brief="Preview the newest entry.")
     async def _rss_force(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
         """Preview the newest feed entry without advancing its saved marker."""
         channel = channel or ctx.channel
@@ -415,7 +418,7 @@ class RSSCommands:
         rss_feed = feeds[channel.id]["feeds"][feed_name]
         await self.get_current_feed(channel, feed_name, rss_feed, force=True)
 
-    @rss.command(name="mode")
+    @rss.command(name="mode", brief="Set latest or catch-up mode.")
     async def _rss_mode(
         self,
         ctx,
@@ -440,14 +443,14 @@ class RSSCommands:
             feed_data[feed_name]["mode"] = mode
         await ctx.send(f"{bold(feed_name)} will now use `{mode}` posting mode.")
 
-    @rss.command(name="pause")
+    @rss.command(name="pause", brief="Pause a feed.")
     async def _rss_pause(
         self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None
     ):
         """Pause automatic checks for a feed without removing its configuration."""
         await self._set_feed_paused(ctx, feed_name, channel or ctx.channel, True)
 
-    @rss.command(name="resume")
+    @rss.command(name="resume", brief="Resume a feed.")
     async def _rss_resume(
         self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None
     ):
@@ -466,7 +469,7 @@ class RSSCommands:
         state = "paused" if paused else "resumed"
         await ctx.send(f"{bold(feed_name)} has been {state}.")
 
-    @rss.command(name="status")
+    @rss.command(name="status", brief="Show feed health.")
     async def _rss_status(
         self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None
     ):
@@ -492,7 +495,7 @@ class RSSCommands:
             lines.append(f"Last error: {migrated['last_error'][:500]}")
         await ctx.send(box("\n".join(lines), lang="ini"))
 
-    @rss.command(name="limit")
+    @rss.command(name="limit", brief="Set the post length limit.")
     async def _rss_limit(
         self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, character_limit: int = None
     ):
@@ -534,45 +537,97 @@ class RSSCommands:
         characters = f"approximately {character_limit}" if character_limit > 0 else "an unlimited amount of"
         await ctx.send(f"{extra_msg}Character limit for {bold(feed_name)} is now {characters} characters.")
 
-    @rss.command(name="list")
+    @rss.command(name="list", brief="List feeds in one channel.")
     async def _rss_list(self, ctx, channel: GuildMessageable = None):
-        """List saved feeds for this channel or a specific channel."""
+        """List saved feeds and their delivery settings for one channel."""
         channel = channel or ctx.channel
-        channel_permission_check = await self._check_channel_permissions(ctx, channel)
-        if not channel_permission_check:
+        if not await self._check_channel_permissions(ctx, channel):
             return
 
-        feeds = await self._get_feed_names(channel)
-        msg = f"[ Available Feeds for #{channel.name} ]\n\n\t"
-        if feeds:
-            msg += "\n\t".join(sorted(feeds))
-        else:
-            msg += "\n\tNone."
-        for page in pagify(msg, delims=["\n"], page_length=1800):
-            await ctx.send(box(page, lang="ini"))
-
-    @rss.command(name="listall")
-    async def _rss_listall(self, ctx):
-        """List all saved feeds for this server."""
-        all_channels = await self.config.all_channels()
-        all_guild_channels = [x.id for x in itertools.chain(ctx.guild.channels, ctx.guild.threads)]
-        msg = ""
-        for channel_id, data in all_channels.items():
-            if channel_id in all_guild_channels:
-                channel_obj = ctx.guild.get_channel_or_thread(channel_id)
-                feeds = await self._get_feed_names(channel_obj)
-                if not feeds:
-                    continue
-                if feeds == ["None."]:
-                    continue
-                msg += f"[ Available Feeds for #{channel_obj.name} ]\n\n\t"
-                msg += "\n\t".join(sorted(feeds))
-                msg += "\n\n"
-
+        feeds = await self._get_feed_summaries(channel)
+        msg = f"[ Available Feeds for #{channel.name} ]\n\n"
+        msg += "\n\n".join(feeds) if feeds else "None."
         for page in pagify(msg, delims=["\n\n", "\n"], page_length=1800):
             await ctx.send(box(page, lang="ini"))
 
-    @rss.command(name="listtags")
+    @rss.command(name="listall", brief="List every server feed.")
+    async def _rss_listall(self, ctx):
+        """List all server feeds with their delivery settings."""
+        all_channels = await self.config.all_channels()
+        guild_channel_ids = {item.id for item in itertools.chain(ctx.guild.channels, ctx.guild.threads)}
+        sections = []
+        for channel_id in all_channels:
+            if channel_id not in guild_channel_ids:
+                continue
+            channel = ctx.guild.get_channel_or_thread(channel_id)
+            if channel is None:
+                continue
+            feeds = await self._get_feed_summaries(channel)
+            if feeds:
+                sections.append(
+                    f"[ Available Feeds for #{channel.name} ]\n\n" + "\n\n".join(feeds)
+                )
+
+        msg = "\n\n".join(sections) if sections else "No RSS feeds are configured in this server."
+        msg += f"\n\nUse {ctx.clean_prefix}rss view <feed> <channel> for complete settings and health."
+        for page in pagify(msg, delims=["\n\n", "\n"], page_length=1800):
+            await ctx.send(box(page, lang="ini"))
+    @rss.command(name="view", aliases=["info", "settings"], brief="View one feed's settings.")
+    @commands.bot_has_permissions(embed_links=True)
+    async def _rss_view(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
+        """Show complete settings and delivery health for one feed."""
+        channel = channel or ctx.channel
+        if not await self._check_channel_permissions(ctx, channel):
+            return
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            await ctx.send("No feed with that name in this channel.")
+            return
+
+        feed, _ = migrate_feed_data(raw_feed)
+        delivery = self._feed_delivery_style(feed)
+        state = "Paused" if feed["paused"] else "Active"
+        announcement = "Configured" if feed.get("announcement") else "None"
+        template = str(feed["template"]).replace("`", "ˋ")
+        limit_value = feed.get("limit", 0)
+        embed = discord.Embed(
+            title=f"RSS Feed: {feed_name}",
+            description=f"Complete settings and health for {channel.mention}.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Source", value=str(feed.get("url") or "Unknown")[:1024], inline=False)
+        embed.add_field(name="Delivery", value=delivery, inline=True)
+        embed.add_field(name="State", value=state, inline=True)
+        embed.add_field(name="Mode", value=feed["mode"], inline=True)
+        embed.add_field(name="Announcement", value=announcement, inline=True)
+        embed.add_field(
+            name="Limit",
+            value="Unlimited" if not limit_value else f"{limit_value} characters",
+            inline=True,
+        )
+        restrictions = feed_filter_summary(feed)
+        embed.add_field(name="Entry filters", value=restrictions[:1024], inline=False)
+        embed.add_field(name="Template", value=f"```text\n{template[:900]}\n```", inline=False)
+        embed_enabled = "Yes" if feed["embed"] else "No"
+        embed_details = [
+            f"Enabled: {embed_enabled}",
+            "Color: " + str(feed.get("embed_color") or "Default"),
+            "Image tag: " + str(feed.get("embed_image") or "None"),
+            "Thumbnail tag: " + str(feed.get("embed_thumbnail") or "None"),
+        ]
+        embed.add_field(name="RSS embed settings", value="\n".join(embed_details), inline=False)
+        health = [
+            "Last checked: " + str(feed.get("last_checked_at") or "Never"),
+            "Last successful post: " + str(feed.get("last_success_at") or "Never"),
+            "Consecutive failures: " + str(feed.get("consecutive_failures", 0)),
+        ]
+        if feed.get("last_error"):
+            health.append("Last error: " + str(feed["last_error"])[:500])
+        embed.add_field(name="Delivery health", value="\n".join(health)[:1024], inline=False)
+        embed.set_footer(text=f"Use {ctx.clean_prefix}help rss for commands that change these settings.")
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    @rss.command(name="listtags", brief="List available feed tags.")
     async def _rss_list_tags(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
         """List the tags available from a specific feed."""
         channel = channel or ctx.channel
@@ -627,7 +682,7 @@ class RSSCommands:
             await ctx.send(box(msg_part, lang="ini"))
 
     @checks.is_owner()
-    @rss.group(name="parse")
+    @rss.group(name="parse", brief="Manage domain parsing.")
     async def _rss_parse(self, ctx):
         """
         Change feed parsing for a specfic domain.
@@ -694,7 +749,7 @@ class RSSCommands:
         else:
             await ctx.send(f"`{website}` isn't in the parsing override list.")
 
-    @rss.command(name="remove", aliases=["delete", "del"])
+    @rss.command(name="remove", aliases=["delete", "del"], brief="Remove a feed.")
     async def _rss_remove(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
         """
         Removes a feed from a channel.
@@ -712,7 +767,7 @@ class RSSCommands:
         else:
             await ctx.send("Feed not found!")
 
-    @rss.command(name="showtemplate")
+    @rss.command(name="showtemplate", brief="Show a feed template.")
     async def _rss_show_template(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
         """Show the template in use for a specific feed."""
         channel = channel or ctx.channel
@@ -781,7 +836,85 @@ class RSSCommands:
         for page in pagify(msg, delims=["\n"], page_length=1800):
             await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
 
-    @rss.group(name="tag")
+    @rss.group(name="filter", brief="Filter entries by title or author.")
+    async def _rss_filter(self, ctx):
+        """Filter feed entries by title prefix or exact author."""
+        pass
+
+    @_rss_filter.command(name="show")
+    async def _rss_filter_show(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
+        """Show active title, author, and tag filters for a feed."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        await ctx.send(box(f"[ Filters for {feed_name} ]\n\n{feed_filter_summary(raw_feed)}", lang="ini"))
+
+    @_rss_filter.command(name="titleprefix", aliases=["title"] )
+    async def _rss_filter_title(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, prefix: str = None):
+        """Set a case-insensitive title prefix; use `clear` to remove it."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        value = None if not prefix or prefix.strip().casefold() == "clear" else prefix.strip()
+        async with self.config.channel(channel).feeds() as feeds:
+            feeds[feed_name]["title_prefix"] = value
+        if value:
+            await ctx.send(f"{bold(feed_name)} will only post entries whose title starts with **{value}** (case-insensitive).")
+        else:
+            await ctx.send(f"The title-prefix filter for {bold(feed_name)} was cleared.")
+
+    @_rss_filter.group(name="author")
+    async def _rss_filter_author(self, ctx):
+        """Manage the exact author allowlist."""
+        pass
+
+    @_rss_filter_author.command(name="allow", aliases=["add"] )
+    async def _rss_filter_author_allow(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, author: str):
+        """Allow an exact author name after plaintext normalization."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        author = normalize_author(author)
+        if not author:
+            return await ctx.send("Provide a non-empty author name.")
+        async with self.config.channel(channel).feeds() as feeds:
+            authors = feeds[feed_name].get("allowed_authors", [])
+            if author.casefold() in {item.casefold() for item in authors}:
+                return await ctx.send(f"**{author}** is already allowed for {bold(feed_name)}.")
+            authors.append(author)
+            feeds[feed_name]["allowed_authors"] = authors
+        await ctx.send(f"**{author}** was added to the exact author allowlist for {bold(feed_name)}.")
+
+    @_rss_filter_author.command(name="remove", aliases=["delete"] )
+    async def _rss_filter_author_remove(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, author: str):
+        """Remove an exact author from the allowlist."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        key = normalize_author(author).casefold()
+        async with self.config.channel(channel).feeds() as feeds:
+            authors = feeds[feed_name].get("allowed_authors", [])
+            remaining = [item for item in authors if item.casefold() != key]
+            if len(remaining) == len(authors):
+                return await ctx.send(f"That author is not allowed for {bold(feed_name)}.")
+            feeds[feed_name]["allowed_authors"] = remaining
+        await ctx.send(f"The author was removed from {bold(feed_name)}.")
+
+    @_rss_filter_author.command(name="list")
+    async def _rss_filter_author_list(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
+        """List exact allowed authors for a feed."""
+        channel = channel or ctx.channel
+        raw_feed = await self.config.channel(channel).feeds.get_raw(feed_name, default=None)
+        if not raw_feed:
+            return await ctx.send("That feed name does not exist in this channel.")
+        authors = migrate_feed_data(raw_feed)[0]["allowed_authors"]
+        await ctx.send(box("\n".join(authors) if authors else "All authors are allowed.", lang="ini"))
+
+    @rss.group(name="tag", brief="Manage tag filters.")
     async def _rss_tag(self, ctx):
         """RSS post tag qualification."""
         pass
@@ -862,7 +995,7 @@ class RSSCommands:
                     f"{bold(await self._title_case(tag))} was not found in the allow list for {bold(feed_name)}."
                 )
 
-    @rss.command(name="template")
+    @rss.command(name="template", brief="Set a feed template.")
     async def _rss_template(
         self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None, *, template: str = None
     ):
@@ -895,7 +1028,7 @@ class RSSCommands:
         else:
             await ctx.send("Feed not found!")
 
-    @rss.command(name="viewtags")
+    @rss.command(name="viewtags", brief="Preview rendered tag values.")
     async def _rss_view_tags(self, ctx, feed_name: str, channel: Optional[GuildMessageable] = None):
         """View a preview of template tag content available from a specific feed."""
         channel = channel or ctx.channel
@@ -1063,18 +1196,34 @@ class RSSCommands:
                 return None
 
         return website
+    @staticmethod
+    def _feed_delivery_style(feed: dict) -> str:
+        """Compatibility wrapper for shared delivery classification."""
+        return feed_delivery_style(feed)
+
+    @staticmethod
+    def _feed_summary(name: str, feed: dict) -> str:
+        """Compatibility wrapper for shared list summary rendering."""
+        return feed_summary(name, feed)
+
+    async def _get_feed_summaries(self, channel: GuildMessageable):
+        """Return sorted compact settings for every feed in a channel."""
+        all_feeds = await self.config.channel(channel).feeds.all()
+        return [
+            self._feed_summary(name, feed)
+            for name, feed in sorted(all_feeds.items())
+        ]
+
     async def _get_feed_names(self, channel: GuildMessageable):
-        """Helper for rss list/listall."""
-        feed_list = []
-        space = "\N{SPACE}"
+        """Compatibility helper returning feed names and URLs."""
         all_feeds = await self.config.channel(channel).feeds.all()
         if not all_feeds:
             return ["None."]
-        longest_name_len = len(max(list(all_feeds.keys()), key=len))
-        for name, data in all_feeds.items():
-            extra_spacing = longest_name_len - len(name)
-            feed_list.append(f"{name}{space * extra_spacing}  {data['url']}")
-        return feed_list
+        feed_names = []
+        for name, data in sorted(all_feeds.items()):
+            source = data.get("url") or "Unknown"
+            feed_names.append(f"{name}  {source}")
+        return feed_names
 
     @staticmethod
     async def _title_case(phrase: str):
@@ -1084,7 +1233,7 @@ class RSSCommands:
         final_words += [word if word in exceptions else word.capitalize() for word in lowercase_words[1:]]
         return " ".join(final_words)
 
-    @rss.command(name="announce", aliases=["announcement"])
+    @rss.command(name="announce", aliases=["announcement"], brief="Set announcement text.")
     async def _rss_announce(
         self,
         ctx,
