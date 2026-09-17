@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Literal, Optional
 
@@ -14,6 +15,10 @@ from .menus import IMAGE_LINKS, BaseMenu, EventType, WelcomePages
 default_greeting = "Welcome {0.name} to {1.name}!"
 default_goodbye = "See you later {0.name}!"
 default_bot_msg = "Hello {0.name}, fellow bot!"
+
+LEGACY_CONFIG_IDENTIFIER = 144465786453
+SICK_COGS_CONFIG_IDENTIFIER = 3395959994324229610
+WELCOME_SCHEMA_VERSION = 1
 default_settings = {
     "GREETING": [default_greeting],
     "ON": False,
@@ -65,15 +70,92 @@ class Welcome(Events, commands.Cog):
     Maintained as part of Sick-Cogs."""
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "2.6.1"
+    __version__ = "2.6.2"
 
     def __init__(self, bot):
         self.bot = bot
-        self.config = Config.get_conf(self, 144465786453, force_registration=True)
+        self.config = Config.get_conf(self, SICK_COGS_CONFIG_IDENTIFIER, force_registration=True)
+        self.config.register_guild(MIGRATION_REVIEW=[])
         self.config.register_guild(**default_settings)
+        self.config.register_global(
+            schema_version=0,
+            legacy_migration={"state": "not_started", "imported_guilds": 0, "review_guilds": []},
+        )
+        self.legacy_config = Config.get_conf(
+            None, LEGACY_CONFIG_IDENTIFIER, cog_name="Welcome", force_registration=False
+        )
         self.joined = {}
         self.today_count = {"now": datetime.now(timezone.utc)}
+
+    async def cog_load(self):
+        await self._migrate_legacy_config()
         self.group_welcome.start()
+
+    def cog_unload(self):
+        self.group_welcome.cancel()
+
+    @staticmethod
+    def _normalise_legacy_guild(data):
+        """Merge a legacy record with complete defaults without retaining unknown keys."""
+        warnings = []
+        data = data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            warnings.append("Legacy record was not a mapping; defaults were used.")
+        unknown_root = sorted(set(data).difference(default_settings))
+        if unknown_root:
+            unknown_root_names = "; ".join(unknown_root)
+            warnings.append(f"Legacy record contains unrecognized keys: {unknown_root_names}.")
+        def merge(default, value, path):
+            if isinstance(default, dict):
+                if not isinstance(value, dict):
+                    if value is not None:
+                        warnings.append(f"{path} was malformed; defaults were used.")
+                    value = {}
+                unknown = sorted(set(value).difference(default))
+                if unknown:
+                    unknown_names = "; ".join(unknown)
+                    warnings.append(f"{path} contains unrecognized legacy keys: {unknown_names}.")
+                return {key: merge(item, value.get(key), f"{path}.{key}") for key, item in default.items()}
+            if value is None:
+                return deepcopy(default)
+            if isinstance(default, bool) and not isinstance(value, bool):
+                warnings.append(f"{path} was malformed; default was used.")
+                return deepcopy(default)
+            if isinstance(default, list) and (not isinstance(value, list) or not all(isinstance(item, str) for item in value)):
+                warnings.append(f"{path} was malformed; default was used.")
+                return deepcopy(default)
+            if isinstance(default, int) and not isinstance(default, bool) and (not isinstance(value, int) or isinstance(value, bool)):
+                warnings.append(f"{path} was malformed; default was used.")
+                return deepcopy(default)
+            return deepcopy(value)
+        return {key: merge(value, data.get(key), key) for key, value in default_settings.items()}, warnings
+
+    async def _migrate_legacy_config(self):
+        if await self.config.schema_version() >= WELCOME_SCHEMA_VERSION:
+            return
+        state = await self.config.legacy_migration()
+        target_guilds = await self.config.all_guilds()
+        if target_guilds and state.get("state") != "migrating":
+            await self.config.legacy_migration.set({
+                "state": "needs_owner_review", "imported_guilds": 0,
+                "review_guilds": [], "reason": "New namespace already contains guild data.",
+            })
+            return
+        legacy_guilds = await self.legacy_config.all_guilds()
+        await self.config.legacy_migration.set({"state": "migrating", "imported_guilds": 0, "review_guilds": []})
+        review_guilds = []
+        for guild_id, legacy_data in legacy_guilds.items():
+            normalised, warnings = self._normalise_legacy_guild(legacy_data)
+            await self.config.guild_from_id(int(guild_id)).set(normalised)
+            await self.config.guild_from_id(int(guild_id)).MIGRATION_REVIEW.set(warnings)
+            if warnings:
+                review_guilds.append(int(guild_id))
+        await self.config.schema_version.set(WELCOME_SCHEMA_VERSION)
+        await self.config.legacy_migration.set({
+            "state": "completed", "imported_guilds": len(legacy_guilds),
+            "review_guilds": review_guilds, "legacy_identifier": LEGACY_CONFIG_IDENTIFIER,
+        })
+
 
     def format_help_for_context(self, ctx: commands.Context) -> str:
         """
@@ -126,6 +208,19 @@ class Welcome(Events, commands.Cog):
     async def welcomeset(self, ctx: commands.Context) -> None:
         """Sets welcome module settings"""
         pass
+
+    @welcomeset.command(name="migrationstatus")
+    @checks.is_owner()
+    async def welcome_migration_status(self, ctx: commands.Context) -> None:
+        """Owner: show the external Welcome import status."""
+        status = await self.config.legacy_migration()
+        await ctx.send(
+            "**Welcome migration status**\n"
+            f"State: `{status.get('state', 'not_started')}`\n"
+            f"Imported guilds: `{status.get('imported_guilds', 0)}`\n"
+            f"Guilds needing review: `{len(status.get('review_guilds', []))}`\n"
+            f"Schema version: `{await self.config.schema_version()}`"
+        )
 
     @welcomeset.command(name="settings")
     async def welcome_settings(self, ctx: commands.Context) -> None:
