@@ -97,7 +97,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.7.0"
+    __version__ = "1.7.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -370,6 +370,7 @@ class RoleTools(
                 msg += r.reason
             await ctx.send(msg)
             return
+        await self.notify_role_change(author, role, "received")
         msg = _("You have been given the {role} role.").format(role=role.mention)
         await ctx.send(msg)
 
@@ -386,7 +387,13 @@ class RoleTools(
             msg = _("The {role} role is not currently self-removable.").format(role=role.mention)
             await ctx.send(msg)
             return
-        await self.remove_roles(author, [role], _("Selfrole command."))
+        response = await self.remove_roles(author, [role], _("Selfrole command."))
+        if response:
+            msg = _("I could not remove that role for the following reasons:\n")
+            msg += "".join(item.reason for item in response)
+            await ctx.send(msg)
+            return
+        await self.notify_role_change(author, role, "removed")
         msg = _("The {role} role has been removed from you.").format(role=role.mention)
         await ctx.send(msg)
 

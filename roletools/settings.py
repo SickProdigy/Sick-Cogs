@@ -351,7 +351,7 @@ class RoleToolsSettings(RoleToolsMixin):
             )
             return
         await ctx.send(
-            f"RoleTools posts successful reaction, button, and select role changes in {channel.mention}. "
+            f"RoleTools posts successful self-role, reaction, button, and select changes in {channel.mention}. "
             f"Disable them with `{ctx.clean_prefix}roletools notify disable`."
         )
 
