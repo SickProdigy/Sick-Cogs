@@ -70,7 +70,7 @@ class WolframResponse:
 class Wolfram(commands.Cog):
     """Ask Wolfram|Alpha any question."""
 
-    __version__ = "2.3.0"
+    __version__ = "2.3.1"
 
     API_BASE_URL = "https://api.wolframalpha.com"
     DEVELOPER_URL = "https://products.wolframalpha.com/api/"
@@ -193,6 +193,9 @@ class Wolfram(commands.Cog):
         Related commands:
         - `[p]wolframimage <question>` returns Wolfram|Alpha's visual result.
         - `[p]wolframsolve <question>` requests step-by-step math output.
+        - `[p]wolframexample [category]` shows a curated Knowledgebase example.
+          Categories: `mathematics`, `science`, `society`, `everyday`, `surprises`.
+          `[p]wolframrandom` is an alias.
 
         A Wolfram|Alpha AppID must be configured by the bot owner.
         """
