@@ -53,22 +53,27 @@ class RoleToolsMixin(ABC):
         prefix = ctx.clean_prefix
         embed = discord.Embed(
             title="RoleTools",
-            description="Choose roles your server has made available to you.",
+            description="View the self-roles this server has made available, then add or remove one.",
             color=discord.Color.blurple(),
         )
         embed.add_field(
-            name="Get or remove a self-role",
-            value=f"`{prefix}roletools selfrole @Role` toggles an allowed role.",
+            name="1. View available self-roles",
+            value=f"`{prefix}roletools viewroles` shows roles you can add or remove. It also explains when none are configured.",
             inline=False,
         )
         embed.add_field(
-            name="Use a role menu",
+            name="2. Add or remove a self-role",
+            value=f"`{prefix}roletools selfrole @Role` toggles an available role. Mentions, IDs, and role names are accepted.",
+            inline=False,
+        )
+        embed.add_field(
+            name="3. Or use a role menu",
             value="Reaction, button, and select role messages can be used directly. Their result is shown to you privately.",
             inline=False,
         )
         embed.add_field(
             name="Need more detail?",
-            value=f"`{prefix}help roletools selfrole` explains the command. Server managers can use `{prefix}roletools adminhelp`.",
+            value=f"`{prefix}help roletools selfrole` explains the command. Server managers: `{prefix}roletools adminhelp`.",
             inline=False,
         )
         await ctx.send(embed=embed)

@@ -97,7 +97,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.6.2"
+    __version__ = "1.6.3"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -318,7 +318,8 @@ class RoleTools(
         )
         embed.add_field(
             name="2. Choose the member experience",
-            value=(f"Use `{prefix}roletools selfrole @Role` for a command, or configure "
+            value=(f"Members can browse with `{prefix}roletools viewroles` and toggle with "
+                   f"`{prefix}roletools selfrole @Role`, or you can configure "
                    f"reaction roles, buttons, or select menus with `{prefix}help roletools buttons`."),
             inline=False,
         )
@@ -337,10 +338,12 @@ class RoleTools(
     @commands.bot_has_permissions(manage_roles=True)
     async def selfrole(self, ctx: Context, *, role: SelfRoleConverter) -> None:
         """
-        Add or remove a defined selfrole
+        Add or remove an available self-role.
 
-        `<role>` The role you want to add or remove.
-        If you already have the role it will be removed.
+        `<role>` accepts a role mention, ID, or name. If you already have the
+        role, it is removed; otherwise it is added when server rules allow it.
+
+        Use `[p]roletools viewroles` to see available self-roles first.
         """
         if role not in ctx.author.roles:
             await self.selfrole_add(ctx, role=role)
