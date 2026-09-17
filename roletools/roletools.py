@@ -101,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.11.2"
+    __version__ = "1.12.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -118,6 +118,7 @@ class RoleTools(
         self.views: Dict[int, Dict[str, discord.ui.View]] = {}
         self.layouts: Dict[int, Dict[str, discord.ui.LayoutView]] = {}
         self.picker_views: List[discord.ui.View] = []
+        self._role_transaction_locks: Dict[tuple, asyncio.Lock] = {}
         self._repo = ""
         self._commit = ""
         self.is_discord: bool = discord.utils.oauth_url("").startswith("https://discord.com/")

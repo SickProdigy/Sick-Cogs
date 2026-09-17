@@ -31,6 +31,12 @@ Run `[p]roletools adminhelp` for the short setup path.
 - `[p]roletools notify channel #channel` - Opt in to a channel notice for successful self-role, reaction, button, and select changes.
 - `[p]roletools notify disable` - Stop those notices.
 
+## Paid And Temporary Roles
+
+RoleTools uses Red Bank for roles configured with `[p]roletools cost`. Paid role grants are serialized per member, validated before withdrawal, and refunded if Discord assignment or temporary-role persistence fails. Temporary-role scheduling supports both resetting an expiration and extending the remaining paid time; the extension helper is the foundation for forthcoming monthly, yearly, and custom-duration Role Shop offers.
+
+Automatic recurring withdrawals are not enabled. Future subscription-style offers will use explicit manual renewal unless a separately reviewed opt-in design is added.
+
 ## Role Rules
 
 - `[p]roletools include add <role> <included_role...>` - Grant related roles together.
