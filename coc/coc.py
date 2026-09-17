@@ -1712,7 +1712,7 @@ class Coc(commands.Cog):
         )
 
     @coc_manager()
-    @command_coc_warnotification.command(name="status")
+    @command_coc_warnotification.command(name="status", aliases=["info", "view"])
     async def command_coc_warnotification_status(self, ctx):
         """Show Clash of Clans war notification settings."""
 
@@ -1732,7 +1732,9 @@ class Coc(commands.Cog):
             manager_role = ctx.guild.get_role(int(manager_role_id)) if manager_role_id else None
         except (TypeError, ValueError):
             manager_role = None
+        clan_tag = settings.get("COC_CLAN_KEY")
         lines = [
+            f"Clan: **{self._normalize_tag(clan_tag) if clan_tag else 'not set'}**",
             f"Global notifications: **{'ON' if settings.get('COC_WAR_NOTIFICATIONS') else 'OFF'}**",
             f"Channel: {channel.mention if channel else ('`' + str(channel_id) + '`' if channel_id else '**not set**')}",
             f"Mention role: {role.mention if role else ('`' + str(role_id) + '`' if role_id else '**not set**')}",
@@ -1752,6 +1754,12 @@ class Coc(commands.Cog):
             lines.append(f"- `{event}` {label}: **{enabled}**, {mention}")
 
         await ctx.send("\n".join(lines))
+
+    @command_coc_set.command(name="info", aliases=["view", "settings", "status"])
+    async def command_coc_set_info(self, ctx):
+        """Show every Clash of Clans setting for this server."""
+
+        await self.command_coc_warnotification_status.callback(self, ctx)
 
     @command_coc_set.command(name="clanwarleague", aliases=["cwl"])
     async def command_coc_set_cwl(self, ctx):

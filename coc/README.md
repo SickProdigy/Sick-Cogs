@@ -29,7 +29,7 @@ Set or change the war update channel explicitly. If no channel is passed, the cu
 [p]cocset warchannel #war-updates
 ```
 
-Use `[p]help cocset` for all server configuration. Use `[p]help cocset notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
+Use `[p]help cocset` for all server configuration. Show every server setting with `[p]cocset info` (aliases: `view`, `settings`, and `status`). The summary never displays the bot-wide API key. Use `[p]help cocset notifications` for the global notification toggle and status. If required setup is missing, `[p]coc` and notification enablement return one yellow warning card listing every missing item and the exact command needed to fix it.
 
 ## Commands
 
