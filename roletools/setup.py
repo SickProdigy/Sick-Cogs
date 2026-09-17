@@ -149,6 +149,29 @@ class SetupLayoutView(discord.ui.View):
         return True
 
 
+class RemovePublishedMenuView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.author = author
+
+    @discord.ui.button(label="Remove published menu", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        removed, message = await self.cog.unpublish_setup_picker(interaction.guild)
+        await interaction.edit_original_response(content=message, embed=None, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Published menu kept.", embed=None, view=None)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
 class SelfRoleAppearanceModal(discord.ui.Modal):
     def __init__(self, cog, guild: discord.Guild, data: dict):
         super().__init__(title="Self-role card appearance")
@@ -234,6 +257,14 @@ class RoleToolsSetupView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=RoleToolsSetupView(self.cog, interaction.user))
         await interaction.followup.send(
             "Published role menu synchronized." if synced else "Setup synchronized; publish a role menu when ready.",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Remove published menu", style=discord.ButtonStyle.danger, row=1)
+    async def remove_published(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Remove the published role menu? Your Basic and Advanced role lists and Appearance settings will be kept.",
+            view=RemovePublishedMenuView(self.cog, interaction.user),
             ephemeral=True,
         )
 
@@ -500,6 +531,42 @@ class RoleToolsSetup(RoleToolsMixin):
             "role_channel": "managed role channel",
         }[layout]
         return True, f"Published {layout_name} in {channel.mention}."
+
+    async def unpublish_setup_picker(self, guild: discord.Guild):
+        pickers, data = await self.ensure_setup_picker(guild)
+        message_ids = self.managed_message_ids(data)
+        channel = guild.get_channel(data.get("channel_id"))
+        if not message_ids or channel is None:
+            data["channel_id"] = None
+            data["message_id"] = None
+            data["reaction_message_ids"] = []
+            data["role_channel_message_ids"] = []
+            pickers[SETUP_PICKER_NAME] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            return False, "No published role menu was found. Your role catalogs were left unchanged."
+
+        removed = 0
+        for message_id in message_ids:
+            try:
+                await (await channel.fetch_message(int(message_id))).delete()
+                removed += 1
+            except discord.NotFound:
+                continue
+            except (discord.Forbidden, discord.HTTPException):
+                log.exception("Could not remove published RoleTools message %s in guild %s", message_id, guild.id)
+                return False, "I could not remove every published menu message. Check my channel permissions and try again."
+
+        if data.get("layout") in {"reactions", "role_channel"}:
+            await self._replace_managed_reaction_mappings(guild, data, [])
+        data["channel_id"] = None
+        data["message_id"] = None
+        data["reaction_message_ids"] = []
+        data["role_channel_message_ids"] = []
+        pickers[SETUP_PICKER_NAME] = data
+        await self.config.guild(guild).pickers.set(pickers)
+        if guild.id in self.settings:
+            self.settings[guild.id]["pickers"] = pickers
+        return True, f"Removed {removed} published role-menu message{'s' if removed != 1 else ''}. Role catalogs and Appearance settings were kept."
 
     @roletools.command(name="setup")
     @commands.admin_or_permissions(manage_roles=True)
