@@ -43,21 +43,16 @@ Run `[p]roletools adminhelp` for the short setup path.
 - `[p]roletools required remove <role> <required_role...>` - Remove required role rules.
 - `[p]roletools required any <role> <true_or_false>` - Decide whether any required role is enough or all are needed.
 
-## Managed Role Pickers
+## Interactive Self-Role Setup
 
-For larger role collections, a picker keeps one public card while members browse 25-role pages privately. RoleTools automatically rebalances pages as roles change.
+Run `[p]roletools setup` to open a manager-only setup card inspired by the Clanker launch workflow. It manages two catalogs:
 
-- `[p]roletools picker create <name> <channel> [title]` - Publish one persistent picker card.
-- `[p]roletools picker add <name> <roles...>` - Add roles in batches and update the card.
-- `[p]roletools picker remove <name> <roles...>` - Remove roles without deleting them from Discord.
-- `[p]roletools picker replace <name> <old_role> <new_role>` - Replace an outdated role in place.
-- `[p]roletools picker move <name> <role> <position>` - Switch to manual order and reposition one role.
-- `[p]roletools picker sort <name> alphabetical` - Alphabetize and automatically rebalance all pages.
-- `[p]roletools picker view <name>` - Inspect active/missing roles, ordering, and publication details.
-- `[p]roletools picker sync <name>` - Refresh the public card manually.
-- `[p]roletools picker delete <name>` - Remove the published card and its saved configuration.
+- **Basic self-roles** use Red Admin's canonical `selfroles` list, so they work through `[p]selfrole` and on RoleTools cards.
+- **Restricted roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
 
-Members click **Choose roles** on the public card. Their role list and page navigation are ephemeral, so one member never changes the shared card for everyone else. Discord's 25-option limit is handled automatically; 100 roles become four private pages.
+The setup card uses Discord role and channel selectors to add/remove roles, edit appearance, publish or move the public card, and refresh it. Managers do not need to create internal select-option names. The member card automatically divides larger catalogs into private 25-role pages; 100 roles become four pages.
+
+The legacy `[p]roletools select`, button, reaction, and message commands remain available for advanced layouts and compatibility.
 
 ## Reaction, Button, And Select Roles
 

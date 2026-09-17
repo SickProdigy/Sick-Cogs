@@ -209,7 +209,7 @@ class RoleToolsPicker(RoleToolsMixin):
         pages = max(1, math.ceil(count / PICKER_PAGE_SIZE))
         return discord.Embed(
             title=data.get("title") or "Choose your roles",
-            description=(
+            description=(data.get("description") or
                 "Click **Choose roles** to open your private role list. "
                 "Selecting a role adds it; selecting one you have removes it."
             ),
@@ -240,7 +240,7 @@ class RoleToolsPicker(RoleToolsMixin):
                     self.bot.add_view(view, message_id=int(message_id))
                     self.picker_views.append(view)
 
-    @roletools.group(name="picker", invoke_without_command=True)
+    @roletools.group(name="picker", invoke_without_command=True, hidden=True)
     @commands.admin_or_permissions(manage_roles=True)
     async def picker(self, ctx: Context) -> None:
         """Create and maintain scalable self-role picker cards."""

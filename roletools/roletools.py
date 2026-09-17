@@ -26,6 +26,7 @@ from .picker import RoleToolsPicker
 from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
 from .select import RoleToolsSelect
+from .setup import RoleToolsSetup
 from .settings import RoleToolsSettings
 from .temprole import RoleToolsTemporary
 
@@ -34,7 +35,7 @@ roletools = RoleToolsMixin.roletools
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
 ROLETOOLS_SCHEMA_VERSION = 1
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
 
@@ -90,6 +91,7 @@ class RoleTools(
     RoleToolsRequires,
     RoleToolsSettings,
     RoleToolsSelect,
+    RoleToolsSetup,
     RoleToolsTemporary,
     commands.Cog,
     metaclass=CompositeMetaClass,
@@ -99,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.8.0"
+    __version__ = "1.9.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -335,9 +337,9 @@ class RoleTools(
             inline=False,
         )
         embed.add_field(
-            name="3. Large role collections",
-            value=(f"`{prefix}roletools picker create games #roles` publishes one card with "
-                   "private 25-role pages that scale to large collections."),
+            name="3. Interactive setup",
+            value=(f"`{prefix}roletools setup` manages Red self-roles, restricted roles, and the "
+                   "published member card without internal option names."),
             inline=False,
         )
         embed.add_field(
