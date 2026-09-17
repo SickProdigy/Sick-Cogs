@@ -41,6 +41,7 @@ from ..core.networks import (
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
+    POLYGON_MAINNET,
     SOLANA_DEVNET,
     OPTIMISM_MAINNET,
     BNB_MAINNET,
@@ -1196,9 +1197,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(KNOWN_NETWORKS) - set(NETWORKS),
-            {OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
+            {POLYGON_MAINNET.key, OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
         )
-        for network in (OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
+        for network in (POLYGON_MAINNET, OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
             with self.subTest(planned_network=network.key):
                 self.assertFalse(network.enabled)
                 self.assertFalse(network.testnet)
@@ -1206,6 +1207,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(network.supports(NetworkCapability.BALANCE))
                 self.assertFalse(network.supports(NetworkCapability.SEND))
                 self.assertFalse(network.supports(NetworkCapability.SPONSORSHIP))
+        self.assertEqual(POLYGON_MAINNET.chain_id, 137)
+        self.assertEqual(POLYGON_MAINNET.native_symbol, "POL")
+        self.assertEqual(POLYGON_MAINNET.explorer_url, "https://polygonscan.com")
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(
