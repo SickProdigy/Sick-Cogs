@@ -1064,7 +1064,7 @@ class RoleToolsSetup(RoleToolsMixin):
     @roletools.group(name="menu", invoke_without_command=True)
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_menu(self, ctx: Context) -> None:
-        """Create and manage separate role menus from the shared role catalog."""
+        """Manage published role menus."""
         menus = await self.named_role_menus(ctx.guild)
         if not menus:
             await ctx.send(f"No saved role menus yet. Use `{ctx.clean_prefix}roletools setup` or `{ctx.clean_prefix}roletools menu create <name> [title]`.")
@@ -1134,6 +1134,6 @@ class RoleToolsSetup(RoleToolsMixin):
     @roletools.command(name="setup")
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_setup(self, ctx: Context) -> None:
-        """Open the interactive RoleTools self-role setup card."""
+        """Open interactive setup."""
         await self.refresh_setup_picker(ctx.guild)
         await ctx.send(embed=await self.setup_embed(ctx.guild), view=RoleToolsSetupView(self, ctx.author))

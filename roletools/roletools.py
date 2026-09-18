@@ -101,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.5"
+    __version__ = "1.12.6"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -311,14 +311,14 @@ class RoleTools(
     @roletools.command(name="migrationstatus")
     @commands.is_owner()
     async def roletools_migration_status(self, ctx: Context) -> None:
-        """Owner: show legacy RoleTools import status."""
+        """Owner migration status."""
         status = await self.config.legacy_migration()
         await ctx.send(f"**RoleTools migration status**\nState: `{status.get('state')}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
 
     @roletools.command(name="adminhelp", aliases=["setuphelp"])
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_admin_help(self, ctx: Context) -> None:
-        """Show the most useful RoleTools setup commands for server managers."""
+        """Manager command guide."""
         prefix = ctx.clean_prefix
         embed = discord.Embed(
             title="RoleTools setup guide",
@@ -358,7 +358,7 @@ class RoleTools(
     @commands.bot_has_permissions(manage_roles=True)
     async def selfrole(self, ctx: Context, *, role: SelfRoleConverter) -> None:
         """
-        Add or remove an available self-role.
+        Toggle a self-role.
 
         `<role>` accepts a role mention, ID, or name. If you already have the
         role, it is removed; otherwise it is added when server rules allow it.
@@ -429,7 +429,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Thread, discord.Member, str],
     ) -> None:
         """
-        Gives a role to designated members.
+        Give a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -524,7 +524,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Member, str],
     ) -> None:
         """
-        Removes a role from the designated members.
+        Remove a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -606,7 +606,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force a sticky role on one or more users.
+        Force a sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -652,7 +652,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force remove sticky role on one or more users.
+        Remove a forced sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -691,7 +691,7 @@ class RoleTools(
     @roletools.command(aliases=["viewrole"])
     @commands.bot_has_permissions(embed_links=True)
     async def viewroles(self, ctx: Context, *, selection: Optional[str] = None) -> None:
-        """View available self-roles or the complete manager configuration.
+        """View available or configured roles.
 
         `[selection]` may be `available`, `configured`, or a role mention, ID, or name.
         Members see availability by default. Managers can use `configured` for the full report.

@@ -66,7 +66,7 @@ class RoleToolsButtons(RoleToolsMixin):
     @commands.admin_or_permissions(manage_roles=True)
     async def buttons(self, ctx: Context) -> None:
         """
-        Setup role buttons
+        Manage button roles.
         """
 
     @buttons.command(name="create", usage="<name> <role> [extras]")

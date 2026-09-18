@@ -23,7 +23,7 @@ class RoleToolsRequires(RoleToolsMixin):
     @roletools.group(name="required", aliases=["requires", "require", "req"])
     async def required_roles(self, ctx: Union[Context, Interaction]) -> None:
         """
-        Set role requirements
+        Manage role requirements.
         """
 
     @required_roles.command(name="any")
