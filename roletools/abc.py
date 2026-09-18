@@ -58,7 +58,7 @@ class RoleToolsMixin(ABC):
         )
         embed.add_field(
             name="1. View available self-roles",
-            value=f"`{prefix}roletools viewroles` shows roles you can add or remove. It also explains when none are configured.",
+            value=f"`{prefix}selfroles` lists roles you can add or remove (`{prefix}roletools viewroles` also works).",
             inline=False,
         )
         embed.add_field(

@@ -101,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.6"
+    __version__ = "1.12.7"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -687,6 +687,17 @@ class RoleTools(
         await ctx.send(msg)
         if errors:
             await ctx.channel.send("".join([e for e in errors]))
+
+    @commands.command(name="selfroles")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def selfroles_shortcut(self, ctx: Context, *, selection: Optional[str] = None) -> None:
+        """List available self-roles.
+
+        This is a shortcut for `[p]roletools viewroles`. An optional role mention,
+        ID, or name filters the list to that role.
+        """
+        await type(self).viewroles.callback(self, ctx, selection=selection)
 
     @roletools.command(aliases=["viewrole"])
     @commands.bot_has_permissions(embed_links=True)
