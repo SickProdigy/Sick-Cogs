@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
+from roletools.setup import NamedMenuManagerView
 
 
 class FakeRole:
@@ -158,6 +159,20 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         deleted, _ = await cog.delete_named_role_menu(guild, "games")
         self.assertTrue(deleted)
         self.assertNotIn("games", pickers)
+
+    def test_manager_paginates_more_than_twenty_five_menus(self):
+        cog = SimpleNamespace(layout_name=lambda layout: "Button Role Menu")
+        author = SimpleNamespace(id=1, guild=SimpleNamespace(id=1))
+        menus = [(f"menu-{index}", {"display_name": f"Menu {index}"}) for index in range(26)]
+
+        first = NamedMenuManagerView(cog, author, menus, page=0)
+        second = NamedMenuManagerView(cog, author, menus, page=1)
+
+        first_select = next(item for item in first.children if hasattr(item, "options") and item.options)
+        second_select = next(item for item in second.children if hasattr(item, "options") and item.options)
+        self.assertEqual(len(first_select.options), 25)
+        self.assertEqual(len(second_select.options), 1)
+        self.assertFalse(first.next.disabled)
 
     async def test_preview_does_not_mutate_saved_menu(self):
         data = {"title": "Games", "role_ids": [1], "layout": "private", "message_id": 20}

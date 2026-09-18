@@ -89,7 +89,7 @@ Selecting a menu shows its saved roles, current layout, and destination. From th
 - configure reaction behavior;
 - add or remove a named menu's role subset, or fill it from the complete library.
 
-This keeps creation, inspection, publication, movement, synchronization, and removal in one GUI instead of spreading those operations across unrelated commands.
+This keeps creation, inspection, publication, movement, synchronization, and removal in one GUI instead of spreading those operations across unrelated commands. The manager paginates after 25 saved menus and includes name/ID search.
 
 ### Publication Layouts
 
