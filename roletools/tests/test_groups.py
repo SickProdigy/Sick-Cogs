@@ -3,8 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import (PrivateGroupAccessModal, PrivateGroupEditorView,
-                             PrivateGroupManagerView, RoleToolsSetupView)
+from roletools.setup import (PrivateGroupAccessModal, PrivateGroupDeleteConfirmView,
+                             PrivateGroupEditorView, PrivateGroupManagerView,
+                             RoleToolsSetupView)
 
 
 class Value:
@@ -205,6 +206,37 @@ class PrivateGroupTests(unittest.IsolatedAsyncioTestCase):
             "Access cost in Red credits (0 = free)",
             "Access minutes (0 = permanent)",
         })
+
+    async def test_private_group_delete_replaces_editor_message(self):
+        cog = SimpleNamespace()
+        author = SimpleNamespace(id=1)
+        view = PrivateGroupEditorView(cog, author, "vip")
+        interaction = SimpleNamespace(
+            user=author, response=SimpleNamespace(edit_message=AsyncMock())
+        )
+
+        await view.delete.callback(interaction)
+
+        interaction.response.edit_message.assert_awaited_once()
+        kwargs = interaction.response.edit_message.await_args.kwargs
+        self.assertIsNone(kwargs["embed"])
+        self.assertIsInstance(kwargs["view"], PrivateGroupDeleteConfirmView)
+
+    async def test_private_group_delete_cancel_restores_editor(self):
+        embed = object()
+        cog = SimpleNamespace(private_group_embed=AsyncMock(return_value=embed))
+        author = SimpleNamespace(id=1)
+        view = PrivateGroupDeleteConfirmView(cog, author, "vip")
+        interaction = SimpleNamespace(
+            guild=SimpleNamespace(id=1), user=author,
+            response=SimpleNamespace(edit_message=AsyncMock()),
+        )
+
+        await view.cancel.callback(interaction)
+
+        kwargs = interaction.response.edit_message.await_args.kwargs
+        self.assertIs(kwargs["embed"], embed)
+        self.assertIsInstance(kwargs["view"], PrivateGroupEditorView)
 
     def test_private_group_editor_has_done_and_delete_controls(self):
         view = PrivateGroupEditorView(SimpleNamespace(), SimpleNamespace(id=1), "vip")
