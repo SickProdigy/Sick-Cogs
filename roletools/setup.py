@@ -967,7 +967,13 @@ class NamedMenuEditorView(discord.ui.View):
     @discord.ui.button(label="Unpublish", style=discord.ButtonStyle.danger, row=3)
     async def unpublish(self, interaction: discord.Interaction, button: discord.ui.Button):
         _, message = await self.cog.unpublish_role_menu(interaction.guild, self.name)
-        await interaction.response.send_message(message, ephemeral=True)
+        embed = await self.cog.named_menu_embed(interaction.guild, self.name)
+        embed.add_field(name="Last change", value=message[:1024], inline=False)
+        await interaction.response.edit_message(
+            content=None,
+            embed=embed,
+            view=NamedMenuEditorView(self.cog, interaction.user, self.name),
+        )
 
     @discord.ui.button(label="Use all library roles", style=discord.ButtonStyle.secondary, row=4)
     async def use_all(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1666,7 +1672,12 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.config.guild(guild).pickers.set(pickers)
         if guild.id in self.settings:
             self.settings[guild.id]["pickers"] = pickers
-        return True, f"Removed {removed} published role-menu message{'s' if removed != 1 else ''}. The saved menu roles and text were kept."
+        display_name = data.get("display_name") or name
+        return True, (
+            f"Unpublished **{display_name}** from {channel.mention} and removed {removed} "
+            f"role-selection message{'s' if removed != 1 else ''}. "
+            "The saved menu configuration and Discord roles were kept."
+        )
 
     async def publish_setup_picker(
         self, guild: discord.Guild, channel: discord.TextChannel, layout: str = "private"
