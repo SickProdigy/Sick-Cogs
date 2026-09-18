@@ -26,7 +26,7 @@ class Meme(commands.Cog):
     """Find online memes and GIFs and publish scheduled feeds."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -138,7 +138,7 @@ class Meme(commands.Cog):
         `[p]memeify` (alias: `[p]imgflip`).
 
         Administrators can start automatic posting with
-        `[p]memeset autopost [community] [minutes]` in the destination channel.
+        `[p]memeset autopost [channel] [subreddit] [minutes]`.
         """
         await self._run_interactive(ctx, "memeapi", "memes")
 
@@ -189,9 +189,11 @@ class Meme(commands.Cog):
     async def memeset(self, ctx):
         """Configure automatic meme feeds.
 
-        Run this in the destination channel: `[p]memeset autopost [community] [minutes]`
+        Quick setup: `[p]memeset autopost [channel] [subreddit] [minutes]`
 
-        Example: `[p]memeset autopost pcmasterrace 180`
+        Omit `channel` to use the current Discord channel. Use
+        `[p]memeset autopost status` to inspect schedules and
+        `[p]memeset autopost off [channel] [subreddit]` to remove one.
 
         Use `[p]memeset feed` for advanced providers and feed management.
         """
@@ -200,51 +202,169 @@ class Meme(commands.Cog):
     async def memeset_feed(self, ctx):
         """Manage automatic meme feeds."""
 
+    @staticmethod
+    def _reconcile_feed(feeds: dict, channel_id: int, provider: str, source: str,
+                        interval_minutes: int, *, toggle_identical: bool = False):
+        provider = provider.casefold()
+        source = source.strip().casefold()
+        interval = interval_minutes * 60
+        matches = [
+            feed_id for feed_id, feed in feeds.items()
+            if int(feed.get("channel_id", 0)) == channel_id
+            and str(feed.get("provider", "")).casefold() == provider
+            and str(feed.get("source", "")).strip().casefold() == source
+        ]
+        matches.sort(key=lambda value: (not str(value).isdigit(), int(value) if str(value).isdigit() else str(value)))
+        if matches:
+            primary_id = matches[0]
+            primary = feeds[primary_id]
+            identical = int(primary.get("interval", 0)) == interval and primary.get("enabled", True)
+            if toggle_identical and identical:
+                for feed_id in matches:
+                    feeds.pop(feed_id, None)
+                return "removed", primary_id, matches[1:]
+            for feed_id in matches[1:]:
+                feeds.pop(feed_id, None)
+            primary.update({
+                "channel_id": channel_id, "provider": provider, "source": source,
+                "interval": interval, "enabled": True,
+                "next_post": min(float(primary.get("next_post", time.time())), time.time()),
+            })
+            return "updated", primary_id, matches[1:]
+        feed_id = str(max((int(key) for key in feeds if str(key).isdigit()), default=0) + 1)
+        feeds[feed_id] = {
+            "channel_id": channel_id, "provider": provider, "source": source,
+            "interval": interval, "next_post": time.time(), "enabled": True,
+        }
+        return "added", feed_id, []
+
+    @staticmethod
+    def _feed_destination_error(guild: discord.Guild, channel) -> str:
+        if not isinstance(channel, discord.TextChannel):
+            return "Choose a Discord text channel for the feed destination."
+        permissions = channel.permissions_for(guild.me)
+        missing = [
+            permission.replace("_", " ") for permission in ("view_channel", "send_messages", "embed_links")
+            if not getattr(permissions, permission, False)
+        ]
+        return (f"I need {', '.join(missing)} in {channel.mention} before saving this feed." if missing else "")
+
     async def _create_feed(
         self, ctx, channel: discord.TextChannel, provider: str, source: str,
-        interval_minutes: int,
+        interval_minutes: int, *, toggle_identical: bool = False,
     ):
         provider = provider.casefold()
+        source = source.strip().casefold()
         if provider not in {"memeapi", "imgur", "imgur-gif", "reddit"}:
             raise commands.BadArgument(
                 "Provider must be `memeapi`, `imgur`, `imgur-gif`, or `reddit`."
             )
         if interval_minutes < MIN_FEED_MINUTES:
             raise commands.BadArgument(f"The minimum interval is {MIN_FEED_MINUTES} minutes.")
+        error = self._feed_destination_error(ctx.guild, channel)
+        if error:
+            await ctx.send(error)
+            return
         feeds = await self.config.guild(ctx.guild).feeds()
-        feed_id = str(max((int(key) for key in feeds), default=0) + 1)
-        feeds[feed_id] = {
-            "channel_id": channel.id,
-            "provider": provider,
-            "source": source,
-            "interval": interval_minutes * 60,
-            "next_post": time.time(),
-            "enabled": True,
-        }
-        await self.config.guild(ctx.guild).feeds.set(feeds)
-        await ctx.send(
-            f"Added feed `{feed_id}`: {provider} `{source}` → {channel.mention} "
-            f"every {interval_minutes} minutes."
+        action, feed_id, duplicate_ids = self._reconcile_feed(
+            feeds, channel.id, provider, source, interval_minutes,
+            toggle_identical=toggle_identical,
         )
+        await self.config.guild(ctx.guild).feeds.set(feeds)
+        label = "Meme API" if provider == "memeapi" else provider
+        duplicate_note = (
+            f" Consolidated duplicate feed IDs: {', '.join(f'`{item}`' for item in duplicate_ids)}."
+            if duplicate_ids else ""
+        )
+        if action == "removed":
+            await ctx.send(
+                f"Turned off feed `{feed_id}`: {label} r/{source} → {channel.mention}."
+                + duplicate_note
+            )
+        else:
+            await ctx.send(
+                f"{action.title()} feed `{feed_id}`: {label} r/{source} → {channel.mention} "
+                f"every {interval_minutes} minutes." + duplicate_note
+            )
 
-    @memeset.command(name="autopost")
+    @memeset.group(name="autopost", invoke_without_command=True)
     async def memeset_autopost(
-        self, ctx, community: str = "memes", interval_minutes: int = 360,
+        self, ctx, channel: Optional[discord.TextChannel] = None,
+        subreddit: str = "memes", interval_minutes: int = 360,
     ):
-        """Automatically post memes to a channel.
+        """Set or toggle a Meme API subreddit feed.
 
-        `community` is a subreddit name exposed by Meme API, such as `memes`,
-        `wholesomememes`, or `pcmasterrace`. The interval is in minutes,
-        defaults to 360 (six hours), and must be at least 30.
+        Syntax: `[p]memeset autopost [channel] [subreddit] [minutes]`
 
-        The destination is the Discord channel where this command is run.
+        `channel` is the Discord destination and defaults to the current channel.
+        `subreddit` is the Meme API source, such as `memes`, `wholesomememes`,
+        or `pcmasterrace`. Repeating an identical setup turns it off. Changing
+        the interval updates the existing destination/source feed.
+
+        Management:
+        - `[p]memeset autopost status [channel]`
+        - `[p]memeset autopost off [channel] [subreddit]`
+        - `[p]memeset feed list`
+        - `[p]memeset feed remove <feed-id>`
 
         Examples:
         - `[p]memeset autopost`
-        - `[p]memeset autopost wholesomememes 180`
+        - `[p]memeset autopost #memes wholesomememes 180`
         - `[p]memeset autopost pcmasterrace 120`
         """
-        await self._create_feed(ctx, ctx.channel, "memeapi", community, interval_minutes)
+        destination = channel or ctx.channel
+        await self._create_feed(
+            ctx, destination, "memeapi", subreddit, interval_minutes,
+            toggle_identical=True,
+        )
+
+    @memeset_autopost.command(name="off", aliases=["remove", "disable"])
+    async def memeset_autopost_off(
+        self, ctx, channel: Optional[discord.TextChannel] = None, subreddit: str = "memes",
+    ):
+        """Remove a Meme API feed by destination and subreddit source."""
+        destination = channel or ctx.channel
+        feeds = await self.config.guild(ctx.guild).feeds()
+        matches = [
+            feed_id for feed_id, feed in feeds.items()
+            if int(feed.get("channel_id", 0)) == destination.id
+            and str(feed.get("provider", "")).casefold() == "memeapi"
+            and str(feed.get("source", "")).strip().casefold() == subreddit.strip().casefold()
+        ]
+        if not matches:
+            await ctx.send(f"No Meme API r/{subreddit} feed is configured for {destination.mention}.")
+            return
+        for feed_id in matches:
+            feeds.pop(feed_id, None)
+        await self.config.guild(ctx.guild).feeds.set(feeds)
+        await ctx.send(
+            f"Turned off Meme API r/{subreddit} → {destination.mention}. "
+            f"Removed feed ID{'s' if len(matches) != 1 else ''}: "
+            + ", ".join(f"`{feed_id}`" for feed_id in matches) + "."
+        )
+
+    @memeset_autopost.command(name="status", aliases=["list"])
+    async def memeset_autopost_status(
+        self, ctx, channel: Optional[discord.TextChannel] = None,
+    ):
+        """Show Meme API feed IDs, sources, destinations, intervals, and state."""
+        feeds = await self.config.guild(ctx.guild).feeds()
+        destination = channel
+        matches = [
+            (feed_id, feed) for feed_id, feed in feeds.items()
+            if str(feed.get("provider", "")).casefold() == "memeapi"
+            and (destination is None or int(feed.get("channel_id", 0)) == destination.id)
+        ]
+        if not matches:
+            await ctx.send("No matching Meme API autopost feeds are configured.")
+            return
+        lines = [
+            f"`{feed_id}` · Meme API r/{feed.get('source', 'memes')} → <#{feed.get('channel_id')}> "
+            f"· every {max(1, int(feed.get('interval', 21600) / 60))}m · "
+            f"{'ON' if feed.get('enabled', True) else 'OFF'}"
+            for feed_id, feed in matches
+        ]
+        await ctx.send("**Meme autopost status**\n" + "\n".join(lines))
 
     @memeset.command(name="gifpost")
     async def memeset_gifpost(
@@ -307,7 +427,7 @@ class Meme(commands.Cog):
             minutes = int(feed.get("interval", 3600) / 60)
             lines.append(
                 f"`{feed_id}` <#{feed['channel_id']}> · {feed['provider']} "
-                f"`{feed['source']}` · every {minutes}m"
+                f"`{feed['source']}` · every {minutes}m · {'ON' if feed.get('enabled', True) else 'OFF'}"
             )
         await ctx.send("**Meme feeds**\n" + "\n".join(lines))
 
