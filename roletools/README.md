@@ -143,9 +143,11 @@ This cog stores role configuration, message/component IDs, and user IDs needed f
 
 ## Upgrading And Replacing RoleTools
 
-Upgrading from Sick-Cogs RoleTools on `main` is an in-place conversion: the Config identifier does not change. Schema 2 preserves existing settings, moves simple self-assignable/removable roles into Red Admin's native self-role list, classifies roles with Bank costs, durations, requirements, inclusions, or conflicts as Advanced, and removes Advanced roles from the native list so their rules cannot be bypassed. Existing manual Advanced classifications are preserved. If Red Admin is unavailable during conversion, roles remain safely Advanced and a review note is recorded.
+Upgrading from Sick-Cogs RoleTools on `main` is a copy-first import. This generation uses a new Config identifier and reads the current `main` namespace (`7194820561938472611`) as a migration source without modifying or clearing it. Guild, role, member, and relevant global settings are normalized into the new namespace before any persistent views or catalog automation starts.
 
-When replacing the older external RoleTools cog, Sick-Cogs RoleTools uses its separate Config namespace and imports the external RoleTools namespace plus legacy StickyRoles and Autorole data as read-only sources before applying the catalog conversion. Do not clear legacy Red data during replacement.
+Schema 2 then builds catalogs in the new namespace: simple self-assignable/removable roles are merged into Red Admin's native self-role list, while roles with Bank costs, durations, requirements, inclusions, or conflicts become Advanced. Existing manual Advanced classifications are preserved. Advanced roles are removed from the native list so their rules cannot be bypassed. If Red Admin is unavailable during conversion, roles remain safely Advanced and a review note is recorded.
+
+When the Sick-Cogs `main` namespace is empty, the importer falls back to the older external RoleTools namespace and also copies the legacy StickyRoles and Autorole state. Neither prior RoleTools namespace is reused for normal operation or modified by the importer. Do not clear legacy Red data during replacement.
 
 After installing and loading Sick-Cogs RoleTools, a bot owner can run:
 
