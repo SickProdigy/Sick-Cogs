@@ -141,9 +141,11 @@ Legacy button, select, reaction, and message commands remain available for speci
 This cog stores role configuration, message/component IDs, and user IDs needed for sticky and temporary role behavior.
 
 
-## Replacing external RoleTools
+## Upgrading And Replacing RoleTools
 
-Sick-Cogs RoleTools uses a new Config namespace. Its first load imports the external RoleTools namespace plus legacy StickyRoles and Autorole data as read-only sources before persistent component views and temporary-role scheduling start. Do not clear legacy Red data during replacement.
+Upgrading from Sick-Cogs RoleTools on `main` is an in-place conversion: the Config identifier does not change. Schema 2 preserves existing settings, moves simple self-assignable/removable roles into Red Admin's native self-role list, classifies roles with Bank costs, durations, requirements, inclusions, or conflicts as Advanced, and removes Advanced roles from the native list so their rules cannot be bypassed. Existing manual Advanced classifications are preserved. If Red Admin is unavailable during conversion, roles remain safely Advanced and a review note is recorded.
+
+When replacing the older external RoleTools cog, Sick-Cogs RoleTools uses its separate Config namespace and imports the external RoleTools namespace plus legacy StickyRoles and Autorole data as read-only sources before applying the catalog conversion. Do not clear legacy Red data during replacement.
 
 After installing and loading Sick-Cogs RoleTools, a bot owner can run:
 

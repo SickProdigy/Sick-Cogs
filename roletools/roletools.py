@@ -34,10 +34,11 @@ roletools = RoleToolsMixin.roletools
 
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
-ROLETOOLS_SCHEMA_VERSION = 1
+ROLETOOLS_SCHEMA_VERSION = 2
 GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
+ADVANCED_CATALOG_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
 
 log = getLogger("red.Sick-Cogs.RoleTools")
 _ = Translator("RoleTools", __file__)
@@ -101,7 +102,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.9"
+    __version__ = "1.12.10"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -160,8 +161,9 @@ class RoleTools(
                 self._commit = cog.commit
 
     async def load_views(self):
-        self.settings = await self.config.all_guilds()
         await self.bot.wait_until_red_ready()
+        await self._migrate_role_catalogs()
+        self.settings = await self.config.all_guilds()
         try:
             await self.initialize_select()
         except Exception:
@@ -204,7 +206,7 @@ class RoleTools(
         return result, review
 
     async def _migrate_legacy_config(self):
-        if await self.config.schema_version() >= ROLETOOLS_SCHEMA_VERSION:
+        if await self.config.schema_version() >= 1:
             return
         target_data = await self.config.all_guilds()
         state = await self.config.legacy_migration()
@@ -239,8 +241,71 @@ class RoleTools(
                     async with self.config.guild_from_id(int(guild_id)).auto_roles() as roles:
                         if int(role_id) not in roles:
                             roles.append(int(role_id))
-        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
+        await self.config.schema_version.set(1)
         await self.config.legacy_migration.set({"state": "completed", "review": review, "legacy_identifier": LEGACY_CONFIG_IDENTIFIER})
+
+    @staticmethod
+    def _uses_advanced_role_rules(data: dict) -> bool:
+        return any(data.get(key) for key in ADVANCED_CATALOG_KEYS)
+
+    @classmethod
+    def _partition_role_catalog(cls, stored_roles: dict, live_role_ids, existing_advanced):
+        live_role_ids = {int(role_id) for role_id in live_role_ids}
+        advanced = {int(role_id) for role_id in existing_advanced if int(role_id) in live_role_ids}
+        configured = {
+            int(role_id) for role_id, data in stored_roles.items()
+            if int(role_id) in live_role_ids
+            and (data.get("selfassignable") or data.get("selfremovable")
+                 or cls._uses_advanced_role_rules(data))
+        }
+        advanced.update(
+            role_id for role_id in configured
+            if cls._uses_advanced_role_rules(stored_roles[role_id])
+        )
+        return configured - advanced, advanced
+
+    async def _migrate_role_catalogs(self) -> None:
+        """Convert schema 1 role settings into the shared ordinary/Advanced catalogs."""
+        schema = await self.config.schema_version()
+        if schema < 1 or schema >= ROLETOOLS_SCHEMA_VERSION:
+            return
+
+        stored_roles = {
+            int(role_id): data for role_id, data in (await self.config.all_roles()).items()
+        }
+        admin = self.bot.get_cog("Admin")
+        for guild in self.bot.guilds:
+            live_role_ids = {role.id for role in guild.roles}
+            ordinary, advanced = self._partition_role_catalog(
+                stored_roles,
+                live_role_ids,
+                await self.config.guild(guild).restricted_roles(),
+            )
+
+            if admin is None:
+                # Preserve access through RoleTools without risking native selfrole
+                # bypass of paid or otherwise controlled roles.
+                advanced.update(ordinary)
+                ordinary.clear()
+                async with self.config.guild(guild).MIGRATION_REVIEW() as notes:
+                    note = "Admin cog was unavailable; existing self-roles were kept as Advanced roles."
+                    if note not in notes:
+                        notes.append(note)
+            else:
+                admin_roles = [
+                    int(role_id) for role_id in await admin.config.guild(guild).selfroles()
+                    if int(role_id) in live_role_ids and int(role_id) not in advanced
+                ]
+                admin_roles.extend(role_id for role_id in ordinary if role_id not in admin_roles)
+                await admin.config.guild(guild).selfroles.set(admin_roles)
+
+            await self.config.guild(guild).restricted_roles.set(sorted(advanced))
+            log.info(
+                "Migrated RoleTools catalogs in guild %s: %s ordinary, %s Advanced",
+                guild.id, len(ordinary), len(advanced),
+            )
+
+        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
 
     async def cog_load(self) -> None:
         await self._migrate_legacy_config()
