@@ -44,12 +44,48 @@ class RoleToolsMixin(ABC):
         self.views: Dict[int, Dict[str, discord.ui.View]]
         self.is_discord: bool
 
-    @commands.group()
+    @commands.group(invoke_without_command=True)
     @commands.guild_only()
     async def roletools(self, ctx: Context) -> None:
-        """
-        Commands for creating custom role settings
-        """
+        """Member role help and server role-management commands."""
+        if ctx.invoked_subcommand is not None:
+            return
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="RoleTools",
+            description="View the self-roles this server has made available, then add or remove one.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="1. View available self-roles",
+            value=f"`{prefix}selfroles` lists roles you can add or remove (`{prefix}roletools viewroles` also works).",
+            inline=False,
+        )
+        embed.add_field(
+            name="2. Add or remove a self-role",
+            value=f"`{prefix}roletools selfrole @Role` toggles an available role. Mentions, IDs, and role names are accepted.",
+            inline=False,
+        )
+        embed.add_field(
+            name="3. Or use a role menu",
+            value="Reaction, button, and select role messages can be used directly. Their result is shown to you privately.",
+            inline=False,
+        )
+        embed.add_field(
+            name="Server managers",
+            value=(
+                f"`{prefix}roletools setup` opens the interactive role catalog, publishing, "
+                f"synchronization, and removal controls. `{prefix}roletools adminhelp` shows "
+                "the advanced command-based setup options."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Need more detail?",
+            value=f"`{prefix}help roletools selfrole` explains member role commands. `{prefix}help roletools setup` explains the manager setup card.",
+            inline=False,
+        )
+        await ctx.send(embed=embed)
 
     #######################################################################
     # roletools.py                                                        #
@@ -367,6 +403,7 @@ class RoleToolsMixin(ABC):
         check_exclusive: bool = True,
         check_inclusive: bool = True,
         check_cost: bool = True,
+        check_private_groups: bool = True,
     ) -> None:
         raise NotImplementedError()
 

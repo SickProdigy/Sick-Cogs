@@ -147,6 +147,7 @@ class ButtonRole(discord.ui.Button):
                     ephemeral=True,
                 )
                 return
+            await self.view.cog.notify_role_change(interaction.user, role, "received")
             msg = _("I have given you the {role} role.").format(role=role.mention)
             duration = await config.role(role).duration()
             if duration is not None:
@@ -174,6 +175,7 @@ class ButtonRole(discord.ui.Button):
                     ephemeral=True,
                 )
                 return
+            await self.view.cog.notify_role_change(interaction.user, role, "removed")
             await interaction.response.send_message(
                 _("I have removed the {role} role from you.").format(role=role.mention),
                 ephemeral=True,
@@ -347,6 +349,10 @@ class SelectRole(discord.ui.Select):
             msg += _("I have removed the following roles from you: {roles}\n").format(
                 roles=humanize_list([i.mention for i in removed_roles])
             )
+        for role in added_roles:
+            await self.view.cog.notify_role_change(interaction.user, role, "received")
+        for role in removed_roles:
+            await self.view.cog.notify_role_change(interaction.user, role, "removed")
         if msg:
             await interaction.followup.send(msg, ephemeral=True)
         else:

@@ -1,5 +1,7 @@
 from typing import Optional, Union
 
+import discord
+
 from red_commons.logging import getLogger
 from redbot.core import bank, commands
 from redbot.core.commands import Context
@@ -27,7 +29,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a user can apply the role to themselves.
+        Allow self-assignment.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -70,7 +72,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a user can remove the role from themselves.
+        Allow self-removal.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -107,7 +109,7 @@ class RoleToolsSettings(RoleToolsMixin):
     @commands.admin_or_permissions(manage_roles=True)
     async def atomic(self, ctx: Context, true_or_false: Optional[Union[bool, str]] = None) -> None:
         """
-        Set the atomicity of role assignment.
+        Configure safe role changes.
         What this means is that when this is `True` roles will be
         applied inidvidually and not cause any errors. When this
         is set to `False` roles will be grouped together into one call.
@@ -190,7 +192,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set the cost to acquire a role.
+        Set a role Bank cost.
 
         `[cost]` The price you want to set the role at in bot credits.
         Setting this to 0 or lower will remove the cost.
@@ -249,7 +251,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a role will be re-applied when a user leaves and rejoins the server.
+        Configure sticky roles.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -287,7 +289,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set a role to be automatically applied when a user joins the server.
+        Configure join roles.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -336,3 +338,35 @@ class RoleToolsSettings(RoleToolsMixin):
                 role=role.mention
             )
             await ctx.send(msg)
+
+    @roletools.group(name="notify", aliases=["notifications"], invoke_without_command=True)
+    @commands.admin_or_permissions(manage_roles=True)
+    async def roletools_notify(self, ctx: Context) -> None:
+        """Configure role notices."""
+        channel_id = await self.config.guild(ctx.guild).notification_channel()
+        channel = ctx.guild.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            await ctx.send(
+                f"RoleTools role-change notifications are disabled. Set one with `{ctx.clean_prefix}roletools notify channel #channel`."
+            )
+            return
+        await ctx.send(
+            f"RoleTools posts successful self-role, reaction, button, and select changes in {channel.mention}. "
+            f"Disable them with `{ctx.clean_prefix}roletools notify disable`."
+        )
+
+    @roletools_notify.command(name="channel")
+    async def roletools_notify_channel(self, ctx: Context, channel: discord.TextChannel) -> None:
+        """Send successful member role-change notices to this channel."""
+        await self.config.guild(ctx.guild).notification_channel.set(channel.id)
+        if ctx.guild.id in self.settings:
+            self.settings[ctx.guild.id]["notification_channel"] = channel.id
+        await ctx.send(f"RoleTools will post successful role-change notices in {channel.mention}.")
+
+    @roletools_notify.command(name="disable", aliases=["off", "clear"])
+    async def roletools_notify_disable(self, ctx: Context) -> None:
+        """Disable public RoleTools role-change notices for this server."""
+        await self.config.guild(ctx.guild).notification_channel.set(None)
+        if ctx.guild.id in self.settings:
+            self.settings[ctx.guild.id]["notification_channel"] = None
+        await ctx.send("RoleTools role-change notices are now disabled.")

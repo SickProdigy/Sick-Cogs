@@ -5,12 +5,12 @@ from typing import Any, Dict, List, Optional, Union
 
 import discord
 from red_commons.logging import getLogger
-from redbot.core import Config, commands
+from redbot.core import Config, bank, commands
 from redbot.core.bot import Red
 from redbot.core.commands import Context
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils import AsyncIter, bounded_gather
-from redbot.core.utils.chat_formatting import humanize_list
+from redbot.core.utils.chat_formatting import humanize_list, humanize_timedelta
 from redbot.core.utils.menus import start_adding_reactions
 from redbot.core.utils.predicates import ReactionPredicate
 
@@ -20,11 +20,14 @@ from .converter import RawUserIds, RoleHierarchyConverter, SelfRoleConverter
 from .events import RoleToolsEvents
 from .exclusive import RoleToolsExclusive
 from .inclusive import RoleToolsInclusive
-from .menus import BaseMenu, ConfirmView, RolePages
+from .groups import RoleToolsGroups
+from .menus import BaseMenu, ConfirmView, EmbedPages, RolePages
 from .messages import RoleToolsMessages
+from .picker import RoleToolsPicker
 from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
 from .select import RoleToolsSelect
+from .setup import RoleToolsSetup
 from .settings import RoleToolsSettings
 from .temprole import RoleToolsTemporary
 
@@ -32,10 +35,11 @@ roletools = RoleToolsMixin.roletools
 
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
-ROLETOOLS_SCHEMA_VERSION = 1
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "MIGRATION_REVIEW": []}
+ROLETOOLS_SCHEMA_VERSION = 2
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "private_groups": {}, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
+ADVANCED_CATALOG_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
 
 log = getLogger("red.Sick-Cogs.RoleTools")
 _ = Translator("RoleTools", __file__)
@@ -83,11 +87,14 @@ class RoleTools(
     RoleToolsButtons,
     RoleToolsExclusive,
     RoleToolsInclusive,
+    RoleToolsGroups,
     RoleToolsMessages,
+    RoleToolsPicker,
     RoleToolsReactions,
     RoleToolsRequires,
     RoleToolsSettings,
     RoleToolsSelect,
+    RoleToolsSetup,
     RoleToolsTemporary,
     commands.Cog,
     metaclass=CompositeMetaClass,
@@ -97,7 +104,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.6.1"
+    __version__ = "1.13.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -113,6 +120,8 @@ class RoleTools(
         self._ready: asyncio.Event = asyncio.Event()
         self.views: Dict[int, Dict[str, discord.ui.View]] = {}
         self.layouts: Dict[int, Dict[str, discord.ui.LayoutView]] = {}
+        self.picker_views: List[discord.ui.View] = []
+        self._role_transaction_locks: Dict[tuple, asyncio.Lock] = {}
         self._repo = ""
         self._commit = ""
         self.is_discord: bool = discord.utils.oauth_url("").startswith("https://discord.com/")
@@ -154,8 +163,9 @@ class RoleTools(
                 self._commit = cog.commit
 
     async def load_views(self):
-        self.settings = await self.config.all_guilds()
         await self.bot.wait_until_red_ready()
+        await self._migrate_role_catalogs()
+        self.settings = await self.config.all_guilds()
         try:
             await self.initialize_select()
         except Exception:
@@ -164,6 +174,10 @@ class RoleTools(
             await self.initialize_buttons()
         except Exception:
             log.exception("Error initializing Buttons")
+        try:
+            await self.register_picker_views()
+        except Exception:
+            log.exception("Error initializing role picker cards")
         for guild_id, guild_views in self.views.items():
             for msg_ids, view in guild_views.items():
                 log.debug("Adding view %r to %s", view, guild_id)
@@ -194,7 +208,7 @@ class RoleTools(
         return result, review
 
     async def _migrate_legacy_config(self):
-        if await self.config.schema_version() >= ROLETOOLS_SCHEMA_VERSION:
+        if await self.config.schema_version() >= 1:
             return
         target_data = await self.config.all_guilds()
         state = await self.config.legacy_migration()
@@ -229,8 +243,71 @@ class RoleTools(
                     async with self.config.guild_from_id(int(guild_id)).auto_roles() as roles:
                         if int(role_id) not in roles:
                             roles.append(int(role_id))
-        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
+        await self.config.schema_version.set(1)
         await self.config.legacy_migration.set({"state": "completed", "review": review, "legacy_identifier": LEGACY_CONFIG_IDENTIFIER})
+
+    @staticmethod
+    def _uses_advanced_role_rules(data: dict) -> bool:
+        return any(data.get(key) for key in ADVANCED_CATALOG_KEYS)
+
+    @classmethod
+    def _partition_role_catalog(cls, stored_roles: dict, live_role_ids, existing_advanced):
+        live_role_ids = {int(role_id) for role_id in live_role_ids}
+        advanced = {int(role_id) for role_id in existing_advanced if int(role_id) in live_role_ids}
+        configured = {
+            int(role_id) for role_id, data in stored_roles.items()
+            if int(role_id) in live_role_ids
+            and (data.get("selfassignable") or data.get("selfremovable")
+                 or cls._uses_advanced_role_rules(data))
+        }
+        advanced.update(
+            role_id for role_id in configured
+            if cls._uses_advanced_role_rules(stored_roles[role_id])
+        )
+        return configured - advanced, advanced
+
+    async def _migrate_role_catalogs(self) -> None:
+        """Convert schema 1 role settings into the shared ordinary/Advanced catalogs."""
+        schema = await self.config.schema_version()
+        if schema < 1 or schema >= ROLETOOLS_SCHEMA_VERSION:
+            return
+
+        stored_roles = {
+            int(role_id): data for role_id, data in (await self.config.all_roles()).items()
+        }
+        admin = self.bot.get_cog("Admin")
+        for guild in self.bot.guilds:
+            live_role_ids = {role.id for role in guild.roles}
+            ordinary, advanced = self._partition_role_catalog(
+                stored_roles,
+                live_role_ids,
+                await self.config.guild(guild).restricted_roles(),
+            )
+
+            if admin is None:
+                # Preserve access through RoleTools without risking native selfrole
+                # bypass of paid or otherwise controlled roles.
+                advanced.update(ordinary)
+                ordinary.clear()
+                async with self.config.guild(guild).MIGRATION_REVIEW() as notes:
+                    note = "Admin cog was unavailable; existing self-roles were kept as Advanced roles."
+                    if note not in notes:
+                        notes.append(note)
+            else:
+                admin_roles = [
+                    int(role_id) for role_id in await admin.config.guild(guild).selfroles()
+                    if int(role_id) in live_role_ids and int(role_id) not in advanced
+                ]
+                admin_roles.extend(role_id for role_id in ordinary if role_id not in admin_roles)
+                await admin.config.guild(guild).selfroles.set(admin_roles)
+
+            await self.config.guild(guild).restricted_roles.set(sorted(advanced))
+            log.info(
+                "Migrated RoleTools catalogs in guild %s: %s ordinary, %s Advanced",
+                guild.id, len(ordinary), len(advanced),
+            )
+
+        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
 
     async def cog_load(self) -> None:
         await self._migrate_legacy_config()
@@ -246,6 +323,10 @@ class RoleTools(
                 # Don't forget to remove persistent views when the cog is unloaded.
                 log.debug("Stopping view %s", view)
                 view.stop()
+        for view in self.picker_views:
+            log.debug("Stopping picker view %s", view)
+            view.stop()
+        self.picker_views.clear()
         try:
             self.bot.remove_dev_env_value("roletools")
         except Exception:
@@ -297,19 +378,65 @@ class RoleTools(
     @roletools.command(name="migrationstatus")
     @commands.is_owner()
     async def roletools_migration_status(self, ctx: Context) -> None:
-        """Owner: show legacy RoleTools import status."""
+        """Owner migration status."""
         status = await self.config.legacy_migration()
         await ctx.send(f"**RoleTools migration status**\nState: `{status.get('state')}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
+
+    @roletools.command(name="adminhelp", aliases=["setuphelp"])
+    @commands.admin_or_permissions(manage_roles=True)
+    async def roletools_admin_help(self, ctx: Context) -> None:
+        """Manager command guide."""
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="RoleTools setup guide",
+            description="Start by allowing a role, then give members a clear way to choose it.",
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(
+            name="1. Allow a self-role",
+            value=f"`{prefix}roletools selfassignable true @Role`\n`{prefix}roletools selfremovable true @Role`",
+            inline=False,
+        )
+        embed.add_field(
+            name="2. Choose the member experience",
+            value=(f"Members can browse with `{prefix}roletools viewroles` and toggle with "
+                   f"`{prefix}roletools selfrole @Role`, or you can configure "
+                   f"reaction roles, buttons, or select menus with `{prefix}help roletools buttons`."),
+            inline=False,
+        )
+        embed.add_field(
+            name="3. Interactive setup",
+            value=(f"`{prefix}roletools setup` manages Red self-roles, advanced self-roles, and the "
+                   "published member card without internal option names."),
+            inline=False,
+        )
+        embed.add_field(
+            name="4. Private access groups",
+            value=(f"`{prefix}roletools setup` includes private access groups. "
+                   f"Use `{prefix}help roletools group` for prerequisites, access roles, Bank cost, duration, and publishing."),
+            inline=False,
+        )
+        embed.add_field(
+            name="5. Optional role-change notices",
+            value=(f"`{prefix}roletools notify channel #role-log` posts successful reaction, "
+                   "button, and select role changes there. Use "
+                   f"`{prefix}roletools notify disable` to stop them."),
+            inline=False,
+        )
+        embed.set_footer(text=f"More detail: {prefix}help roletools <command>")
+        await ctx.send(embed=embed)
 
     @roletools.command()
     @commands.guild_only()
     @commands.bot_has_permissions(manage_roles=True)
     async def selfrole(self, ctx: Context, *, role: SelfRoleConverter) -> None:
         """
-        Add or remove a defined selfrole
+        Toggle a self-role.
 
-        `<role>` The role you want to add or remove.
-        If you already have the role it will be removed.
+        `<role>` accepts a role mention, ID, or name. If you already have the
+        role, it is removed; otherwise it is added when server rules allow it.
+
+        Use `[p]roletools viewroles` to see available self-roles first.
         """
         if role not in ctx.author.roles:
             await self.selfrole_add(ctx, role=role)
@@ -336,6 +463,7 @@ class RoleTools(
                 msg += r.reason
             await ctx.send(msg)
             return
+        await self.notify_role_change(author, role, "received")
         msg = _("You have been given the {role} role.").format(role=role.mention)
         await ctx.send(msg)
 
@@ -352,7 +480,13 @@ class RoleTools(
             msg = _("The {role} role is not currently self-removable.").format(role=role.mention)
             await ctx.send(msg)
             return
-        await self.remove_roles(author, [role], _("Selfrole command."))
+        response = await self.remove_roles(author, [role], _("Selfrole command."))
+        if response:
+            msg = _("I could not remove that role for the following reasons:\n")
+            msg += "".join(item.reason for item in response)
+            await ctx.send(msg)
+            return
+        await self.notify_role_change(author, role, "removed")
         msg = _("The {role} role has been removed from you.").format(role=role.mention)
         await ctx.send(msg)
 
@@ -368,7 +502,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Thread, discord.Member, str],
     ) -> None:
         """
-        Gives a role to designated members.
+        Give a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -443,7 +577,7 @@ class RoleTools(
                 # tasks.append(m.add_roles(role, reason=_("Roletools Giverole command")))
                 tasks.append(
                     self.give_roles(
-                        m, [role], _("Roletools Giverole command"), check_cost=False, atomic=False
+                        m, [role], _("Roletools Giverole command"), check_cost=False, check_private_groups=False, atomic=False
                     )
                 )
             await bounded_gather(*tasks)
@@ -463,7 +597,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Member, str],
     ) -> None:
         """
-        Removes a role from the designated members.
+        Remove a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -545,7 +679,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force a sticky role on one or more users.
+        Force a sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -567,7 +701,9 @@ class RoleTools(
                     if role.id not in setting:
                         setting.append(role.id)
                 try:
-                    await self.give_roles(user, [role], reason=_("Forced Sticky Role"))
+                    await self.give_roles(
+                        user, [role], reason=_("Forced Sticky Role"), check_private_groups=False
+                    )
                 except discord.HTTPException:
                     errors.append(
                         _("There was an error force applying the role to {user}.\n").format(
@@ -591,7 +727,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force remove sticky role on one or more users.
+        Remove a forced sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -627,26 +763,174 @@ class RoleTools(
         if errors:
             await ctx.channel.send("".join([e for e in errors]))
 
-    @roletools.command(aliases=["viewrole"])
-    @commands.bot_has_permissions(read_message_history=True, add_reactions=True, embed_links=True)
-    async def viewroles(self, ctx: Context, *, role: Optional[discord.Role] = None) -> None:
-        """
-        View current roletools setup for each role in the server
+    @commands.command(name="selfroles")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def selfroles_shortcut(self, ctx: Context, *, selection: Optional[str] = None) -> None:
+        """List available self-roles.
 
-        `[role]` The role you want to see settings for.
+        This is a shortcut for `[p]roletools viewroles`. An optional role mention,
+        ID, or name filters the list to that role.
         """
-        page_start = 0
-        if role:
-            page_start = ctx.guild.roles.index(role)
+        await type(self).viewroles.callback(self, ctx, selection=selection)
+
+    @roletools.command(aliases=["viewrole"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def viewroles(self, ctx: Context, *, selection: Optional[str] = None) -> None:
+        """View available or configured roles.
+
+        `[selection]` may be `available`, `configured`, or a role mention, ID, or name.
+        Members see availability by default. Managers can use `configured` for the full report.
+        """
+        requested = (selection or "available").strip()
+        mode = requested.lower()
+        manager = ctx.author.guild_permissions.manage_roles
+        role = None
+        if mode not in {"available", "configured"}:
+            role = await commands.RoleConverter().convert(ctx, requested)
+            if manager:
+                await BaseMenu(
+                    source=RolePages(roles=[role]),
+                    delete_message_after=False,
+                    clear_reactions_after=True,
+                    timeout=60,
+                    cog=self,
+                ).start(ctx=ctx)
+                return
+            mode = "available"
+
+        if mode == "configured" and not manager:
+            await ctx.send(
+                f"The configured-role report requires Manage Roles. "
+                f"Use `{ctx.clean_prefix}roletools viewroles` for available self-roles."
+            )
+            return
+
+        raw_settings = await self.config.all_roles()
+        settings_by_id = {int(role_id): data for role_id, data in raw_settings.items()}
+        guild_roles = {item.id: item for item in ctx.guild.roles}
+        pages = []
+
+        if mode == "available":
+            lines = []
+            member_role_ids = {item.id for item in ctx.author.roles}
+            currency = await bank.get_currency_name(ctx.guild)
+            advanced_ids = set(await self.restricted_role_ids(ctx.guild))
+            candidates = [role] if role else ctx.guild.roles
+            for item in candidates:
+                data = settings_by_id.get(item.id, {})
+                can_add = bool(data.get("selfassignable")) and item.id not in member_role_ids
+                can_remove = bool(data.get("selfremovable")) and item.id in member_role_ids
+                if not can_add and not can_remove:
+                    continue
+                details = []
+                blockers = []
+                required_ids = {int(role_id) for role_id in data.get("required", [])}
+                required = [guild_roles.get(role_id) for role_id in required_ids]
+                required_mentions = [required_role.mention for required_role in required if required_role]
+                conflicts = [guild_roles.get(int(role_id)) for role_id in data.get("exclusive_to", [])]
+                conflicts = [conflict.mention for conflict in conflicts if conflict]
+                if required_mentions:
+                    qualifier = "any" if data.get("require_any") else "all"
+                    details.append(f"requires {qualifier}: {humanize_list(required_mentions)}")
+                    has_required = bool(member_role_ids & required_ids)
+                    if not data.get("require_any"):
+                        has_required = required_ids <= member_role_ids
+                    if can_add and not has_required:
+                        blockers.append("missing required role")
+                if conflicts:
+                    details.append(f"removes conflicts: {humanize_list(conflicts)}")
+                if data.get("cost"):
+                    details.append(f"cost: {data['cost']} {currency}")
+                    if can_add and not await bank.can_spend(ctx.author, data["cost"]):
+                        blockers.append("insufficient credits")
+                if data.get("duration"):
+                    details.append(f"temporary: {humanize_timedelta(seconds=data['duration'])}")
+                if item >= ctx.guild.me.top_role:
+                    blockers.append("above the bot's highest role")
+                action = "can remove now" if can_remove else "can add now"
+                if blockers:
+                    action = f"cannot {'remove' if can_remove else 'add'} yet ({humanize_list(blockers)})"
+                suffix = f" — {'; '.join(details)}" if details else ""
+                label = f"{item.name} (Advanced)" if item.id in advanced_ids else item.name
+                lines.append(f"**{label}** — {action}{suffix}")
+
+            if not lines:
+                await ctx.send(
+                    "No self-roles are currently available to you. A server manager can configure "
+                    f"them with `{ctx.clean_prefix}roletools adminhelp`."
+                )
+                return
+            intro = (
+                f"Use Red’s `{ctx.clean_prefix}selfrole @Role` for ordinary roles. "
+                f"Advanced Bank/rule roles use `{ctx.clean_prefix}roletools selfrole @Role`."
+            )
+            title = "Available self-roles"
+        else:
+            lines = []
+            for role_id, data in sorted(settings_by_id.items()):
+                if role_id not in guild_roles:
+                    continue
+                if not any(data.get(key) for key in ROLE_DEFAULTS):
+                    continue
+                item = guild_roles.get(role_id)
+                label = item.mention if item else f"Deleted role (`{role_id}`) — cleanup needed"
+                flags = []
+                for key, name in (
+                    ("selfassignable", "self-assignable"),
+                    ("selfremovable", "self-removable"),
+                    ("sticky", "sticky"),
+                    ("auto", "autorole"),
+                ):
+                    if data.get(key):
+                        flags.append(name)
+                if data.get("duration"):
+                    flags.append(f"temporary {humanize_timedelta(seconds=data['duration'])}")
+                if data.get("cost"):
+                    flags.append(f"cost {data['cost']}")
+                for key, name in (
+                    ("required", "required"),
+                    ("inclusive_with", "included"),
+                    ("exclusive_to", "excluded"),
+                ):
+                    references = [guild_roles.get(int(value)) for value in data.get(key, [])]
+                    present = [ref.mention for ref in references if ref]
+                    missing = len(references) - len(present)
+                    if present or missing:
+                        value = humanize_list(present) if present else ""
+                        if missing:
+                            value = f"{value}{', ' if value else ''}{missing} deleted"
+                        flags.append(f"{name}: {value}")
+                for key, name in (
+                    ("reactions", "reactions"),
+                    ("buttons", "buttons"),
+                    ("select_options", "select options"),
+                ):
+                    if data.get(key):
+                        flags.append(f"{name}: {len(data[key])}")
+                lines.append(f"**{label}** — {', '.join(flags) or 'stored configuration'}")
+
+            if not lines:
+                await ctx.send(
+                    f"No RoleTools role configuration exists yet. Start with `{ctx.clean_prefix}roletools adminhelp`."
+                )
+                return
+            intro = "Only roles with stored RoleTools settings are shown. Deleted IDs are flagged for cleanup."
+            title = "RoleTools configuration"
+
+        for start in range(0, len(lines), 10):
+            embed = discord.Embed(
+                title=title,
+                description=f"{intro}\n\n" + "\n".join(lines[start : start + 10]),
+                color=discord.Color.blurple(),
+            )
+            pages.append(embed)
         await BaseMenu(
-            source=RolePages(
-                roles=ctx.guild.roles,
-            ),
+            source=EmbedPages(pages),
             delete_message_after=False,
             clear_reactions_after=True,
             timeout=60,
             cog=self,
-            page_start=page_start,
         ).start(ctx=ctx)
 
     # @roletools.group(name="slash")

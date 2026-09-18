@@ -61,7 +61,7 @@ class RoleToolsTemporary(RoleToolsMixin):
     @roletools.group(name="temporary", aliases=["temp"])
     async def temporary_roles(self, ctx: Union[Context, Interaction]):
         """
-        Setup temporary roles
+        Manage temporary roles.
         """
 
     @temporary_roles.command(name="set")

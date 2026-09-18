@@ -22,7 +22,7 @@ class RoleToolsReactions(RoleToolsMixin):
 
     @roletools.group(name="reaction", aliases=["react", "reactions"])
     async def react_coms(self, ctx: Context) -> None:
-        """Reaction role settings"""
+        """Manage reaction roles."""
         pass
 
     @react_coms.command(with_app_command=False)
