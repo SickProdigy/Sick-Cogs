@@ -3,7 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from donate.donate import DEFAULT_DESCRIPTION, DEFAULT_FOOTER, DEFAULT_TITLE, Donate
-from donate.setup import CardDetailsModal, MethodModal, owner_check
+from donate.setup import (
+    CardDetailsModal, MethodDeleteConfirmView, MethodModal, ResetConfirmView, owner_check,
+)
 
 
 class Value:
@@ -116,6 +118,24 @@ class DonateSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Custom support")
         self.assertEqual(embed.fields[0].name, "Cash App")
         self.assertEqual(embed.fields[0].value, "$test")
+
+    async def test_cancel_keeps_settings_and_destructive_views_require_confirmation(self):
+        cog, group = self.make_cog()
+        cog.setup_embed = AsyncMock(return_value=MagicMock())
+        author = SimpleNamespace(id=1, guild_permissions=SimpleNamespace(manage_guild=True))
+        interaction = SimpleNamespace(
+            user=author, guild=SimpleNamespace(id=1),
+            response=SimpleNamespace(edit_message=AsyncMock()),
+        )
+        reset_view = ResetConfirmView(cog, author)
+        method_view = MethodDeleteConfirmView(cog, author, "paypal")
+
+        cancel = next(item for item in reset_view.children if item.label == "Cancel")
+        await cancel.callback(interaction)
+
+        group.clear.assert_not_awaited()
+        self.assertEqual({item.label for item in reset_view.children}, {"Restore defaults", "Cancel"})
+        self.assertEqual({item.label for item in method_view.children}, {"Remove method", "Cancel"})
 
     async def test_reset_uses_registered_defaults(self):
         cog, group = self.make_cog()
