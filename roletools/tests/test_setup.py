@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import NamedMenuManagerView
+from roletools.setup import NamedMenuEditorView, NamedMenuManagerView
 
 
 class FakeRole:
@@ -175,6 +175,30 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(first_select.options), 25)
         self.assertEqual(len(second_select.options), 1)
         self.assertFalse(first.next.disabled)
+
+    async def test_unpublish_refreshes_existing_editor_message(self):
+        guild = SimpleNamespace(id=1)
+        author = SimpleNamespace(id=2, guild=guild)
+        embed = SimpleNamespace(add_field=MagicMock())
+        cog = SimpleNamespace(
+            settings={1: {"pickers": {"games": {"layout": "role_channel"}}}},
+            unpublish_role_menu=AsyncMock(return_value=(True, "Unpublished games.")),
+            named_menu_embed=AsyncMock(return_value=embed),
+        )
+        view = NamedMenuEditorView(cog, author, "games")
+        interaction = SimpleNamespace(
+            guild=guild, user=author, response=SimpleNamespace(edit_message=AsyncMock())
+        )
+
+        await view.unpublish.callback(interaction)
+
+        interaction.response.edit_message.assert_awaited_once()
+        kwargs = interaction.response.edit_message.await_args.kwargs
+        self.assertIs(kwargs["embed"], embed)
+        self.assertIsInstance(kwargs["view"], NamedMenuEditorView)
+        embed.add_field.assert_called_once_with(
+            name="Last change", value="Unpublished games.", inline=False
+        )
 
     async def test_role_presentation_is_saved_without_changing_role_catalog(self):
         pickers = {"games": {"role_ids": [7], "message_id": None}}
