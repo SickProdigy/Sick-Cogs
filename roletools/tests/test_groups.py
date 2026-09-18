@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import RoleToolsSetupView
+from roletools.setup import PrivateGroupEditorView, PrivateGroupManagerView, RoleToolsSetupView
 
 
 class Value:
@@ -187,6 +187,17 @@ class PrivateGroupTests(unittest.IsolatedAsyncioTestCase):
         view = RoleToolsSetupView(cog, author)
         labels = {item.label for item in view.children if getattr(item, "label", None)}
         self.assertIn("Private gated groups", labels)
+
+    def test_private_group_manager_has_done_control(self):
+        view = PrivateGroupManagerView(SimpleNamespace(), SimpleNamespace(id=1), [])
+        labels = {item.label for item in view.children if getattr(item, "label", None)}
+        self.assertEqual(labels, {"Create private group", "Done"})
+
+    def test_private_group_editor_has_done_and_delete_controls(self):
+        view = PrivateGroupEditorView(SimpleNamespace(), SimpleNamespace(id=1), "vip")
+        labels = {item.label for item in view.children if getattr(item, "label", None)}
+        self.assertIn("Done", labels)
+        self.assertIn("Delete", labels)
 
 
 if __name__ == "__main__":
