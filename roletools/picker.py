@@ -31,6 +31,41 @@ LEGACY_DEFAULT_DESCRIPTIONS = {
 }
 
 
+
+def reaction_emoji_key(emoji: str) -> str:
+    parsed = discord.PartialEmoji.from_str(str(emoji).strip())
+    if parsed.id:
+        return str(parsed.id)
+    return str(emoji).strip().strip("\N{VARIATION SELECTOR-16}")
+
+
+def reaction_emoji_value(emoji: str):
+    parsed = discord.PartialEmoji.from_str(str(emoji).strip())
+    return parsed if parsed.id else str(emoji).strip()
+
+
+def reaction_page_emojis(data: dict, roles: List[discord.Role]) -> List[str]:
+    overrides = {str(key): str(value).strip() for key, value in data.get("role_emojis", {}).items() if str(value).strip()}
+    chosen = []
+    used = set()
+    reserved = {reaction_emoji_key(value) for value in overrides.values()}
+    for role in roles:
+        configured = overrides.get(str(role.id))
+        if configured and reaction_emoji_key(configured) not in used:
+            emoji = configured
+        else:
+            emoji = next((candidate for candidate in REACTION_EMOJIS
+                          if reaction_emoji_key(candidate) not in used
+                          and reaction_emoji_key(candidate) not in reserved), "🔹")
+        chosen.append(emoji)
+        used.add(reaction_emoji_key(emoji))
+    return chosen
+
+
+def shared_reaction_emoji(data: dict) -> str:
+    return str(data.get("shared_emoji") or "👍").strip() or "👍"
+
+
 def picker_description(data: dict) -> str:
     description = (data.get("description") or "").strip()
     if description and description not in LEGACY_DEFAULT_DESCRIPTIONS:
@@ -38,7 +73,7 @@ def picker_description(data: dict) -> str:
     return {
         "dropdown": "Use the dropdowns below to add or remove roles.",
         "reactions": "React to add a role; remove your reaction to remove it.",
-        "role_channel": "React with 👍 to join; remove 👍 to leave.",
+        "role_channel": f"React with {shared_reaction_emoji(data)} to join; remove it to leave.",
     }.get(data.get("layout"), "Click **Choose roles** to open your private role list.")
 
 
@@ -308,7 +343,7 @@ class RoleToolsPicker(RoleToolsMixin):
 
     @staticmethod
     def reaction_picker_embed(data: dict, roles: List[discord.Role], page: int, pages: int) -> discord.Embed:
-        lines = [f"{emoji}  {role.mention}" for emoji, role in zip(REACTION_EMOJIS, roles)]
+        lines = [f"{emoji}  {role.mention}" for emoji, role in zip(reaction_page_emojis(data, roles), roles)]
         description = picker_description(data)
         if lines:
             description += "\n\n" + "\n".join(lines)
@@ -343,9 +378,9 @@ class RoleToolsPicker(RoleToolsMixin):
                 async with self.config.role_from_id(role_id).reactions() as reactions:
                     if key in reactions:
                         reactions.remove(key)
-        for message, role_ids in messages:
-            for emoji, role_id in zip(REACTION_EMOJIS, role_ids):
-                key = f"{message.channel.id}-{message.id}-{emoji.strip(chr(0xfe0f))}"
+        for message, role_ids, emojis in messages:
+            for emoji, role_id in zip(emojis, role_ids):
+                key = f"{message.channel.id}-{message.id}-{reaction_emoji_key(emoji)}"
                 kept[key] = role_id
                 async with self.config.role_from_id(role_id).reactions() as reactions:
                     if key not in reactions:
@@ -377,22 +412,23 @@ class RoleToolsPicker(RoleToolsMixin):
                         message = await channel.fetch_message(int(old_ids[page]))
                     except discord.NotFound:
                         pass
+                emojis = reaction_page_emojis(data, roles)
                 embed = self.reaction_picker_embed(data, roles, page, len(pages))
                 if message is None:
                     message = await channel.send(embed=embed)
                 else:
                     await message.edit(embed=embed, view=None)
                     await message.clear_reactions()
-                for emoji in REACTION_EMOJIS[:len(roles)]:
-                    await message.add_reaction(emoji)
-                messages.append((message, [role.id for role in roles]))
+                for emoji in emojis:
+                    await message.add_reaction(reaction_emoji_value(emoji))
+                messages.append((message, [role.id for role in roles], emojis))
             for message_id in old_ids[len(pages):]:
                 try:
                     await (await channel.fetch_message(int(message_id))).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
             await self._replace_managed_reaction_mappings(guild, data, messages)
-            data["reaction_message_ids"] = [message.id for message, _ in messages]
+            data["reaction_message_ids"] = [message.id for message, _, _ in messages]
             data["message_id"] = messages[0][0].id
             pickers = await self.config.guild(guild).pickers()
             pickers[name] = data
@@ -420,9 +456,8 @@ class RoleToolsPicker(RoleToolsMixin):
             async with self.config.role_from_id(role_id).reactions() as reactions:
                 if key in reactions:
                     reactions.remove(key)
-        emoji_key = "👍".strip("\N{VARIATION SELECTOR-16}")
-        for message, role_id in messages:
-            key = f"{message.channel.id}-{message.id}-{emoji_key}"
+        for message, role_id, emoji in messages:
+            key = f"{message.channel.id}-{message.id}-{reaction_emoji_key(emoji)}"
             kept[key] = role_id
             async with self.config.role_from_id(role_id).reactions() as reactions:
                 if key not in reactions:
@@ -443,7 +478,7 @@ class RoleToolsPicker(RoleToolsMixin):
             await channel.send(
                 f"The self-role channel was reordered and {changed} existing role "
                 f"entr{'y was' if changed == 1 else 'ies were'} remapped. Existing roles were not changed. "
-                "If a retained 👍 now appears beside a different role, remove it and add it again "
+                "If a retained reaction now appears beside a different role, remove it and add it again "
                 "to select that newly displayed role."
             )
         except discord.HTTPException:
@@ -461,12 +496,16 @@ class RoleToolsPicker(RoleToolsMixin):
         if not old_ids and data.get("message_id"):
             old_ids = [int(data["message_id"])]
         current = dict(await self.config.guild(guild).reaction_roles())
-        emoji_key = "👍".strip("\N{VARIATION SELECTOR-16}")
+        emoji = shared_reaction_emoji(data)
+        emoji_key = reaction_emoji_key(emoji)
         old_roles = {}
-        for message_id in old_ids:
-            key = f"{channel.id}-{int(message_id)}-{emoji_key}"
-            if key in current:
-                old_roles[int(message_id)] = int(current[key])
+        for key, role_id in current.items():
+            try:
+                key_channel, key_message, _ = key.split("-", 2)
+            except ValueError:
+                continue
+            if int(key_channel) == channel.id and int(key_message) in {int(mid) for mid in old_ids}:
+                old_roles[int(key_message)] = int(role_id)
         messages = []
         changed = 0
         try:
@@ -478,7 +517,7 @@ class RoleToolsPicker(RoleToolsMixin):
                         message = await channel.fetch_message(int(old_ids[position]))
                     except discord.NotFound:
                         pass
-                content = f"{role.mention} — React with 👍 to join!"
+                content = f"{role.mention} — React with {emoji} to join!"
                 if message is None:
                     message = await channel.send(content, allowed_mentions=discord.AllowedMentions.none())
                 else:
@@ -489,17 +528,17 @@ class RoleToolsPicker(RoleToolsMixin):
                         allowed_mentions=discord.AllowedMentions.none(),
                     )
                     for reaction in getattr(message, "reactions", []):
-                        if str(reaction.emoji).strip("\N{VARIATION SELECTOR-16}") != emoji_key:
+                        if reaction_emoji_key(str(reaction.emoji)) != emoji_key:
                             await message.clear_reaction(reaction.emoji)
-                await message.add_reaction("👍")
-                messages.append((message, role_id))
+                await message.add_reaction(reaction_emoji_value(emoji))
+                messages.append((message, role_id, emoji))
             for message_id in old_ids[len(role_ids):]:
                 try:
                     await (await channel.fetch_message(int(message_id))).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     pass
             await self._replace_role_channel_mappings(guild, old_ids, messages)
-            data["role_channel_message_ids"] = [message.id for message, _ in messages]
+            data["role_channel_message_ids"] = [message.id for message, _, _ in messages]
             data["reaction_message_ids"] = []
             data["message_id"] = messages[0][0].id if messages else None
             pickers = await self.config.guild(guild).pickers()

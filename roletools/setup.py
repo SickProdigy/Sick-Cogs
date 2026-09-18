@@ -9,7 +9,8 @@ from redbot.core import commands
 from redbot.core.commands import Context
 
 from .abc import RoleToolsMixin
-from .picker import LEGACY_DEFAULT_DESCRIPTIONS, PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE, picker_description
+from .picker import (LEGACY_DEFAULT_DESCRIPTIONS, PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE,
+                     picker_description, reaction_emoji_key, reaction_emoji_value)
 
 roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -215,6 +216,32 @@ class SelfRoleAppearanceModal(discord.ui.Modal):
         )
 
 
+class SelfRoleLibraryView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member):
+        super().__init__(timeout=600)
+        self.cog, self.author = cog, author
+
+    @discord.ui.button(label="Ordinary self-roles", style=discord.ButtonStyle.primary)
+    async def ordinary(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=await self.cog.catalog_embed(interaction.guild, restricted=False),
+            view=CatalogEditorView(self.cog, interaction.user, restricted=False), ephemeral=True,
+        )
+
+    @discord.ui.button(label="Protected role rules", style=discord.ButtonStyle.secondary)
+    async def protected(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=await self.cog.catalog_embed(interaction.guild, restricted=True),
+            view=CatalogEditorView(self.cog, interaction.user, restricted=True), ephemeral=True,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
 class RoleToolsSetupView(discord.ui.View):
     def __init__(self, cog, author: discord.Member):
         super().__init__(timeout=900)
@@ -230,22 +257,11 @@ class RoleToolsSetupView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Basic self-roles", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Self-role library", style=discord.ButtonStyle.primary, row=0)
     async def basic_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = await self.cog.catalog_embed(interaction.guild, restricted=False)
         await interaction.response.send_message(
-            embed=embed,
-            view=CatalogEditorView(self.cog, interaction.user, restricted=False),
-            ephemeral=True,
-        )
-
-    @discord.ui.button(label="Advanced self-roles", style=discord.ButtonStyle.secondary, row=0)
-    async def restricted_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = await self.cog.catalog_embed(interaction.guild, restricted=True)
-        await interaction.response.send_message(
-            embed=embed,
-            view=CatalogEditorView(self.cog, interaction.user, restricted=True),
-            ephemeral=True,
+            "Choose ordinary self-roles, or protected roles that use RoleTools rules such as costs and durations.",
+            view=SelfRoleLibraryView(self.cog, interaction.user), ephemeral=True,
         )
 
     @discord.ui.button(label="Menu text", style=discord.ButtonStyle.secondary, row=0)
@@ -255,7 +271,7 @@ class RoleToolsSetupView(discord.ui.View):
             SelfRoleAppearanceModal(self.cog, interaction.guild, data)
         )
 
-    @discord.ui.button(label="Publish role menu", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Quick publish all roles", style=discord.ButtonStyle.success, row=1)
     async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             "Choose how members should use the public self-role card.",
@@ -410,6 +426,60 @@ class NamedMenuTextModal(discord.ui.Modal):
         )
 
 
+class RoleEmojiModal(discord.ui.Modal):
+    def __init__(self, cog, guild: discord.Guild, name: str, role: discord.Role):
+        super().__init__(title="Reaction emoji")
+        self.cog, self.guild, self.name, self.role = cog, guild, name, role
+        self.emoji_input = discord.ui.TextInput(
+            label=f"Emoji for {role.name}"[:45], placeholder="🎮 or a server custom emoji", max_length=100
+        )
+        self.add_item(self.emoji_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        ok, message = await self.cog.set_menu_role_emoji(
+            self.guild, self.name, self.role, str(self.emoji_input.value)
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class RoleEmojiSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "RoleEmojiSettingsView"):
+        super().__init__(placeholder="Choose a menu role to change its emoji", min_values=1, max_values=1)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        role = self.values[0]
+        data = (await self.parent_view.cog.config.guild(interaction.guild).pickers()).get(self.parent_view.name, {})
+        if role.id not in data.get("role_ids", []):
+            await interaction.response.send_message("That role is not part of this menu.", ephemeral=True)
+            return
+        await interaction.response.send_modal(RoleEmojiModal(self.parent_view.cog, interaction.guild, self.parent_view.name, role))
+
+
+class RoleEmojiSettingsView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=600)
+        self.cog, self.author, self.name = cog, author, name
+        self.add_item(RoleEmojiSelect(self))
+
+    @discord.ui.button(label="Reset automatic emojis", style=discord.ButtonStyle.secondary, row=1)
+    async def reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.reset_menu_role_emojis(interaction.guild, self.name)
+        await interaction.response.send_message("This menu now uses the automatic numbered emoji defaults.", ephemeral=True)
+
+
+class SharedEmojiModal(discord.ui.Modal):
+    def __init__(self, cog, guild: discord.Guild, name: str, current: str):
+        super().__init__(title="Managed channel reaction")
+        self.cog, self.guild, self.name = cog, guild, name
+        self.emoji_input = discord.ui.TextInput(label="Emoji used for every role", default=current or "👍", max_length=100)
+        self.add_item(self.emoji_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        _, message = await self.cog.set_menu_shared_emoji(self.guild, self.name, str(self.emoji_input.value))
+        await interaction.response.send_message(message, ephemeral=True)
+
+
 class NamedMenuEditorView(discord.ui.View):
     def __init__(self, cog, author: discord.Member, name: str):
         super().__init__(timeout=900)
@@ -450,6 +520,31 @@ class NamedMenuEditorView(discord.ui.View):
     async def unpublish(self, interaction: discord.Interaction, button: discord.ui.Button):
         _, message = await self.cog.unpublish_role_menu(interaction.guild, self.name)
         await interaction.response.send_message(message, ephemeral=True)
+
+    @discord.ui.button(label="Use all library roles", style=discord.ButtonStyle.secondary, row=4)
+    async def use_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        changed = await self.cog.fill_named_menu_from_library(interaction.guild, self.name)
+        await interaction.response.edit_message(
+            embed=await self.cog.named_menu_embed(interaction.guild, self.name),
+            view=NamedMenuEditorView(self.cog, interaction.user, self.name),
+        )
+        await interaction.followup.send(f"Added {changed} library role(s) to this menu.", ephemeral=True)
+
+    @discord.ui.button(label="Reaction settings", style=discord.ButtonStyle.secondary, row=4)
+    async def reaction_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = (await self.cog.config.guild(interaction.guild).pickers()).get(self.name, {})
+        layout = data.get("layout", "private")
+        if layout == "reactions":
+            await interaction.response.send_message(
+                "Automatic numbered emojis are already assigned. Choose a role only when you want to override its emoji.",
+                view=RoleEmojiSettingsView(self.cog, interaction.user, self.name), ephemeral=True,
+            )
+        elif layout == "role_channel":
+            await interaction.response.send_modal(
+                SharedEmojiModal(self.cog, interaction.guild, self.name, data.get("shared_emoji", "👍"))
+            )
+        else:
+            await interaction.response.send_message("Reaction settings apply only to reaction layouts.", ephemeral=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -579,6 +674,77 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.save_role_menus(guild, pickers)
         return True
 
+
+    async def fill_named_menu_from_library(self, guild: discord.Guild, name: str) -> int:
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        if data is None or name == SETUP_PICKER_NAME:
+            return 0
+        before = set(data.get("role_ids", []))
+        data["role_ids"] = await self.combined_catalog_ids(guild)
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        if data.get("message_id"):
+            await self.sync_picker(guild, name, data)
+        return len(set(data["role_ids"]) - before)
+
+    async def set_menu_role_emoji(self, guild: discord.Guild, name: str, role: discord.Role, emoji: str):
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        emoji = emoji.strip()
+        if data is None or role.id not in data.get("role_ids", []):
+            return False, "That role is not part of this saved menu."
+        if not emoji:
+            return False, "Enter one Unicode emoji or one custom server emoji."
+        try:
+            parsed = reaction_emoji_value(emoji)
+            key = reaction_emoji_key(emoji)
+            if isinstance(parsed, discord.PartialEmoji) and parsed.id and guild.get_emoji(parsed.id) is None:
+                return False, "I cannot access that custom emoji in this server."
+        except (TypeError, ValueError):
+            return False, "I could not read that emoji."
+        overrides = dict(data.get("role_emojis", {}))
+        for role_id, current in overrides.items():
+            if str(role_id) != str(role.id) and reaction_emoji_key(current) == key:
+                return False, "Each role on a reaction card needs a different emoji."
+        overrides[str(role.id)] = emoji
+        data["role_emojis"] = overrides
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        synced = bool(data.get("message_id") and await self.sync_picker(guild, name, data))
+        return True, f"{role.mention} now uses {emoji}." + (" The published card was synchronized." if synced else "")
+
+    async def reset_menu_role_emojis(self, guild: discord.Guild, name: str) -> None:
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        if data is None:
+            return
+        data["role_emojis"] = {}
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        if data.get("message_id"):
+            await self.sync_picker(guild, name, data)
+
+    async def set_menu_shared_emoji(self, guild: discord.Guild, name: str, emoji: str):
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        emoji = emoji.strip()
+        if data is None:
+            return False, "That saved role menu no longer exists."
+        if not emoji:
+            return False, "Enter one Unicode emoji or one custom server emoji."
+        try:
+            parsed = reaction_emoji_value(emoji)
+            if isinstance(parsed, discord.PartialEmoji) and parsed.id and guild.get_emoji(parsed.id) is None:
+                return False, "I cannot access that custom emoji in this server."
+        except (TypeError, ValueError):
+            return False, "I could not read that emoji."
+        data["shared_emoji"] = emoji
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        synced = bool(data.get("message_id") and await self.sync_picker(guild, name, data))
+        return True, f"Managed role entries now use {emoji}." + (" The published channel was synchronized." if synced else "")
+
     async def named_menu_embed(self, guild: discord.Guild, name: str) -> discord.Embed:
         data = (await self.config.guild(guild).pickers()).get(name, {})
         roles = [guild.get_role(int(role_id)) for role_id in data.get("role_ids", [])]
@@ -671,11 +837,11 @@ class RoleToolsSetup(RoleToolsMixin):
         role_ids = await (self.restricted_role_ids(guild) if restricted else self.admin_selfrole_ids(guild))
         roles = [guild.get_role(role_id) for role_id in role_ids]
         roles = [role for role in roles if role is not None]
-        title = "Advanced self-roles" if restricted else "Basic Red self-roles"
+        title = "Protected role rules" if restricted else "Self-role library"
         explanation = (
-            "These roles use RoleTools-only assignment so costs, requirements, conflicts, and durations cannot be bypassed."
+            "These library roles use RoleTools rules so costs, requirements, conflicts, and durations cannot be bypassed."
             if restricted else
-            "These are Red Admin self-roles. They work with !selfrole and can also appear on RoleTools cards."
+            "These roles work with Red Admin selfrole and can be reused across any RoleTools menu."
         )
         listing = "\n".join(f"• {role.name}" for role in roles[:40]) or "No roles configured."
         if len(roles) > 40:
@@ -693,13 +859,12 @@ class RoleToolsSetup(RoleToolsMixin):
         embed = discord.Embed(
             title="RoleTools setup",
             description=(
-                "Manage one shared self-role catalog without creating internal option names. "
-                "Basic roles also work with Red's `selfrole`; advanced self-roles stay inside RoleTools."
+                "Keep one reusable self-role library, then publish all roles quickly or build separate menus "
+                "for games, ranks, platforms, notifications, and more."
             ),
             color=discord.Color.blurple(),
         )
-        embed.add_field(name="Basic self-roles", value=str(len(basic)))
-        embed.add_field(name="Advanced self-roles", value=str(len(restricted)))
+        embed.add_field(name="Self-role library", value=str(len(set(basic + restricted))))
         unsafe = []
         for role_id in basic:
             role = guild.get_role(role_id)
@@ -714,7 +879,7 @@ class RoleToolsSetup(RoleToolsMixin):
             "reactions": "Single Reaction Card",
             "role_channel": "Managed Reaction Channel",
         }
-        embed.add_field(name="Public card", value=published, inline=False)
+        embed.add_field(name="Quick all-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:
             embed.add_field(

@@ -2,7 +2,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from roletools.picker import PICKER_PAGE_SIZE, REACTION_PAGE_SIZE, PickerMemberView, picker_description, picker_page_index, picker_pages
+from roletools.picker import (PICKER_PAGE_SIZE, REACTION_PAGE_SIZE, PickerMemberView,
+                              picker_description, picker_page_index, picker_pages,
+                              reaction_emoji_key, reaction_page_emojis, shared_reaction_emoji)
 
 
 class PickerPagingTests(unittest.TestCase):
@@ -27,6 +29,17 @@ class PickerPagingTests(unittest.TestCase):
         self.assertEqual(picker_page_index(-1, 4), 3)
         self.assertEqual(picker_page_index(4, 4), 0)
         self.assertEqual(picker_page_index(0, 0), 0)
+
+
+    def test_reaction_defaults_allow_per_role_overrides_without_duplicates(self):
+        roles = [SimpleNamespace(id=1), SimpleNamespace(id=2), SimpleNamespace(id=3)]
+        emojis = reaction_page_emojis({"role_emojis": {"2": "1️⃣"}}, roles)
+        self.assertEqual(emojis[1], "1️⃣")
+        self.assertEqual(len({reaction_emoji_key(emoji) for emoji in emojis}), 3)
+
+    def test_managed_channel_emoji_defaults_to_thumb(self):
+        self.assertEqual(shared_reaction_emoji({}), "👍")
+        self.assertEqual(shared_reaction_emoji({"shared_emoji": "🚀"}), "🚀")
 
 
 class ManagedRoleChannelTests(unittest.IsolatedAsyncioTestCase):
