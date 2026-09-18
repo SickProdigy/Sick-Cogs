@@ -1,16 +1,33 @@
 # RoleTools
 
-RoleTools is a Red-DiscordBot cog for managing self roles, sticky roles, automatic roles, reaction roles, button roles, select menu roles, temporary roles, and role relationship rules.
+RoleTools is a Red-DiscordBot cog for managing self roles, sticky roles, automatic roles, reaction roles, button roles, dropdown roles, temporary roles, paid roles, and role relationship rules.
 
-It is intended for servers that need more flexible role management than Discord's built-in onboarding tools provide.
+It is intended for servers that need more control and less manual message maintenance than Discord's built-in onboarding tools or separate one-purpose role cogs provide.
+
+## Why Use Sick-Cogs RoleTools?
+
+RoleTools combines the member interface, manager interface, publishing system, and assignment rules in one cog:
+
+- **Built-in setup GUI:** `[p]roletools setup` uses Discord buttons, role selectors, channel selectors, and forms. Routine setup does not require memorizing long commands or creating internal option names.
+- **One reusable role library:** Ordinary and Advanced roles can be reused across multiple menus instead of being configured separately for buttons, dropdowns, and reactions.
+- **Multiple managed menus:** Publish the default All Roles menu plus focused menus for games, ranks, platforms, notifications, or VIP access. Each menu keeps its own title, instructions, layout, destination, and reaction settings.
+- **Four scalable layouts:** Choose a private paged Button Role Menu, public dropdowns, a multi-message Single Reaction Card, or a Managed Reaction Channel.
+- **Automation instead of message rebuilding:** RoleTools synchronizes managed messages, creates overflow pages, preserves reusable reaction-channel slots, removes surplus messages, and maintains reaction-to-role bindings.
+- **Rules that cannot be bypassed:** Advanced roles stay outside Red's ordinary `selfrole` list, allowing RoleTools to enforce Red Bank costs, temporary access, requirements, inclusive roles, and conflicts.
+- **Native Red compatibility:** Ordinary roles use Red Admin's canonical self-role list, so `[p]selfrole <role>` continues to work while RoleTools adds richer menus and automation around it.
+- **Transactional paid roles:** Credit withdrawal, Discord assignment, and temporary-role persistence are handled as one operation, with a refund when assignment fails.
 
 ## User Commands
 
-Run `[p]roletools` in a server for a short member guide. These commands use RoleTools’ own server configuration; Red’s separate core `[p]selfrole` command is not a substitute.
+Run `[p]roletools` for the member guide.
 
-- `[p]roletools viewroles` - View the self-roles currently available to you.
-- `[p]roletools selfrole <role>` - Add or remove an available self-role by mention, ID, or name.
-- `[p]help roletools selfrole` - View detailed command syntax and behavior.
+- `[p]selfroles` - List the self-roles currently available to you. This is the short form of `[p]roletools viewroles`.
+- `[p]selfroles <role>` - Filter that availability view to a role mention, ID, or name.
+- `[p]selfrole <role>` - Use Red's native command to add or remove an ordinary self-role.
+- `[p]roletools selfrole <role>` - Add or remove an Advanced role whose Bank cost or other RoleTools rules must be enforced.
+- `[p]help roletools selfrole` - View detailed Advanced-role assignment behavior.
+
+The availability card labels Advanced roles and tells members which assignment command applies.
 
 ## Moderator Commands
 
@@ -51,23 +68,48 @@ Automatic recurring withdrawals are not enabled. Future subscription-style offer
 
 ## Interactive Self-Role Setup
 
-Run `[p]roletools setup` to open a manager-only setup card inspired by the Clanker launch workflow. It manages two catalogs:
+Run `[p]roletools setup` to open the manager-only GUI. Its first card deliberately has three jobs:
 
-- **Basic self-roles** use Red Admin's canonical `selfroles` list, so they work through `[p]selfrole` and on RoleTools cards.
-- **Advanced self-roles** remain RoleTools-only so costs, requirements, conflicts, and temporary durations cannot be bypassed through Red's simpler command.
+- **Self-roles** manages ordinary roles. These live in Red Admin's canonical self-role list and work through native `[p]selfrole` as well as RoleTools menus.
+- **Advanced roles (Bank/rules)** manages RoleTools-only roles. Use these for Red Bank costs, temporary access, required roles, inclusive roles, and conflicts so the rules cannot be bypassed through native `selfrole`.
+- **Manage role menus** opens the publishing dashboard.
 
-The setup card uses Discord role and channel selectors to add/remove roles, edit menu text, publish the selected menu layout, and synchronize it. Managers do not need to create internal option names. When publishing, choose one layout:
+### Managed Role Menus
 
-- **Button Role Menu** puts one button on the public card and opens private 25-role pages. This is the cleanest choice for very large catalogs.
-- **Public dropdowns** puts as many as five 25-role dropdowns directly on the public message, supporting up to 125 roles.
-- **Single Reaction Card** assigns a distinct emoji to every role. RoleTools keeps 20 roles on each message, creates overflow messages automatically, and rebuilds its mappings when the shared catalogs change.
-- **Managed Reaction Channel** publishes one bot message per role with 👍. Synchronization retains and edits existing message slots without clearing reactions, creates only the additional bottom messages it needs, removes surplus bottom messages, and remaps each slot to the alphabetized shared catalog.
+The menu dashboard lists every saved menu with its layout and publication state. **All roles (default)** follows both role lists automatically. Managers can also create named menus containing smaller subsets, such as Games, Ranks, Platforms, Notifications, or VIP Roles.
 
-Use **Sync published menu** after changing the catalogs. **Remove published menu** deletes every tracked public menu message and its reaction bindings while preserving the shared catalogs and Menu text settings. Existing Red `selfroleset` changes and changes made inside the setup card also trigger synchronization. If Managed Reaction Channel slots are remapped, existing member roles are not transferred; the optional RoleTools notification channel receives a notice explaining that members can remove and add 👍 again for a newly displayed role.
+Selecting a menu shows its saved roles, current layout, and destination. From that editor a manager can:
 
-Every layout reads the same Basic and Advanced catalogs, so roles only need to be managed once.
+- edit the public title and instructions;
+- choose the publication layout;
+- publish the menu, move it to another channel, or synchronize it;
+- unpublish its Discord messages without losing the saved menu;
+- configure reaction behavior;
+- add or remove a named menu's role subset, or fill it from the complete library.
 
-The legacy `[p]roletools select`, button, reaction, and message commands remain available for advanced layouts and compatibility.
+This keeps creation, inspection, publication, movement, synchronization, and removal in one GUI instead of spreading those operations across unrelated commands.
+
+### Publication Layouts
+
+- **Button Role Menu** publishes one button that opens private 25-role pages for each member. It is the cleanest default for a large library.
+- **Public dropdowns** place as many as five 25-role selectors on the public message, supporting up to 125 roles.
+- **Single Reaction Card** places up to 20 distinct reactions on each managed message and creates overflow messages automatically. Numbered emojis require no setup; managers may override individual roles with Unicode or accessible server-custom emojis.
+- **Managed Reaction Channel** publishes one bot message per role. It uses 👍 by default or one manager-selected shared emoji. Synchronization edits and reuses existing slots, creates required bottom messages, removes surplus bottom messages, and updates bindings without clearing retained reactions that still use the selected emoji.
+
+RoleTools validates duplicate and inaccessible custom emojis before saving them. If a Managed Reaction Channel reorder maps an existing slot to another role, member roles are not silently transferred; the optional notification channel explains that members should remove and add the displayed reaction again if they want the newly displayed role.
+
+The command equivalents live under `[p]roletools menu`:
+
+- `[p]roletools menu` - List saved role menus.
+- `[p]roletools menu create <name> [title]` - Create an unpublished named menu.
+- `[p]roletools menu view <name>` - Show its roles, layout, and destination.
+- `[p]roletools menu add <name> <roles...>` / `remove` - Change a named menu's subset.
+- `[p]roletools menu layout <name> <layout>` - Select `private`, `dropdown`, `reactions`, or `role_channel`.
+- `[p]roletools menu publish <name> <channel>` - Publish or move the menu.
+- `[p]roletools menu sync <name>` - Synchronize its managed messages.
+- `[p]roletools menu unpublish <name>` - Remove managed messages but retain the saved configuration.
+
+Legacy button, select, reaction, and message commands remain available for specialized layouts and compatibility.
 
 ## Reaction, Button, And Select Roles
 
