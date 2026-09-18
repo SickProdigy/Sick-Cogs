@@ -411,9 +411,9 @@ class RoleTools(
             inline=False,
         )
         embed.add_field(
-            name="4. Private gated groups",
-            value=(f"`{prefix}roletools setup` includes private groups for staged access. "
-                   f"Use `{prefix}help roletools group` for requirements, gateway roles, Bank cost, duration, and publishing."),
+            name="4. Private access groups",
+            value=(f"`{prefix}roletools setup` includes private access groups. "
+                   f"Use `{prefix}help roletools group` for prerequisites, access roles, Bank cost, duration, and publishing."),
             inline=False,
         )
         embed.add_field(

@@ -567,7 +567,7 @@ class NamedMenuChooseSelect(discord.ui.Select):
             label=(data.get("display_name") or name)[:100], value=name,
             description=(
                 f"{parent.cog.layout_name(data.get('layout'))} · "
-                f"{'archived' if data.get('archived') else ('published' if data.get('message_id') else 'draft')}"
+                f"{'archived' if data.get('archived') else ('published' if parent.cog.managed_message_ids(data) else 'draft')}"
             )[:100],
         ) for name, data in menus]
         super().__init__(placeholder="Choose a role menu to manage", options=options, row=0)
@@ -1015,7 +1015,6 @@ class RoleToolsSetup(RoleToolsMixin):
         combined.sort(key=lambda role_id: guild.get_role(role_id).name.lower())
         return combined
 
-
     @staticmethod
     def layout_name(layout: str) -> str:
         return {
@@ -1324,8 +1323,9 @@ class RoleToolsSetup(RoleToolsMixin):
         listing = "\n".join(f"• {role.name}" for role in roles[:30]) or "No roles selected yet."
         if len(roles) > 30:
             listing += f"\n…and {len(roles) - 30} more."
-        published = f"<#{data.get('channel_id')}>" if data.get("message_id") else "Not published"
-        state = "Archived" if data.get("archived") else ("Published" if data.get("message_id") else "Draft")
+        is_published = bool(self.managed_message_ids(data))
+        published = f"<#{data.get('channel_id')}>" if is_published else "Not published"
+        state = "Archived" if data.get("archived") else ("Published" if is_published else "Draft")
         embed = discord.Embed(
             title=data.get("display_name") or ("All roles (default)" if name == SETUP_PICKER_NAME else "Saved role menu"),
             description=listing,
@@ -1354,11 +1354,12 @@ class RoleToolsSetup(RoleToolsMixin):
             display_name = data.get("display_name") or (
                 "All roles (default)" if name == SETUP_PICKER_NAME else name
             )
+            is_published = bool(self.managed_message_ids(data))
             state = "Archived" if data.get("archived") else (
-                "Published" if data.get("message_id") else "Draft"
+                "Published" if is_published else "Draft"
             )
             role_count = len(data.get("role_ids", []))
-            destination = f"<#{data.get('channel_id')}>" if data.get("message_id") else "Not published"
+            destination = f"<#{data.get('channel_id')}>" if is_published else "Not published"
             lines.append(
                 f"• **{display_name}** (`{name}`) — {state} · {role_count} role"
                 f"{'s' if role_count != 1 else ''} · {self.layout_name(data.get('layout'))} · {destination}"
@@ -1639,7 +1640,7 @@ class RoleToolsSetup(RoleToolsMixin):
             data["reaction_message_ids"] = []
             data["role_channel_message_ids"] = []
             pickers[name] = data
-            await self.config.guild(guild).pickers.set(pickers)
+            await self.save_role_menus(guild, pickers)
             return False, "No published role menu was found. Its saved roles and text were left unchanged."
 
         removed = 0
@@ -1660,9 +1661,7 @@ class RoleToolsSetup(RoleToolsMixin):
         data["reaction_message_ids"] = []
         data["role_channel_message_ids"] = []
         pickers[name] = data
-        await self.config.guild(guild).pickers.set(pickers)
-        if guild.id in self.settings:
-            self.settings[guild.id]["pickers"] = pickers
+        await self.save_role_menus(guild, pickers)
         display_name = data.get("display_name") or name
         return True, (
             f"Unpublished **{display_name}** from {channel.mention} and removed {removed} "

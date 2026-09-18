@@ -129,7 +129,7 @@ Open `[p]roletools setup` and choose **Private access groups** to create a group
 [p]roletools group create VIP Gold
 [p]roletools group view vip-gold
 [p]roletools group roles add vip-gold @VIP-Lounge @VIP-Games
-[p]roletools group gateway vip-gold @VIP-Gold
+[p]roletools group accessrole vip-gold @VIP-Gold
 [p]roletools group required add vip-gold @VIP
 [p]roletools group required mode vip-gold all
 [p]roletools group conflicts add vip-gold @Suspended
