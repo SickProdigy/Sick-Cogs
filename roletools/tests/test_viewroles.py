@@ -26,6 +26,20 @@ def context(*, manager=False, roles=None):
 
 
 class ViewRolesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selfroles_shortcut_uses_available_view(self):
+        cog = object.__new__(RoleTools)
+        cog.config = SimpleNamespace(
+            all_roles=AsyncMock(return_value={}),
+            guild=MagicMock(return_value=SimpleNamespace(restricted_roles=AsyncMock(return_value=[]))),
+        )
+        ctx = context()
+
+        with patch("roletools.roletools.bank.get_currency_name", new=AsyncMock(return_value="credits")):
+            await RoleTools.selfroles_shortcut.callback(cog, ctx)
+
+        ctx.send.assert_awaited_once()
+        self.assertIn("No self-roles are currently available", ctx.send.await_args.args[0])
+
     async def test_configured_report_requires_manage_roles(self):
         cog = object.__new__(RoleTools)
         ctx = context()
@@ -37,7 +51,10 @@ class ViewRolesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_available_report_has_friendly_empty_state(self):
         cog = object.__new__(RoleTools)
-        cog.config = SimpleNamespace(all_roles=AsyncMock(return_value={}))
+        cog.config = SimpleNamespace(
+            all_roles=AsyncMock(return_value={}),
+            guild=MagicMock(return_value=SimpleNamespace(restricted_roles=AsyncMock(return_value=[]))),
+        )
         ctx = context()
 
         with patch("roletools.roletools.bank.get_currency_name", new=AsyncMock(return_value="credits")):

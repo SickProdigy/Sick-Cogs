@@ -96,7 +96,7 @@ class RoleToolsSelect(RoleToolsMixin):
     @commands.admin_or_permissions(manage_roles=True)
     async def select(self, ctx: Context) -> None:
         """
-        Setup role select menus
+        Manage dropdown roles.
         """
 
     @select.command(name="create", usage="<name> <options...> [extras]")

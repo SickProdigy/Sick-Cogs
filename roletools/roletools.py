@@ -22,9 +22,11 @@ from .exclusive import RoleToolsExclusive
 from .inclusive import RoleToolsInclusive
 from .menus import BaseMenu, ConfirmView, EmbedPages, RolePages
 from .messages import RoleToolsMessages
+from .picker import RoleToolsPicker
 from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
 from .select import RoleToolsSelect
+from .setup import RoleToolsSetup
 from .settings import RoleToolsSettings
 from .temprole import RoleToolsTemporary
 
@@ -32,10 +34,11 @@ roletools = RoleToolsMixin.roletools
 
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
-ROLETOOLS_SCHEMA_VERSION = 1
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
+ROLETOOLS_SCHEMA_VERSION = 2
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
+ADVANCED_CATALOG_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
 
 log = getLogger("red.Sick-Cogs.RoleTools")
 _ = Translator("RoleTools", __file__)
@@ -84,10 +87,12 @@ class RoleTools(
     RoleToolsExclusive,
     RoleToolsInclusive,
     RoleToolsMessages,
+    RoleToolsPicker,
     RoleToolsReactions,
     RoleToolsRequires,
     RoleToolsSettings,
     RoleToolsSelect,
+    RoleToolsSetup,
     RoleToolsTemporary,
     commands.Cog,
     metaclass=CompositeMetaClass,
@@ -97,7 +102,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.7.1"
+    __version__ = "1.12.15"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -113,6 +118,8 @@ class RoleTools(
         self._ready: asyncio.Event = asyncio.Event()
         self.views: Dict[int, Dict[str, discord.ui.View]] = {}
         self.layouts: Dict[int, Dict[str, discord.ui.LayoutView]] = {}
+        self.picker_views: List[discord.ui.View] = []
+        self._role_transaction_locks: Dict[tuple, asyncio.Lock] = {}
         self._repo = ""
         self._commit = ""
         self.is_discord: bool = discord.utils.oauth_url("").startswith("https://discord.com/")
@@ -154,8 +161,9 @@ class RoleTools(
                 self._commit = cog.commit
 
     async def load_views(self):
-        self.settings = await self.config.all_guilds()
         await self.bot.wait_until_red_ready()
+        await self._migrate_role_catalogs()
+        self.settings = await self.config.all_guilds()
         try:
             await self.initialize_select()
         except Exception:
@@ -164,6 +172,10 @@ class RoleTools(
             await self.initialize_buttons()
         except Exception:
             log.exception("Error initializing Buttons")
+        try:
+            await self.register_picker_views()
+        except Exception:
+            log.exception("Error initializing role picker cards")
         for guild_id, guild_views in self.views.items():
             for msg_ids, view in guild_views.items():
                 log.debug("Adding view %r to %s", view, guild_id)
@@ -194,7 +206,7 @@ class RoleTools(
         return result, review
 
     async def _migrate_legacy_config(self):
-        if await self.config.schema_version() >= ROLETOOLS_SCHEMA_VERSION:
+        if await self.config.schema_version() >= 1:
             return
         target_data = await self.config.all_guilds()
         state = await self.config.legacy_migration()
@@ -229,8 +241,71 @@ class RoleTools(
                     async with self.config.guild_from_id(int(guild_id)).auto_roles() as roles:
                         if int(role_id) not in roles:
                             roles.append(int(role_id))
-        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
+        await self.config.schema_version.set(1)
         await self.config.legacy_migration.set({"state": "completed", "review": review, "legacy_identifier": LEGACY_CONFIG_IDENTIFIER})
+
+    @staticmethod
+    def _uses_advanced_role_rules(data: dict) -> bool:
+        return any(data.get(key) for key in ADVANCED_CATALOG_KEYS)
+
+    @classmethod
+    def _partition_role_catalog(cls, stored_roles: dict, live_role_ids, existing_advanced):
+        live_role_ids = {int(role_id) for role_id in live_role_ids}
+        advanced = {int(role_id) for role_id in existing_advanced if int(role_id) in live_role_ids}
+        configured = {
+            int(role_id) for role_id, data in stored_roles.items()
+            if int(role_id) in live_role_ids
+            and (data.get("selfassignable") or data.get("selfremovable")
+                 or cls._uses_advanced_role_rules(data))
+        }
+        advanced.update(
+            role_id for role_id in configured
+            if cls._uses_advanced_role_rules(stored_roles[role_id])
+        )
+        return configured - advanced, advanced
+
+    async def _migrate_role_catalogs(self) -> None:
+        """Convert schema 1 role settings into the shared ordinary/Advanced catalogs."""
+        schema = await self.config.schema_version()
+        if schema < 1 or schema >= ROLETOOLS_SCHEMA_VERSION:
+            return
+
+        stored_roles = {
+            int(role_id): data for role_id, data in (await self.config.all_roles()).items()
+        }
+        admin = self.bot.get_cog("Admin")
+        for guild in self.bot.guilds:
+            live_role_ids = {role.id for role in guild.roles}
+            ordinary, advanced = self._partition_role_catalog(
+                stored_roles,
+                live_role_ids,
+                await self.config.guild(guild).restricted_roles(),
+            )
+
+            if admin is None:
+                # Preserve access through RoleTools without risking native selfrole
+                # bypass of paid or otherwise controlled roles.
+                advanced.update(ordinary)
+                ordinary.clear()
+                async with self.config.guild(guild).MIGRATION_REVIEW() as notes:
+                    note = "Admin cog was unavailable; existing self-roles were kept as Advanced roles."
+                    if note not in notes:
+                        notes.append(note)
+            else:
+                admin_roles = [
+                    int(role_id) for role_id in await admin.config.guild(guild).selfroles()
+                    if int(role_id) in live_role_ids and int(role_id) not in advanced
+                ]
+                admin_roles.extend(role_id for role_id in ordinary if role_id not in admin_roles)
+                await admin.config.guild(guild).selfroles.set(admin_roles)
+
+            await self.config.guild(guild).restricted_roles.set(sorted(advanced))
+            log.info(
+                "Migrated RoleTools catalogs in guild %s: %s ordinary, %s Advanced",
+                guild.id, len(ordinary), len(advanced),
+            )
+
+        await self.config.schema_version.set(ROLETOOLS_SCHEMA_VERSION)
 
     async def cog_load(self) -> None:
         await self._migrate_legacy_config()
@@ -246,6 +321,10 @@ class RoleTools(
                 # Don't forget to remove persistent views when the cog is unloaded.
                 log.debug("Stopping view %s", view)
                 view.stop()
+        for view in self.picker_views:
+            log.debug("Stopping picker view %s", view)
+            view.stop()
+        self.picker_views.clear()
         try:
             self.bot.remove_dev_env_value("roletools")
         except Exception:
@@ -297,14 +376,14 @@ class RoleTools(
     @roletools.command(name="migrationstatus")
     @commands.is_owner()
     async def roletools_migration_status(self, ctx: Context) -> None:
-        """Owner: show legacy RoleTools import status."""
+        """Owner migration status."""
         status = await self.config.legacy_migration()
         await ctx.send(f"**RoleTools migration status**\nState: `{status.get('state')}`\nReview warnings: `{len(status.get('review', []))}`\nSchema version: `{await self.config.schema_version()}`")
 
     @roletools.command(name="adminhelp", aliases=["setuphelp"])
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_admin_help(self, ctx: Context) -> None:
-        """Show the most useful RoleTools setup commands for server managers."""
+        """Manager command guide."""
         prefix = ctx.clean_prefix
         embed = discord.Embed(
             title="RoleTools setup guide",
@@ -324,7 +403,13 @@ class RoleTools(
             inline=False,
         )
         embed.add_field(
-            name="3. Optional role-change notices",
+            name="3. Interactive setup",
+            value=(f"`{prefix}roletools setup` manages Red self-roles, advanced self-roles, and the "
+                   "published member card without internal option names."),
+            inline=False,
+        )
+        embed.add_field(
+            name="4. Optional role-change notices",
             value=(f"`{prefix}roletools notify channel #role-log` posts successful reaction, "
                    "button, and select role changes there. Use "
                    f"`{prefix}roletools notify disable` to stop them."),
@@ -338,7 +423,7 @@ class RoleTools(
     @commands.bot_has_permissions(manage_roles=True)
     async def selfrole(self, ctx: Context, *, role: SelfRoleConverter) -> None:
         """
-        Add or remove an available self-role.
+        Toggle a self-role.
 
         `<role>` accepts a role mention, ID, or name. If you already have the
         role, it is removed; otherwise it is added when server rules allow it.
@@ -409,7 +494,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Thread, discord.Member, str],
     ) -> None:
         """
-        Gives a role to designated members.
+        Give a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -504,7 +589,7 @@ class RoleTools(
         *who: Union[discord.Role, discord.TextChannel, discord.Member, str],
     ) -> None:
         """
-        Removes a role from the designated members.
+        Remove a role in bulk.
 
         `<role>` The role you want to give.
         `[who...]` Who you want to give the role to. This can include any of the following:```diff
@@ -586,7 +671,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force a sticky role on one or more users.
+        Force a sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -632,7 +717,7 @@ class RoleTools(
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Force remove sticky role on one or more users.
+        Remove a forced sticky role.
 
         `<users>` The users you want to have a forced stickyrole applied to.
         `<roles>` The role you want to set.
@@ -668,10 +753,21 @@ class RoleTools(
         if errors:
             await ctx.channel.send("".join([e for e in errors]))
 
+    @commands.command(name="selfroles")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def selfroles_shortcut(self, ctx: Context, *, selection: Optional[str] = None) -> None:
+        """List available self-roles.
+
+        This is a shortcut for `[p]roletools viewroles`. An optional role mention,
+        ID, or name filters the list to that role.
+        """
+        await type(self).viewroles.callback(self, ctx, selection=selection)
+
     @roletools.command(aliases=["viewrole"])
     @commands.bot_has_permissions(embed_links=True)
     async def viewroles(self, ctx: Context, *, selection: Optional[str] = None) -> None:
-        """View available self-roles or the complete manager configuration.
+        """View available or configured roles.
 
         `[selection]` may be `available`, `configured`, or a role mention, ID, or name.
         Members see availability by default. Managers can use `configured` for the full report.
@@ -709,6 +805,7 @@ class RoleTools(
             lines = []
             member_role_ids = {item.id for item in ctx.author.roles}
             currency = await bank.get_currency_name(ctx.guild)
+            advanced_ids = set(await self.restricted_role_ids(ctx.guild))
             candidates = [role] if role else ctx.guild.roles
             for item in candidates:
                 data = settings_by_id.get(item.id, {})
@@ -745,7 +842,8 @@ class RoleTools(
                 if blockers:
                     action = f"cannot {'remove' if can_remove else 'add'} yet ({humanize_list(blockers)})"
                 suffix = f" — {'; '.join(details)}" if details else ""
-                lines.append(f"**{item.name}** — {action}{suffix}")
+                label = f"{item.name} (Advanced)" if item.id in advanced_ids else item.name
+                lines.append(f"**{label}** — {action}{suffix}")
 
             if not lines:
                 await ctx.send(
@@ -753,7 +851,10 @@ class RoleTools(
                     f"them with `{ctx.clean_prefix}roletools adminhelp`."
                 )
                 return
-            intro = f"Use `{ctx.clean_prefix}roletools selfrole @Role` to add or remove one."
+            intro = (
+                f"Use Red’s `{ctx.clean_prefix}selfrole @Role` for ordinary roles. "
+                f"Advanced Bank/rule roles use `{ctx.clean_prefix}roletools selfrole @Role`."
+            )
             title = "Available self-roles"
         else:
             lines = []

@@ -19,7 +19,7 @@ class RoleToolsInclusive(RoleToolsMixin):
     @roletools.group(name="include", aliases=["inclusive"])
     async def inclusive(self, ctx: Context) -> None:
         """
-        Set role inclusion
+        Manage linked roles.
         """
 
     @inclusive.command(name="add")

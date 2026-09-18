@@ -58,7 +58,7 @@ class RoleToolsMixin(ABC):
         )
         embed.add_field(
             name="1. View available self-roles",
-            value=f"`{prefix}roletools viewroles` shows roles you can add or remove. It also explains when none are configured.",
+            value=f"`{prefix}selfroles` lists roles you can add or remove (`{prefix}roletools viewroles` also works).",
             inline=False,
         )
         embed.add_field(
@@ -72,8 +72,17 @@ class RoleToolsMixin(ABC):
             inline=False,
         )
         embed.add_field(
+            name="Server managers",
+            value=(
+                f"`{prefix}roletools setup` opens the interactive role catalog, publishing, "
+                f"synchronization, and removal controls. `{prefix}roletools adminhelp` shows "
+                "the advanced command-based setup options."
+            ),
+            inline=False,
+        )
+        embed.add_field(
             name="Need more detail?",
-            value=f"`{prefix}help roletools selfrole` explains the command. Server managers: `{prefix}roletools adminhelp`.",
+            value=f"`{prefix}help roletools selfrole` explains member role commands. `{prefix}help roletools setup` explains the manager setup card.",
             inline=False,
         )
         await ctx.send(embed=embed)

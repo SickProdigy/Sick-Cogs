@@ -19,7 +19,7 @@ class RoleToolsExclusive(RoleToolsMixin):
     @roletools.group(name="exclude", aliases=["exclusive"])
     async def exclusive(self, ctx: Context) -> None:
         """
-        Set role exclusions
+        Manage conflicting roles.
         """
 
     @exclusive.command(name="add")

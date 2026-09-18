@@ -21,7 +21,7 @@ _ = Translator("RoleTools", __file__)
 class RoleToolsMessages(RoleToolsMixin):
     @roletools.group(name="message", with_app_command=False)
     async def roletools_message(self, ctx: commands.Context):
-        """Commands for sending/editing messages for roletools"""
+        """Manage RoleTools messages."""
         pass
 
     async def check_totals(self, ctx: commands.Context, buttons: int, menus: int) -> bool:

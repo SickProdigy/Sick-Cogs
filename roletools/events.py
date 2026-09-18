@@ -265,6 +265,32 @@ class RoleToolsEvents(RoleToolsMixin):
         check_cost: bool = True,
         atomic: Optional[bool] = None,
     ) -> List[RoleChangeResponse]:
+        key = (member.guild.id, member.id)
+        lock = self._role_transaction_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            return await self._give_roles_unlocked(
+                member,
+                roles,
+                reason,
+                check_required=check_required,
+                check_exclusive=check_exclusive,
+                check_inclusive=check_inclusive,
+                check_cost=check_cost,
+                atomic=atomic,
+            )
+
+    async def _give_roles_unlocked(
+        self,
+        member: discord.Member,
+        roles: List[discord.Role],
+        reason: Optional[str] = None,
+        *,
+        check_required: bool = True,
+        check_exclusive: bool = True,
+        check_inclusive: bool = True,
+        check_cost: bool = True,
+        atomic: Optional[bool] = None,
+    ) -> List[RoleChangeResponse]:
         """
         Handles all the logic for applying roles to a user
 
@@ -299,6 +325,9 @@ class RoleToolsEvents(RoleToolsMixin):
                 large numbers of members getting roles
         """
         ret = []
+        pending_costs = {}
+        to_remove = set()
+        initial_roles = set(member.roles)
         if self.is_discord:
             if not member.guild.get_member(member.id):
                 log.debug(
@@ -344,7 +373,7 @@ class RoleToolsEvents(RoleToolsMixin):
                         RoleChangeResponse(role, _("The Role requested no longer exists."), False)
                     )
                 continue
-            if role in to_add and not atomic:
+            if role in initial_roles:
                 ret.append(
                     RoleChangeResponse(
                         role,
@@ -387,31 +416,7 @@ class RoleToolsEvents(RoleToolsMixin):
                         )
                         continue
             if (cost := await self.config.role(role).cost()) and check_cost:
-                currency_name = await bank.get_currency_name(guild)
-                msg = _(
-                    "You do not have enough {currency_name} to acquire "
-                    "this role. You need {cost} {currency_name}."
-                ).format(currency_name=currency_name, cost=cost)
-                if await bank.can_spend(member, cost):
-                    try:
-                        await bank.withdraw_credits(member, cost)
-                    except Exception:
-                        log.info(
-                            "Could not assign %s to %s as they don't have enough credits.",
-                            role,
-                            member,
-                        )
-                        ret.append(RoleChangeResponse(role, msg, False))
-                        continue
-                else:
-                    log.info(
-                        "Could not assign %s to %s as they don't have enough credits.",
-                        role,
-                        member,
-                    )
-
-                    ret.append(RoleChangeResponse(role, msg, False))
-                    continue
+                pending_costs[role] = int(cost)
             if (inclusive := await self.config.role(role).inclusive_with()) and check_inclusive:
                 inclusive_roles = []
                 for role_id in inclusive:
@@ -424,8 +429,6 @@ class RoleToolsEvents(RoleToolsMixin):
                     if r and await self.config.role(r).selfassignable():
                         to_add.add(r)
                         inclusive_roles.append(r)
-                if atomic:
-                    await member.add_roles(*inclusive_roles, reason=_("Inclusive Roles"))
             if (exclusive := await self.config.role(role).exclusive_to()) and check_exclusive:
                 skip_role_assign = False
                 exclusive_roles = []
@@ -451,40 +454,114 @@ class RoleToolsEvents(RoleToolsMixin):
                             # to apply the initial role to begin with
                             skip_role_assign = True
                 if skip_role_assign:
-                    # we want to skip assigning the role which means the continue
-                    # needs to be here
-                    # I don't think we should be removing roles at all if this
-                    # is the case but if required this can be adjusted in the future
+                    pending_costs.pop(role, None)
+                    ret.append(
+                        RoleChangeResponse(
+                            role,
+                            _("A conflicting role cannot be removed, so this role was not assigned."),
+                            False,
+                        )
+                    )
                     continue
                 if atomic:
-                    await member.remove_roles(*exclusive_roles, reason=_("Exclusive Roles"))
+                    to_remove.update(exclusive_roles)
             to_add.add(role)
-        for role in to_add:
-            duration = await self.config.role(role).duration()
-            if duration is not None:
-                temp_role = {
-                    "user_id": member.id,
-                    "role_id": role.id,
-                    "remove_at": int(
-                        (datetime.now(timezone.utc) + timedelta(seconds=duration)).timestamp()
-                    ),
-                }
-                async with self.config.guild(guild).temporary_roles() as temp_roles:
-                    edited = False
-                    for temp in temp_roles:
-                        if temp["user_id"] == member.id and temp["role_id"] == role.id:
-                            temp.update(temp_role)
-                            edited = True
-                    if not edited:
-                        temp_roles.append(temp_role)
-        log.debug("Adding %s to %s", to_add, member.name)
-        if atomic:
-            log.debug("Atomic is true")
-            await member.add_roles(*list(to_add), reason=reason)
-        else:
-            log.debug("Atomic is false")
-            await member.edit(roles=list(to_add), reason=reason)
+
+        total_cost = sum(pending_costs.values())
+        balance_before = None
+        if total_cost:
+            currency_name = await bank.get_currency_name(guild)
+            if not await bank.can_spend(member, total_cost):
+                for role, cost in pending_costs.items():
+                    ret.append(
+                        RoleChangeResponse(
+                            role,
+                            _("You do not have enough {currency_name} to acquire this role. You need {cost} {currency_name}.").format(
+                                currency_name=currency_name, cost=cost
+                            ),
+                            False,
+                        )
+                    )
+                return ret
+            balance_before = await bank.get_balance(member)
+            try:
+                await bank.withdraw_credits(member, total_cost)
+            except Exception:
+                log.exception("Could not withdraw %s credits from %s", total_cost, member)
+                for role, cost in pending_costs.items():
+                    ret.append(
+                        RoleChangeResponse(
+                            role,
+                            _("The {cost} {currency_name} payment could not be completed.").format(
+                                cost=cost, currency_name=currency_name
+                            ),
+                            False,
+                        )
+                    )
+                return ret
+
+        newly_added = set(to_add).difference(initial_roles)
+        try:
+            log.debug("Adding %s to %s", to_add, member.name)
+            if atomic:
+                log.debug("Atomic is true")
+                if to_remove:
+                    await member.remove_roles(*list(to_remove), reason=_("Exclusive Roles"))
+                await member.add_roles(*list(to_add), reason=reason)
+            else:
+                log.debug("Atomic is false")
+                await member.edit(roles=list(to_add), reason=reason)
+            for role in newly_added:
+                duration = await self.config.role(role).duration()
+                if duration is not None:
+                    await self.schedule_temporary_role(member, role, duration, extend=False)
+        except Exception:
+            try:
+                if atomic and newly_added:
+                    await member.remove_roles(*list(newly_added), reason=_("Role assignment rollback"))
+                elif not atomic:
+                    await member.edit(roles=list(initial_roles), reason=_("Role assignment rollback"))
+            except discord.HTTPException:
+                log.exception("Could not remove newly assigned roles during rollback for %s", member)
+            if total_cost and balance_before is not None:
+                try:
+                    await bank.deposit_credits(member, total_cost)
+                except Exception:
+                    log.critical(
+                        "Could not refund %s credits to %s after failed role assignment",
+                        total_cost,
+                        member,
+                        exc_info=True,
+                    )
+            if atomic and to_remove:
+                try:
+                    await member.add_roles(*list(to_remove), reason=_("Role assignment rollback"))
+                except discord.HTTPException:
+                    log.exception("Could not restore exclusive roles during rollback for %s", member)
+            raise
         return ret
+
+    async def schedule_temporary_role(
+        self,
+        member: discord.Member,
+        role: discord.Role,
+        duration: int,
+        *,
+        extend: bool = False,
+    ) -> int:
+        now = datetime.now(timezone.utc).timestamp()
+        remove_at = int(now + duration)
+        async with self.config.guild(member.guild).temporary_roles() as temp_roles:
+            for temp in temp_roles:
+                if temp["user_id"] == member.id and temp["role_id"] == role.id:
+                    if extend:
+                        remove_at = int(max(float(temp["remove_at"]), now) + duration)
+                    temp["remove_at"] = remove_at
+                    return remove_at
+            temp_roles.append(
+                {"user_id": member.id, "role_id": role.id, "remove_at": remove_at}
+            )
+        return remove_at
 
     async def remove_roles(
         self,

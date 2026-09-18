@@ -29,7 +29,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a user can apply the role to themselves.
+        Allow self-assignment.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -72,7 +72,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a user can remove the role from themselves.
+        Allow self-removal.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -109,7 +109,7 @@ class RoleToolsSettings(RoleToolsMixin):
     @commands.admin_or_permissions(manage_roles=True)
     async def atomic(self, ctx: Context, true_or_false: Optional[Union[bool, str]] = None) -> None:
         """
-        Set the atomicity of role assignment.
+        Configure safe role changes.
         What this means is that when this is `True` roles will be
         applied inidvidually and not cause any errors. When this
         is set to `False` roles will be grouped together into one call.
@@ -192,7 +192,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set the cost to acquire a role.
+        Set a role Bank cost.
 
         `[cost]` The price you want to set the role at in bot credits.
         Setting this to 0 or lower will remove the cost.
@@ -251,7 +251,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set whether or not a role will be re-applied when a user leaves and rejoins the server.
+        Configure sticky roles.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -289,7 +289,7 @@ class RoleToolsSettings(RoleToolsMixin):
         role: RoleHierarchyConverter,
     ) -> None:
         """
-        Set a role to be automatically applied when a user joins the server.
+        Configure join roles.
 
         `[true_or_false]` optional boolean of what to set the setting to.
         If not provided the current setting will be shown instead.
@@ -342,7 +342,7 @@ class RoleToolsSettings(RoleToolsMixin):
     @roletools.group(name="notify", aliases=["notifications"], invoke_without_command=True)
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_notify(self, ctx: Context) -> None:
-        """Configure an opt-in channel for successful member role-change notices."""
+        """Configure role notices."""
         channel_id = await self.config.guild(ctx.guild).notification_channel()
         channel = ctx.guild.get_channel(channel_id) if channel_id else None
         if channel is None:
