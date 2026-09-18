@@ -101,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.7"
+    __version__ = "1.12.8"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -740,6 +740,7 @@ class RoleTools(
             lines = []
             member_role_ids = {item.id for item in ctx.author.roles}
             currency = await bank.get_currency_name(ctx.guild)
+            advanced_ids = set(await self.restricted_role_ids(ctx.guild))
             candidates = [role] if role else ctx.guild.roles
             for item in candidates:
                 data = settings_by_id.get(item.id, {})
@@ -776,7 +777,8 @@ class RoleTools(
                 if blockers:
                     action = f"cannot {'remove' if can_remove else 'add'} yet ({humanize_list(blockers)})"
                 suffix = f" — {'; '.join(details)}" if details else ""
-                lines.append(f"**{item.name}** — {action}{suffix}")
+                label = f"{item.name} (Advanced)" if item.id in advanced_ids else item.name
+                lines.append(f"**{label}** — {action}{suffix}")
 
             if not lines:
                 await ctx.send(
@@ -784,7 +786,10 @@ class RoleTools(
                     f"them with `{ctx.clean_prefix}roletools adminhelp`."
                 )
                 return
-            intro = f"Use `{ctx.clean_prefix}roletools selfrole @Role` to add or remove one."
+            intro = (
+                f"Use Red’s `{ctx.clean_prefix}selfrole @Role` for ordinary roles. "
+                f"Advanced Bank/rule roles use `{ctx.clean_prefix}roletools selfrole @Role`."
+            )
             title = "Available self-roles"
         else:
             lines = []

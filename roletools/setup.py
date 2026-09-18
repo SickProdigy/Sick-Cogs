@@ -257,48 +257,21 @@ class RoleToolsSetupView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="Self-role library", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Self-roles", style=discord.ButtonStyle.primary, row=0)
     async def basic_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Ordinary roles also work with Red’s `selfrole`. Advanced roles stay inside RoleTools so Red bank costs, temporary access, requirements, and conflicts cannot be bypassed.",
-            view=SelfRoleLibraryView(self.cog, interaction.user), ephemeral=True,
+            embed=await self.cog.catalog_embed(interaction.guild, restricted=False),
+            view=CatalogEditorView(self.cog, interaction.user, restricted=False), ephemeral=True,
         )
 
-    @discord.ui.button(label="Menu text", style=discord.ButtonStyle.secondary, row=0)
-    async def appearance(self, interaction: discord.Interaction, button: discord.ui.Button):
-        _, data = await self.cog.ensure_setup_picker(interaction.guild)
-        await interaction.response.send_modal(
-            SelfRoleAppearanceModal(self.cog, interaction.guild, data)
-        )
-
-    @discord.ui.button(label="Quick publish all roles", style=discord.ButtonStyle.success, row=1)
-    async def publish(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Advanced roles (Bank/rules)", style=discord.ButtonStyle.secondary, row=0)
+    async def advanced_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Choose how members should use the public self-role card.",
-            view=SetupLayoutView(self.cog, interaction.user),
-            ephemeral=True,
+            embed=await self.cog.catalog_embed(interaction.guild, restricted=True),
+            view=CatalogEditorView(self.cog, interaction.user, restricted=True), ephemeral=True,
         )
 
-    @discord.ui.button(label="Sync published menu", style=discord.ButtonStyle.secondary, row=1)
-    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
-        synced = await self.cog.refresh_setup_picker(interaction.guild)
-        embed = await self.cog.setup_embed(interaction.guild)
-        await interaction.response.edit_message(embed=embed, view=RoleToolsSetupView(self.cog, interaction.user))
-        await interaction.followup.send(
-            "Published role menu synchronized." if synced else "Setup synchronized; publish a role menu when ready.",
-            ephemeral=True,
-        )
-
-    @discord.ui.button(label="Remove published menu", style=discord.ButtonStyle.danger, row=1)
-    async def remove_published(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "Remove the published role menu? Your self-role library, Advanced role rules, and Menu text settings will be kept.",
-            view=RemovePublishedMenuView(self.cog, interaction.user),
-            ephemeral=True,
-        )
-
-
-    @discord.ui.button(label="Manage role menus", style=discord.ButtonStyle.primary, row=2)
+    @discord.ui.button(label="Manage role menus", style=discord.ButtonStyle.success, row=1)
     async def manage_menus(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.open_named_menu_manager(interaction)
 
@@ -330,9 +303,12 @@ class NamedMenuChooseSelect(discord.ui.Select):
     def __init__(self, parent: "NamedMenuManagerView", menus):
         options = [discord.SelectOption(
             label=(data.get("display_name") or name)[:100], value=name,
-            description=f"{len(data.get('role_ids', []))} roles · {parent.cog.layout_name(data.get('layout'))}"[:100],
+            description=(
+                f"{parent.cog.layout_name(data.get('layout'))} · "
+                f"{'published' if data.get('message_id') else 'not published'}"
+            )[:100],
         ) for name, data in menus[:25]]
-        super().__init__(placeholder="Choose a saved role menu", options=options, row=0)
+        super().__init__(placeholder="Choose a role menu to manage", options=options, row=0)
         self.parent_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -485,8 +461,11 @@ class NamedMenuEditorView(discord.ui.View):
         super().__init__(timeout=900)
         self.cog, self.author, self.name = cog, author, name
         data = cog.settings.get(author.guild.id, {}).get("pickers", {}).get(name, {})
-        self.add_item(NamedMenuRoleSelect(self, add=True))
-        self.add_item(NamedMenuRoleSelect(self, add=False))
+        if name != SETUP_PICKER_NAME:
+            self.add_item(NamedMenuRoleSelect(self, add=True))
+            self.add_item(NamedMenuRoleSelect(self, add=False))
+        else:
+            self.remove_item(self.use_all)
         self.add_item(NamedMenuLayoutSelect(self, data.get("layout", "private")))
 
     @discord.ui.button(label="Menu text", style=discord.ButtonStyle.secondary, row=3)
@@ -611,9 +590,11 @@ class RoleToolsSetup(RoleToolsMixin):
 
     async def named_role_menus(self, guild: discord.Guild):
         pickers = await self.config.guild(guild).pickers()
+        if SETUP_PICKER_NAME in pickers:
+            pickers[SETUP_PICKER_NAME].setdefault("display_name", "All roles (default)")
         return sorted(
-            ((name, data) for name, data in pickers.items() if name != SETUP_PICKER_NAME),
-            key=lambda item: (item[1].get("display_name") or item[0]).lower(),
+            pickers.items(),
+            key=lambda item: (item[0] != SETUP_PICKER_NAME, (item[1].get("display_name") or item[0]).lower()),
         )
 
     async def create_named_role_menu(self, guild: discord.Guild, display_name: str, title: str):
@@ -667,7 +648,7 @@ class RoleToolsSetup(RoleToolsMixin):
             return False
         pickers = await self.config.guild(guild).pickers()
         data = pickers.get(name)
-        if data is None or name == SETUP_PICKER_NAME:
+        if data is None:
             return False
         data["layout"] = layout
         pickers[name] = data
@@ -754,24 +735,30 @@ class RoleToolsSetup(RoleToolsMixin):
             listing += f"\n…and {len(roles) - 30} more."
         published = f"<#{data.get('channel_id')}>" if data.get("message_id") else "Not published"
         embed = discord.Embed(
-            title=data.get("display_name") or "Saved role menu", description=listing,
+            title=data.get("display_name") or ("All roles (default)" if name == SETUP_PICKER_NAME else "Saved role menu"),
+            description=listing,
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Layout", value=self.layout_name(data.get("layout")))
         embed.add_field(name="Destination", value=published)
-        embed.set_footer(text="Roles must first exist in the shared self-role library.")
+        embed.set_footer(text=(
+            "This default menu always follows the complete Self-role and Advanced-role lists."
+            if name == SETUP_PICKER_NAME else
+            "This menu uses a selected subset of the Self-role and Advanced-role lists."
+        ))
         return embed
 
     async def open_named_menu_manager(self, interaction: discord.Interaction) -> None:
         menus = await self.named_role_menus(interaction.guild)
         description = (
-            "Create separate menus for games, ranks, platforms, or other groups. "
-            "Every menu selects from the same self-role library; Advanced roles keep their Bank and access rules."
+            "Select a menu to see its layout and destination, edit its text, publish or move it, sync it, "
+            "or unpublish it. The default All roles menu follows both role lists automatically; create another "
+            "menu for a smaller group such as games, ranks, or platforms."
         )
         if len(menus) > 25:
             description += " Showing the first 25 menus."
         embed = discord.Embed(title="Manage role menus", description=description, color=discord.Color.blurple())
-        embed.add_field(name="Saved menus", value=str(len(menus)))
+        embed.add_field(name="Role menus", value=str(len(menus)))
         await interaction.response.send_message(
             embed=embed, view=NamedMenuManagerView(self, interaction.user, menus), ephemeral=True
         )
