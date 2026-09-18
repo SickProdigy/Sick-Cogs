@@ -244,6 +244,130 @@ class SelfRoleLibraryView(discord.ui.View):
         return True
 
 
+class PrivateGroupCreateModal(discord.ui.Modal):
+    def __init__(self, cog, author: discord.Member):
+        super().__init__(title="Create private role group")
+        self.cog, self.author = cog, author
+        self.name_input = discord.ui.TextInput(
+            label="Group name", placeholder="VIP Gold, Competitive Team, Course 2", max_length=40
+        )
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        name, message = await self.cog.create_private_group(
+            interaction.guild, str(self.name_input.value)
+        )
+        if name is None:
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+        await interaction.response.send_message(
+            message, embed=await self.cog.private_group_embed(interaction.guild, name),
+            view=PrivateGroupEditorView(self.cog, interaction.user, name), ephemeral=True,
+        )
+
+
+class PrivateGroupChooseSelect(discord.ui.Select):
+    def __init__(self, parent: "PrivateGroupManagerView", groups):
+        options = [discord.SelectOption(
+            label=(data.get("display_name") or name)[:100], value=name,
+            description=f"{len(data.get('role_ids', []))} roles · menu {data.get('menu_name')}"[:100],
+        ) for name, data in groups[:25]]
+        super().__init__(placeholder="Choose a private group to manage", options=options)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        name = self.values[0]
+        await interaction.response.send_message(
+            embed=await self.parent_view.cog.private_group_embed(interaction.guild, name),
+            view=PrivateGroupEditorView(self.parent_view.cog, interaction.user, name), ephemeral=True,
+        )
+
+
+class PrivateGroupRoleSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "PrivateGroupEditorView", *, add: bool):
+        super().__init__(
+            placeholder=("Add gated selectable roles" if add else "Remove selectable roles"),
+            min_values=1, max_values=25, row=0 if add else 1,
+        )
+        self.parent_view, self.add = parent, add
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        changed, notes = await self.parent_view.cog.update_private_group_roles(
+            interaction.guild, self.parent_view.name, list(self.values), add=self.add
+        )
+        embed = await self.parent_view.cog.private_group_embed(interaction.guild, self.parent_view.name)
+        summary = f"{'Added' if self.add else 'Removed'} {changed} role(s)."
+        if notes:
+            summary += "\n" + "\n".join(notes)
+        embed.add_field(name="Last change", value=summary[:1024], inline=False)
+        await interaction.response.edit_message(
+            embed=embed, view=PrivateGroupEditorView(
+                self.parent_view.cog, interaction.user, self.parent_view.name
+            )
+        )
+
+
+class PrivateGroupGatewaySelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "PrivateGroupEditorView"):
+        super().__init__(placeholder="Choose the staged-access gateway role", min_values=1, max_values=1, row=2)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        _, message = await self.parent_view.cog.set_private_group_gateway(
+            interaction.guild, self.parent_view.name, self.values[0]
+        )
+        embed = await self.parent_view.cog.private_group_embed(interaction.guild, self.parent_view.name)
+        embed.add_field(name="Last change", value=message[:1024], inline=False)
+        await interaction.response.edit_message(
+            embed=embed, view=PrivateGroupEditorView(
+                self.parent_view.cog, interaction.user, self.parent_view.name
+            )
+        )
+
+
+class PrivateGroupEditorView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=900)
+        self.cog, self.author, self.name = cog, author, name
+        self.add_item(PrivateGroupRoleSelect(self, add=True))
+        self.add_item(PrivateGroupRoleSelect(self, add=False))
+        self.add_item(PrivateGroupGatewaySelect(self))
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=3)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Private group changes saved.", embed=None, view=None)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("Manage Roles is required.", ephemeral=True)
+            return False
+        return True
+
+
+class PrivateGroupManagerView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, groups):
+        super().__init__(timeout=900)
+        self.cog, self.author = cog, author
+        if groups:
+            self.add_item(PrivateGroupChooseSelect(self, groups))
+
+    @discord.ui.button(label="Create private group", style=discord.ButtonStyle.success, row=1)
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(PrivateGroupCreateModal(self.cog, self.author))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("Manage Roles is required.", ephemeral=True)
+            return False
+        return True
+
+
 class RoleToolsSetupView(discord.ui.View):
     def __init__(self, cog, author: discord.Member):
         super().__init__(timeout=900)
@@ -276,6 +400,25 @@ class RoleToolsSetupView(discord.ui.View):
     @discord.ui.button(label="Manage role menus", style=discord.ButtonStyle.success, row=1)
     async def manage_menus(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.open_named_menu_manager(interaction)
+
+    @discord.ui.button(label="Private gated groups", style=discord.ButtonStyle.secondary, row=1)
+    async def private_groups(self, interaction: discord.Interaction, button: discord.ui.Button):
+        groups = sorted(
+            (await self.cog.private_groups(interaction.guild)).items(),
+            key=lambda item: (item[1].get("display_name") or item[0]).lower(),
+        )
+        embed = discord.Embed(
+            title="Private gated role groups",
+            description=(
+                "Create reusable staged-access groups, select their roles, and choose a gateway role. "
+                "Requirements, conflicts, Bank cost, duration, and publishing are also available under "
+                "`roletools group`."
+            ), color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Configured groups", value=str(len(groups)))
+        await interaction.response.send_message(
+            embed=embed, view=PrivateGroupManagerView(self.cog, interaction.user, groups), ephemeral=True
+        )
 
 
 class NamedMenuCreateModal(discord.ui.Modal):
@@ -822,9 +965,15 @@ class RoleToolsSetup(RoleToolsMixin):
         data = pickers.get(name)
         if data is None or name == SETUP_PICKER_NAME:
             return 0, ["That saved role menu no longer exists."]
+        groups = await self.private_groups(guild)
+        linked_groups = [key for key, group in groups.items() if group.get("menu_name") == name]
+        notes = []
+        if linked_groups and add:
+            _, catalog_notes = await self.update_role_catalog(guild, list(roles), restricted=True, add=True)
+            notes.extend(catalog_notes)
         allowed = set(await self.combined_catalog_ids(guild))
         current = list(data.get("role_ids", []))
-        changed, notes = 0, []
+        changed = 0
         for role in roles:
             if add and role.id not in allowed:
                 notes.append(f"Skipped {role.name}: add it to the self-role library first.")
@@ -839,6 +988,10 @@ class RoleToolsSetup(RoleToolsMixin):
         data["role_ids"] = current
         pickers[name] = data
         await self.save_role_menus(guild, pickers)
+        if linked_groups:
+            for group_name in linked_groups:
+                groups[group_name]["role_ids"] = list(current)
+            await self.save_private_groups(guild, groups)
         if data.get("message_id"):
             await self.sync_picker(guild, name, data)
         return changed, notes
@@ -991,7 +1144,12 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.save_role_menus(guild, pickers)
         return True, ("Menu archived. Its configuration was kept." if archived else "Menu restored to active management.")
 
-    async def delete_named_role_menu(self, guild: discord.Guild, name: str):
+    async def delete_named_role_menu(
+        self, guild: discord.Guild, name: str, *, allow_private_group: bool = False
+    ):
+        groups = await self.private_groups(guild)
+        if not allow_private_group and any(group.get("menu_name") == name for group in groups.values()):
+            return False, "Delete the linked private group instead of deleting its managed role menu."
         pickers = await self.config.guild(guild).pickers()
         data = pickers.get(name)
         if data is None or name == SETUP_PICKER_NAME:
@@ -1221,6 +1379,8 @@ class RoleToolsSetup(RoleToolsMixin):
             "reactions": "Single Reaction Card",
             "role_channel": "Managed Reaction Channel",
         }
+        groups = await self.private_groups(guild)
+        embed.add_field(name="Private gated groups", value=str(len(groups)))
         embed.add_field(name="Quick all-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:

@@ -107,7 +107,9 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
 class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def make_cog(self, pickers):
         picker_value = AsyncMock(return_value=pickers)
-        guild_config = SimpleNamespace(pickers=picker_value)
+        guild_config = SimpleNamespace(
+            pickers=picker_value, private_groups=AsyncMock(return_value={})
+        )
         cog = object.__new__(RoleTools)
         cog.config = SimpleNamespace(guild=MagicMock(return_value=guild_config))
         cog.settings = {}

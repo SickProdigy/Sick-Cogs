@@ -403,6 +403,7 @@ class RoleToolsMixin(ABC):
         check_exclusive: bool = True,
         check_inclusive: bool = True,
         check_cost: bool = True,
+        check_private_groups: bool = True,
     ) -> None:
         raise NotImplementedError()
 

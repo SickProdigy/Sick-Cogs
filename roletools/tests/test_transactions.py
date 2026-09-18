@@ -39,7 +39,8 @@ class RoleTransactionTests(unittest.IsolatedAsyncioTestCase):
         )
         records = records if records is not None else []
         guild_setting = SimpleNamespace(
-            temporary_roles=MagicMock(side_effect=lambda: AsyncListContext(records))
+            temporary_roles=MagicMock(side_effect=lambda: AsyncListContext(records)),
+            private_groups=AsyncMock(return_value={}),
         )
         cog = object.__new__(RoleTools)
         cog.is_discord = False
@@ -72,6 +73,23 @@ class RoleTransactionTests(unittest.IsolatedAsyncioTestCase):
         withdraw.assert_awaited_once_with(member, 500)
         refund.assert_awaited_once_with(member, 500)
         member.remove_roles.assert_awaited_once()
+
+    async def test_private_group_denial_stops_assignment_before_charge(self):
+        cog, _ = self.make_cog(cost=500)
+        cog.private_group_role_access = AsyncMock(return_value=(False, "Join VIP first."))
+        role = FakeRole(10)
+        bot_member = SimpleNamespace(
+            guild_permissions=SimpleNamespace(manage_roles=True), top_role=object()
+        )
+        guild = SimpleNamespace(id=1, me=bot_member, get_role=lambda role_id: None)
+        member = SimpleNamespace(id=2, name="Buyer", guild=guild, roles=[])
+        member.add_roles = AsyncMock()
+        member.edit = AsyncMock()
+
+        responses = await cog.give_roles(member, [role], atomic=True)
+
+        self.assertEqual(responses[0].reason, "Join VIP first.")
+        member.add_roles.assert_awaited_once_with(reason=None)
 
     async def test_extension_adds_time_to_existing_expiration(self):
         existing = {"user_id": 2, "role_id": 10, "remove_at": 2_000_000_000}

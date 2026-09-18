@@ -4,7 +4,7 @@
     "disabled": false,
     "end_user_data_statement": "This cog stores user IDs for the purpose of re-assigning sticky roles when a user rejoins a server. User IDs may also appear in bot logs.",
     "hidden": false,
-    "install_msg": "Use `[p]roletools` for the member guide and `[p]roletools adminhelp` for server setup.",
+    "install_msg": "Use `[p]roletools` for the member guide and `[p]roletools setup` for role catalogs, menus, and private gated groups.",
     "min_bot_version": "3.5.0",
     "min_python_version": [3, 8, 1],
     "name": "RoleTools",
@@ -14,5 +14,5 @@
     "short": "Various role-related tools",
     "tags": ["utility", "mod", "roles"],
     "type": "COG",
-    "version": "1.12.15"
+    "version": "1.13.0"
 }
