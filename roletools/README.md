@@ -1,21 +1,30 @@
 # RoleTools
 
-RoleTools is a Red-DiscordBot cog for managing self roles, sticky roles, automatic roles, reaction roles, button roles, dropdown roles, temporary roles, paid roles, and role relationship rules.
+RoleTools is a companion to Red-DiscordBot’s built-in self-role system. It keeps ordinary self-roles native and familiar, then adds the menus, automation, and policy controls needed when a server outgrows a simple role list.
 
-It is intended for servers that need more control and less manual message maintenance than Discord's built-in onboarding tools or separate one-purpose role cogs provide.
+Members can continue using Red’s `[p]selfrole` command. Managers can build on that foundation with buttons, dropdowns, reactions, paid or temporary roles, prerequisites, conflicts, notifications, and private access groups—all without maintaining several disconnected role cogs.
 
-## Why Use Sick-Cogs RoleTools?
+## Built On Red, Not Around It
 
-RoleTools combines the member interface, manager interface, publishing system, and assignment rules in one cog:
+RoleTools separates roles by what they need:
 
-- **Built-in setup GUI:** `[p]roletools setup` uses Discord buttons, role selectors, channel selectors, and forms. Routine setup does not require memorizing long commands or creating internal option names.
-- **One reusable role library:** Ordinary and Advanced roles can be reused across multiple menus instead of being configured separately for buttons, dropdowns, and reactions.
-- **Multiple managed menus:** Publish the default All Roles menu plus focused menus for games, ranks, platforms, notifications, or VIP access. Each menu keeps its own title, instructions, layout, destination, and reaction settings.
-- **Four scalable layouts:** Choose a private paged Button Role Menu, public dropdowns, a multi-message Single Reaction Card, or a Managed Reaction Channel.
-- **Automation instead of message rebuilding:** RoleTools synchronizes managed messages, creates overflow pages, preserves reusable reaction-channel slots, removes surplus messages, and maintains reaction-to-role bindings.
-- **Rules that cannot be bypassed:** Advanced roles stay outside Red's ordinary `selfrole` list, allowing RoleTools to enforce Red Bank costs, temporary access, requirements, inclusive roles, and conflicts.
-- **Native Red compatibility:** Ordinary roles use Red Admin's canonical self-role list, so `[p]selfrole <role>` continues to work while RoleTools adds richer menus and automation around it.
-- **Transactional paid roles:** Credit withdrawal, Discord assignment, and temporary-role persistence are handled as one operation, with a refund when assignment fails.
+- **Ordinary self-roles** stay in Red Admin’s canonical self-role list. They work with native `[p]selfrole`, appear in RoleTools menus, and remain compatible with Red’s existing permission and Downloader behavior.
+- **Advanced roles** are for special actions or assignment rules, such as Red Bank costs, temporary access, prerequisite roles, bundled roles, or mutually exclusive choices. RoleTools keeps these outside the native list so members cannot bypass their rules.
+- **Private access groups** add an optional membership layer. A member must hold the group’s access role before choosing the roles inside that group. Ordinary roles are never placed into a group automatically.
+
+This lets a server start with Red’s straightforward self-roles and introduce advanced behavior only where it provides a real benefit. Existing reaction-role messages and stored role mappings remain part of the same system rather than being replaced.
+
+## What RoleTools Adds
+
+- **Guided setup:** `[p]roletools setup` uses Discord buttons, role selectors, channel selectors, and forms instead of requiring managers to memorize a large command tree.
+- **One shared role library:** Ordinary and Advanced roles can appear in multiple focused menus without duplicating their configuration.
+- **Managed role menus:** Publish an automatic All Roles menu or smaller menus for games, ranks, platforms, notifications, and VIP access. Each menu has its own text, layout, destination, and lifecycle.
+- **Scalable layouts:** Choose a private paged Button Role Menu, public dropdowns, a Single Reaction Card, or a Managed Reaction Channel. Large role collections are split around Discord’s limits automatically.
+- **Safe advanced actions:** Bank withdrawal, role assignment, and temporary-role persistence are handled together. Failed assignments are refunded instead of leaving members charged without a role.
+- **Rules across every RoleTools path:** Costs, durations, prerequisites, included roles, conflicts, and private-group access are checked consistently for commands, buttons, dropdowns, and reactions.
+- **Less message maintenance:** Synchronization reuses existing messages where possible, creates overflow pages, removes surplus managed messages, and preserves reaction bindings.
+- **Clear member and manager views:** Members see what they can choose; managers can inspect complete configuration, missing roles, and publication health.
+- **Optional notifications:** Servers can log successful self-role, reaction, button, and dropdown changes without making notices mandatory.
 
 ## User Commands
 
@@ -68,11 +77,12 @@ Automatic recurring withdrawals are not enabled. Future subscription-style offer
 
 ## Interactive Self-Role Setup
 
-Run `[p]roletools setup` to open the manager-only GUI. Its first card deliberately has three jobs:
+Run `[p]roletools setup` to open the manager-only GUI. The first card separates the four main setup areas:
 
 - **Self-roles** manages ordinary roles. These live in Red Admin's canonical self-role list and work through native `[p]selfrole` as well as RoleTools menus.
 - **Advanced roles (Bank/rules)** manages RoleTools-only roles. Use these for Red Bank costs, temporary access, required roles, inclusive roles, and conflicts so the rules cannot be bypassed through native `selfrole`.
 - **Manage role menus** opens the publishing dashboard.
+- **Private access groups** protects a collection of roles behind a membership role, with optional prerequisites, Bank cost, and temporary access.
 
 ### Managed Role Menus
 
@@ -89,7 +99,7 @@ Selecting a menu shows its saved roles, current layout, and destination. From th
 - configure reaction behavior;
 - add or remove a named menu's role subset, or fill it from the complete library.
 
-This keeps creation, inspection, publication, movement, synchronization, and removal in one GUI instead of spreading those operations across unrelated commands. The manager paginates after 25 saved menus and includes name/ID search.
+This keeps creation, inspection, publication, movement, synchronization, and removal in one GUI instead of spreading those operations across unrelated commands. The manager shows a compact summary of every saved menu. Pagination controls appear only when more than 25 saved menus require them.
 
 ### Publication Layouts
 
