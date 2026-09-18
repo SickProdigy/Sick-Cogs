@@ -118,6 +118,41 @@ The command equivalents live under `[p]roletools menu`:
 
 Legacy button, select, reaction, and message commands remain available for specialized layouts and compatibility.
 
+## Private Gated Groups
+
+Private groups are a separate staged-access layer built on the same named-menu publisher and safe role transaction service. They are useful for progressions such as `Member → VIP → VIP Gold`, courses, teams, supporter areas, ranks, or gated game sections.
+
+Open `[p]roletools setup` and choose **Private gated groups** to create a group, select its roles, and assign a gateway role. Command equivalents provide the complete rule set:
+
+```text
+[p]roletools group
+[p]roletools group create VIP Gold
+[p]roletools group view vip-gold
+[p]roletools group roles add vip-gold @VIP-Lounge @VIP-Games
+[p]roletools group gateway vip-gold @VIP-Gold
+[p]roletools group required add vip-gold @VIP
+[p]roletools group required mode vip-gold all
+[p]roletools group conflicts add vip-gold @Suspended
+[p]roletools group cost vip-gold 500
+[p]roletools group duration vip-gold 43200
+[p]roletools group publish vip-gold #roles dropdown
+```
+
+Members use `[p]roletools group join vip-gold` to acquire the gateway after requirements, conflicts, hierarchy, and Red Bank balance are checked. Duration values are minutes; `0` means permanent. Joining never creates an automatic renewal. `[p]roletools group leave vip-gold` removes the gateway and roles belonging to that group without refunding the one-time entry cost.
+
+Each group owns an ordinary named role menu, so it can publish as a Button Role Menu, Public Dropdowns, Single Reaction Card, or Managed Reaction Channel. Group roles are moved into the Advanced catalog and every RoleTools assignment path rechecks the group's requirements, conflicts, archive state, and gateway. This prevents native `selfrole`, component, or reaction paths from bypassing gated access.
+
+Groups can be described, archived/restored, and safely deleted with:
+
+```text
+[p]roletools group description vip-gold Premium server areas and game groups.
+[p]roletools group archive vip-gold
+[p]roletools group restore vip-gold
+[p]roletools group delete vip-gold confirm
+```
+
+Changing or clearing a gateway restores the cost and duration settings that role had before the group took control. Deleting a group does not delete Discord roles.
+
 ## Reaction, Button, And Select Roles
 
 - `[p]roletools reaction create <message> <emoji> <role>` - Add a reaction role to a message.

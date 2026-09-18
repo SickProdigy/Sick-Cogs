@@ -263,6 +263,7 @@ class RoleToolsEvents(RoleToolsMixin):
         check_exclusive: bool = True,
         check_inclusive: bool = True,
         check_cost: bool = True,
+        check_private_groups: bool = True,
         atomic: Optional[bool] = None,
     ) -> List[RoleChangeResponse]:
         key = (member.guild.id, member.id)
@@ -276,6 +277,7 @@ class RoleToolsEvents(RoleToolsMixin):
                 check_exclusive=check_exclusive,
                 check_inclusive=check_inclusive,
                 check_cost=check_cost,
+                check_private_groups=check_private_groups,
                 atomic=atomic,
             )
 
@@ -289,6 +291,7 @@ class RoleToolsEvents(RoleToolsMixin):
         check_exclusive: bool = True,
         check_inclusive: bool = True,
         check_cost: bool = True,
+        check_private_groups: bool = True,
         atomic: Optional[bool] = None,
     ) -> List[RoleChangeResponse]:
         """
@@ -382,6 +385,11 @@ class RoleToolsEvents(RoleToolsMixin):
                     )
                 )
                 continue
+            if check_private_groups:
+                allowed, denial = await self.private_group_role_access(member, role)
+                if not allowed:
+                    ret.append(RoleChangeResponse(role, denial, False))
+                    continue
             require_any = await self.config.role(role).require_any()
             if (required := await self.config.role(role).required()) and check_required:
                 if require_any:

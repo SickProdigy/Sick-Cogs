@@ -20,6 +20,7 @@ from .converter import RawUserIds, RoleHierarchyConverter, SelfRoleConverter
 from .events import RoleToolsEvents
 from .exclusive import RoleToolsExclusive
 from .inclusive import RoleToolsInclusive
+from .groups import RoleToolsGroups
 from .menus import BaseMenu, ConfirmView, EmbedPages, RolePages
 from .messages import RoleToolsMessages
 from .picker import RoleToolsPicker
@@ -35,7 +36,7 @@ roletools = RoleToolsMixin.roletools
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
 ROLETOOLS_SCHEMA_VERSION = 2
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "MIGRATION_REVIEW": []}
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "private_groups": {}, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
 MEMBER_DEFAULTS = {"sticky_roles": []}
 ADVANCED_CATALOG_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
@@ -86,6 +87,7 @@ class RoleTools(
     RoleToolsButtons,
     RoleToolsExclusive,
     RoleToolsInclusive,
+    RoleToolsGroups,
     RoleToolsMessages,
     RoleToolsPicker,
     RoleToolsReactions,
@@ -102,7 +104,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.15"
+    __version__ = "1.13.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -409,7 +411,13 @@ class RoleTools(
             inline=False,
         )
         embed.add_field(
-            name="4. Optional role-change notices",
+            name="4. Private gated groups",
+            value=(f"`{prefix}roletools setup` includes private groups for staged access. "
+                   f"Use `{prefix}help roletools group` for requirements, gateway roles, Bank cost, duration, and publishing."),
+            inline=False,
+        )
+        embed.add_field(
+            name="5. Optional role-change notices",
             value=(f"`{prefix}roletools notify channel #role-log` posts successful reaction, "
                    "button, and select role changes there. Use "
                    f"`{prefix}roletools notify disable` to stop them."),
@@ -569,7 +577,7 @@ class RoleTools(
                 # tasks.append(m.add_roles(role, reason=_("Roletools Giverole command")))
                 tasks.append(
                     self.give_roles(
-                        m, [role], _("Roletools Giverole command"), check_cost=False, atomic=False
+                        m, [role], _("Roletools Giverole command"), check_cost=False, check_private_groups=False, atomic=False
                     )
                 )
             await bounded_gather(*tasks)
@@ -693,7 +701,9 @@ class RoleTools(
                     if role.id not in setting:
                         setting.append(role.id)
                 try:
-                    await self.give_roles(user, [role], reason=_("Forced Sticky Role"))
+                    await self.give_roles(
+                        user, [role], reason=_("Forced Sticky Role"), check_private_groups=False
+                    )
                 except discord.HTTPException:
                     errors.append(
                         _("There was an error force applying the role to {user}.\n").format(
