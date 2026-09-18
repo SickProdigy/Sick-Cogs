@@ -2,7 +2,7 @@
 
 RoleTools is a companion to Red-DiscordBot’s built-in self-role system. It keeps ordinary self-roles native and familiar, then adds the menus, automation, and policy controls needed when a server outgrows a simple role list.
 
-Members can continue using Red’s `[p]selfrole` command. Managers can build on that foundation with buttons, dropdowns, reactions, paid or temporary roles, prerequisites, conflicts, notifications, and private access groups—all without maintaining several disconnected role cogs.
+Members can continue using Red’s `[p]selfrole` command. Managers can build on that foundation with buttons, dropdowns, reactions, paid or temporary roles, prerequisites, conflicts, notifications, and private access groups, all without maintaining several disconnected role cogs.
 
 ## Built On Red, Not Around It
 
@@ -190,19 +190,10 @@ Changing or clearing an access role restores the cost and duration settings that
 - `[p]roletools temporary set <role> [duration]` - Set how long a role lasts after RoleTools applies it.
 - `[p]roletools temporary list [member]` - List pending temporary role removals.
 
-This cog stores role configuration, message/component IDs, and user IDs needed for sticky and temporary role behavior.
+## Upgrading Or Migrating
 
+Updates from an existing Sick-Cogs RoleTools installation preserve its configuration and managed-message mappings. Existing reaction roles, buttons, dropdowns, sticky roles, automatic roles, and temporary-role records are preserved.
 
-## Upgrading And Replacing RoleTools
+When replacing the older external RoleTools cog, Sick-Cogs RoleTools can import its RoleTools configuration along with legacy StickyRoles and Autorole data. The import reads the legacy namespaces as sources and does not automatically delete them.
 
-Upgrading from Sick-Cogs RoleTools on `main` is an in-place conversion: the Config identifier does not change. Schema 2 preserves existing settings, moves simple self-assignable/removable roles into Red Admin's native self-role list, classifies roles with Bank costs, durations, requirements, inclusions, or conflicts as Advanced, and removes Advanced roles from the native list so their rules cannot be bypassed. Existing manual Advanced classifications are preserved. If Red Admin is unavailable during conversion, roles remain safely Advanced and a review note is recorded.
-
-When replacing the older external RoleTools cog, Sick-Cogs RoleTools uses its separate Config namespace and imports the external RoleTools namespace plus legacy StickyRoles and Autorole data as read-only sources before applying the catalog conversion. Do not clear legacy Red data during replacement.
-
-After installing and loading Sick-Cogs RoleTools, a bot owner can run:
-
-```text
-[p]roletools migrationstatus
-```
-
-Review any warnings before testing existing reaction roles, button/select messages, sticky/automatic roles, temporary roles, and member self roles with `[p]roletools selfrole <role>`.
+After an upgrade or import, a bot owner can run `[p]roletools migrationstatus` to review the migration state and any warnings.
