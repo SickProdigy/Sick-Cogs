@@ -76,7 +76,7 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         changed, notes = await cog.update_role_catalog(guild, [role], restricted=False, add=True)
 
         self.assertEqual(changed, 0)
-        self.assertIn("Advanced self-roles", notes[0])
+        self.assertIn("Advanced roles", notes[0])
         admin_selfroles.set.assert_awaited_once_with([])
         restricted.set.assert_awaited_once_with([])
 

@@ -61,7 +61,7 @@ class CatalogEditorView(discord.ui.View):
         self.cog = cog
         self.author = author
         self.restricted = restricted
-        self.catalog_name = "Advanced self-role" if restricted else "Basic Red self-role"
+        self.catalog_name = "Advanced RoleTools role" if restricted else "Ordinary Red self-role"
         self.add_item(CatalogRoleSelect(self, add=True))
         self.add_item(CatalogRoleSelect(self, add=False))
 
@@ -228,7 +228,7 @@ class SelfRoleLibraryView(discord.ui.View):
             view=CatalogEditorView(self.cog, interaction.user, restricted=False), ephemeral=True,
         )
 
-    @discord.ui.button(label="Protected role rules", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Advanced roles (Bank/rules)", style=discord.ButtonStyle.secondary)
     async def protected(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
             embed=await self.cog.catalog_embed(interaction.guild, restricted=True),
@@ -260,7 +260,7 @@ class RoleToolsSetupView(discord.ui.View):
     @discord.ui.button(label="Self-role library", style=discord.ButtonStyle.primary, row=0)
     async def basic_roles(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Choose ordinary self-roles, or protected roles that use RoleTools rules such as costs and durations.",
+            "Ordinary roles also work with Red’s `selfrole`. Advanced roles stay inside RoleTools so Red bank costs, temporary access, requirements, and conflicts cannot be bypassed.",
             view=SelfRoleLibraryView(self.cog, interaction.user), ephemeral=True,
         )
 
@@ -292,7 +292,7 @@ class RoleToolsSetupView(discord.ui.View):
     @discord.ui.button(label="Remove published menu", style=discord.ButtonStyle.danger, row=1)
     async def remove_published(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_message(
-            "Remove the published role menu? Your Basic and Advanced role lists and Menu text settings will be kept.",
+            "Remove the published role menu? Your self-role library, Advanced role rules, and Menu text settings will be kept.",
             view=RemovePublishedMenuView(self.cog, interaction.user),
             ephemeral=True,
         )
@@ -646,7 +646,7 @@ class RoleToolsSetup(RoleToolsMixin):
         changed, notes = 0, []
         for role in roles:
             if add and role.id not in allowed:
-                notes.append(f"Skipped {role.name}: add it to Basic or Advanced self-roles first.")
+                notes.append(f"Skipped {role.name}: add it to the self-role library first.")
             elif add and role.id not in current:
                 current.append(role.id)
                 changed += 1
@@ -759,14 +759,14 @@ class RoleToolsSetup(RoleToolsMixin):
         )
         embed.add_field(name="Layout", value=self.layout_name(data.get("layout")))
         embed.add_field(name="Destination", value=published)
-        embed.set_footer(text="Roles must first exist in the shared Basic or Advanced catalog.")
+        embed.set_footer(text="Roles must first exist in the shared self-role library.")
         return embed
 
     async def open_named_menu_manager(self, interaction: discord.Interaction) -> None:
         menus = await self.named_role_menus(interaction.guild)
         description = (
             "Create separate menus for games, ranks, platforms, or other groups. "
-            "Every menu selects from the same Basic and Advanced self-role catalogs."
+            "Every menu selects from the same self-role library; Advanced roles keep their Bank and access rules."
         )
         if len(menus) > 25:
             description += " Showing the first 25 menus."
@@ -813,7 +813,7 @@ class RoleToolsSetup(RoleToolsMixin):
                 if active:
                     notes.append(
                         f"Skipped {role.name}: it has RoleTools-only rules ({', '.join(active)}). "
-                        "Add it under Advanced self-roles so !selfrole cannot bypass them."
+                        "Add it under Advanced roles so `selfrole` cannot bypass those rules."
                     )
                     continue
             if add:
@@ -837,11 +837,11 @@ class RoleToolsSetup(RoleToolsMixin):
         role_ids = await (self.restricted_role_ids(guild) if restricted else self.admin_selfrole_ids(guild))
         roles = [guild.get_role(role_id) for role_id in role_ids]
         roles = [role for role in roles if role is not None]
-        title = "Protected role rules" if restricted else "Self-role library"
+        title = "Advanced roles — Bank and access rules" if restricted else "Ordinary self-roles"
         explanation = (
-            "These library roles use RoleTools rules so costs, requirements, conflicts, and durations cannot be bypassed."
+            "These roles are assigned only through RoleTools. Use them for Red bank costs, temporary or expiring access, required roles, and conflicting roles so ordinary `selfrole` cannot bypass the rules."
             if restricted else
-            "These roles work with Red Admin selfrole and can be reused across any RoleTools menu."
+            "These free roles work with Red Admin `selfrole` and can also be reused across any RoleTools menu."
         )
         listing = "\n".join(f"• {role.name}" for role in roles[:40]) or "No roles configured."
         if len(roles) > 40:
@@ -865,6 +865,14 @@ class RoleToolsSetup(RoleToolsMixin):
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Self-role library", value=str(len(set(basic + restricted))))
+        embed.add_field(
+            name="Advanced roles",
+            value=(
+                f"{len(restricted)} controlled role(s). Use these for Red bank costs, temporary access, "
+                "requirements, or conflicts; they are kept out of ordinary `selfrole` so the rules cannot be bypassed."
+            ),
+            inline=False,
+        )
         unsafe = []
         for role_id in basic:
             role = guild.get_role(role_id)
@@ -918,7 +926,7 @@ class RoleToolsSetup(RoleToolsMixin):
         if layout == "dropdown" and len(data["role_ids"]) > PUBLIC_SELECT_PAGE_SIZE * PUBLIC_SELECT_MAX_PAGES:
             return False, "The public dropdown supports up to 125 roles. Use the Button Role Menu or a reaction layout for this catalog."
         if layout == "role_channel" and not data["role_ids"]:
-            return False, "Add at least one Basic or Advanced self-role before publishing a managed role channel."
+            return False, "Add at least one role to the self-role library before publishing a managed role channel."
         permissions = channel.permissions_for(guild.me)
         required = {"view_channel", "send_messages"}
         if layout != "role_channel":
@@ -1065,7 +1073,7 @@ class RoleToolsSetup(RoleToolsMixin):
 
     @roletools_menu.command(name="create")
     async def roletools_menu_create(self, ctx: Context, name: str, *, title: str = "") -> None:
-        """Create an unpublished named menu. Roles come from Basic/Advanced self-roles."""
+        """Create an unpublished named menu using roles from the shared library."""
         key, message = await self.create_named_role_menu(ctx.guild, name, title)
         await ctx.send(message + (f" Manager key: `{key}`." if key else ""))
 
