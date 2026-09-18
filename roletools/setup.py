@@ -581,28 +581,6 @@ class NamedMenuChooseSelect(discord.ui.Select):
         )
 
 
-class NamedMenuSearchModal(discord.ui.Modal):
-    def __init__(self, cog, author: discord.Member, menus):
-        super().__init__(title="Find a role menu")
-        self.cog, self.author, self.menus = cog, author, menus
-        self.query = discord.ui.TextInput(label="Menu name or stable ID", max_length=40)
-        self.add_item(self.query)
-
-    async def on_submit(self, interaction: discord.Interaction) -> None:
-        query = str(self.query.value).strip().lower()
-        matches = [
-            (name, data) for name, data in self.menus
-            if query in name.lower() or query in (data.get("display_name") or "").lower()
-        ]
-        if not matches:
-            await interaction.response.send_message("No saved role menus matched that search.", ephemeral=True)
-            return
-        embed = self.cog.role_menu_manager_embed(matches, search=query)
-        await interaction.response.send_message(
-            embed=embed, view=NamedMenuManagerView(self.cog, self.author, matches), ephemeral=True
-        )
-
-
 class NamedMenuManagerView(discord.ui.View):
     PAGE_SIZE = 25
 
@@ -615,16 +593,13 @@ class NamedMenuManagerView(discord.ui.View):
         page_menus = self.menus[start:start + self.PAGE_SIZE]
         if page_menus:
             self.add_item(NamedMenuChooseSelect(self, page_menus))
-        self.previous.disabled = self.page_count == 1
-        self.next.disabled = self.page_count == 1
+        if self.page_count == 1:
+            self.remove_item(self.previous)
+            self.remove_item(self.next)
 
     @discord.ui.button(label="Create role menu", style=discord.ButtonStyle.success, row=1)
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(NamedMenuCreateModal(self.cog, self.author))
-
-    @discord.ui.button(label="Search", style=discord.ButtonStyle.secondary, row=1)
-    async def search(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(NamedMenuSearchModal(self.cog, self.author, self.menus))
 
     @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, row=2)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1369,19 +1344,35 @@ class RoleToolsSetup(RoleToolsMixin):
         ))
         return embed
 
-    @staticmethod
-    def role_menu_manager_embed(menus, page: int = 0, search: str = "") -> discord.Embed:
+    def role_menu_manager_embed(self, menus, page: int = 0) -> discord.Embed:
         page_count = max(1, (len(menus) + NamedMenuManagerView.PAGE_SIZE - 1) // NamedMenuManagerView.PAGE_SIZE)
         page %= page_count
+        start = page * NamedMenuManagerView.PAGE_SIZE
+        page_menus = menus[start:start + NamedMenuManagerView.PAGE_SIZE]
+        lines = []
+        for name, data in page_menus:
+            display_name = data.get("display_name") or (
+                "All roles (default)" if name == SETUP_PICKER_NAME else name
+            )
+            state = "Archived" if data.get("archived") else (
+                "Published" if data.get("message_id") else "Draft"
+            )
+            role_count = len(data.get("role_ids", []))
+            destination = f"<#{data.get('channel_id')}>" if data.get("message_id") else "Not published"
+            lines.append(
+                f"• **{display_name}** (`{name}`) — {state} · {role_count} role"
+                f"{'s' if role_count != 1 else ''} · {self.layout_name(data.get('layout'))} · {destination}"
+            )
         description = (
-            "Select a menu to edit its roles, layout, text, destination, publication, and lifecycle. "
-            "The default All roles menu follows both role lists automatically."
+            "Select a menu below to edit it. The default All roles menu follows both role lists "
+            "automatically.\n\n" + ("\n".join(lines) if lines else "No saved role menus yet.")
         )
-        if search:
-            description += f" Search results for **{search}**."
-        embed = discord.Embed(title="Manage role menus", description=description, color=discord.Color.blurple())
+        embed = discord.Embed(
+            title="Manage role menus", description=description[:4096], color=discord.Color.blurple()
+        )
         embed.add_field(name="Role menus", value=str(len(menus)))
-        embed.add_field(name="Page", value=f"{page + 1}/{page_count}")
+        if page_count > 1:
+            embed.add_field(name="Page", value=f"{page + 1}/{page_count}")
         return embed
 
     async def open_named_menu_manager(self, interaction: discord.Interaction) -> None:

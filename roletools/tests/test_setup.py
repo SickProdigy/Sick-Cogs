@@ -176,6 +176,26 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(second_select.options), 1)
         self.assertFalse(first.next.disabled)
 
+    def test_small_manager_lists_menus_without_search_or_pagination(self):
+        cog = object.__new__(RoleTools)
+        author = SimpleNamespace(id=1, guild=SimpleNamespace(id=1))
+        menus = [
+            ("_selfroles", {"role_ids": [1, 2], "layout": "private", "message_id": None}),
+            ("games", {"display_name": "Games", "role_ids": [3, 4, 5],
+                       "layout": "role_channel", "message_id": 20, "channel_id": 10}),
+        ]
+
+        view = NamedMenuManagerView(cog, author, menus)
+        labels = {item.label for item in view.children if getattr(item, "label", None)}
+        embed = cog.role_menu_manager_embed(menus)
+
+        self.assertEqual(labels, {"Create role menu"})
+        self.assertIn("**All roles (default)**", embed.description)
+        self.assertIn("**Games**", embed.description)
+        self.assertIn("Published · 3 roles · Managed Reaction Channel · <#10>", embed.description)
+        self.assertNotIn("Search", embed.description)
+        self.assertNotIn("Page", {field.name for field in embed.fields})
+
     async def test_unpublish_refreshes_existing_editor_message(self):
         guild = SimpleNamespace(id=1)
         author = SimpleNamespace(id=2, guild=guild)
