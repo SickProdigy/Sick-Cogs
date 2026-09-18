@@ -88,10 +88,10 @@ class RoleToolsGroups(RoleToolsMixin):
         old_gateway_id = data.get("gateway_role_id")
         if role is not None:
             if role.id in await self.private_group_role_ids(guild, data):
-                return False, "The gateway role cannot also be one of the group's selectable roles."
+                return False, "The access role cannot also be one of the group's selectable roles."
             for other_name, other in groups.items():
                 if other_name != name and other.get("gateway_role_id") == role.id:
-                    return False, "That role is already the gateway for another private group."
+                    return False, "That role is already the access role for another private group."
         if old_gateway_id and (role is None or int(old_gateway_id) != role.id):
             old_setting = self.config.role_from_id(int(old_gateway_id))
             await old_setting.cost.set(int(data.get("gateway_previous_cost", 0)))
@@ -126,13 +126,13 @@ class RoleToolsGroups(RoleToolsMixin):
         if data is None:
             return False, "That private group does not exist."
         if amount and not data.get("gateway_role_id"):
-            return False, "Set a gateway role before adding an entry cost."
+            return False, "Choose an access role before setting an access cost."
         data["entry_cost"] = amount
         groups[name] = data
         await self.save_private_groups(guild, groups)
         if data.get("gateway_role_id"):
             await self.config.role_from_id(int(data["gateway_role_id"])).cost.set(amount)
-        return True, f"Entry cost set to {amount}."
+        return True, f"Access cost set to {amount}."
 
     async def set_private_group_duration(self, guild: discord.Guild, name: str, minutes: int):
         if minutes < 0:
@@ -142,7 +142,7 @@ class RoleToolsGroups(RoleToolsMixin):
         if data is None:
             return False, "That private group does not exist."
         if minutes and not data.get("gateway_role_id"):
-            return False, "Set a gateway role before adding temporary access."
+            return False, "Choose an access role before setting temporary access."
         seconds = minutes * 60 if minutes else None
         data["duration"] = seconds
         groups[name] = data
@@ -190,7 +190,7 @@ class RoleToolsGroups(RoleToolsMixin):
             return False, "A role you already have conflicts with this private group."
         gateway_id = data.get("gateway_role_id")
         if gateway_id and not joining and int(gateway_id) not in member_ids:
-            return False, "Join this private group before selecting its roles."
+            return False, "Get this group's access role before selecting its roles."
         return True, ""
 
     async def set_private_group_description(self, guild: discord.Guild, name: str, description: str):
@@ -270,9 +270,14 @@ class RoleToolsGroups(RoleToolsMixin):
         required = [guild.get_role(int(role_id)) for role_id in data.get("required_role_ids", [])]
         conflicts = [guild.get_role(int(role_id)) for role_id in data.get("conflict_role_ids", [])]
         gateway = guild.get_role(int(data["gateway_role_id"])) if data.get("gateway_role_id") else None
+        default_description = (
+            "Members must hold this group's access role before they can choose its roles."
+            if gateway
+            else "Choose an access role. Members who hold it can then choose roles from this group."
+        )
         embed = discord.Embed(
             title=data.get("display_name") or name,
-            description=data.get("description") or "A reusable gated role group.",
+            description=data.get("description") or default_description,
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Stable ID", value=f"`{name}`")
@@ -280,14 +285,14 @@ class RoleToolsGroups(RoleToolsMixin):
         role_text = humanize_list([r.mention for r in role_names if r]) or "None"
         required_text = humanize_list([r.mention for r in required if r]) or "None"
         conflict_text = humanize_list([r.mention for r in conflicts if r]) or "None"
-        embed.add_field(name="Selectable roles", value=role_text[:1024], inline=False)
-        embed.add_field(name="Required", value=required_text[:1024])
-        embed.add_field(name="Requirement mode", value="Any" if data.get("require_any") else "All")
-        embed.add_field(name="Conflicts", value=conflict_text[:1024], inline=False)
-        embed.add_field(name="Gateway", value=gateway.mention if gateway else "None")
-        embed.add_field(name="Entry cost", value=str(data.get("entry_cost", 0)))
+        embed.add_field(name="Roles available after access", value=role_text[:1024], inline=False)
+        embed.add_field(name="Prerequisite roles", value=required_text[:1024])
+        embed.add_field(name="Prerequisite mode", value="Any" if data.get("require_any") else "All")
+        embed.add_field(name="Blocked by roles", value=conflict_text[:1024], inline=False)
+        embed.add_field(name="Access role", value=gateway.mention if gateway else "None")
+        embed.add_field(name="Access cost", value=str(data.get("entry_cost", 0)))
         duration = data.get("duration")
-        embed.add_field(name="Duration", value=humanize_timedelta(seconds=duration) if duration else "Permanent")
+        embed.add_field(name="Access duration", value=humanize_timedelta(seconds=duration) if duration else "Permanent")
         return embed
 
     async def join_private_group(self, member: discord.Member, name: str):
@@ -296,7 +301,7 @@ class RoleToolsGroups(RoleToolsMixin):
             return False, "That private group is unavailable."
         gateway = member.guild.get_role(int(data["gateway_role_id"])) if data.get("gateway_role_id") else None
         if gateway is None:
-            return False, "This group does not use a joinable gateway role."
+            return False, "This group does not have a member access role."
         if gateway in member.roles:
             return True, "You already have access to this private group."
         allowed, message = await self.private_group_access(member, data, joining=True)
@@ -334,7 +339,7 @@ class RoleToolsGroups(RoleToolsMixin):
 
     @roletools_group.command(name="join")
     async def roletools_group_join(self, ctx: Context, name: str) -> None:
-        """Join a private group after its requirements and entry cost are checked."""
+        """Join a private group after its prerequisites and access cost are checked."""
         _, message = await self.join_private_group(ctx.author, name.lower())
         await ctx.send(message)
 
@@ -375,14 +380,14 @@ class RoleToolsGroups(RoleToolsMixin):
     @roletools_group.command(name="gateway")
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_group_gateway(self, ctx: Context, name: str, role: Optional[discord.Role] = None) -> None:
-        """Set the group's gateway role; omit the role to clear it."""
+        """Set the group's member access role; omit the role to clear it."""
         _, message = await self.set_private_group_gateway(ctx.guild, name.lower(), role)
         await ctx.send(message)
 
     @roletools_group.command(name="cost")
     @commands.admin_or_permissions(manage_roles=True)
     async def roletools_group_cost(self, ctx: Context, name: str, amount: int) -> None:
-        """Set the one-time gateway entry cost; use 0 for free."""
+        """Set the one-time access cost; use 0 for free."""
         _, message = await self.set_private_group_cost(ctx.guild, name.lower(), amount)
         await ctx.send(message)
 

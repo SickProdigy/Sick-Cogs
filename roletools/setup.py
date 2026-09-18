@@ -246,7 +246,7 @@ class SelfRoleLibraryView(discord.ui.View):
 
 class PrivateGroupCreateModal(discord.ui.Modal):
     def __init__(self, cog, author: discord.Member):
-        super().__init__(title="Create private role group")
+        super().__init__(title="Create private access group")
         self.cog, self.author = cog, author
         self.name_input = discord.ui.TextInput(
             label="Group name", placeholder="VIP Gold, Competitive Team, Course 2", max_length=40
@@ -272,7 +272,7 @@ class PrivateGroupChooseSelect(discord.ui.Select):
             label=(data.get("display_name") or name)[:100], value=name,
             description=f"{len(data.get('role_ids', []))} roles · menu {data.get('menu_name')}"[:100],
         ) for name, data in groups[:25]]
-        super().__init__(placeholder="Choose a private group to manage", options=options)
+        super().__init__(placeholder="Choose a private access group to manage", options=options)
         self.parent_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -286,7 +286,7 @@ class PrivateGroupChooseSelect(discord.ui.Select):
 class PrivateGroupRoleSelect(discord.ui.RoleSelect):
     def __init__(self, parent: "PrivateGroupEditorView", *, add: bool):
         super().__init__(
-            placeholder=("Add gated selectable roles" if add else "Remove selectable roles"),
+            placeholder=("Add roles members can choose" if add else "Remove selectable roles"),
             min_values=1, max_values=25, row=0 if add else 1,
         )
         self.parent_view, self.add = parent, add
@@ -309,7 +309,7 @@ class PrivateGroupRoleSelect(discord.ui.RoleSelect):
 
 class PrivateGroupGatewaySelect(discord.ui.RoleSelect):
     def __init__(self, parent: "PrivateGroupEditorView"):
-        super().__init__(placeholder="Choose the staged-access gateway role", min_values=1, max_values=1, row=2)
+        super().__init__(placeholder="Choose the group access role", min_values=1, max_values=1, row=2)
         self.parent_view = parent
 
     async def callback(self, interaction: discord.Interaction) -> None:
@@ -322,6 +322,67 @@ class PrivateGroupGatewaySelect(discord.ui.RoleSelect):
             embed=embed, view=PrivateGroupEditorView(
                 self.parent_view.cog, interaction.user, self.parent_view.name
             )
+        )
+
+
+class PrivateGroupAccessModal(discord.ui.Modal):
+    def __init__(self, cog, guild: discord.Guild, name: str, data: dict):
+        super().__init__(title="Edit private-group access")
+        self.cog, self.guild, self.name = cog, guild, name
+        duration = data.get("duration")
+        self.description_input = discord.ui.TextInput(
+            label="Member-facing explanation",
+            default=data.get("description") or "",
+            placeholder="VIP members can choose roles from this group.",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            required=False,
+        )
+        self.cost_input = discord.ui.TextInput(
+            label="Access cost in Red credits (0 = free)",
+            default=str(data.get("entry_cost", 0)),
+            max_length=12,
+        )
+        self.duration_input = discord.ui.TextInput(
+            label="Access minutes (0 = permanent)",
+            default=str(int(duration) // 60 if duration else 0),
+            max_length=12,
+        )
+        for item in (self.description_input, self.cost_input, self.duration_input):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            cost = int(str(self.cost_input.value).strip() or "0")
+            minutes = int(str(self.duration_input.value).strip() or "0")
+        except ValueError:
+            await interaction.response.send_message(
+                "Access cost and minutes must be whole numbers.", ephemeral=True
+            )
+            return
+        if cost < 0 or minutes < 0:
+            await interaction.response.send_message(
+                "Access cost and minutes cannot be negative.", ephemeral=True
+            )
+            return
+        data = (await self.cog.private_groups(self.guild)).get(self.name)
+        if data is None:
+            await interaction.response.send_message("That private group no longer exists.", ephemeral=True)
+            return
+        if (cost or minutes) and not data.get("gateway_role_id"):
+            await interaction.response.send_message(
+                "Choose an access role before setting a cost or temporary duration.", ephemeral=True
+            )
+            return
+        await self.cog.set_private_group_description(
+            self.guild, self.name, str(self.description_input.value)
+        )
+        await self.cog.set_private_group_cost(self.guild, self.name, cost)
+        await self.cog.set_private_group_duration(self.guild, self.name, minutes)
+        embed = await self.cog.private_group_embed(self.guild, self.name)
+        embed.add_field(name="Last change", value="Access details updated.", inline=False)
+        await interaction.response.edit_message(
+            embed=embed, view=PrivateGroupEditorView(self.cog, interaction.user, self.name)
         )
 
 
@@ -357,9 +418,19 @@ class PrivateGroupEditorView(discord.ui.View):
         self.add_item(PrivateGroupRoleSelect(self, add=False))
         self.add_item(PrivateGroupGatewaySelect(self))
 
+    @discord.ui.button(label="Edit access details", style=discord.ButtonStyle.primary, row=3)
+    async def access_details(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = (await self.cog.private_groups(interaction.guild)).get(self.name)
+        if data is None:
+            await interaction.response.send_message("That private group no longer exists.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            PrivateGroupAccessModal(self.cog, interaction.guild, self.name, data)
+        )
+
     @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=3)
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Private group changes saved.", embed=None, view=None)
+        await interaction.response.edit_message(content="Private access-group changes saved.", embed=None, view=None)
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, row=3)
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -387,14 +458,14 @@ class PrivateGroupManagerView(discord.ui.View):
         if groups:
             self.add_item(PrivateGroupChooseSelect(self, groups))
 
-    @discord.ui.button(label="Create private group", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="Create access group", style=discord.ButtonStyle.success, row=1)
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PrivateGroupCreateModal(self.cog, self.author))
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=1)
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
-            content="Private-group management finished.", embed=None, view=None
+            content="Private access-group management finished.", embed=None, view=None
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -440,17 +511,18 @@ class RoleToolsSetupView(discord.ui.View):
     async def manage_menus(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.open_named_menu_manager(interaction)
 
-    @discord.ui.button(label="Private gated groups", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Private access groups", style=discord.ButtonStyle.secondary, row=1)
     async def private_groups(self, interaction: discord.Interaction, button: discord.ui.Button):
         groups = sorted(
             (await self.cog.private_groups(interaction.guild)).items(),
             key=lambda item: (item[1].get("display_name") or item[0]).lower(),
         )
         embed = discord.Embed(
-            title="Private gated role groups",
+            title="Private access groups",
             description=(
-                "Create reusable staged-access groups, select their roles, and choose a gateway role. "
-                "Requirements, conflicts, Bank cost, duration, and publishing are also available under "
+                "Members must hold a group's access role before they can choose any roles in that group. "
+                "You can optionally add prerequisite roles, blocked roles, a Red Bank access cost, "
+                "temporary access, and a published role menu. Full command controls are under "
                 "`roletools group`."
             ), color=discord.Color.blurple(),
         )
@@ -1419,7 +1491,7 @@ class RoleToolsSetup(RoleToolsMixin):
             "role_channel": "Managed Reaction Channel",
         }
         groups = await self.private_groups(guild)
-        embed.add_field(name="Private gated groups", value=str(len(groups)))
+        embed.add_field(name="Private access groups", value=str(len(groups)))
         embed.add_field(name="Quick all-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:

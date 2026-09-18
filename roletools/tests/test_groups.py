@@ -3,7 +3,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.roletools import RoleTools
-from roletools.setup import PrivateGroupEditorView, PrivateGroupManagerView, RoleToolsSetupView
+from roletools.setup import (PrivateGroupAccessModal, PrivateGroupEditorView,
+                             PrivateGroupManagerView, RoleToolsSetupView)
 
 
 class Value:
@@ -70,7 +71,7 @@ class PrivateGroupTests(unittest.IsolatedAsyncioTestCase):
         member = SimpleNamespace(roles=[FakeRole(1)])
         allowed, message = await cog.private_group_access(member, data)
         self.assertFalse(allowed)
-        self.assertIn("Join", message)
+        self.assertIn("access role", message)
 
         member.roles.append(FakeRole(2))
         allowed, _ = await cog.private_group_access(member, data)
@@ -186,18 +187,31 @@ class PrivateGroupTests(unittest.IsolatedAsyncioTestCase):
         author = SimpleNamespace(id=1)
         view = RoleToolsSetupView(cog, author)
         labels = {item.label for item in view.children if getattr(item, "label", None)}
-        self.assertIn("Private gated groups", labels)
+        self.assertIn("Private access groups", labels)
 
     def test_private_group_manager_has_done_control(self):
         view = PrivateGroupManagerView(SimpleNamespace(), SimpleNamespace(id=1), [])
         labels = {item.label for item in view.children if getattr(item, "label", None)}
-        self.assertEqual(labels, {"Create private group", "Done"})
+        self.assertEqual(labels, {"Create access group", "Done"})
+
+    def test_private_group_access_modal_exposes_description_cost_and_duration(self):
+        modal = PrivateGroupAccessModal(
+            SimpleNamespace(), SimpleNamespace(), "vip",
+            {"description": "VIP access", "entry_cost": 500, "duration": 3600},
+        )
+        labels = {item.label for item in modal.children}
+        self.assertEqual(labels, {
+            "Member-facing explanation",
+            "Access cost in Red credits (0 = free)",
+            "Access minutes (0 = permanent)",
+        })
 
     def test_private_group_editor_has_done_and_delete_controls(self):
         view = PrivateGroupEditorView(SimpleNamespace(), SimpleNamespace(id=1), "vip")
         labels = {item.label for item in view.children if getattr(item, "label", None)}
         self.assertIn("Done", labels)
         self.assertIn("Delete", labels)
+        self.assertIn("Edit access details", labels)
 
 
 if __name__ == "__main__":
