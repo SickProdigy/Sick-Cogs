@@ -118,11 +118,11 @@ The command equivalents live under `[p]roletools menu`:
 
 Legacy button, select, reaction, and message commands remain available for specialized layouts and compatibility.
 
-## Private Gated Groups
+## Private Access Groups
 
-Private groups are a separate staged-access layer built on the same named-menu publisher and safe role transaction service. They are useful for progressions such as `Member → VIP → VIP Gold`, courses, teams, supporter areas, ranks, or gated game sections.
+Private access groups collect roles that only members with a chosen access role may select. They can support VIP areas, courses, teams, supporter areas, ranks, or private game sections.
 
-Open `[p]roletools setup` and choose **Private gated groups** to create a group, select its roles, and assign a gateway role. Command equivalents provide the complete rule set:
+Open `[p]roletools setup` and choose **Private access groups** to create a group, select the roles members can choose, and assign the access role members must hold first. Command equivalents provide the complete rule set:
 
 ```text
 [p]roletools group
@@ -138,9 +138,9 @@ Open `[p]roletools setup` and choose **Private gated groups** to create a group,
 [p]roletools group publish vip-gold #roles dropdown
 ```
 
-Members use `[p]roletools group join vip-gold` to acquire the gateway after requirements, conflicts, hierarchy, and Red Bank balance are checked. Duration values are minutes; `0` means permanent. Joining never creates an automatic renewal. `[p]roletools group leave vip-gold` removes the gateway and roles belonging to that group without refunding the one-time entry cost.
+Members use `[p]roletools group join vip-gold` to acquire the access role after prerequisites, blocked roles, hierarchy, and Red Bank balance are checked. Duration values are minutes; `0` means permanent. Joining never creates an automatic renewal. `[p]roletools group leave vip-gold` removes the access role and roles belonging to that group without refunding the one-time access cost.
 
-Each group owns an ordinary named role menu, so it can publish as a Button Role Menu, Public Dropdowns, Single Reaction Card, or Managed Reaction Channel. Group roles are moved into the Advanced catalog and every RoleTools assignment path rechecks the group's requirements, conflicts, archive state, and gateway. This prevents native `selfrole`, component, or reaction paths from bypassing gated access.
+Each group owns an ordinary named role menu, so it can publish as a Button Role Menu, Public Dropdowns, Single Reaction Card, or Managed Reaction Channel. Group roles are moved into the Advanced catalog and every RoleTools assignment path rechecks the group's prerequisites, blocked roles, archive state, and access role. This prevents native `selfrole`, component, or reaction paths from bypassing the group's access rules.
 
 Groups can be described, archived/restored, and safely deleted with:
 
@@ -151,7 +151,7 @@ Groups can be described, archived/restored, and safely deleted with:
 [p]roletools group delete vip-gold confirm
 ```
 
-Changing or clearing a gateway restores the cost and duration settings that role had before the group took control. Deleting a group does not delete Discord roles.
+Changing or clearing an access role restores the cost and duration settings that role had before the group took control. Deleting a group does not delete Discord roles.
 
 ## Reaction, Button, And Select Roles
 
