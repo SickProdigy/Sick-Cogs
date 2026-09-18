@@ -11,7 +11,8 @@ from redbot.core.commands import Context
 
 from .abc import RoleToolsMixin
 from .picker import (LEGACY_DEFAULT_DESCRIPTIONS, PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE,
-                     picker_description, reaction_emoji_key, reaction_emoji_value)
+                     configured_role_pages, picker_description, reaction_emoji_key,
+                     reaction_emoji_value)
 
 roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -507,6 +508,56 @@ class SharedEmojiModal(discord.ui.Modal):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+class RolePresentationModal(discord.ui.Modal):
+    def __init__(self, cog, guild: discord.Guild, name: str, role: discord.Role, current: dict):
+        super().__init__(title="Role menu presentation")
+        self.cog, self.guild, self.name, self.role = cog, guild, name, role
+        self.label_input = discord.ui.TextInput(label="Label (blank uses role name)", default=current.get("label", ""), max_length=100, required=False)
+        self.description_input = discord.ui.TextInput(label="Description (optional)", default=current.get("description", ""), max_length=100, required=False)
+        self.emoji_input = discord.ui.TextInput(label="Emoji (optional)", default=current.get("emoji", ""), max_length=100, required=False)
+        self.group_input = discord.ui.TextInput(label="Dropdown/category group (optional)", default=current.get("group", ""), max_length=100, required=False)
+        for item in (self.label_input, self.description_input, self.emoji_input, self.group_input):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        ok, message = await self.cog.set_menu_role_presentation(
+            self.guild, self.name, self.role,
+            label=str(self.label_input.value), description=str(self.description_input.value),
+            emoji=str(self.emoji_input.value), group=str(self.group_input.value),
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+
+class RolePresentationSelect(discord.ui.RoleSelect):
+    def __init__(self, parent: "RolePresentationView"):
+        super().__init__(placeholder="Choose a role to customize", min_values=1, max_values=1)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        role = self.values[0]
+        data = (await self.parent_view.cog.config.guild(interaction.guild).pickers()).get(self.parent_view.name, {})
+        if role.id not in data.get("role_ids", []):
+            await interaction.response.send_message("That role is not part of this menu.", ephemeral=True)
+            return
+        current = data.get("role_metadata", {}).get(str(role.id), {})
+        await interaction.response.send_modal(
+            RolePresentationModal(self.parent_view.cog, interaction.guild, self.parent_view.name, role, current)
+        )
+
+
+class RolePresentationView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=600)
+        self.cog, self.author, self.name = cog, author, name
+        self.add_item(RolePresentationSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
 class NamedMenuDuplicateModal(discord.ui.Modal):
     def __init__(self, cog, guild: discord.Guild, source: str):
         super().__init__(title="Duplicate role menu")
@@ -599,6 +650,13 @@ class NamedMenuMoreView(discord.ui.View):
             )
         else:
             await interaction.response.send_message("Reaction settings apply only to reaction layouts.", ephemeral=True)
+
+    @discord.ui.button(label="Role presentation", style=discord.ButtonStyle.secondary, row=1)
+    async def role_presentation(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Choose a role to set its label, description, emoji, and dropdown/category group.",
+            view=RolePresentationView(self.cog, interaction.user, self.name), ephemeral=True,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -867,6 +925,36 @@ class RoleToolsSetup(RoleToolsMixin):
         await self.save_role_menus(guild, pickers)
         synced = bool(data.get("message_id") and await self.sync_picker(guild, name, data))
         return True, f"Managed role entries now use {emoji}." + (" The published channel was synchronized." if synced else "")
+
+    async def set_menu_role_presentation(
+        self, guild: discord.Guild, name: str, role: discord.Role, *,
+        label: str = "", description: str = "", emoji: str = "", group: str = "",
+    ):
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        if data is None or role.id not in data.get("role_ids", []):
+            return False, "That role is not part of this saved menu."
+        values = {
+            "label": label.strip()[:100], "description": description.strip()[:100],
+            "emoji": emoji.strip(), "group": group.strip()[:100],
+        }
+        if values["emoji"]:
+            try:
+                parsed = reaction_emoji_value(values["emoji"])
+                if isinstance(parsed, discord.PartialEmoji) and parsed.id and guild.get_emoji(parsed.id) is None:
+                    return False, "I cannot access that custom emoji in this server."
+            except (TypeError, ValueError):
+                return False, "I could not read that emoji."
+        metadata = dict(data.get("role_metadata", {}))
+        if any(values.values()):
+            metadata[str(role.id)] = values
+        else:
+            metadata.pop(str(role.id), None)
+        data["role_metadata"] = metadata
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        synced = bool(data.get("message_id") and await self.sync_picker(guild, name, data))
+        return True, f"Updated presentation for {role.mention}." + (" The published menu was synchronized." if synced else "")
 
     async def duplicate_named_role_menu(self, guild: discord.Guild, source: str, display_name: str):
         pickers = await self.config.guild(guild).pickers()
@@ -1171,8 +1259,12 @@ class RoleToolsSetup(RoleToolsMixin):
             data["role_ids"] = await self.combined_catalog_ids(guild)
         if name != SETUP_PICKER_NAME and not data.get("role_ids"):
             return False, "Add at least one shared-catalog role before publishing this menu."
-        if layout == "dropdown" and len(data["role_ids"]) > PUBLIC_SELECT_PAGE_SIZE * PUBLIC_SELECT_MAX_PAGES:
-            return False, "The public dropdown supports up to 125 roles. Use the Button Role Menu or a reaction layout for this catalog."
+        if layout == "dropdown":
+            roles = [guild.get_role(int(role_id)) for role_id in data["role_ids"]]
+            roles = [role for role in roles if role is not None]
+            dropdowns = configured_role_pages(data, roles, PUBLIC_SELECT_PAGE_SIZE)
+            if len(dropdowns) > PUBLIC_SELECT_MAX_PAGES:
+                return False, "Public dropdowns support five groups/pages per message. Merge smaller groups or use the Button Role Menu."
         if layout == "role_channel" and not data["role_ids"]:
             return False, "Add at least one role to the self-role library before publishing a managed role channel."
         permissions = channel.permissions_for(guild.me)
@@ -1379,6 +1471,19 @@ class RoleToolsSetup(RoleToolsMixin):
     async def roletools_menu_unpublish(self, ctx: Context, name: str) -> None:
         """Remove published messages but keep the saved menu."""
         _, message = await self.unpublish_role_menu(ctx.guild, name.lower())
+        await ctx.send(message)
+
+    @roletools_menu.command(name="presentation")
+    async def roletools_menu_presentation(
+        self, ctx: Context, name: str, role: discord.Role, *, values: str = ""
+    ) -> None:
+        """Set `label | description | emoji | group`; omit values to reset."""
+        parts = [part.strip() for part in values.split("|", 3)] if values else []
+        parts += [""] * (4 - len(parts))
+        _, message = await self.set_menu_role_presentation(
+            ctx.guild, name.lower(), role, label=parts[0], description=parts[1],
+            emoji=parts[2], group=parts[3],
+        )
         await ctx.send(message)
 
     @roletools_menu.command(name="preview")

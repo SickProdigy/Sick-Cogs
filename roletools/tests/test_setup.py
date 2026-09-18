@@ -174,6 +174,23 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(second_select.options), 1)
         self.assertFalse(first.next.disabled)
 
+    async def test_role_presentation_is_saved_without_changing_role_catalog(self):
+        pickers = {"games": {"role_ids": [7], "message_id": None}}
+        cog = self.make_cog(pickers)
+        role = SimpleNamespace(id=7, mention="@Game")
+        guild = SimpleNamespace(id=1, get_emoji=lambda emoji_id: None)
+
+        updated, _ = await cog.set_menu_role_presentation(
+            guild, "games", role, label="Game Night", description="Weekly group",
+            emoji="🎮", group="Games",
+        )
+
+        self.assertTrue(updated)
+        saved = cog.save_role_menus.await_args.args[1]["games"]
+        self.assertEqual(saved["role_ids"], [7])
+        self.assertEqual(saved["role_metadata"]["7"]["label"], "Game Night")
+        self.assertEqual(saved["role_metadata"]["7"]["group"], "Games")
+
     async def test_preview_does_not_mutate_saved_menu(self):
         data = {"title": "Games", "role_ids": [1], "layout": "private", "message_id": 20}
         pickers = {"games": data.copy()}

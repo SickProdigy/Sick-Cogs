@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import OrderedDict
 from typing import List, Optional
 
 import discord
@@ -82,6 +83,27 @@ def picker_pages(role_ids: List[int], page_size: int = PICKER_PAGE_SIZE) -> List
     return [role_ids[start : start + page_size] for start in range(0, len(role_ids), page_size)]
 
 
+def role_presentation(data: dict, role: discord.Role) -> dict:
+    return dict(data.get("role_metadata", {}).get(str(role.id), {}))
+
+
+def configured_role_pages(data: dict, roles: List[discord.Role], page_size: int = PICKER_PAGE_SIZE):
+    metadata = data.get("role_metadata", {})
+    uses_groups = any(str(value.get("group") or "").strip() for value in metadata.values())
+    if not uses_groups:
+        return [(f"Group {index + 1}", page) for index, page in enumerate(picker_pages(roles, page_size))]
+    groups = OrderedDict()
+    for role in roles:
+        group = str(role_presentation(data, role).get("group") or "Other roles").strip()[:100]
+        groups.setdefault(group, []).append(role)
+    pages = []
+    for group, group_roles in groups.items():
+        chunks = picker_pages(group_roles, page_size)
+        pages.extend((group if len(chunks) == 1 else f"{group} {index + 1}", chunk)
+                     for index, chunk in enumerate(chunks))
+    return pages
+
+
 def picker_page_index(current: int, page_count: int) -> int:
     if page_count < 1:
         return 0
@@ -95,11 +117,13 @@ class PickerRoleSelect(discord.ui.Select):
         options = []
         for role in roles:
             marker = "✓ " if role.id in owned else ""
+            presentation = role_presentation(parent.data, role)
+            description = presentation.get("description") or ("Select to remove" if role.id in owned else "Select to add")
+            emoji = presentation.get("emoji") or None
             options.append(
                 discord.SelectOption(
-                    label=f"{marker}{role.name}"[:100],
-                    value=str(role.id),
-                    description=("Select to remove" if role.id in owned else "Select to add"),
+                    label=f"{marker}{presentation.get('label') or role.name}"[:100],
+                    value=str(role.id), description=str(description)[:100], emoji=emoji,
                 )
             )
         super().__init__(
@@ -192,6 +216,7 @@ class PickerMemberView(discord.ui.View):
         self.member = member
         self.picker_name = picker_name
         self.page = page
+        self.data = {}
         self.embed = discord.Embed(title="Role picker")
 
     @classmethod
@@ -202,9 +227,10 @@ class PickerMemberView(discord.ui.View):
         if data is None:
             view.embed = discord.Embed(title="Role picker unavailable", description="This picker was removed.")
             return view
+        view.data = data
         roles = [guild.get_role(int(role_id)) for role_id in data.get("role_ids", [])]
         roles = [role for role in roles if role is not None]
-        pages = picker_pages([role.id for role in roles])
+        pages = configured_role_pages(data, roles)
         if not pages:
             view.embed = discord.Embed(
                 title=data.get("title") or "Choose your roles",
@@ -213,13 +239,12 @@ class PickerMemberView(discord.ui.View):
             )
             return view
         view.page = picker_page_index(page, len(pages))
-        page_roles = [guild.get_role(role_id) for role_id in pages[view.page]]
-        page_roles = [role for role in page_roles if role is not None]
+        group_name, page_roles = pages[view.page]
         view.embed = discord.Embed(
             title=data.get("title") or "Choose your roles",
             description=(
                 "Select any displayed role to toggle it. A ✓ means you already have it.\n"
-                f"Page {view.page + 1} of {len(pages)} · {len(roles)} roles"
+                f"{group_name} · Page {view.page + 1} of {len(pages)} · {len(roles)} roles"
             ),
             color=discord.Color.blurple(),
         )
@@ -262,11 +287,18 @@ class PickerLaunchView(discord.ui.View):
 
 
 class PublicPickerSelect(discord.ui.Select):
-    def __init__(self, cog, guild_id: int, picker_name: str, roles: List[discord.Role], page: int):
+    def __init__(self, cog, guild_id: int, picker_name: str, data: dict, roles: List[discord.Role], page: int, group: str):
         self.cog = cog
-        options = [discord.SelectOption(label=role.name[:100], value=str(role.id)) for role in roles]
+        options = []
+        for role in roles:
+            presentation = role_presentation(data, role)
+            options.append(discord.SelectOption(
+                label=str(presentation.get("label") or role.name)[:100], value=str(role.id),
+                description=(str(presentation.get("description"))[:100] if presentation.get("description") else None),
+                emoji=presentation.get("emoji") or None,
+            ))
         super().__init__(
-            placeholder=f"Choose roles · group {page + 1}", min_values=1,
+            placeholder=f"Choose roles · {group}"[:150], min_values=1,
             max_values=max(1, len(options)), options=options,
             custom_id=f"RTPublicPicker:{guild_id}:{picker_name}:{page}", row=page,
         )
@@ -315,10 +347,10 @@ class PublicPickerSelect(discord.ui.Select):
 
 
 class PublicPickerView(discord.ui.View):
-    def __init__(self, cog, guild_id: int, picker_name: str, roles: List[discord.Role]):
+    def __init__(self, cog, guild_id: int, picker_name: str, data: dict, roles: List[discord.Role]):
         super().__init__(timeout=None)
-        for page, page_roles in enumerate(picker_pages(roles, PUBLIC_SELECT_PAGE_SIZE)):
-            self.add_item(PublicPickerSelect(cog, guild_id, picker_name, page_roles, page))
+        for page, (group, page_roles) in enumerate(configured_role_pages(data, roles, PUBLIC_SELECT_PAGE_SIZE)):
+            self.add_item(PublicPickerSelect(cog, guild_id, picker_name, data, page_roles, page, group))
 
 
 class RoleToolsPicker(RoleToolsMixin):
@@ -338,7 +370,7 @@ class RoleToolsPicker(RoleToolsMixin):
         roles = [guild.get_role(int(role_id)) for role_id in data.get("role_ids", [])]
         roles = [role for role in roles if role is not None]
         if data.get("layout") == "dropdown" and roles:
-            return PublicPickerView(self, guild.id, name, roles)
+            return PublicPickerView(self, guild.id, name, data, roles)
         return PickerLaunchView(self, guild.id, name)
 
     @staticmethod

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from roletools.picker import (PICKER_PAGE_SIZE, REACTION_PAGE_SIZE, PickerMemberView,
+                              configured_role_pages,
                               picker_description, picker_page_index, picker_pages,
                               reaction_emoji_key, reaction_page_emojis, shared_reaction_emoji)
 
@@ -14,6 +15,27 @@ class PickerPagingTests(unittest.TestCase):
         self.assertEqual([len(page) for page in picker_pages(list(range(100)))], [25, 25, 25, 25])
         self.assertEqual([len(page) for page in picker_pages(list(range(101)))], [25, 25, 25, 25, 1])
         self.assertEqual([len(page) for page in picker_pages(list(range(41)), REACTION_PAGE_SIZE)], [20, 20, 1])
+
+    def test_configured_groups_create_intentional_pages(self):
+        roles = [SimpleNamespace(id=index, name=f"Role {index}") for index in range(1, 5)]
+        data = {"role_metadata": {
+            "1": {"group": "Platforms"}, "2": {"group": "Platforms"},
+            "3": {"group": "Ranks"}, "4": {"group": "Ranks"},
+        }}
+
+        pages = configured_role_pages(data, roles, page_size=25)
+
+        self.assertEqual([name for name, _ in pages], ["Platforms", "Ranks"])
+        self.assertEqual([[role.id for role in items] for _, items in pages], [[1, 2], [3, 4]])
+
+    def test_configured_group_respects_twenty_five_option_limit(self):
+        roles = [SimpleNamespace(id=index, name=f"Role {index}") for index in range(1, 27)]
+        data = {"role_metadata": {str(role.id): {"group": "Games"} for role in roles}}
+
+        pages = configured_role_pages(data, roles, page_size=25)
+
+        self.assertEqual([len(items) for _, items in pages], [25, 1])
+        self.assertEqual([name for name, _ in pages], ["Games 1", "Games 2"])
 
     def test_stock_description_follows_published_layout(self):
         legacy = {"description": "Click Choose roles to open your private role list."}

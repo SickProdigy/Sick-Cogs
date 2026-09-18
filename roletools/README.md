@@ -93,8 +93,8 @@ This keeps creation, inspection, publication, movement, synchronization, and rem
 
 ### Publication Layouts
 
-- **Button Role Menu** publishes one button that opens private 25-role pages for each member. It is the cleanest default for a large library.
-- **Public dropdowns** place as many as five 25-role selectors on the public message, supporting up to 125 roles.
+- **Button Role Menu** publishes one button that opens private 25-role pages for each member. Optional role groups become named private categories/pages; otherwise automatic alphabetical pages remain the default.
+- **Public dropdowns** place as many as five 25-role selectors on the public message. Each role can have a custom label, description, emoji, and intentional group; blank groups retain automatic 25-role pagination.
 - **Single Reaction Card** places up to 20 distinct reactions on each managed message and creates overflow messages automatically. Numbered emojis require no setup; managers may override individual roles with Unicode or accessible server-custom emojis.
 - **Managed Reaction Channel** publishes one bot message per role. It uses 👍 by default or one manager-selected shared emoji. Synchronization edits and reuses existing slots, creates required bottom messages, removes surplus bottom messages, and updates bindings without clearing retained reactions that still use the selected emoji.
 
@@ -107,6 +107,7 @@ The command equivalents live under `[p]roletools menu`:
 - `[p]roletools menu view <name>` - Show its roles, layout, and destination.
 - `[p]roletools menu add <name> <roles...>` / `remove` - Change a named menu's subset.
 - `[p]roletools menu layout <name> <layout>` - Select `private`, `dropdown`, `reactions`, or `role_channel`.
+- `[p]roletools menu presentation <name> <role> [label | description | emoji | group]` - Customize or reset one role's menu presentation.
 - `[p]roletools menu publish <name> <channel>` - Publish or move the menu.
 - `[p]roletools menu sync <name>` - Synchronize its managed messages.
 - `[p]roletools menu unpublish <name>` - Remove managed messages but retain the saved configuration.
