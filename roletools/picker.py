@@ -557,16 +557,25 @@ class RoleToolsPicker(RoleToolsMixin):
         if channel is None or not data.get("message_id"):
             return False
         if data.get("layout") == "reactions":
-            return await self.sync_reaction_picker(guild, name, data)
-        if data.get("layout") == "role_channel":
-            return await self.sync_role_channel(guild, name, data)
-        try:
-            message = await channel.fetch_message(data["message_id"])
-            await message.edit(embed=self.picker_embed(data), view=self.public_picker_view(guild, name, data))
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-            log.exception("Could not synchronize RoleTools picker %s in guild %s", name, guild.id)
-            return False
-        return True
+            synced = await self.sync_reaction_picker(guild, name, data)
+        elif data.get("layout") == "role_channel":
+            synced = await self.sync_role_channel(guild, name, data)
+        else:
+            try:
+                message = await channel.fetch_message(data["message_id"])
+                await message.edit(embed=self.picker_embed(data), view=self.public_picker_view(guild, name, data))
+                synced = True
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                log.exception("Could not synchronize RoleTools picker %s in guild %s", name, guild.id)
+                synced = False
+        if synced:
+            data["last_synced_at"] = discord.utils.utcnow().isoformat()
+            pickers = await self.config.guild(guild).pickers()
+            pickers[name] = data
+            await self.config.guild(guild).pickers.set(pickers)
+            if guild.id in self.settings:
+                self.settings[guild.id]["pickers"] = pickers
+        return synced
 
     async def register_picker_views(self) -> None:
         for guild_id, data in (await self.config.all_guilds()).items():

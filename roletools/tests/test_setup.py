@@ -103,5 +103,87 @@ class SetupCatalogTests(unittest.IsolatedAsyncioTestCase):
         restricted.set.assert_awaited_once_with([2])
 
 
+class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    def make_cog(self, pickers):
+        picker_value = AsyncMock(return_value=pickers)
+        guild_config = SimpleNamespace(pickers=picker_value)
+        cog = object.__new__(RoleTools)
+        cog.config = SimpleNamespace(guild=MagicMock(return_value=guild_config))
+        cog.settings = {}
+        cog.save_role_menus = AsyncMock()
+        return cog
+
+    async def test_duplicate_clears_publication_and_preserves_source(self):
+        source = {
+            "games": {"display_name": "Games", "role_ids": [1, 2], "layout": "dropdown",
+                      "channel_id": 10, "message_id": 20, "reaction_message_ids": [20],
+                      "role_channel_message_ids": [], "archived": True, "last_synced_at": "earlier"}
+        }
+        cog = self.make_cog(source)
+        guild = SimpleNamespace(id=1)
+
+        key, _ = await cog.duplicate_named_role_menu(guild, "games", "Games Copy")
+
+        self.assertEqual(key, "games-copy")
+        copied = cog.save_role_menus.await_args.args[1][key]
+        self.assertEqual(copied["role_ids"], [1, 2])
+        self.assertIsNone(copied["message_id"])
+        self.assertEqual(copied["reaction_message_ids"], [])
+        self.assertFalse(copied["archived"])
+        self.assertIsNone(copied["last_synced_at"])
+        self.assertEqual(source["games"]["message_id"], 20)
+
+    async def test_archive_and_delete_require_unpublished_named_menu(self):
+        published = {"games": {"message_id": 20, "reaction_message_ids": [], "role_channel_message_ids": []}}
+        cog = self.make_cog(published)
+        guild = SimpleNamespace(id=1)
+
+        archived, archive_message = await cog.set_named_menu_archived(guild, "games", True)
+        deleted, delete_message = await cog.delete_named_role_menu(guild, "games")
+
+        self.assertFalse(archived)
+        self.assertFalse(deleted)
+        self.assertIn("Unpublish", archive_message)
+        self.assertIn("Unpublish", delete_message)
+        cog.save_role_menus.assert_not_awaited()
+
+    async def test_unpublished_menu_can_be_archived_then_deleted(self):
+        pickers = {"games": {"message_id": None, "reaction_message_ids": [], "role_channel_message_ids": []}}
+        cog = self.make_cog(pickers)
+        guild = SimpleNamespace(id=1)
+
+        archived, _ = await cog.set_named_menu_archived(guild, "games", True)
+        self.assertTrue(archived)
+        self.assertTrue(pickers["games"]["archived"])
+        deleted, _ = await cog.delete_named_role_menu(guild, "games")
+        self.assertTrue(deleted)
+        self.assertNotIn("games", pickers)
+
+    async def test_preview_does_not_mutate_saved_menu(self):
+        data = {"title": "Games", "role_ids": [1], "layout": "private", "message_id": 20}
+        pickers = {"games": data.copy()}
+        cog = self.make_cog(pickers)
+        guild = SimpleNamespace(id=1)
+
+        embed = await cog.preview_named_role_menu(guild, "games")
+
+        self.assertEqual(embed.title, "Preview — Games")
+        self.assertEqual(pickers["games"], data)
+        cog.save_role_menus.assert_not_awaited()
+
+    async def test_diagnostics_reports_deleted_role_without_mutation(self):
+        pickers = {"games": {"role_ids": [404], "message_id": None}}
+        cog = self.make_cog(pickers)
+        guild = SimpleNamespace(id=1, me=SimpleNamespace(top_role=object()),
+                                get_role=lambda role_id: None, get_channel=lambda channel_id: None,
+                                get_emoji=lambda emoji_id: None)
+
+        state, issues = await cog.named_menu_diagnostics(guild, "games")
+
+        self.assertEqual(state, "draft")
+        self.assertIn("deleted", issues[0])
+        self.assertEqual(pickers["games"]["role_ids"], [404])
+
+
 if __name__ == "__main__":
     unittest.main()

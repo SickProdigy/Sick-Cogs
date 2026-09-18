@@ -84,6 +84,8 @@ Selecting a menu shows its saved roles, current layout, and destination. From th
 - choose the publication layout;
 - publish the menu, move it to another channel, or synchronize it;
 - unpublish its Discord messages without losing the saved menu;
+- preview and diagnose without changing the live publication;
+- duplicate an unpublished draft, archive/restore it, or permanently delete it with confirmation;
 - configure reaction behavior;
 - add or remove a named menu's role subset, or fill it from the complete library.
 
@@ -108,6 +110,10 @@ The command equivalents live under `[p]roletools menu`:
 - `[p]roletools menu publish <name> <channel>` - Publish or move the menu.
 - `[p]roletools menu sync <name>` - Synchronize its managed messages.
 - `[p]roletools menu unpublish <name>` - Remove managed messages but retain the saved configuration.
+- `[p]roletools menu preview <name>` / `diagnose` - Inspect a draft or publication without changing it.
+- `[p]roletools menu duplicate <name> <new name>` - Copy configuration into an unpublished draft.
+- `[p]roletools menu archive <name>` / `restore` - Hide or restore an unpublished saved menu.
+- `[p]roletools menu delete <name> confirm` - Permanently delete an unpublished saved menu.
 
 Legacy button, select, reaction, and message commands remain available for specialized layouts and compatibility.
 

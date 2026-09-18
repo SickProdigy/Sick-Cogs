@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import List
 
 import discord
@@ -305,7 +306,7 @@ class NamedMenuChooseSelect(discord.ui.Select):
             label=(data.get("display_name") or name)[:100], value=name,
             description=(
                 f"{parent.cog.layout_name(data.get('layout'))} · "
-                f"{'published' if data.get('message_id') else 'not published'}"
+                f"{'archived' if data.get('archived') else ('published' if data.get('message_id') else 'draft')}"
             )[:100],
         ) for name, data in menus[:25]]
         super().__init__(placeholder="Choose a role menu to manage", options=options, row=0)
@@ -456,6 +457,106 @@ class SharedEmojiModal(discord.ui.Modal):
         await interaction.response.send_message(message, ephemeral=True)
 
 
+class NamedMenuDuplicateModal(discord.ui.Modal):
+    def __init__(self, cog, guild: discord.Guild, source: str):
+        super().__init__(title="Duplicate role menu")
+        self.cog, self.guild, self.source = cog, guild, source
+        self.name_input = discord.ui.TextInput(label="New menu name", placeholder="Games copy", max_length=40)
+        self.add_item(self.name_input)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        name, message = await self.cog.duplicate_named_role_menu(
+            self.guild, self.source, str(self.name_input.value)
+        )
+        if name is None:
+            await interaction.response.send_message(message, ephemeral=True)
+            return
+        await interaction.response.send_message(
+            message, embed=await self.cog.named_menu_embed(self.guild, name),
+            view=NamedMenuEditorView(self.cog, interaction.user, name), ephemeral=True,
+        )
+
+
+class NamedMenuDeleteConfirmView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=120)
+        self.cog, self.author, self.name = cog, author, name
+
+    @discord.ui.button(label="Delete saved menu", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, message = await self.cog.delete_named_role_menu(interaction.guild, self.name)
+        await interaction.response.edit_message(content=message, embed=None, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Saved menu kept.", embed=None, view=None)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
+class NamedMenuMoreView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=600)
+        self.cog, self.author, self.name = cog, author, name
+        data = cog.settings.get(author.guild.id, {}).get("pickers", {}).get(name, {})
+        self.archive.label = "Restore" if data.get("archived") else "Archive"
+
+    @discord.ui.button(label="Preview", style=discord.ButtonStyle.primary)
+    async def preview(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = await self.cog.preview_named_role_menu(interaction.guild, self.name)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Diagnostics", style=discord.ButtonStyle.secondary)
+    async def diagnostics(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = await self.cog.named_menu_diagnostics_embed(interaction.guild, self.name)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Duplicate", style=discord.ButtonStyle.secondary)
+    async def duplicate(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(NamedMenuDuplicateModal(self.cog, interaction.guild, self.name))
+
+    @discord.ui.button(label="Archive", style=discord.ButtonStyle.secondary)
+    async def archive(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = (await self.cog.config.guild(interaction.guild).pickers()).get(self.name, {})
+        _, message = await self.cog.set_named_menu_archived(
+            interaction.guild, self.name, not data.get("archived", False)
+        )
+        await interaction.response.send_message(message, ephemeral=True)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "This permanently deletes the saved menu configuration. Published menus must be unpublished first.",
+            view=NamedMenuDeleteConfirmView(self.cog, interaction.user, self.name), ephemeral=True,
+        )
+
+    @discord.ui.button(label="Reaction settings", style=discord.ButtonStyle.secondary, row=1)
+    async def reaction_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = (await self.cog.config.guild(interaction.guild).pickers()).get(self.name, {})
+        layout = data.get("layout", "private")
+        if layout == "reactions":
+            await interaction.response.send_message(
+                "Automatic numbered emojis are already assigned. Choose a role only to override its emoji.",
+                view=RoleEmojiSettingsView(self.cog, interaction.user, self.name), ephemeral=True,
+            )
+        elif layout == "role_channel":
+            await interaction.response.send_modal(
+                SharedEmojiModal(self.cog, interaction.guild, self.name, data.get("shared_emoji", "👍"))
+            )
+        else:
+            await interaction.response.send_message("Reaction settings apply only to reaction layouts.", ephemeral=True)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        return True
+
+
 class NamedMenuEditorView(discord.ui.View):
     def __init__(self, cog, author: discord.Member, name: str):
         super().__init__(timeout=900)
@@ -509,21 +610,12 @@ class NamedMenuEditorView(discord.ui.View):
         )
         await interaction.followup.send(f"Added {changed} library role(s) to this menu.", ephemeral=True)
 
-    @discord.ui.button(label="Reaction settings", style=discord.ButtonStyle.secondary, row=4)
-    async def reaction_settings(self, interaction: discord.Interaction, button: discord.ui.Button):
-        data = (await self.cog.config.guild(interaction.guild).pickers()).get(self.name, {})
-        layout = data.get("layout", "private")
-        if layout == "reactions":
-            await interaction.response.send_message(
-                "Automatic numbered emojis are already assigned. Choose a role only when you want to override its emoji.",
-                view=RoleEmojiSettingsView(self.cog, interaction.user, self.name), ephemeral=True,
-            )
-        elif layout == "role_channel":
-            await interaction.response.send_modal(
-                SharedEmojiModal(self.cog, interaction.guild, self.name, data.get("shared_emoji", "👍"))
-            )
-        else:
-            await interaction.response.send_message("Reaction settings apply only to reaction layouts.", ephemeral=True)
+    @discord.ui.button(label="More actions", style=discord.ButtonStyle.secondary, row=4)
+    async def more_actions(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "Preview, diagnose, duplicate, archive, delete, or configure layout-specific reactions.",
+            view=NamedMenuMoreView(self.cog, interaction.user, self.name), ephemeral=True,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -726,6 +818,111 @@ class RoleToolsSetup(RoleToolsMixin):
         synced = bool(data.get("message_id") and await self.sync_picker(guild, name, data))
         return True, f"Managed role entries now use {emoji}." + (" The published channel was synchronized." if synced else "")
 
+    async def duplicate_named_role_menu(self, guild: discord.Guild, source: str, display_name: str):
+        pickers = await self.config.guild(guild).pickers()
+        original = pickers.get(source)
+        display_name = display_name.strip()
+        if original is None:
+            return None, "That saved role menu no longer exists."
+        if source == SETUP_PICKER_NAME:
+            return None, "The default All roles menu cannot be duplicated."
+        slug = re.sub(r"[^a-z0-9]+", "-", display_name.lower()).strip("-")[:32]
+        if not slug:
+            return None, "Enter a new menu name containing a letter or number."
+        if slug in pickers:
+            return None, f"A saved role menu named **{display_name}** already exists."
+        data = deepcopy(original)
+        data.update({
+            "display_name": display_name[:40], "channel_id": None, "message_id": None,
+            "reaction_message_ids": [], "role_channel_message_ids": [], "archived": False,
+            "last_synced_at": None,
+        })
+        pickers[slug] = data
+        await self.save_role_menus(guild, pickers)
+        return slug, f"Duplicated **{original.get('display_name') or source}** as **{display_name}**."
+
+    async def set_named_menu_archived(self, guild: discord.Guild, name: str, archived: bool):
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        if data is None or name == SETUP_PICKER_NAME:
+            return False, "That saved menu cannot be archived."
+        if archived and self.managed_message_ids(data):
+            return False, "Unpublish this menu before archiving it."
+        data["archived"] = bool(archived)
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
+        return True, ("Menu archived. Its configuration was kept." if archived else "Menu restored to active management.")
+
+    async def delete_named_role_menu(self, guild: discord.Guild, name: str):
+        pickers = await self.config.guild(guild).pickers()
+        data = pickers.get(name)
+        if data is None or name == SETUP_PICKER_NAME:
+            return False, "The default All roles menu cannot be deleted."
+        if self.managed_message_ids(data):
+            return False, "Unpublish this menu before permanently deleting its saved configuration."
+        del pickers[name]
+        await self.save_role_menus(guild, pickers)
+        return True, "Deleted the saved role menu configuration. Discord roles were not deleted."
+
+    async def preview_named_role_menu(self, guild: discord.Guild, name: str) -> discord.Embed:
+        data = (await self.config.guild(guild).pickers()).get(name)
+        if data is None:
+            return discord.Embed(title="Role menu unavailable", description="That saved menu no longer exists.")
+        embed = self.picker_embed(data)
+        embed.title = f"Preview — {embed.title}"
+        embed.add_field(name="Layout", value=self.layout_name(data.get("layout")), inline=False)
+        embed.set_footer(text="Preview only · the published menu was not changed")
+        return embed
+
+    async def named_menu_diagnostics(self, guild: discord.Guild, name: str):
+        data = (await self.config.guild(guild).pickers()).get(name)
+        if data is None:
+            return "missing", ["Saved menu configuration is missing."]
+        issues = []
+        for role_id in data.get("role_ids", []):
+            role = guild.get_role(int(role_id))
+            if role is None:
+                issues.append(f"Role `{role_id}` was deleted.")
+            elif role.managed or role >= guild.me.top_role:
+                issues.append(f"The bot cannot manage **{role.name}**.")
+        for emoji in list(data.get("role_emojis", {}).values()) + [data.get("shared_emoji")]:
+            if not emoji:
+                continue
+            parsed = discord.PartialEmoji.from_str(str(emoji))
+            if parsed.id and guild.get_emoji(parsed.id) is None:
+                issues.append(f"Custom emoji `{emoji}` is unavailable.")
+        message_ids = self.managed_message_ids(data)
+        channel = guild.get_channel(data.get("channel_id")) if data.get("channel_id") else None
+        if message_ids and channel is None:
+            issues.append("The destination channel is missing or unavailable.")
+        if channel is not None:
+            permissions = channel.permissions_for(guild.me)
+            required = {"view_channel", "send_messages"}
+            if data.get("layout") != "role_channel":
+                required.add("embed_links")
+            if data.get("layout") in {"reactions", "role_channel"}:
+                required.update({"add_reactions", "read_message_history", "manage_messages"})
+            missing = [item.replace("_", " ") for item in sorted(required) if not getattr(permissions, item, False)]
+            if missing:
+                issues.append("Missing channel permissions: " + ", ".join(missing) + ".")
+            for message_id in message_ids:
+                try:
+                    await channel.fetch_message(int(message_id))
+                except discord.NotFound:
+                    issues.append(f"Published message `{message_id}` is missing.")
+                except (discord.Forbidden, discord.HTTPException):
+                    issues.append(f"Published message `{message_id}` could not be checked.")
+        state = "archived" if data.get("archived") else ("broken" if message_ids and issues else ("published" if message_ids else "draft"))
+        return state, issues
+
+    async def named_menu_diagnostics_embed(self, guild: discord.Guild, name: str) -> discord.Embed:
+        state, issues = await self.named_menu_diagnostics(guild, name)
+        return discord.Embed(
+            title=f"Role menu diagnostics — {name}",
+            description=("No problems found." if not issues else "\n".join(f"• {item}" for item in issues))[:4000],
+            color=(discord.Color.green() if not issues else discord.Color.orange()),
+        ).add_field(name="State", value=state.title())
+
     async def named_menu_embed(self, guild: discord.Guild, name: str) -> discord.Embed:
         data = (await self.config.guild(guild).pickers()).get(name, {})
         roles = [guild.get_role(int(role_id)) for role_id in data.get("role_ids", [])]
@@ -734,13 +931,18 @@ class RoleToolsSetup(RoleToolsMixin):
         if len(roles) > 30:
             listing += f"\n…and {len(roles) - 30} more."
         published = f"<#{data.get('channel_id')}>" if data.get("message_id") else "Not published"
+        state = "Archived" if data.get("archived") else ("Published" if data.get("message_id") else "Draft")
         embed = discord.Embed(
             title=data.get("display_name") or ("All roles (default)" if name == SETUP_PICKER_NAME else "Saved role menu"),
             description=listing,
             color=discord.Color.blurple(),
         )
+        embed.add_field(name="Stable ID", value=f"`{name}`")
+        embed.add_field(name="State", value=state)
+        embed.add_field(name="Selected roles", value=str(len(data.get("role_ids", []))))
         embed.add_field(name="Layout", value=self.layout_name(data.get("layout")))
         embed.add_field(name="Destination", value=published)
+        embed.add_field(name="Last sync", value=data.get("last_synced_at") or "Never")
         embed.set_footer(text=(
             "This default menu always follows the complete Self-role and Advanced-role lists."
             if name == SETUP_PICKER_NAME else
@@ -906,6 +1108,8 @@ class RoleToolsSetup(RoleToolsMixin):
         data = pickers.get(name)
         if data is None:
             return False, "That saved role menu no longer exists."
+        if data.get("archived"):
+            return False, "Restore this archived menu before publishing it."
         if name == SETUP_PICKER_NAME:
             data["role_ids"] = await self.combined_catalog_ids(guild)
         if name != SETUP_PICKER_NAME and not data.get("role_ids"):
@@ -987,8 +1191,10 @@ class RoleToolsSetup(RoleToolsMixin):
                     await (await old_channel.fetch_message(old_message_id)).delete()
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                     log.warning("Could not remove an earlier self-role menu message in guild %s", guild.id)
-        if guild.id in self.settings:
-            self.settings[guild.id]["pickers"] = await self.config.guild(guild).pickers()
+        data["last_synced_at"] = discord.utils.utcnow().isoformat()
+        pickers = await self.config.guild(guild).pickers()
+        pickers[name] = data
+        await self.save_role_menus(guild, pickers)
         layout_name = {
             "private": "Button Role Menu",
             "dropdown": "public dropdowns",
@@ -1116,6 +1322,43 @@ class RoleToolsSetup(RoleToolsMixin):
     async def roletools_menu_unpublish(self, ctx: Context, name: str) -> None:
         """Remove published messages but keep the saved menu."""
         _, message = await self.unpublish_role_menu(ctx.guild, name.lower())
+        await ctx.send(message)
+
+    @roletools_menu.command(name="preview")
+    async def roletools_menu_preview(self, ctx: Context, name: str) -> None:
+        """Preview a saved menu without changing its published messages."""
+        await ctx.send(embed=await self.preview_named_role_menu(ctx.guild, name.lower()))
+
+    @roletools_menu.command(name="diagnose", aliases=["diagnostics"])
+    async def roletools_menu_diagnose(self, ctx: Context, name: str) -> None:
+        """Check a menu for missing roles, messages, emoji, and permissions."""
+        await ctx.send(embed=await self.named_menu_diagnostics_embed(ctx.guild, name.lower()))
+
+    @roletools_menu.command(name="duplicate")
+    async def roletools_menu_duplicate(self, ctx: Context, name: str, *, new_name: str) -> None:
+        """Copy a saved menu into a new unpublished draft."""
+        key, message = await self.duplicate_named_role_menu(ctx.guild, name.lower(), new_name)
+        await ctx.send(message + (f" Manager key: `{key}`." if key else ""))
+
+    @roletools_menu.command(name="archive")
+    async def roletools_menu_archive(self, ctx: Context, name: str) -> None:
+        """Archive an unpublished menu while keeping its configuration."""
+        _, message = await self.set_named_menu_archived(ctx.guild, name.lower(), True)
+        await ctx.send(message)
+
+    @roletools_menu.command(name="restore")
+    async def roletools_menu_restore(self, ctx: Context, name: str) -> None:
+        """Restore an archived menu to active management."""
+        _, message = await self.set_named_menu_archived(ctx.guild, name.lower(), False)
+        await ctx.send(message)
+
+    @roletools_menu.command(name="delete")
+    async def roletools_menu_delete(self, ctx: Context, name: str, confirmation: str = "") -> None:
+        """Permanently delete an unpublished menu; append `confirm`."""
+        if confirmation.lower() != "confirm":
+            await ctx.send(f"This permanently deletes `{name.lower()}`. Re-run with `confirm` after the name.")
+            return
+        _, message = await self.delete_named_role_menu(ctx.guild, name.lower())
         await ctx.send(message)
 
     @roletools.command(name="setup")
