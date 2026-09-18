@@ -101,7 +101,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.12.2"
+    __version__ = "1.12.3"
 
     def __init__(self, bot: Red):
         self.bot = bot
