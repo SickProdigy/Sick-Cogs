@@ -398,7 +398,11 @@ class PrivateGroupDeleteConfirmView(discord.ui.View):
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.edit_message(content="Private group kept.", embed=None, view=None)
+        await interaction.response.edit_message(
+            content=None,
+            embed=await self.cog.private_group_embed(interaction.guild, self.name),
+            view=PrivateGroupEditorView(self.cog, interaction.user, self.name),
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -434,11 +438,13 @@ class PrivateGroupEditorView(discord.ui.View):
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, row=3)
     async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "This permanently deletes the private-group configuration and its saved role menu. "
-            "Published menus must be unpublished first. Discord roles will not be deleted.",
+        await interaction.response.edit_message(
+            content=(
+                "This permanently deletes the private-group configuration and its saved role menu. "
+                "Published menus must be unpublished first. Discord roles will not be deleted."
+            ),
+            embed=None,
             view=PrivateGroupDeleteConfirmView(self.cog, interaction.user, self.name),
-            ephemeral=True,
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
