@@ -163,7 +163,10 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("games", pickers)
 
     def test_manager_paginates_more_than_twenty_five_menus(self):
-        cog = SimpleNamespace(layout_name=lambda layout: "Button Role Menu")
+        cog = SimpleNamespace(
+            layout_name=lambda layout: "Button Role Menu",
+            managed_message_ids=lambda data: [],
+        )
         author = SimpleNamespace(id=1, guild=SimpleNamespace(id=1))
         menus = [(f"menu-{index}", {"display_name": f"Menu {index}"}) for index in range(26)]
 
@@ -182,7 +185,8 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         menus = [
             ("_selfroles", {"role_ids": [1, 2], "layout": "private", "message_id": None}),
             ("games", {"display_name": "Games", "role_ids": [3, 4, 5],
-                       "layout": "role_channel", "message_id": 20, "channel_id": 10}),
+                       "layout": "role_channel", "message_id": None, "channel_id": 10,
+                       "role_channel_message_ids": [20]}),
         ]
 
         view = NamedMenuManagerView(cog, author, menus)
@@ -195,6 +199,22 @@ class NamedMenuLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Published · 3 roles · Managed Reaction Channel · <#10>", embed.description)
         self.assertNotIn("Search", embed.description)
         self.assertNotIn("Page", {field.name for field in embed.fields})
+
+    async def test_multi_message_layout_renders_as_published(self):
+        pickers = {"games": {
+            "display_name": "Games", "role_ids": [1], "layout": "role_channel",
+            "channel_id": 10, "message_id": None, "reaction_message_ids": [],
+            "role_channel_message_ids": [20],
+        }}
+        cog = self.make_cog(pickers)
+        role = SimpleNamespace(id=1, name="Game")
+        guild = SimpleNamespace(id=1, get_role=lambda role_id: role)
+
+        embed = await cog.named_menu_embed(guild, "games")
+        fields = {field.name: field.value for field in embed.fields}
+
+        self.assertEqual(fields["State"], "Published")
+        self.assertEqual(fields["Destination"], "<#10>")
 
     async def test_unpublish_refreshes_existing_editor_message(self):
         guild = SimpleNamespace(id=1)

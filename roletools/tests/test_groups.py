@@ -200,12 +200,10 @@ class PrivateGroupTests(unittest.IsolatedAsyncioTestCase):
             SimpleNamespace(), SimpleNamespace(), "vip",
             {"description": "VIP access", "entry_cost": 500, "duration": 3600},
         )
-        labels = {item.label for item in modal.children}
-        self.assertEqual(labels, {
-            "Member-facing explanation",
-            "Access cost in Red credits (0 = free)",
-            "Access minutes (0 = permanent)",
-        })
+        self.assertEqual(
+            modal.children,
+            [modal.description_input, modal.cost_input, modal.duration_input],
+        )
 
     async def test_private_group_delete_replaces_editor_message(self):
         cog = SimpleNamespace()

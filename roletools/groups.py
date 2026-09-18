@@ -15,7 +15,7 @@ GROUP_LAYOUTS = {"private", "dropdown", "reactions", "role_channel"}
 
 
 class RoleToolsGroups(RoleToolsMixin):
-    """Reusable gated role groups backed by the named-menu publisher."""
+    """Private access groups backed by the named-menu publisher."""
 
     async def private_groups(self, guild: discord.Guild) -> dict:
         return dict(await self.config.guild(guild).private_groups())
@@ -330,7 +330,7 @@ class RoleToolsGroups(RoleToolsMixin):
 
     @roletools.group(name="group", aliases=["groups", "privategroups"], invoke_without_command=True)
     async def roletools_group(self, ctx: Context) -> None:
-        """View or manage private gated role groups."""
+        """View or manage private access groups."""
         groups = await self.private_groups(ctx.guild)
         if not groups:
             await ctx.send(f"No private groups are configured. Managers can use `{ctx.clean_prefix}roletools group create <name>`.")
@@ -377,9 +377,9 @@ class RoleToolsGroups(RoleToolsMixin):
         changed, notes = await self.update_private_group_roles(ctx.guild, name.lower(), list(roles), add=False)
         await ctx.send(f"Removed {changed} role(s)." + (("\n" + "\n".join(notes)) if notes else ""))
 
-    @roletools_group.command(name="gateway")
+    @roletools_group.command(name="accessrole", aliases=["gateway"])
     @commands.admin_or_permissions(manage_roles=True)
-    async def roletools_group_gateway(self, ctx: Context, name: str, role: Optional[discord.Role] = None) -> None:
+    async def roletools_group_accessrole(self, ctx: Context, name: str, role: Optional[discord.Role] = None) -> None:
         """Set the group's member access role; omit the role to clear it."""
         _, message = await self.set_private_group_gateway(ctx.guild, name.lower(), role)
         await ctx.send(message)
