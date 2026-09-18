@@ -325,6 +325,30 @@ class PrivateGroupGatewaySelect(discord.ui.RoleSelect):
         )
 
 
+class PrivateGroupDeleteConfirmView(discord.ui.View):
+    def __init__(self, cog, author: discord.Member, name: str):
+        super().__init__(timeout=120)
+        self.cog, self.author, self.name = cog, author, name
+
+    @discord.ui.button(label="Delete private group", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        _, message = await self.cog.delete_private_group(interaction.guild, self.name)
+        await interaction.response.edit_message(content=message, embed=None, view=None)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(content="Private group kept.", embed=None, view=None)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author.id:
+            await interaction.response.send_message("Open your own RoleTools setup card.", ephemeral=True)
+            return False
+        if not interaction.user.guild_permissions.manage_roles:
+            await interaction.response.send_message("Manage Roles is required.", ephemeral=True)
+            return False
+        return True
+
+
 class PrivateGroupEditorView(discord.ui.View):
     def __init__(self, cog, author: discord.Member, name: str):
         super().__init__(timeout=900)
@@ -336,6 +360,15 @@ class PrivateGroupEditorView(discord.ui.View):
     @discord.ui.button(label="Done", style=discord.ButtonStyle.success, row=3)
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(content="Private group changes saved.", embed=None, view=None)
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger, row=3)
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "This permanently deletes the private-group configuration and its saved role menu. "
+            "Published menus must be unpublished first. Discord roles will not be deleted.",
+            view=PrivateGroupDeleteConfirmView(self.cog, interaction.user, self.name),
+            ephemeral=True,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -357,6 +390,12 @@ class PrivateGroupManagerView(discord.ui.View):
     @discord.ui.button(label="Create private group", style=discord.ButtonStyle.success, row=1)
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(PrivateGroupCreateModal(self.cog, self.author))
+
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=1)
+    async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Private-group management finished.", embed=None, view=None
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
