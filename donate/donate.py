@@ -1,6 +1,10 @@
+import re
+
 import discord
 from redbot.core import Config, commands
 from redbot.core.utils.chat_formatting import pagify
+
+from .setup import DonateSetupView
 
 
 DEFAULT_TITLE = "Support SickGaming"
@@ -58,6 +62,9 @@ def default_methods() -> dict:
 class Donate(commands.Cog):
     """Share configured donation links and support options."""
 
+    __author__ = ["SickProdigy"]
+    __version__ = "1.1.0"
+
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=5829017346, force_registration=True)
@@ -75,7 +82,8 @@ class Donate(commands.Cog):
 
     @staticmethod
     def _clean_key(value: str) -> str:
-        return value.strip().lower().replace(" ", "-")
+        value = re.sub(r"[^a-z0-9_-]+", "-", value.strip().lower())
+        return value.strip("-_")[:40]
 
     @staticmethod
     def _display_label(key: str, data: dict) -> str:
@@ -103,17 +111,23 @@ class Donate(commands.Cog):
             return f"{value}\n{note}"
         return value
 
-    async def _donation_embed(self, ctx: commands.Context) -> discord.Embed:
-        title = await self.config.guild(ctx.guild).title()
-        description = await self.config.guild(ctx.guild).description()
-        footer = await self.config.guild(ctx.guild).footer()
-        methods = await self.config.guild(ctx.guild).methods()
-        notes = await self.config.guild(ctx.guild).notes()
+    async def donation_settings(self, guild: discord.Guild) -> dict:
+        group = self.config.guild(guild)
+        return {
+            "title": await group.title(), "description": await group.description(),
+            "footer": await group.footer(), "methods": await group.methods(),
+            "notes": await group.notes(),
+        }
+
+    async def donation_embed_for(self, guild: discord.Guild, color: discord.Color) -> discord.Embed:
+        settings = await self.donation_settings(guild)
+        title, description, footer = settings["title"], settings["description"], settings["footer"]
+        methods, notes = settings["methods"], settings["notes"]
 
         embed = discord.Embed(
             title=title or DEFAULT_TITLE,
             description=description or DEFAULT_DESCRIPTION,
-            color=await ctx.embed_color(),
+            color=color,
         )
 
         if methods:
@@ -135,6 +149,126 @@ class Donate(commands.Cog):
 
         embed.set_footer(text=footer or DEFAULT_FOOTER)
         return embed
+
+    async def _donation_embed(self, ctx: commands.Context) -> discord.Embed:
+        return await self.donation_embed_for(ctx.guild, await ctx.embed_color())
+
+    async def setup_embed(self, guild: discord.Guild) -> discord.Embed:
+        embed = await self.donation_embed_for(guild, discord.Color.blurple())
+        embed.set_author(name="Donate setup preview · submitted forms save immediately")
+        return embed
+
+    def validate_embed_budget(self, settings: dict):
+        total = len(settings.get("title") or DEFAULT_TITLE)
+        total += len(settings.get("description") or DEFAULT_DESCRIPTION)
+        total += len(settings.get("footer") or DEFAULT_FOOTER)
+        for key, data in settings.get("methods", {}).items():
+            field_value = self._format_method_value(data)
+            if len(field_value) > 1024:
+                return False, f"Donation method `{key}` is too long for one Discord field."
+            total += len(self._display_label(key, data)) + len(field_value)
+        notes = [note for note in settings.get("notes", []) if note]
+        if notes:
+            note_text = "\n".join(f"- {note}" for note in notes)
+            if len(note_text) > 1024:
+                return False, "The combined donation notes are too long for Discord."
+            total += len("Notes") + len(note_text)
+        if total > 5900:
+            return False, "Those changes would make the donation card too long for Discord."
+        return True, ""
+
+    async def save_card_details(self, guild: discord.Guild, title: str, description: str, footer: str):
+        title, description, footer = title.strip(), description.strip(), footer.strip()
+        if not title or not description:
+            return False, "The card title and description cannot be empty."
+        settings = await self.donation_settings(guild)
+        settings.update({"title": title[:256], "description": description[:4096], "footer": footer[:2048]})
+        valid, message = self.validate_embed_budget(settings)
+        if not valid:
+            return False, message
+        group = self.config.guild(guild)
+        await group.title.set(settings["title"])
+        await group.description.set(settings["description"])
+        await group.footer.set(settings["footer"])
+        return True, "Donation card details updated."
+
+    async def save_donation_method(
+        self, guild: discord.Guild, original_key: str, key: str, label: str,
+        value: str, note: str, order_text: str,
+    ):
+        method_key = self._clean_key(key)
+        label, value, note = label.strip(), value.strip(), note.strip()
+        if not method_key:
+            return False, "Method key must contain a letter or number."
+        if not label or not value:
+            return False, "Method label and value cannot be empty."
+        try:
+            order = int(order_text.strip() or "0")
+        except ValueError:
+            return False, "Display order must be a whole number from 0 to 999."
+        if order < 0 or order > 999:
+            return False, "Display order must be from 0 to 999."
+        methods = await self.config.guild(guild).methods()
+        if not original_key and method_key not in methods and len(methods) >= 24:
+            return False, "A donation card supports at most 24 methods so one field remains available for notes."
+        if original_key and method_key != original_key and method_key in methods:
+            return False, f"A donation method already uses key `{method_key}`."
+        previous = dict(methods.get(original_key or method_key, {}))
+        data = {"label": label[:256], "value": value[:1024], "note": note[:1024]}
+        if previous.get("code"):
+            data["code"] = True
+        if order:
+            data["order"] = order
+        if original_key and original_key != method_key:
+            methods.pop(original_key, None)
+        methods[method_key] = data
+        settings = await self.donation_settings(guild)
+        settings["methods"] = methods
+        valid, message = self.validate_embed_budget(settings)
+        if not valid:
+            return False, message
+        await self.config.guild(guild).methods.set(methods)
+        return True, f"Donation method `{method_key}` saved."
+
+    async def remove_donation_method(self, guild: discord.Guild, key: str):
+        methods = await self.config.guild(guild).methods()
+        if key not in methods:
+            return False, "That donation method no longer exists."
+        methods.pop(key)
+        await self.config.guild(guild).methods.set(methods)
+        return True, f"Donation method `{key}` removed."
+
+    async def save_donation_note(self, guild: discord.Guild, note: str, index=None):
+        note = note.strip()
+        if not note:
+            return False, "Donation note cannot be empty."
+        notes = await self.config.guild(guild).notes()
+        if index is None:
+            if len(notes) >= 25:
+                return False, "The interactive editor supports at most 25 notes."
+            notes.append(note[:500])
+        elif index < 0 or index >= len(notes):
+            return False, "That donation note no longer exists."
+        else:
+            notes[index] = note[:500]
+        settings = await self.donation_settings(guild)
+        settings["notes"] = notes
+        valid, message = self.validate_embed_budget(settings)
+        if not valid:
+            return False, message
+        await self.config.guild(guild).notes.set(notes)
+        return True, "Donation note saved."
+
+    async def remove_donation_note(self, guild: discord.Guild, index: int):
+        notes = await self.config.guild(guild).notes()
+        if index < 0 or index >= len(notes):
+            return False, "That donation note no longer exists."
+        removed = notes.pop(index)
+        await self.config.guild(guild).notes.set(notes)
+        return True, f"Removed note: {removed}"
+
+    async def reset_donation_settings(self, guild: discord.Guild) -> None:
+        await self.config.guild(guild).clear()
 
     @commands.group(name="donate", aliases=("donations", "support"), invoke_without_command=True)
     @commands.guild_only()
@@ -171,6 +305,7 @@ class Donate(commands.Cog):
 
         message = (
             "**Donate Settings**\n\n"
+            "- `donate set setup` (alias: `interactive`)\n"
             "- `donate set view`\n"
             "- `donate set title <text>`\n"
             "- `donate set description <text>`\n"
@@ -184,6 +319,18 @@ class Donate(commands.Cog):
             "Example: `donate set method paypal PayPal | https://paypal.me/example`"
         )
         await ctx.send(message)
+
+    @donate_set.command(name="setup", aliases=["interactive"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def donateset_setup(self, ctx: commands.Context):
+        """Open the interactive donation-card setup dashboard.
+
+        Existing text commands remain available as command-line fallbacks.
+        """
+        await ctx.send(
+            embed=await self.setup_embed(ctx.guild),
+            view=DonateSetupView(self, ctx.author),
+        )
 
     @donate_set.command(name="view")
     @commands.bot_has_permissions(embed_links=True)

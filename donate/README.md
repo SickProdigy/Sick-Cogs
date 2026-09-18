@@ -11,10 +11,19 @@ The default donation card includes SickGaming's donation page, PayPal, Patreon, 
 - `donate` shows the configured donation embed.
 - `donations` and `support` are aliases for `donate`.
 - `donate set` shows admin configuration commands.
+- `donate set setup` opens the interactive setup dashboard (`interactive` is an alias).
 
 ## Setup
 
 Configure the donation card from Discord:
+
+```text
+donate set setup
+```
+
+The dashboard previews the public card and provides forms for its title, description, footer, donation methods, display order, and notes. Existing values—including the default card—are prefilled. Removing a method or note and restoring all defaults require confirmation. Submitted forms save immediately; **Done** closes the dashboard.
+
+The text commands remain available for quick edits and automation:
 
 ```text
 donate set view
