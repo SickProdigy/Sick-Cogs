@@ -1,16 +1,21 @@
 """Server-local prediction games with no money or wallet integration."""
 
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
-from redbot.core import Config, commands
+from redbot.core import Config, bank, commands
 
-from .models import PredictionMarket
+from .models import PredictionMarket, calculate_payouts
 
 
-GUILD_DEFAULTS = {"markets": {}, "next_market_id": 1, "channel_id": None, "scores": {}}
+GUILD_DEFAULTS = {
+    "markets": {}, "next_market_id": 1, "channel_id": None, "scores": {},
+    "bank_enabled": False, "stake_min": 10, "stake_max": 10000,
+    "exposure_limit": 50000, "house_cut_bps": 0, "treasury_user_id": None,
+}
 DURATION_RE = re.compile(r"^(?P<count>[1-9][0-9]*)(?P<unit>[mhdw])$", re.IGNORECASE)
 DURATION_UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 
@@ -26,6 +31,30 @@ class Predictions(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=self.CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**GUILD_DEFAULTS)
+        self._guild_locks = {}
+
+    def _guild_lock(self, guild_id: int):
+        return self._guild_locks.setdefault(guild_id, asyncio.Lock())
+
+    @staticmethod
+    def parse_stake(value: str):
+        value = value.strip()
+        if value.isdigit():
+            amount = int(value)
+            return ("fixed", amount, amount) if amount > 0 else None
+        parts = value.split("-", 1)
+        if len(parts) == 2 and all(part.strip().isdigit() for part in parts):
+            minimum, maximum = (int(part.strip()) for part in parts)
+            if 0 < minimum <= maximum:
+                return "range", minimum, maximum
+        return None
+
+    @staticmethod
+    def _audit(market: PredictionMarket, event: str, **details):
+        market.audit.append({
+            "event": event, "at": datetime.now(timezone.utc).isoformat(), **details
+        })
+        market.audit = market.audit[-100:]
 
     async def red_delete_data_for_user(self, *, requester, user_id):
         for guild_id, settings in (await self.config.all_guilds()).items():
@@ -97,6 +126,25 @@ class Predictions(commands.Cog):
         embed.set_footer(text=f"{state} • No money, tokens, or prizes")
         return embed
 
+    @staticmethod
+    async def market_embed_with_currency(market: PredictionMarket, guild) -> discord.Embed:
+        embed = Predictions.market_embed(market)
+        currency = await bank.get_currency_name(guild)
+        stake = (
+            str(market.stake_min) if market.stake_mode == "fixed"
+            else f"{market.stake_min}–{market.stake_max}"
+        )
+        embed.add_field(
+            name="Play-credit stake",
+            value=(
+                f"**{stake} {currency}** · losing pool is shared proportionally by winners. "
+                "Cancelled or no-winner predictions refund accepted stakes."
+            ), inline=False,
+        )
+        cut = market.house_cut_bps / 100
+        embed.set_footer(text=f"Open · Fictional {currency} only · House cut {cut:g}%")
+        return embed
+
     @commands.group(name="predict", aliases=["prediction", "predictions"], invoke_without_command=True)
     @commands.guild_only()
     async def predict(self, ctx):
@@ -126,6 +174,123 @@ class Predictions(commands.Cog):
         if destination.id != ctx.channel.id:
             await ctx.send(f"Prediction #{market_id} was posted in {destination.mention}.")
 
+    @predict.command(name="createbank", aliases=["createstaked"])
+    async def predict_create_bank(self, ctx, duration: str, stake: str, *, definition: str):
+        """Create a play-credit prediction using a fixed stake or min-max range."""
+        settings = await self.config.guild(ctx.guild).all()
+        if not settings.get("bank_enabled", False):
+            await ctx.send("Bank-backed predictions are disabled in this server.")
+            return
+        parsed_duration = self.parse_duration(duration)
+        parsed_definition = self.parse_definition(definition)
+        parsed_stake = self.parse_stake(stake)
+        if parsed_duration is None or parsed_definition is None or parsed_stake is None:
+            await ctx.send(
+                "Use `predict createbank 1d 100 Question? | Yes | No` for a fixed stake, "
+                "or replace `100` with a range such as `10-500`."
+            )
+            return
+        mode, minimum, maximum = parsed_stake
+        if minimum < int(settings["stake_min"]) or maximum > int(settings["stake_max"]):
+            await ctx.send(
+                f"Stake limits for this server are {settings['stake_min']}–{settings['stake_max']}."
+            )
+            return
+        question, outcomes = parsed_definition
+        now = datetime.now(timezone.utc)
+        async with self._guild_lock(ctx.guild.id):
+            async with self.config.guild(ctx.guild).all() as current:
+                market_id = int(current["next_market_id"])
+                current["next_market_id"] = market_id + 1
+                market = PredictionMarket(
+                    market_id, ctx.guild.id, ctx.author.id, question, outcomes,
+                    now + parsed_duration, now, stake_mode=mode,
+                    stake_min=minimum, stake_max=maximum,
+                    house_cut_bps=int(current.get("house_cut_bps", 0)),
+                    treasury_user_id=current.get("treasury_user_id"),
+                )
+                current["markets"][str(market_id)] = market.to_raw()
+                channel_id = current.get("channel_id")
+        destination = ctx.guild.get_channel(channel_id) if channel_id else ctx.channel
+        if not isinstance(destination, discord.TextChannel):
+            destination = ctx.channel
+        await destination.send(embed=await self.market_embed_with_currency(market, ctx.guild))
+        if destination.id != ctx.channel.id:
+            await ctx.send(f"Prediction #{market_id} was posted in {destination.mention}.")
+
+    @predict.command(name="stake")
+    async def predict_stake(self, ctx, market_id: int, amount: int, *, outcome: str):
+        """Confirm a play-credit stake and pick an outcome."""
+        async with self._guild_lock(ctx.guild.id):
+            markets = await self.config.guild(ctx.guild).markets()
+            market = self._market_from_raw(markets.get(str(market_id)))
+            if market is None or not market.uses_bank:
+                await ctx.send("That bank-backed prediction does not exist.")
+                return
+            if not market.is_open():
+                await ctx.send("Voting is closed for that prediction.")
+                return
+            choice = self.outcome_index(market, outcome)
+            if choice is None or not market.stake_min <= amount <= market.stake_max:
+                await ctx.send(
+                    f"Choose a valid outcome and a stake from {market.stake_min} to {market.stake_max}."
+                )
+                return
+            user_id = str(ctx.author.id)
+            existing = market.entries.get(user_id)
+            if existing and existing.get("state") == "funded":
+                if int(existing.get("stake", 0)) != amount:
+                    await ctx.send("Your accepted stake is locked; you may only change the outcome.")
+                    return
+                existing["choice"] = choice
+                market.votes[user_id] = choice
+                self._audit(market, "entry_choice_changed", user_id=user_id, choice=choice)
+                markets[str(market_id)] = market.to_raw()
+                await self.config.guild(ctx.guild).markets.set(markets)
+                await ctx.send(f"Your funded pick is now **{market.outcomes[choice]}**.")
+                return
+            exposure = sum(
+                int(entry.get("stake", 0)) for raw in markets.values()
+                for entry_user, entry in (raw.get("entries", {}) if isinstance(raw, dict) else {}).items()
+                if entry_user == user_id and entry.get("state") == "funded"
+            )
+            limit = int(await self.config.guild(ctx.guild).exposure_limit())
+            if exposure + amount > limit:
+                await ctx.send(f"That would exceed the per-user exposure limit of {limit} credits.")
+                return
+            balance_before = await bank.get_balance(ctx.author)
+            operation_id = f"{ctx.guild.id}:{market_id}:entry:{user_id}"
+            market.entries[user_id] = {
+                "choice": choice, "stake": amount, "state": "prepared",
+                "withdrawal_id": operation_id, "balance_before": balance_before,
+            }
+            self._audit(market, "withdrawal_prepared", user_id=user_id, amount=amount, operation_id=operation_id)
+            markets[str(market_id)] = market.to_raw()
+            await self.config.guild(ctx.guild).markets.set(markets)
+            try:
+                await bank.withdraw_credits(ctx.author, amount)
+            except ValueError:
+                market.entries[user_id]["state"] = "failed"
+                self._audit(market, "withdrawal_failed", user_id=user_id, amount=amount)
+                markets[str(market_id)] = market.to_raw()
+                await self.config.guild(ctx.guild).markets.set(markets)
+                await ctx.send("You do not have enough credits for that stake.")
+                return
+            market.entries[user_id]["state"] = "funded"
+            market.votes[user_id] = choice
+            self._audit(market, "withdrawal_applied", user_id=user_id, amount=amount, operation_id=operation_id)
+            markets[str(market_id)] = market.to_raw()
+            try:
+                await self.config.guild(ctx.guild).markets.set(markets)
+            except Exception:
+                await bank.deposit_credits(ctx.author, amount)
+                raise
+        currency = await bank.get_currency_name(ctx.guild)
+        await ctx.send(
+            f"Confirmed: **{amount} {currency}** on **{market.outcomes[choice]}**. "
+            "The stake is refunded if the prediction is cancelled or has no winner."
+        )
+
     @predict.command(name="vote", aliases=["pick"])
     async def predict_vote(self, ctx, market_id: int, *, outcome: str):
         """Vote for one outcome. A later vote replaces your earlier choice."""
@@ -136,6 +301,9 @@ class Predictions(commands.Cog):
                 return
             if not market.is_open():
                 await ctx.send("Voting is closed for that prediction.")
+                return
+            if market.uses_bank:
+                await ctx.send(f"Use `predict stake {market_id} <amount> <outcome>` for this prediction.")
                 return
             index = self.outcome_index(market, outcome)
             if index is None:
