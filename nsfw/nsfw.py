@@ -133,6 +133,7 @@ class Nsfw(Core, name="Nsfw"):
             else "Switched back to Martine API."
         )
 
+    @commands.is_nsfw()
     @commands.command()
     @commands.cooldown(1, 3, commands.BucketType.user)
     async def cleandm(self, ctx: commands.Context, number: int):
@@ -150,6 +151,7 @@ class Nsfw(Core, name="Nsfw"):
                     await message.delete()
         await ctx.tick()
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(name="4k", aliases=["4K", "fourk"])
@@ -158,6 +160,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("4k"), sub.FOUR_K)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["oface", "ofaces"])
@@ -166,6 +169,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("ahegao"), sub.AHEGAO)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["butt", "booty"])
@@ -174,6 +178,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("ass"), sub.ASS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["asian"])
@@ -182,6 +187,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("asian porn"), sub.ASIANPORN)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["sodomy"])
@@ -190,6 +196,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("anal"), sub.ANAL)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -198,6 +205,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("bbw"), sub.BBW)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["shibari"])
@@ -206,6 +214,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("bdsm"), sub.BDSM)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["blackdick", "bcock", "bdick", "blackcocks", "blackdicks"])
@@ -214,6 +223,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("black cock"), sub.BLACKCOCK)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["blowjobs", "blowj", "bjob", "fellatio", "fellation"])
@@ -222,6 +232,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("blowjob"), sub.BLOWJOB)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["boob", "boobies", "tits", "titties", "breasts", "breast"])
@@ -230,6 +241,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("boobs"), sub.BOOBS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["boless"])
@@ -238,6 +250,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("bottomless"), sub.BOTTOMLESS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -246,6 +259,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("nsfw cosplay"), sub.COSPLAY)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["cunni", "pussyeating"])
@@ -254,6 +268,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("cunnilingus"), sub.CUNNI)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["cum", "cums", "cumshots"])
@@ -262,6 +277,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("cumshot"), sub.CUMSHOTS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["deept", "deepthroating"])
@@ -270,6 +286,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("deepthroat"), sub.DEEPTHROAT)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["cock"])
@@ -278,6 +295,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("dick"), sub.DICK)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["doublep"])
@@ -286,6 +304,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("double penetration"), sub.DOUBLE_P)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -294,6 +313,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("ebony"), sub.EBONY)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["facial"])
@@ -302,6 +322,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("facials"), sub.FACIALS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["feets", "feetish"])
@@ -310,6 +331,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("feets"), sub.FEET)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -318,6 +340,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("femdom"), sub.FEMDOM)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["futanari"])
@@ -326,6 +349,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("futa"), sub.FUTA)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["gayporn"])
@@ -334,6 +358,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("gay porn"), sub.GAY_P)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["groups", "nudegroup", "nudegroups"])
@@ -342,6 +367,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, "groups nudes", sub.GROUPS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -356,6 +382,7 @@ class Nsfw(Core, name="Nsfw"):
             url=sub.NEKOBOT_URL.format(sub.NEKOBOT_HENTAI),
         )
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["lesbians"])
@@ -364,6 +391,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("lesbian"), sub.LESBIANS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["milfs"])
@@ -372,6 +400,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("milf"), sub.MILF)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["oralsex"])
@@ -380,6 +409,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("oral"), sub.ORAL)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["pgif", "prongif"])
@@ -394,6 +424,7 @@ class Nsfw(Core, name="Nsfw"):
             url=sub.NEKOBOT_URL.format("pgif"),
         )
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -402,6 +433,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("public nude"), sub.PUBLIC)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["vagina", "puss"])
@@ -410,6 +442,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("pussy"), sub.PUSSY)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command()
@@ -418,6 +451,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("real nudes"), sub.REAL_GIRLS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["redheads", "ginger", "gingers"])
@@ -426,6 +460,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("red head"), sub.REDHEADS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["r34"])
@@ -434,6 +469,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("rule34"), sub.RULE_34)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["squirts"])
@@ -442,6 +478,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("squirt"), sub.SQUIRTS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["thighs", "legs"])
@@ -450,6 +487,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("thigh"), sub.THIGHS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["groupsex"])
@@ -458,6 +496,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("threesome"), sub.THREESOME)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["trap", "shemale", "shemales"])
@@ -466,6 +505,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("trans"), sub.TRANS)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["wild", "gwild"])
@@ -474,6 +514,7 @@ class Nsfw(Core, name="Nsfw"):
 
         await self._send_msg(ctx, _("gonewild"), sub.WILD)
 
+    @commands.is_nsfw()
     @commands.bot_has_permissions(embed_links=True)
     @commands.cooldown(1, 0.5, commands.BucketType.user)
     @commands.command(aliases=["yiffs"])
