@@ -13,12 +13,7 @@ _ = Translator("Nsfw", __file__)
 
 @cog_i18n(_)
 class Nsfw(Core, name="Nsfw"):
-    """
-    Send random NSFW images from random subreddits
-
-    If `[p]help Nsfw` or any other Nsfw commands are used in a non-nsfw channel,
-    you will not be able to see the list of commands for this category.
-    """
+    """Browse mature-media commands. Media only posts in age-restricted channels."""
 
     @commands.command()
     async def nsfwversion(self, ctx: commands.Context):
