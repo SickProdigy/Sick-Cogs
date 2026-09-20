@@ -11,7 +11,7 @@ from redbot.core import Config, bank, commands
 from redbot.core.errors import BalanceTooHigh
 
 from .models import PredictionMarket, calculate_payouts
-from .views import PredictionEntryView, PredictionSetupView, StakeConfirmView
+from .views import PredictionEntryView, PredictionHomeView, PredictionStartView, StakeConfirmView
 
 
 GUILD_DEFAULTS = {
@@ -53,12 +53,12 @@ class Predictions(commands.Cog):
             await interaction.response.send_message("Voting is closed for this prediction.", ephemeral=True)
             return
         if not market.stake_min <= amount <= market.stake_max:
-            await interaction.response.send_message("That stake is outside this prediction's limits.", ephemeral=True)
+            await interaction.response.send_message("That entry amount is outside this prediction's limits.", ephemeral=True)
             return
         currency = await bank.get_currency_name(interaction.guild)
         view = StakeConfirmView(self, interaction.user.id, market_id, choice, amount)
         await interaction.response.send_message(
-            f"Confirm **{amount} {currency}** on **{market.outcomes[choice]}**?\n"
+            f"Confirm a **{amount} {currency}** entry on **{market.outcomes[choice]}**?\n"
             "This is fictional server currency. It is refunded if the prediction is "
             "cancelled or has no winner; otherwise the losing pool is shared by winners.",
             view=view, ephemeral=True,
@@ -163,10 +163,10 @@ class Predictions(commands.Cog):
             else f"{market.stake_min}–{market.stake_max}"
         )
         embed.add_field(
-            name="Play-credit stake",
+            name="Play-credit entry",
             value=(
                 f"**{stake} {currency}** · losing pool is shared proportionally by winners. "
-                "Cancelled or no-winner predictions refund accepted stakes."
+                "Cancelled or no-winner predictions refund accepted entries."
             ), inline=False,
         )
         cut = market.house_cut_bps / 100
@@ -290,20 +290,41 @@ class Predictions(commands.Cog):
     @commands.group(name="predict", aliases=["prediction", "predictions"], invoke_without_command=True)
     @commands.guild_only()
     async def predict(self, ctx):
-        """Create and vote on server-local prediction games."""
-        await ctx.send_help()
-
-    @predict.command(name="setup")
-    async def predict_setup(self, ctx):
-        """Open interactive free or play-credit prediction creation."""
-        enabled = await self.config.guild(ctx.guild).bank_enabled()
+        """Open the interactive Predictions home menu."""
+        settings = await self.config.guild(ctx.guild).all()
+        markets = [self._market_from_raw(raw) for raw in settings["markets"].values()]
+        valid = [market for market in markets if market]
+        open_count = sum(market.is_open() for market in valid)
+        bank_text = "Play-credit entries enabled" if settings.get("bank_enabled") else "Free predictions"
+        embed = discord.Embed(
+            title="Predictions",
+            description=(
+                f"**{open_count} open** · {len(valid)} total\n{bank_text}\n\n"
+                "Start a prediction or browse the server activity below."
+            ),
+            color=discord.Color.blurple(),
+        )
         await ctx.send(
-            "Choose a prediction type. Play-credit choices are available only when enabled "
-            "by a server administrator.",
-            view=PredictionSetupView(self, ctx.author.id, enabled),
+            embed=embed,
+            view=PredictionHomeView(self, ctx.author.id, settings.get("bank_enabled", False)),
         )
 
-    @predict.command(name="create")
+    @predict.command(name="start")
+    async def predict_start(self, ctx):
+        """Start an interactive free or play-credit prediction."""
+        enabled = await self.config.guild(ctx.guild).bank_enabled()
+        await ctx.send(
+            "What kind of prediction do you want to start? Play-credit choices are "
+            "available only when enabled by a server administrator.",
+            view=PredictionStartView(self, ctx.author.id, enabled),
+        )
+
+    @predict.command(name="setup", hidden=True)
+    async def predict_setup_legacy(self, ctx):
+        """Compatibility alias for predict start."""
+        await self.predict_start.callback(self, ctx)
+
+    @predict.command(name="create", hidden=True)
     async def predict_create(self, ctx, duration: str, *, definition: str):
         """Create one: duration, question, then outcomes separated by |."""
         parsed_duration = self.parse_duration(duration)
@@ -328,7 +349,7 @@ class Predictions(commands.Cog):
         if destination.id != ctx.channel.id:
             await ctx.send(f"Prediction #{market_id} was posted in {destination.mention}.")
 
-    @predict.command(name="createbank", aliases=["createstaked"])
+    @predict.command(name="createbank", aliases=["createstaked"], hidden=True)
     async def predict_create_bank(self, ctx, duration: str, stake: str, *, definition: str):
         """Create a play-credit prediction using a fixed stake or min-max range."""
         settings = await self.config.guild(ctx.guild).all()
@@ -347,7 +368,7 @@ class Predictions(commands.Cog):
         mode, minimum, maximum = parsed_stake
         if minimum < int(settings["stake_min"]) or maximum > int(settings["stake_max"]):
             await ctx.send(
-                f"Stake limits for this server are {settings['stake_min']}–{settings['stake_max']}."
+                f"Entry limits for this server are {settings['stake_min']}–{settings['stake_max']}."
             )
             return
         question, outcomes = parsed_definition
@@ -376,7 +397,7 @@ class Predictions(commands.Cog):
         if destination.id != ctx.channel.id:
             await ctx.send(f"Prediction #{market_id} was posted in {destination.mention}.")
 
-    @predict.command(name="stake")
+    @predict.command(name="stake", hidden=True)
     async def predict_stake(self, ctx, market_id: int, amount: int, *, outcome: str):
         """Confirm a play-credit stake and pick an outcome."""
         async with self._guild_lock(ctx.guild.id):
@@ -391,14 +412,14 @@ class Predictions(commands.Cog):
             choice = self.outcome_index(market, outcome)
             if choice is None or not market.stake_min <= amount <= market.stake_max:
                 await ctx.send(
-                    f"Choose a valid outcome and a stake from {market.stake_min} to {market.stake_max}."
+                    f"Choose a valid outcome and an entry amount from {market.stake_min} to {market.stake_max}."
                 )
                 return
             user_id = str(ctx.author.id)
             existing = market.entries.get(user_id)
             if existing and existing.get("state") == "funded":
                 if int(existing.get("stake", 0)) != amount:
-                    await ctx.send("Your accepted stake is locked; you may only change the outcome.")
+                    await ctx.send("Your accepted entry amount is locked; you may only change the outcome.")
                     return
                 existing["choice"] = choice
                 market.votes[user_id] = choice
@@ -439,7 +460,7 @@ class Predictions(commands.Cog):
             )
             limit = int(await self.config.guild(ctx.guild).exposure_limit())
             if exposure + amount > limit:
-                await ctx.send(f"That would exceed the per-user exposure limit of {limit} credits.")
+                await ctx.send(f"That entry would exceed the per-user exposure limit of {limit} credits.")
                 return
             balance_before = await bank.get_balance(ctx.author)
             operation_id = f"{ctx.guild.id}:{market_id}:entry:{user_id}"
@@ -477,10 +498,10 @@ class Predictions(commands.Cog):
         currency = await bank.get_currency_name(ctx.guild)
         await ctx.send(
             f"Confirmed: **{amount} {currency}** on **{market.outcomes[choice]}**. "
-            "The stake is refunded if the prediction is cancelled or has no winner."
+            "The entry is refunded if the prediction is cancelled or has no winner."
         )
 
-    @predict.command(name="vote", aliases=["pick"])
+    @predict.command(name="vote", hidden=True)
     async def predict_vote(self, ctx, market_id: int, *, outcome: str):
         """Vote for one outcome. A later vote replaces your earlier choice."""
         async with self.config.guild(ctx.guild).markets() as markets:
@@ -492,7 +513,7 @@ class Predictions(commands.Cog):
                 await ctx.send("Voting is closed for that prediction.")
                 return
             if market.uses_bank:
-                await ctx.send(f"Use `predict stake {market_id} <amount> <outcome>` for this prediction.")
+                await ctx.send(f"Use the outcome buttons on `predict pick {market_id}` for this prediction.")
                 return
             index = self.outcome_index(market, outcome)
             if index is None:
@@ -502,9 +523,9 @@ class Predictions(commands.Cog):
             markets[str(market_id)] = market.to_raw()
         await ctx.send(f"Your pick for prediction #{market_id}: **{market.outcomes[index]}**.")
 
-    @predict.command(name="show", aliases=["market"])
-    async def predict_show(self, ctx, market_id: int):
-        """Show a prediction and its current vote totals."""
+    @predict.command(name="status", aliases=["show", "market"])
+    async def predict_status(self, ctx, market_id: int):
+        """Show a prediction, your entry, and its current totals."""
         market = self._market_from_raw((await self.config.guild(ctx.guild).markets()).get(str(market_id)))
         if market is None:
             await ctx.send("That prediction does not exist.")
@@ -513,8 +534,28 @@ class Predictions(commands.Cog):
             await self.market_embed_with_currency(market, ctx.guild)
             if market.uses_bank else self.market_embed(market)
         )
+        user_id = str(ctx.author.id)
+        if market.uses_bank and user_id in market.entries:
+            entry = market.entries[user_id]
+            choice = int(entry.get("choice", -1))
+            outcome = market.outcomes[choice] if 0 <= choice < len(market.outcomes) else "Pending"
+            currency = await bank.get_currency_name(ctx.guild)
+            embed.add_field(
+                name="Your entry",
+                value=f"**{outcome}** · {entry.get('stake', 0)} {currency} · {entry.get('state', 'unknown')}",
+                inline=False,
+            )
+        elif not market.uses_bank and user_id in market.votes:
+            embed.add_field(
+                name="Your pick", value=f"**{market.outcomes[market.votes[user_id]]}**", inline=False
+            )
         view = PredictionEntryView(self, ctx.guild.id, market) if market.is_open() else None
         await ctx.send(embed=embed, view=view)
+
+    @predict.command(name="pick")
+    async def predict_pick(self, ctx, market_id: int):
+        """Open a prediction card and choose an outcome."""
+        await self.predict_status.callback(self, ctx, market_id)
 
     @predict.command(name="list")
     async def predict_list(self, ctx):
@@ -527,8 +568,69 @@ class Predictions(commands.Cog):
         lines = [f"**#{market.market_id}** {market.question} — closes <t:{int(market.closes_at.timestamp())}:R>" for market in open_markets[:20]]
         await ctx.send(embed=discord.Embed(title="Open predictions", description="\n".join(lines), color=discord.Color.blurple()))
 
-    @predict.command(name="settle", aliases=["resolve"])
-    async def predict_settle(self, ctx, market_id: int, *, outcome: str):
+    @predict.command(name="recent")
+    async def predict_recent(self, ctx):
+        """Show the latest predictions and their current state."""
+        markets = [
+            self._market_from_raw(raw)
+            for raw in (await self.config.guild(ctx.guild).markets()).values()
+        ]
+        recent_markets = sorted(
+            (market for market in markets if market),
+            key=lambda market: market.market_id,
+            reverse=True,
+        )[:10]
+        if not recent_markets:
+            await ctx.send("No predictions have been created in this server.")
+            return
+        lines = []
+        for market in recent_markets:
+            state = "open" if market.is_open() else market.state
+            kind = "play credits" if market.uses_bank else "free"
+            lines.append(
+                f"**#{market.market_id}** {market.question} — {state} · {kind}"
+            )
+        await ctx.send(embed=discord.Embed(
+            title="Recent predictions", description="\n".join(lines), color=discord.Color.blurple()
+        ))
+
+    @predict.command(name="mine")
+    async def predict_mine(self, ctx):
+        """Show predictions you have entered in this server."""
+        user_id = str(ctx.author.id)
+        markets = [
+            self._market_from_raw(raw)
+            for raw in (await self.config.guild(ctx.guild).markets()).values()
+        ]
+        joined = []
+        currency = await bank.get_currency_name(ctx.guild)
+        for market in sorted(
+            (item for item in markets if item), key=lambda item: item.market_id, reverse=True
+        ):
+            if market.uses_bank and user_id in market.entries:
+                entry = market.entries[user_id]
+                choice = int(entry.get("choice", -1))
+                outcome = market.outcomes[choice] if 0 <= choice < len(market.outcomes) else "Pending"
+                joined.append(
+                    f"**#{market.market_id}** {market.question} — **{outcome}** · "
+                    f"{entry.get('stake', 0)} {currency} · {entry.get('state', 'unknown')}"
+                )
+            elif not market.uses_bank and user_id in market.votes:
+                joined.append(
+                    f"**#{market.market_id}** {market.question} — "
+                    f"**{market.outcomes[market.votes[user_id]]}** · free"
+                )
+            if len(joined) == 20:
+                break
+        if not joined:
+            await ctx.send("You have not entered any predictions in this server.")
+            return
+        await ctx.send(embed=discord.Embed(
+            title="Your predictions", description="\n".join(joined), color=discord.Color.blurple()
+        ))
+
+    @predict.command(name="resolve", aliases=["settle"])
+    async def predict_resolve(self, ctx, market_id: int, *, outcome: str):
         """Settle a closed prediction; its creator or a server manager may do so."""
         preview = self._market_from_raw(
             (await self.config.guild(ctx.guild).markets()).get(str(market_id))
@@ -600,10 +702,20 @@ class Predictions(commands.Cog):
             await ctx.send("Only the prediction creator or a server manager can cancel it.")
             return
         if not market.uses_bank:
-            await ctx.send("Free predictions cannot currently be cancelled; settle or leave it closed.")
+            if market.state == "cancelled":
+                await ctx.send(f"Prediction #{market_id} is already cancelled.")
+                return
+            if market.is_resolved:
+                await ctx.send("A resolved free prediction cannot be cancelled.")
+                return
+            market.state = "cancelled"
+            self._audit(market, "prediction_cancelled", actor_id=str(ctx.author.id))
+            markets = await self.config.guild(ctx.guild).markets()
+            await self._save_market(ctx.guild, markets, market)
+            await ctx.send(f"Prediction #{market_id} cancelled.")
             return
         _, error = await self._finalize_bank_market(ctx.guild, market_id, cancelled=True)
-        await ctx.send(error or f"Prediction #{market_id} cancelled; accepted stakes were refunded.")
+        await ctx.send(error or f"Prediction #{market_id} cancelled; accepted entries were refunded.")
 
     @predict.command(name="audit")
     @commands.admin_or_permissions(manage_guild=True)
@@ -672,7 +784,7 @@ class Predictions(commands.Cog):
         treasury = settings.get("treasury_user_id")
         await ctx.send(
             f"Bank predictions: **{'ON' if settings.get('bank_enabled') else 'OFF'}** · "
-            f"{scope} {currency}\nStake limits: **{settings['stake_min']}–{settings['stake_max']}** · "
+            f"{scope} {currency}\nEntry limits: **{settings['stake_min']}–{settings['stake_max']}** · "
             f"Exposure: **{settings['exposure_limit']}** · House cut: "
             f"**{int(settings.get('house_cut_bps', 0)) / 100:g}%** · "
             f"Treasury: {f'<@{treasury}>' if treasury else 'not configured'}",
@@ -704,7 +816,7 @@ class Predictions(commands.Cog):
         await self.config.guild(ctx.guild).stake_min.set(minimum)
         await self.config.guild(ctx.guild).stake_max.set(maximum)
         await self.config.guild(ctx.guild).exposure_limit.set(exposure)
-        await ctx.send(f"Stake limits are {minimum}–{maximum}; per-user exposure is {exposure} credits.")
+        await ctx.send(f"Entry limits are {minimum}–{maximum}; per-user exposure is {exposure} credits.")
 
     @predictset_bank.command(name="housecut")
     async def predictset_bank_housecut(

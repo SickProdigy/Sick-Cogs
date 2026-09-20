@@ -123,6 +123,37 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(deposited.await_count, 1)
             self.assertEqual(balances[10], 200)
 
+    async def test_status_and_mine_show_existing_play_credit_entry(self):
+        market = make_market({
+            "10": {"choice": 1, "stake": 125, "state": "funded"}
+        })
+        cog, guild = self.cog_and_guild(market)
+        author = guild.get_member(10)
+        ctx = SimpleNamespace(guild=guild, author=author, send=AsyncMock())
+        with patch("predictions.predictions.bank.get_currency_name", new=AsyncMock(return_value="Gcreds")):
+            await Predictions.predict_status.callback(cog, ctx, 1)
+            status_embed = ctx.send.await_args.kwargs["embed"]
+            self.assertIn("125 Gcreds", status_embed.fields[-1].value)
+            ctx.send.reset_mock()
+            await Predictions.predict_mine.callback(cog, ctx)
+            mine_embed = ctx.send.await_args.kwargs["embed"]
+            self.assertIn("125 Gcreds", mine_embed.description)
+
+    async def test_free_prediction_can_be_cancelled_without_bank_activity(self):
+        now = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        market = PredictionMarket(
+            1, 55, 10, "Winner?", ["A", "B"], now + timedelta(days=1), now
+        )
+        cog, guild = self.cog_and_guild(market)
+        author = guild.get_member(10)
+        author.guild_permissions = SimpleNamespace(manage_guild=False)
+        ctx = SimpleNamespace(guild=guild, author=author, send=AsyncMock())
+        with patch("predictions.predictions.bank.deposit_credits", new=AsyncMock()) as deposited:
+            await Predictions.predict_cancel.callback(cog, ctx, 1)
+        saved = PredictionMarket.from_raw(cog.config.markets_value.value["1"])
+        self.assertEqual(saved.state, "cancelled")
+        self.assertEqual(deposited.await_count, 0)
+
     async def test_cancellation_refunds_each_funded_entry_once(self):
         market = make_market({
             "10": {"choice": 0, "stake": 75, "state": "funded"},
