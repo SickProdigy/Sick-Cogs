@@ -3,6 +3,7 @@ import discord
 from discord.ext import tasks
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from red_commons.logging import getLogger
@@ -725,6 +726,21 @@ class Coc(commands.Cog):
         return clan, opponent
 
     @staticmethod
+    def _format_attack_name(value) -> str:
+        """Escape a player name and isolate RTL text from adjacent attack fields."""
+        text = discord.utils.escape_markdown(
+            discord.utils.escape_mentions(str(value)), as_needed=True
+        )
+        bidi_controls = {
+            "\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c",
+            "\u202d", "\u202e", "\u2066", "\u2067", "\u2068", "\u2069",
+        }
+        text = "".join(character for character in text if character not in bidi_controls)
+        if any(unicodedata.bidirectional(character) in {"R", "AL", "AN"} for character in text):
+            return f"\u2068{text}\u2069"
+        return text
+
+    @staticmethod
     def _attack_key(war_data: dict, attacker_tag: str, attack: dict) -> str:
         return "|".join(
             str(part)
@@ -992,12 +1008,8 @@ class Coc(commands.Cog):
         for attack in new_attacks[:10]:
             direction_marker = "🟢" if attack["is_friendly"] else "🔴"
             attack_type = "Friendly Attack" if attack["is_friendly"] else "Enemy Attack"
-            attacker = discord.utils.escape_markdown(
-                discord.utils.escape_mentions(str(attack["attacker_name"])), as_needed=True
-            )
-            defender = discord.utils.escape_markdown(
-                discord.utils.escape_mentions(str(attack["defender_name"])), as_needed=True
-            )
+            attacker = self._format_attack_name(attack["attacker_name"])
+            defender = self._format_attack_name(attack["defender_name"])
             star_count = max(0, min(3, int(attack["stars"] or 0)))
             stars = "⭐" * star_count or "0 stars"
             line = (
@@ -1042,7 +1054,8 @@ class Coc(commands.Cog):
             embed.add_field(
                 name=f"{marker} {attack_type}",
                 value=(
-                    f"{attack['attacker_name']} → {attack['defender_name']} | "
+                    f"{self._format_attack_name(attack['attacker_name'])} → "
+                    f"{self._format_attack_name(attack['defender_name'])} | "
                     f"{stars} | {self._format_percent(attack['destruction'])}"
                 ),
                 inline=False,
