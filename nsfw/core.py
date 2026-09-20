@@ -1,17 +1,20 @@
 import asyncio
 import json
 import sys
+import time
 from random import choice
 from typing import List, Optional, Union
 from urllib.parse import urlparse
 
 import aiohttp
 import discord
+from discord.ext import tasks
 from redbot.core import Config, commands
 from redbot.core.bot import Red
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import bold, box
 
+from . import constants as source_data
 from .constants import (
     GOOD_EXTENSIONS,
     IMGUR_LINKS,
@@ -24,13 +27,15 @@ from .constants import (
 _ = Translator("Nsfw", __file__)
 
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3)
+MIN_AUTOPOST_MINUTES = 30
+SEEN_LIMIT = 100
 
 
 @cog_i18n(_)
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "3.0.1"
+    __version__ = "3.1.0"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -49,9 +54,196 @@ class Core(commands.Cog):
         )
         self.config = Config.get_conf(self, identifier=512227974893010954, force_registration=True)
         self.config.register_global(use_reddit_api=False)
+        self.config.register_guild(autopost={}, seen=[])
+        self._autopost_lock = asyncio.Lock()
+        self.autopost_loop.start()
 
     def cog_unload(self):
+        self.autopost_loop.cancel()
         self.bot.loop.create_task(self.session.close())
+
+    @staticmethod
+    def _reconcile_autopost(current: dict, channel_id: int, source: str, interval_minutes: int):
+        """Create or update the guild's one feed without posting immediately."""
+        source = source.strip().casefold()
+        interval = interval_minutes * 60
+        same = (
+            bool(current)
+            and int(current.get("channel_id", 0)) == channel_id
+            and str(current.get("source", "")).casefold() == source
+            and int(current.get("interval", 0)) == interval
+            and current.get("enabled", True)
+        )
+        if same:
+            return "unchanged", current
+        return ("updated" if current else "added"), {
+            "channel_id": channel_id,
+            "source": source,
+            "provider": (
+                "mixed" if source == "random"
+                else "nekobot" if source in {"hentai", "porngif"}
+                else "configured-reddit"
+            ),
+            "interval": interval,
+            "next_post": time.time() + interval,
+            "enabled": True,
+            "last_error": "",
+        }
+
+    @staticmethod
+    def _autopost_destination_error(guild: discord.Guild, channel) -> str:
+        if not isinstance(channel, discord.TextChannel):
+            return "Choose a Discord text channel for the NSFW feed."
+        if not channel.is_nsfw():
+            return f"{channel.mention} must be explicitly marked age-restricted (NSFW)."
+        permissions = channel.permissions_for(guild.me)
+        missing = [
+            name.replace("_", " ")
+            for name in ("view_channel", "send_messages", "embed_links")
+            if not getattr(permissions, name, False)
+        ]
+        return f"I need {', '.join(missing)} in {channel.mention}." if missing else ""
+
+    @staticmethod
+    def _retry_at(now: float, interval: int) -> float:
+        return now + max(300, int(interval) // 4)
+
+    @staticmethod
+    def _remember_seen(seen: list, url: str):
+        return (seen + [url])[-SEEN_LIMIT:]
+
+    @staticmethod
+    def _display_prefix(prefixes) -> str:
+        configured = [prefix for prefix in prefixes if not prefix.lstrip().startswith("<@")]
+        return configured[0] if configured else "[p]"
+
+    @staticmethod
+    def autopost_sources():
+        return {
+            "4k": source_data.FOUR_K, "ahegao": source_data.AHEGAO,
+            "anal": source_data.ANAL, "asianporn": source_data.ASIANPORN,
+            "ass": source_data.ASS, "bbw": source_data.BBW, "bdsm": source_data.BDSM,
+            "blackcock": source_data.BLACKCOCK, "blowjob": source_data.BLOWJOB,
+            "boobs": source_data.BOOBS, "bottomless": source_data.BOTTOMLESS,
+            "cosplay": source_data.COSPLAY, "cumshot": source_data.CUMSHOTS,
+            "cunnilingus": source_data.CUNNI, "deepthroat": source_data.DEEPTHROAT,
+            "dick": source_data.DICK, "doublepenetration": source_data.DOUBLE_P,
+            "ebony": source_data.EBONY, "facials": source_data.FACIALS,
+            "feet": source_data.FEET, "femdom": source_data.FEMDOM,
+            "futa": source_data.FUTA, "gay": source_data.GAY_P,
+            "gonewild": source_data.WILD, "group": source_data.GROUPS,
+            "lesbian": source_data.LESBIANS, "milf": source_data.MILF,
+            "oral": source_data.ORAL, "public": source_data.PUBLIC,
+            "pussy": source_data.PUSSY, "realgirls": source_data.REAL_GIRLS,
+            "redhead": source_data.REDHEADS, "rule34": source_data.RULE_34,
+            "squirt": source_data.SQUIRTS, "thigh": source_data.THIGHS,
+            "threesome": source_data.THREESOME, "trans": source_data.TRANS,
+            "yiff": source_data.YIFF,
+        }
+
+    async def _fetch_autopost(self, source: str, seen: set, prefix: str = "[p]"):
+        if source == "random":
+            source = choice(sorted((*self.autopost_sources(), "hentai", "porngif")))
+        if source in {"hentai", "porngif"}:
+            kind = source_data.NEKOBOT_HENTAI if source == "hentai" else "pgif"
+            data = await self._get_others_imgs(None, source_data.NEKOBOT_URL.format(kind))
+            try:
+                url = self._safe_url(data["img"]["message"])
+            except (KeyError, TypeError):
+                url = None
+            provider = "Nekobot API"
+            origin = provider
+        else:
+            category = self.autopost_sources().get(source)
+            if category is None:
+                return None
+            url, subreddit = await self._get_imgs(category)
+            url = self._safe_url(url)
+            provider = "Reddit API" if await self.config.use_reddit_api() else "Martine API"
+            origin = f"r/{subreddit}" if isinstance(subreddit, str) and subreddit else provider
+        if not url or url in seen:
+            return None
+        safe_prefix = prefix.replace("`", "")
+        command = f"{safe_prefix}{source}"
+        if any(domain in url for domain in NOT_EMBED_DOMAINS):
+            payload = (
+                f"**Random {source} post ... \N{EYES}**\n"
+                f"{url}\n\n"
+                f"Want another one? Copy and paste: `{command}`\n"
+                f"From **{origin}** · via {provider}"
+            )
+        else:
+            payload = discord.Embed(
+                color=0x891193,
+                title=f"Random {source} post ... \N{EYES}",
+                description=(
+                    f"[Source link]({url})\n\n"
+                    f"Want another one? Copy and paste: `{command}`"
+                ),
+            )
+            payload.set_image(url=url)
+            payload.set_footer(text=f"From {origin} · via {provider}")
+        return url, payload
+
+    @staticmethod
+    async def _send_autopost(channel, payload):
+        kwargs = {"allowed_mentions": discord.AllowedMentions.none()}
+        if isinstance(payload, discord.Embed):
+            kwargs["embed"] = payload
+        else:
+            kwargs["content"] = payload
+        await channel.send(**kwargs)
+
+    @tasks.loop(minutes=1)
+    async def autopost_loop(self):
+        if self._autopost_lock.locked():
+            return
+        async with self._autopost_lock:
+            now = time.time()
+            for guild_id in await self.config.all_guilds():
+                guild = self.bot.get_guild(guild_id)
+                if guild is None:
+                    continue
+                group = self.config.guild_from_id(guild_id)
+                feed = await group.autopost()
+                if not feed or not feed.get("enabled", True) or feed.get("next_post", 0) > now:
+                    continue
+                channel = guild.get_channel(feed.get("channel_id"))
+                error = self._autopost_destination_error(guild, channel)
+                if error:
+                    feed["enabled"] = False
+                    feed["last_error"] = error
+                    await group.autopost.set(feed)
+                    continue
+                seen_list = await group.seen()
+                seen = set(seen_list)
+                result = None
+                try:
+                    prefixes = await self.bot.get_valid_prefixes(guild)
+                    prefix = self._display_prefix(prefixes)
+                    for _ in range(5):
+                        result = await self._fetch_autopost(
+                            feed.get("source", ""), seen, prefix=prefix
+                        )
+                        if result:
+                            break
+                    if result is None:
+                        raise RuntimeError("No new media available")
+                    url, payload = result
+                    await self._send_autopost(channel, payload)
+                except (aiohttp.ClientError, asyncio.TimeoutError, discord.HTTPException, RuntimeError):
+                    feed["next_post"] = self._retry_at(now, feed.get("interval", 3600))
+                    feed["last_error"] = "The media provider is temporarily unavailable; retry scheduled."
+                else:
+                    seen_list = self._remember_seen(seen_list, url)
+                    feed["next_post"] = now + int(feed.get("interval", 3600))
+                    feed["last_error"] = ""
+                    await group.seen.set(seen_list)
+                await group.autopost.set(feed)
+
+    @autopost_loop.before_loop
+    async def before_autopost_loop(self):
+        await self.bot.wait_until_red_ready()
 
     def format_help_for_context(self, ctx: commands.Context) -> str:
         """Thanks Sinbad!"""
