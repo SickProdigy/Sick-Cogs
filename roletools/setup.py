@@ -13,6 +13,7 @@ from .abc import RoleToolsMixin
 from .picker import (LEGACY_DEFAULT_DESCRIPTIONS, PUBLIC_SELECT_MAX_PAGES, PUBLIC_SELECT_PAGE_SIZE,
                      configured_role_pages, picker_description, reaction_emoji_key,
                      reaction_emoji_value)
+from .shop import RoleShopManagerView
 
 roletools = RoleToolsMixin.roletools
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -535,6 +536,13 @@ class RoleToolsSetupView(discord.ui.View):
         embed.add_field(name="Configured groups", value=str(len(groups)))
         await interaction.response.send_message(
             embed=embed, view=PrivateGroupManagerView(self.cog, interaction.user, groups), ephemeral=True
+        )
+
+    @discord.ui.button(label="Role shop", style=discord.ButtonStyle.success, row=2)
+    async def role_shop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=await self.cog.shop_manager_embed(interaction.guild),
+            view=RoleShopManagerView(self.cog, interaction.user), ephemeral=True,
         )
 
 
@@ -1496,6 +1504,10 @@ class RoleToolsSetup(RoleToolsMixin):
         }
         groups = await self.private_groups(guild)
         embed.add_field(name="Private access groups", value=str(len(groups)))
+        shop = await self.role_shop(guild)
+        shop_state = (f"{len(shop.get('role_ids', []))} offer(s) · <#{shop['channel_id']}>"
+                      if shop.get("message_id") else f"{len(shop.get('role_ids', []))} offer(s) · Not published")
+        embed.add_field(name="Role shop", value=shop_state, inline=False)
         embed.add_field(name="Quick all-role menu", value=published, inline=False)
         embed.add_field(name="Published layout", value=layout_names.get(data.get("layout"), "Button Role Menu"))
         if unsafe:

@@ -2,9 +2,9 @@
     "author": ["SickProdigy", "TrustyJAID"],
     "description": "Various role utility commands, including reaction roles, sticky roles, self roles, auto roles, buttons, selects, and temporary roles.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores user IDs for the purpose of re-assigning sticky roles when a user rejoins a server. User IDs may also appear in bot logs.",
+    "end_user_data_statement": "This cog stores user IDs for sticky-role restoration and restart-safe role-shop purchase counts and timestamps. User IDs may also appear in bot logs.",
     "hidden": false,
-    "install_msg": "Use `[p]roletools` for the member guide and `[p]roletools setup` for role catalogs, menus, and private access groups.",
+    "install_msg": "Use `[p]roletools` for the member guide and `[p]roletools setup` for role catalogs, menus, private access groups, and the Red Bank role shop.",
     "min_bot_version": "3.5.0",
     "min_python_version": [3, 8, 1],
     "name": "RoleTools",
@@ -14,5 +14,5 @@
     "short": "Various role-related tools",
     "tags": ["utility", "mod", "roles"],
     "type": "COG",
-    "version": "1.13.0"
+    "version": "1.15.0"
 }

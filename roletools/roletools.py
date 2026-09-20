@@ -28,6 +28,7 @@ from .reactions import RoleToolsReactions
 from .requires import RoleToolsRequires
 from .select import RoleToolsSelect
 from .setup import RoleToolsSetup
+from .shop import RoleToolsShop
 from .settings import RoleToolsSettings
 from .temprole import RoleToolsTemporary
 
@@ -36,9 +37,9 @@ roletools = RoleToolsMixin.roletools
 LEGACY_CONFIG_IDENTIFIER = 218773382617890828
 SICK_COGS_CONFIG_IDENTIFIER = 7194820561938472611
 ROLETOOLS_SCHEMA_VERSION = 2
-GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "private_groups": {}, "MIGRATION_REVIEW": []}
+GUILD_DEFAULTS = {"reaction_roles": {}, "auto_roles": [], "atomic": None, "buttons": {}, "select_options": {}, "select_menus": {}, "pickers": {}, "restricted_roles": [], "temporary_roles": [], "notification_channel": None, "private_groups": {}, "role_shop": {"role_ids": [], "channel_id": None, "message_id": None, "offers": {}}, "MIGRATION_REVIEW": []}
 ROLE_DEFAULTS = {"sticky": False, "auto": False, "reactions": [], "buttons": [], "select_options": [], "selfassignable": False, "selfremovable": False, "exclusive_to": [], "inclusive_with": [], "required": [], "require_any": False, "cost": 0, "duration": None}
-MEMBER_DEFAULTS = {"sticky_roles": []}
+MEMBER_DEFAULTS = {"sticky_roles": [], "shop_purchases": {}}
 ADVANCED_CATALOG_KEYS = ("cost", "duration", "required", "exclusive_to", "inclusive_with")
 
 log = getLogger("red.Sick-Cogs.RoleTools")
@@ -95,6 +96,7 @@ class RoleTools(
     RoleToolsSettings,
     RoleToolsSelect,
     RoleToolsSetup,
+    RoleToolsShop,
     RoleToolsTemporary,
     commands.Cog,
     metaclass=CompositeMetaClass,
@@ -104,7 +106,7 @@ class RoleTools(
     """
 
     __author__ = ["SickProdigy", "TrustyJAID"]
-    __version__ = "1.13.0"
+    __version__ = "1.15.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -178,6 +180,10 @@ class RoleTools(
             await self.register_picker_views()
         except Exception:
             log.exception("Error initializing role picker cards")
+        try:
+            await self.register_role_shop_views()
+        except Exception:
+            log.exception("Error initializing role shop cards")
         for guild_id, guild_views in self.views.items():
             for msg_ids, view in guild_views.items():
                 log.debug("Adding view %r to %s", view, guild_id)
@@ -332,6 +338,11 @@ class RoleTools(
         except Exception:
             pass
         self.temporary_roles_task.cancel()
+
+    async def red_delete_data_for_user(self, *, requester, user_id: int) -> None:
+        for guild_id, members in (await self.config.all_members()).items():
+            if user_id in members or str(user_id) in members:
+                await self.config.member_from_ids(int(guild_id), int(user_id)).clear()
 
     async def confirm_selfassignable(
         self, ctx: commands.Context, roles: List[discord.Role]
