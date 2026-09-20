@@ -35,7 +35,7 @@ SEEN_LIMIT = 100
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "3.1.0"
+    __version__ = "3.1.1"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -245,11 +245,6 @@ class Core(commands.Cog):
     async def before_autopost_loop(self):
         await self.bot.wait_until_red_ready()
 
-    def format_help_for_context(self, ctx: commands.Context) -> str:
-        """Thanks Sinbad!"""
-        pre_processed = super().format_help_for_context(ctx)
-        return f"{pre_processed}\n\nAuthors: {', '.join(self.__author__)}\nCog Version: {self.__version__}"
-
     async def _get_imgs(self, subs: List[str] = None):
         """Get images from Reddit API."""
         if not subs:
@@ -423,8 +418,17 @@ class Core(commands.Cog):
         except discord.HTTPException:
             return
 
+    @staticmethod
+    async def _media_channel_allowed(ctx: commands.Context) -> bool:
+        if ctx.guild is None or ctx.channel.is_nsfw():
+            return True
+        await ctx.send("This command only works in a Discord channel marked age-restricted (NSFW).")
+        return False
+
     async def _send_msg(self, ctx: commands.Context, name: str, subs: List[str] = None):
         """Main function called in all Reddit API commands."""
+        if not await self._media_channel_allowed(ctx):
+            return
         embed = await self._make_embed(ctx, subs, name)
         return await self._maybe_embed(ctx, embed=embed)
 
@@ -432,6 +436,8 @@ class Core(commands.Cog):
         self, ctx: commands.Context, name: str, arg: str, source: str, url: str = None
     ):
         """Main function called in all others APIs commands."""
+        if not await self._media_channel_allowed(ctx):
+            return
         embed = await self._make_embed_other(ctx, name, url, arg, source)
         return await self._maybe_embed(ctx, embed)
 

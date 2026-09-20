@@ -4,7 +4,7 @@ Nsfw sends random mature images or GIFs in Discord channels marked NSFW.
 
 Most commands fetch media from curated subreddit lists through the default Martine API source. The bot owner can switch to direct Reddit API requests, but that path may be rate limited more quickly.
 
-Every media command is restricted by Red's NSFW-channel check. Provider failures, timeouts, malformed responses, and empty results return a generic error and never expose response details in Discord.
+Every media command verifies the destination is age-restricted immediately before fetching or posting media. Provider failures, timeouts, malformed responses, and empty results return a generic error and never expose response details in Discord.
 
 ## Commands
 
@@ -17,6 +17,6 @@ Every media command is restricted by Red's NSFW-channel check. Provider failures
 - `[p]nsfwset autopost off` - Remove the server's scheduled feed.
 - `[p]nsfwset switchredditapi` - Bot owner only. Toggle between the default Martine API source and direct Reddit API requests.
 
-The cog also provides many category commands such as `[p]hentai`, `[p]porngif`, `[p]gonewild`, and other NSFW-only media commands. Use `[p]help Nsfw` in Discord for the full command list.
+The cog also provides many category commands such as `[p]hentai`, `[p]porngif`, `[p]gonewild`, and other NSFW-only media commands. Use `[p]help Nsfw` in any Discord channel for the full command list. Media still only posts in channels explicitly marked age-restricted (NSFW).
 
 This cog stores its global API-source setting, one scheduled feed per server, and a bounded list of recently posted media URLs for duplicate suppression. It does not store user data. When using external media APIs, request metadata and selected categories may be processed by those services.
