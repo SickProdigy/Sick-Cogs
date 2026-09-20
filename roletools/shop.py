@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+
 import discord
 from red_commons.logging import getLogger
 from redbot.core import bank
@@ -24,12 +27,21 @@ class ShopRoleSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction) -> None:
         role = interaction.guild.get_role(int(self.values[0]))
-        if role is None or role.id not in await self.cog.shop_role_ids(interaction.guild):
+        role_ids = await self.cog.shop_role_ids(interaction.guild)
+        if role is None or role.id not in role_ids:
             await interaction.response.send_message("That shop offer is no longer available.", ephemeral=True)
             return
-        await interaction.response.send_message(
+        details = await self.cog.role_offer_details(interaction.guild, role)
+        renewing = role in interaction.user.roles and details["purchase_mode"] == "renewable"
+        await interaction.response.defer(ephemeral=True)
+        await interaction.message.edit(
+            embed=await self.cog.role_shop_embed(interaction.guild),
+            view=RoleShopView(self.cog, interaction.guild, role_ids),
+        )
+        await interaction.followup.send(
             embed=await self.cog.shop_confirmation_embed(interaction.user, role),
-            view=ShopConfirmView(self.cog, interaction.user, role), ephemeral=True,
+            view=ShopConfirmView(self.cog, interaction.user, role, renewing=renewing),
+            ephemeral=True,
         )
 
 
@@ -40,10 +52,14 @@ class RoleShopView(discord.ui.View):
 
 
 class ShopConfirmView(discord.ui.View):
-    def __init__(self, cog, author: discord.Member, role: discord.Role):
+    def __init__(
+        self, cog, author: discord.Member, role: discord.Role, *, renewing: bool = False
+    ):
         super().__init__(timeout=120)
         self.cog, self.author, self.role = cog, author, role
         self.finished = False
+        if renewing:
+            self.confirm.label = "Confirm renewal"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author.id:
@@ -97,6 +113,8 @@ class ShopOfferRoleSelect(discord.ui.RoleSelect):
                     cost=details["cost"],
                     duration=details["duration"],
                     group_name=details["group_name"],
+                    purchase_mode=details["purchase_mode"],
+                    max_purchases=details["max_purchases"],
                 )
             )
             return
@@ -115,7 +133,10 @@ class ShopOfferRoleSelect(discord.ui.RoleSelect):
 
 
 class ShopOfferConfigModal(discord.ui.Modal, title="Configure shop offer"):
-    def __init__(self, parent: "RoleShopOfferManagerView", role: discord.Role, *, cost, duration, group_name):
+    def __init__(
+        self, parent: "RoleShopOfferManagerView", role: discord.Role, *,
+        cost, duration, group_name, purchase_mode, max_purchases,
+    ):
         super().__init__()
         self.parent_view, self.role, self.group_name = parent, role, group_name
         self.cost_input = discord.ui.TextInput(
@@ -128,20 +149,41 @@ class ShopOfferConfigModal(discord.ui.Modal, title="Configure shop offer"):
             default=str(int(duration or 0) // 60),
             max_length=12,
         )
+        self.mode_input = discord.ui.TextInput(
+            label="Purchase mode: one-time or renewable",
+            default=str(purchase_mode),
+            max_length=10,
+        )
+        self.limit_input = discord.ui.TextInput(
+            label="Maximum purchases (0 = unlimited)",
+            default=str(int(max_purchases or 0)),
+            max_length=10,
+        )
         self.add_item(self.cost_input)
         self.add_item(self.duration_input)
+        self.add_item(self.mode_input)
+        self.add_item(self.limit_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if await bank.is_global() and not await self.parent_view.cog.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Only the bot owner can configure shop prices while Red Bank is global.",
+                ephemeral=True,
+            )
+            return
         try:
             cost = int(str(self.cost_input.value).strip() or "0")
             duration_minutes = int(str(self.duration_input.value).strip() or "0")
+            max_purchases = int(str(self.limit_input.value).strip() or "0")
         except ValueError:
             await interaction.response.send_message(
-                "Price and duration must be whole numbers.", ephemeral=True
+                "Price, duration, and maximum purchases must be whole numbers.", ephemeral=True
             )
             return
+        purchase_mode = str(self.mode_input.value).strip().lower()
         ok, message = await self.parent_view.cog.configure_shop_offer(
-            interaction.guild, self.role, cost, duration_minutes
+            interaction.guild, self.role, cost, duration_minutes,
+            purchase_mode=purchase_mode, max_purchases=max_purchases,
         )
         embed = await self.parent_view.cog.shop_offer_manager_embed(interaction.guild)
         embed.add_field(
@@ -241,6 +283,7 @@ class RoleToolsShop(RoleToolsMixin):
         data.setdefault("role_ids", [])
         data.setdefault("channel_id", None)
         data.setdefault("message_id", None)
+        data.setdefault("offers", {})
         return data
 
     async def save_role_shop(self, guild: discord.Guild, data: dict) -> None:
@@ -276,10 +319,16 @@ class RoleToolsShop(RoleToolsMixin):
         return changed, notes
 
     async def configure_shop_offer(
-        self, guild: discord.Guild, role: discord.Role, cost: int, duration_minutes: int
+        self, guild: discord.Guild, role: discord.Role, cost: int, duration_minutes: int, *,
+        purchase_mode: str = "one-time", max_purchases: int = 0,
     ):
-        if cost < 0 or duration_minutes < 0:
-            return False, "Price and duration cannot be negative."
+        purchase_mode = purchase_mode.replace("_", "-")
+        if purchase_mode not in {"one-time", "renewable"}:
+            return False, "Purchase mode must be one-time or renewable."
+        if cost < 0 or duration_minutes < 0 or max_purchases < 0:
+            return False, "Price, duration, and maximum purchases cannot be negative."
+        if purchase_mode == "renewable" and not duration_minutes:
+            return False, "Renewable offers need a temporary duration."
         if cost >= await bank.get_max_balance(guild):
             return False, "Price must be lower than the maximum Red Bank balance."
 
@@ -309,12 +358,25 @@ class RoleToolsShop(RoleToolsMixin):
             else:
                 await duration_setting.clear()
 
+        shop = await self.role_shop(guild)
+        offers = dict(shop.get("offers", {}))
+        offers[str(role.id)] = {
+            "purchase_mode": purchase_mode,
+            "max_purchases": int(max_purchases),
+        }
+        shop["offers"] = offers
+        await self.save_role_shop(guild, shop)
+
         changed, notes = await self.update_shop_roles(guild, [role], add=True)
         if notes:
             return False, "\n".join(notes)
         action = "Added" if changed else "Updated"
         duration = f"{duration_minutes} minute(s)" if duration_minutes else "permanent"
-        return True, f"{action} {role.mention} for {cost} credits · {duration}."
+        limit = f" · limit {max_purchases}" if max_purchases else ""
+        return True, (
+            f"{action} {role.mention} for {cost} credits · {duration} · "
+            f"{purchase_mode}{limit}."
+        )
 
     async def private_group_for_gateway(self, guild: discord.Guild, role_id: int):
         for name, data in (await self.private_groups(guild)).items():
@@ -327,6 +389,9 @@ class RoleToolsShop(RoleToolsMixin):
         group_name, group = await self.private_group_for_gateway(guild, role.id)
         required_ids = group.get("required_role_ids", []) if group else settings.get("required", [])
         conflict_ids = group.get("conflict_role_ids", []) if group else settings.get("exclusive_to", [])
+        shop = await self.role_shop(guild)
+        policy = dict(shop.get("offers", {}).get(str(role.id), {}))
+        default_mode = "renewable" if settings.get("duration") else "one-time"
         return {
             "cost": int(settings.get("cost", 0)),
             "duration": settings.get("duration"),
@@ -334,6 +399,8 @@ class RoleToolsShop(RoleToolsMixin):
             "conflicts": [guild.get_role(int(role_id)) for role_id in conflict_ids if guild.get_role(int(role_id))],
             "require_any": bool(group.get("require_any")) if group else bool(settings.get("require_any")),
             "group_name": group_name,
+            "purchase_mode": policy.get("purchase_mode", default_mode),
+            "max_purchases": int(policy.get("max_purchases", 0)),
         }
 
     async def role_shop_embed(self, guild: discord.Guild) -> discord.Embed:
@@ -343,7 +410,11 @@ class RoleToolsShop(RoleToolsMixin):
             role = guild.get_role(role_id)
             details = await self.role_offer_details(guild, role)
             duration = humanize_timedelta(seconds=details["duration"]) if details["duration"] else "Permanent"
-            lines.append(f"{role.mention} — **{details['cost']} {currency}** · {duration}")
+            policy = "Renewable" if details["purchase_mode"] == "renewable" else "One-time"
+            limit = f" · Limit {details['max_purchases']}" if details["max_purchases"] else ""
+            lines.append(
+                f"{role.mention} — **{details['cost']} {currency}** · {duration} · {policy}{limit}"
+            )
         return discord.Embed(
             title="Role shop",
             description=("Choose a role below to review its price and requirements before buying.\n\n" + "\n".join(lines))[:4096],
@@ -353,9 +424,14 @@ class RoleToolsShop(RoleToolsMixin):
     async def shop_confirmation_embed(self, member: discord.Member, role: discord.Role):
         details = await self.role_offer_details(member.guild, role)
         currency = await bank.get_currency_name(member.guild)
+        renewing = role in member.roles and details["purchase_mode"] == "renewable"
         embed = discord.Embed(
-            title=f"Buy {role.name}?",
-            description="Nothing is charged until you confirm. Eligibility and balance are checked again at purchase time.",
+            title=f"{'Renew' if renewing else 'Buy'} {role.name}?",
+            description=(
+                "The existing expiration will be extended from its remaining paid time. "
+                if renewing else
+                "Nothing is charged until you confirm. Eligibility and balance are checked again at purchase time."
+            ),
             color=discord.Color.gold(),
         )
         embed.add_field(name="Price", value=f"{details['cost']} {currency}")
@@ -364,6 +440,10 @@ class RoleToolsShop(RoleToolsMixin):
             name="Duration",
             value=humanize_timedelta(seconds=details["duration"]) if details["duration"] else "Permanent",
         )
+        policy = "Renewable" if details["purchase_mode"] == "renewable" else "One-time"
+        if details["max_purchases"]:
+            policy += f" · Maximum {details['max_purchases']} purchase(s)"
+        embed.add_field(name="Purchase policy", value=policy, inline=False)
         required = humanize_list([item.mention for item in details["required"]]) or "None"
         if details["required"] and details["require_any"]:
             required = "Any of: " + required
@@ -375,24 +455,113 @@ class RoleToolsShop(RoleToolsMixin):
         )
         return embed
 
+    async def shop_purchase_records(self, member: discord.Member) -> dict:
+        return dict(await self.config.member(member).shop_purchases())
+
+    async def record_shop_purchase(self, member: discord.Member, role: discord.Role) -> int:
+        records = await self.shop_purchase_records(member)
+        record = dict(records.get(str(role.id), {}))
+        record["count"] = int(record.get("count", 0)) + 1
+        record["last_purchased_at"] = int(discord.utils.utcnow().timestamp())
+        records[str(role.id)] = record
+        await self.config.member(member).shop_purchases.set(records)
+        return record["count"]
+
+    async def shop_offer_eligibility(self, member: discord.Member, role: discord.Role, details: dict):
+        member_roles = set(member.roles)
+        required = set(details["required"])
+        if required:
+            allowed = bool(member_roles & required) if details["require_any"] else required <= member_roles
+            if not allowed:
+                qualifier = "one of" if details["require_any"] else "all of"
+                return False, f"You need {qualifier} the required roles before purchasing this offer."
+        conflicts = member_roles & set(details["conflicts"])
+        if conflicts:
+            return False, "A role you already have conflicts with this offer."
+        group_name = details.get("group_name")
+        if group_name:
+            group = (await self.private_groups(member.guild)).get(group_name)
+            if group is None:
+                return False, "The private access group for this offer is unavailable."
+            allowed, message = await self.private_group_access(member, group, joining=True)
+            if not allowed:
+                return False, message
+        return True, ""
+
     async def purchase_shop_role(self, member: discord.Member, role: discord.Role):
-        if role.id not in await self.shop_role_ids(member.guild):
-            return False, "That shop offer is no longer available."
-        group_name, _ = await self.private_group_for_gateway(member.guild, role.id)
-        try:
-            if group_name:
-                ok, message = await self.join_private_group(member, group_name)
-                if not ok:
-                    return False, message
-                return True, f"You purchased {role.mention}."
-            response = await self.give_roles(member, [role], "Role shop purchase")
-        except Exception:
-            log.exception("Role shop purchase failed for role %s and member %s", role.id, member.id)
-            return False, ("Discord could not assign the role. RoleTools attempted to return any payment; "
-                           "contact a server manager if your balance looks wrong.")
-        if response:
-            return False, "\n".join(item.reason for item in response)
-        return True, f"You purchased {role.mention}."
+        key = (member.guild.id, member.id)
+        lock = self._role_transaction_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            if role.id not in await self.shop_role_ids(member.guild):
+                return False, "That shop offer is no longer available."
+            if role >= member.guild.me.top_role:
+                return False, "The bot cannot manage that role."
+            details = await self.role_offer_details(member.guild, role)
+            records = await self.shop_purchase_records(member)
+            purchases = int(records.get(str(role.id), {}).get("count", 0))
+            limit = int(details.get("max_purchases", 0))
+            if details["purchase_mode"] == "one-time" and purchases:
+                return False, "This is a one-time offer and you have already purchased it."
+            if limit and purchases >= limit:
+                return False, f"You have reached this offer's purchase limit of {limit}."
+
+            eligible, message = await self.shop_offer_eligibility(member, role, details)
+            if not eligible:
+                return False, message
+
+            if role in member.roles:
+                if details["purchase_mode"] != "renewable" or not details.get("duration"):
+                    return False, "You already have the requested role."
+                cost = int(details["cost"])
+                if cost and not await bank.can_spend(member, cost):
+                    currency = await bank.get_currency_name(member.guild)
+                    return False, f"You do not have enough {currency}. You need {cost} {currency}."
+                charged = False
+                try:
+                    if cost:
+                        await bank.withdraw_credits(member, cost)
+                        charged = True
+                    remove_at = await self.schedule_temporary_role(
+                        member, role, int(details["duration"]), extend=True
+                    )
+                    await self.record_shop_purchase(member, role)
+                except Exception:
+                    if charged:
+                        try:
+                            await bank.deposit_credits(member, cost)
+                        except Exception:
+                            log.critical(
+                                "Could not refund %s credits after renewal failure for %s",
+                                cost, member.id, exc_info=True,
+                            )
+                    log.exception("Role shop renewal failed for role %s and member %s", role.id, member.id)
+                    return False, "The renewal failed. RoleTools attempted to return your payment."
+                renewal_time = discord.utils.format_dt(
+                    datetime.fromtimestamp(
+                        remove_at, tz=timezone.utc
+                    ),
+                    style="R",
+                )
+                return True, f"You renewed {role.mention}. It expires {renewal_time}."
+
+            group_name = details.get("group_name")
+            try:
+                response = await self._give_roles_unlocked(
+                    member,
+                    [role],
+                    "Role shop purchase",
+                    check_private_groups=not bool(group_name),
+                )
+            except Exception:
+                log.exception("Role shop purchase failed for role %s and member %s", role.id, member.id)
+                return False, (
+                    "Discord could not assign the role. RoleTools attempted to return any payment; "
+                    "contact a server manager if your balance looks wrong."
+                )
+            if response:
+                return False, "\n".join(item.reason for item in response)
+            await self.record_shop_purchase(member, role)
+            return True, f"You purchased {role.mention}."
 
     async def shop_manager_embed(self, guild: discord.Guild):
         data = await self.role_shop(guild)
@@ -404,7 +573,11 @@ class RoleToolsShop(RoleToolsMixin):
                 humanize_timedelta(seconds=details["duration"])
                 if details["duration"] else "Permanent"
             )
-            offer_lines.append(f"• {role.name} — {details['cost']} credits · {duration}")
+            policy = "renewable" if details["purchase_mode"] == "renewable" else "one-time"
+            limit = f" · limit {details['max_purchases']}" if details["max_purchases"] else ""
+            offer_lines.append(
+                f"• {role.name} — {details['cost']} credits · {duration} · {policy}{limit}"
+            )
         published = (
             f"<#{data['channel_id']}> · message `{data['message_id']}`"
             if data.get("message_id") else "Not published"
@@ -436,7 +609,11 @@ class RoleToolsShop(RoleToolsMixin):
                 humanize_timedelta(seconds=details["duration"])
                 if details["duration"] else "Permanent"
             )
-            lines.append(f"• {role.name} — {details['cost']} credits · {duration}")
+            policy = "renewable" if details["purchase_mode"] == "renewable" else "one-time"
+            limit = f" · limit {details['max_purchases']}" if details["max_purchases"] else ""
+            lines.append(
+                f"• {role.name} — {details['cost']} credits · {duration} · {policy}{limit}"
+            )
         return discord.Embed(
             title="Manage shop roles",
             description=(
