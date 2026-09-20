@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from predictions.models import PredictionMarket
 from predictions.views import (
-    PredictionEntryView, PredictionHomeView, PredictionManageView, PredictionStartView,
+    MarketBrowserView, PredictionEntryView, PredictionHomeView, PredictionManageView,
+    PredictionStartView,
 )
 
 
@@ -33,8 +34,15 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
     async def test_setup_disables_stake_choices_until_bank_is_enabled(self):
         disabled = PredictionStartView(SimpleNamespace(), 10, False)
         enabled = PredictionStartView(SimpleNamespace(), 10, True)
-        self.assertEqual([item.disabled for item in disabled.children], [False, True, True])
-        self.assertEqual([item.disabled for item in enabled.children], [False, False, False])
+        self.assertEqual([item.disabled for item in disabled.children], [False, True])
+        self.assertEqual([item.disabled for item in enabled.children], [False, False])
+        self.assertEqual([item.label for item in enabled.children], ["Free prediction", "Credit pool"])
+
+    async def test_closed_market_keeps_manage_and_disables_outcomes(self):
+        market = self.market()
+        market.closes_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        view = PredictionEntryView(SimpleNamespace(), 55, market)
+        self.assertEqual([item.disabled for item in view.children], [True, True, False])
 
     async def test_fixed_and_ranged_markets_share_persistent_entry_controls(self):
         fixed = PredictionEntryView(SimpleNamespace(), 55, self.market(stake_mode="fixed"))
@@ -56,3 +64,24 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
             [item.label for item in view.children],
             ["Resolve: Alpha", "Resolve: Beta", "Cancel and refund", "View audit"],
         )
+
+    async def test_mine_browser_separates_created_and_entered_markets(self):
+        created = self.market()
+        entered = self.market()
+        entered.market_id = 8
+        entered.creator_id = 99
+        entered.votes = {"10": 1}
+        view = MarketBrowserView(SimpleNamespace(), 10, [created, entered], "mine", "Gcreds")
+        self.assertEqual(view.markets, [created])
+        self.assertEqual([item.label for item in view.children[-2:]], ["Created", "Entered"])
+        view.mine_tab = "entered"
+        self.assertEqual(view._markets_for_tab(), [entered])
+
+    async def test_browser_selects_markets_and_describes_pool_activity(self):
+        market = self.market(stake_mode="range")
+        market.entries = {"20": {"choice": 0, "stake": 125, "state": "funded"}}
+        market.votes = {"20": 0}
+        view = MarketBrowserView(SimpleNamespace(), 10, [market], "open", "Gcreds")
+        self.assertEqual(len(view.children), 1)
+        self.assertIn("1 people", view.children[0].options[0].description)
+        self.assertIn("125 Gcreds", view.embed().description)

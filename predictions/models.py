@@ -65,6 +65,29 @@ class PredictionMarket:
     def vote_counts(self) -> List[int]:
         return [sum(choice == index for choice in self.votes.values()) for index in range(len(self.outcomes))]
 
+    def funded_entries(self) -> Dict[str, dict]:
+        return {
+            user_id: entry for user_id, entry in self.entries.items()
+            if entry.get("state") == "funded" and int(entry.get("stake", 0)) > 0
+        }
+
+    def pool_totals(self) -> List[int]:
+        funded = self.funded_entries().values()
+        return [
+            sum(int(entry["stake"]) for entry in funded if int(entry.get("choice", -1)) == index)
+            for index in range(len(self.outcomes))
+        ]
+
+    def estimated_return(self, user_id: int, choice: int, amount: int) -> int:
+        """Estimate gross payout using the pool after this member proposal."""
+        entries = {
+            entry_user: dict(entry) for entry_user, entry in self.funded_entries().items()
+            if entry_user != str(user_id)
+        }
+        entries[str(user_id)] = {"choice": choice, "stake": amount, "state": "funded"}
+        payouts, _, _ = calculate_payouts(entries, choice, self.house_cut_bps)
+        return int(payouts.get(str(user_id), amount))
+
     def to_raw(self) -> dict:
         return {
             "market_id": self.market_id, "guild_id": self.guild_id, "creator_id": self.creator_id,

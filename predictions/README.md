@@ -14,9 +14,11 @@ Open the Predictions home panel with either command:
 [p]predictions
 ```
 
-The panel provides **Start**, **Open**, **Recent**, **Mine**, and **Leaderboard** actions. Starting a prediction uses one interactive flow: choose Free prediction, Fixed entry, or Choose amount, then enter the duration, question, and outcomes. Play-credit choices appear only when a server administrator has enabled them.
+The panel provides **Start**, **Open**, **Recent**, **Mine**, and **Leaderboard** actions. Starting a prediction uses one interactive flow: choose **Free prediction** or **Credit pool**, then enter the duration, question, and outcomes. Credit pools use the server configured entry range and appear only when a server administrator has enabled them. Older fixed-entry markets remain supported for compatibility.
 
-Every open prediction card has outcome buttons. Free entries record the pick immediately. A fixed play-credit entry shows its exact cost before confirmation; a flexible entry asks for an amount first. The card also has a **Manage** button for its creator and server managers, providing Resolve, Cancel and refund, and Audit actions.
+**Open** lists playable markets by participation and pool activity. **Recent** lists the newest markets first, including completed ones. Both use paginated selectors that open the actual voting or betting card. **Mine** separates predictions you created from predictions you entered, and keeps Manage available after voting closes so eligible creators or server managers can resolve, cancel/refund, or inspect the audit.
+
+Free cards show each outcome share by member votes. Credit-pool cards show both the member percentage and the percentage of pooled credits on every outcome. Selecting an outcome asks for an amount, then displays the estimated gross return before confirmation; that estimate can change as later entries arrive.
 
 ## Command fallback
 

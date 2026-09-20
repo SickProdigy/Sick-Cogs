@@ -90,6 +90,7 @@ class PredictionEntryView(discord.ui.View):
             button = discord.ui.Button(
                 label=outcome[:80], style=discord.ButtonStyle.primary,
                 custom_id=f"predictions:pick:{guild_id}:{market.market_id}:{index}",
+                disabled=not market.is_open(),
             )
             button.callback = self._callback(index)
             self.add_item(button)
@@ -209,12 +210,14 @@ class CreatePredictionModal(discord.ui.Modal):
         label="Entry amount or range", placeholder="100 or 10-500", required=False, max_length=40,
     )
 
-    def __init__(self, cog, user_id: int, mode: str):
+    def __init__(self, cog, user_id: int, mode: str, stake_min=0, stake_max=0):
         super().__init__(title=f"Start {mode} prediction")
         self.cog = cog
         self.user_id = user_id
         self.mode = mode
-        if mode == "free":
+        self.stake_min = stake_min
+        self.stake_max = stake_max
+        if mode in {"free", "credit pool"}:
             self.remove_item(self.stake)
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -230,16 +233,19 @@ class CreatePredictionModal(discord.ui.Modal):
             )
         else:
             await self.cog.predict_create_bank.callback(
-                self.cog, ctx, self.duration.value, self.stake.value, definition=definition
+                self.cog, ctx, self.duration.value,
+                f"{self.stake_min}-{self.stake_max}", definition=definition
             )
 
 
 class PredictionHomeView(discord.ui.View):
-    def __init__(self, cog, user_id: int, bank_enabled: bool):
+    def __init__(self, cog, user_id: int, bank_enabled: bool, stake_min=10, stake_max=10000):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
         self.bank_enabled = bank_enabled
+        self.stake_min = stake_min
+        self.stake_max = stake_max
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -254,7 +260,9 @@ class PredictionHomeView(discord.ui.View):
         await interaction.response.edit_message(
             content="What kind of prediction do you want to start?",
             embed=None,
-            view=PredictionStartView(self.cog, self.user_id, self.bank_enabled),
+            view=PredictionStartView(
+                self.cog, self.user_id, self.bank_enabled, self.stake_min, self.stake_max
+            ),
         )
 
     @discord.ui.button(label="Open", emoji="📊", style=discord.ButtonStyle.primary)
@@ -276,13 +284,14 @@ class PredictionHomeView(discord.ui.View):
 
 
 class PredictionStartView(discord.ui.View):
-    def __init__(self, cog, user_id: int, bank_enabled: bool):
+    def __init__(self, cog, user_id: int, bank_enabled: bool, stake_min=10, stake_max=10000):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
+        self.stake_min = stake_min
+        self.stake_max = stake_max
         if not bank_enabled:
-            self.fixed.disabled = True
-            self.ranged.disabled = True
+            self.credit_pool.disabled = True
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -294,10 +303,158 @@ class PredictionStartView(discord.ui.View):
     async def free(self, interaction, button):
         await interaction.response.send_modal(CreatePredictionModal(self.cog, self.user_id, "free"))
 
-    @discord.ui.button(label="Fixed entry", style=discord.ButtonStyle.primary)
-    async def fixed(self, interaction, button):
-        await interaction.response.send_modal(CreatePredictionModal(self.cog, self.user_id, "fixed stake"))
+    @discord.ui.button(label="Credit pool", style=discord.ButtonStyle.primary)
+    async def credit_pool(self, interaction, button):
+        await interaction.response.send_modal(CreatePredictionModal(
+            self.cog, self.user_id, "credit pool", self.stake_min, self.stake_max
+        ))
 
-    @discord.ui.button(label="Choose amount", style=discord.ButtonStyle.primary)
-    async def ranged(self, interaction, button):
-        await interaction.response.send_modal(CreatePredictionModal(self.cog, self.user_id, "stake range"))
+
+class MarketBrowserSelect(discord.ui.Select):
+    def __init__(self, browser):
+        self.browser = browser
+        start = browser.page * browser.page_size
+        page_markets = browser.markets[start:start + browser.page_size]
+        options = [
+            discord.SelectOption(
+                label=f"#{market.market_id} {market.question}"[:100],
+                value=str(market.market_id),
+                description=browser.option_description(market)[:100],
+            )
+            for market in page_markets
+        ]
+        super().__init__(placeholder="Choose a prediction to view or enter", options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.browser.cog.predict_status.callback(
+            self.browser.cog, InteractionContext(interaction), int(self.values[0])
+        )
+
+
+class MarketBrowserView(discord.ui.View):
+    page_size = 20
+
+    def __init__(self, cog, user_id: int, markets, mode: str, currency: str):
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.user_id = user_id
+        self.all_markets = markets
+        self.mode = mode
+        self.currency = currency
+        self.page = 0
+        self.mine_tab = "created"
+        self.markets = self._markets_for_tab()
+        if mode == "mine" and not self.markets:
+            self.mine_tab = "entered"
+            self.markets = self._markets_for_tab()
+        self._refresh_items()
+
+    def _markets_for_tab(self):
+        if self.mode != "mine":
+            return self.all_markets
+        if self.mine_tab == "created":
+            return [market for market in self.all_markets if market.creator_id == self.user_id]
+        user_id = str(self.user_id)
+        return [
+            market for market in self.all_markets
+            if user_id in market.votes or user_id in market.entries
+        ]
+
+    @property
+    def page_count(self):
+        return max(1, (len(self.markets) + self.page_size - 1) // self.page_size)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message("Run `predict` to open your own browser.", ephemeral=True)
+        return False
+
+    @staticmethod
+    def state_label(market):
+        if market.is_resolved:
+            return "resolved"
+        if market.state in {"cancelled", "frozen"}:
+            return market.state
+        return "open" if market.is_open() else "voting closed"
+
+    def option_description(self, market):
+        state = self.state_label(market)
+        if market.uses_bank:
+            return f"{state} · {len(market.funded_entries())} people · {sum(market.pool_totals())} {self.currency}"
+        return f"{state} · {len(market.votes)} votes · free"
+
+    def embed(self):
+        title = {"open": "Open predictions", "recent": "Recent predictions"}.get(
+            self.mode, f"My predictions · {self.mine_tab.title()}"
+        )
+        start = self.page * self.page_size
+        page_markets = self.markets[start:start + self.page_size]
+        lines = [
+            f"**#{market.market_id}** {market.question}\n{self.option_description(market)}"
+            for market in page_markets
+        ]
+        embed = discord.Embed(
+            title=title,
+            description="\n\n".join(lines) or "No predictions in this view.",
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Page {self.page + 1}/{self.page_count} · Select a market to view or enter")
+        return embed
+
+    def _refresh_items(self):
+        self.clear_items()
+        if self.markets:
+            self.add_item(MarketBrowserSelect(self))
+        if self.mode == "mine":
+            created = discord.ui.Button(
+                label="Created", style=(
+                    discord.ButtonStyle.primary if self.mine_tab == "created"
+                    else discord.ButtonStyle.secondary
+                )
+            )
+            created.callback = self._show_created
+            self.add_item(created)
+            entered = discord.ui.Button(
+                label="Entered", style=(
+                    discord.ButtonStyle.primary if self.mine_tab == "entered"
+                    else discord.ButtonStyle.secondary
+                )
+            )
+            entered.callback = self._show_entered
+            self.add_item(entered)
+        if self.page_count > 1:
+            previous = discord.ui.Button(
+                label="Previous", style=discord.ButtonStyle.secondary, disabled=self.page == 0
+            )
+            previous.callback = self._previous
+            self.add_item(previous)
+            next_page = discord.ui.Button(
+                label="Next", style=discord.ButtonStyle.secondary,
+                disabled=self.page + 1 >= self.page_count,
+            )
+            next_page.callback = self._next
+            self.add_item(next_page)
+
+    async def _set_mine_tab(self, interaction, tab):
+        self.mine_tab = tab
+        self.markets = self._markets_for_tab()
+        self.page = 0
+        self._refresh_items()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def _show_created(self, interaction):
+        await self._set_mine_tab(interaction, "created")
+
+    async def _show_entered(self, interaction):
+        await self._set_mine_tab(interaction, "entered")
+
+    async def _previous(self, interaction):
+        self.page = max(0, self.page - 1)
+        self._refresh_items()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def _next(self, interaction):
+        self.page = min(self.page_count - 1, self.page + 1)
+        self._refresh_items()
+        await interaction.response.edit_message(embed=self.embed(), view=self)

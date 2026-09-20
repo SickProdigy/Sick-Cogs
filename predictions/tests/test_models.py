@@ -16,6 +16,20 @@ class PredictionMarketTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PredictionMarket(1, 2, 3, "Question", ["Yes", "yes"], now + timedelta(days=1), now)
 
+    def test_pool_totals_and_estimated_return(self):
+        now = datetime(2026, 9, 17, tzinfo=timezone.utc)
+        market = PredictionMarket(
+            1, 2, 3, "Question", ["Yes", "No"], now + timedelta(days=1), now,
+            stake_mode="range", stake_min=10, stake_max=1000,
+            entries={
+                "10": {"choice": 0, "stake": 100, "state": "funded"},
+                "20": {"choice": 1, "stake": 900, "state": "funded"},
+            },
+            votes={"10": 0, "20": 1},
+        )
+        self.assertEqual(market.pool_totals(), [100, 900])
+        self.assertEqual(market.estimated_return(30, 0, 100), 550)
+
 
 class PredictionPayoutTests(unittest.TestCase):
     def test_old_free_market_data_remains_compatible(self):
