@@ -175,7 +175,9 @@ class RoleToolsGroups(RoleToolsMixin):
         await self.save_private_groups(guild, groups)
         return changed, f"Updated {relation} roles."
 
-    async def private_group_access(self, member: discord.Member, data: dict, *, joining=False):
+    async def private_group_access(
+        self, member: discord.Member, data: dict, *, joining=False, requested_role=None
+    ):
         if data.get("archived"):
             return False, "This private group is archived."
         member_ids = {role.id for role in member.roles}
@@ -190,7 +192,12 @@ class RoleToolsGroups(RoleToolsMixin):
             return False, "A role you already have conflicts with this private group."
         gateway_id = data.get("gateway_role_id")
         if gateway_id and not joining and int(gateway_id) not in member_ids:
-            return False, "Get this group's access role before selecting its roles."
+            member_guild = getattr(member, "guild", None)
+            gateway = member_guild.get_role(int(gateway_id)) if member_guild else None
+            if gateway is not None:
+                target = requested_role.mention if requested_role is not None else "roles from this group"
+                return False, f"You need {gateway.mention} before you can select {target}."
+            return False, "The access role for this group is unavailable."
         return True, ""
 
     async def set_private_group_description(self, guild: discord.Guild, name: str, description: str):
@@ -256,7 +263,9 @@ class RoleToolsGroups(RoleToolsMixin):
             return True, ""
         failures = []
         for data in groups:
-            allowed, message = await self.private_group_access(member, data)
+            allowed, message = await self.private_group_access(
+                member, data, requested_role=role
+            )
             if allowed:
                 return True, ""
             failures.append(message)
