@@ -418,17 +418,8 @@ class Core(commands.Cog):
         except discord.HTTPException:
             return
 
-    @staticmethod
-    async def _media_channel_allowed(ctx: commands.Context) -> bool:
-        if ctx.guild is None or ctx.channel.is_nsfw():
-            return True
-        await ctx.send("This command only works in a Discord channel marked age-restricted (NSFW).")
-        return False
-
     async def _send_msg(self, ctx: commands.Context, name: str, subs: List[str] = None):
         """Main function called in all Reddit API commands."""
-        if not await self._media_channel_allowed(ctx):
-            return
         embed = await self._make_embed(ctx, subs, name)
         return await self._maybe_embed(ctx, embed=embed)
 
@@ -436,8 +427,6 @@ class Core(commands.Cog):
         self, ctx: commands.Context, name: str, arg: str, source: str, url: str = None
     ):
         """Main function called in all others APIs commands."""
-        if not await self._media_channel_allowed(ctx):
-            return
         embed = await self._make_embed_other(ctx, name, url, arg, source)
         return await self._maybe_embed(ctx, embed)
 
