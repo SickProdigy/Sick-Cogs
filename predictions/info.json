@@ -1,17 +1,31 @@
 {
-  "author": ["SickProdigy"],
-  "description": "Server-local prediction games for bragging rights and leaderboard points.",
+  "author": [
+    "SickProdigy"
+  ],
+  "description": "Server-local prediction games with optional fictional Red Bank stakes and pari-mutuel payouts.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores server prediction questions, outcomes, votes, creator IDs, and server-local leaderboard scores. It does not store or transfer currency, tokens, or real-world value.",
+  "end_user_data_statement": "This cog stores server prediction questions, outcomes, votes, creator IDs, server-local leaderboard scores, and\u2014when optional Red Bank stakes are enabled\u2014member IDs, accepted stake amounts, settlement operations, and a bounded audit journal. It uses Red Bank to transfer fictional credits and does not store real-world payment or wallet data.",
   "hidden": false,
-  "install_msg": "Use `[p]help predict` to create and vote on server-local prediction games. This cog has no money, tokens, or wallet connection.",
+  "install_msg": "Use `[p]predict setup` for interactive creation and `[p]predictset bank` to review the optional fictional Red Bank integration. Bank stakes are disabled by default and have no real-world value.",
   "min_bot_version": "3.5.0",
-  "min_python_version": [3, 8, 0],
+  "min_python_version": [
+    3,
+    8,
+    0
+  ],
   "name": "Predictions",
-  "permissions": ["embed_links"],
+  "permissions": [
+    "embed_links"
+  ],
   "requirements": [],
-  "short": "Server-local prediction games and leaderboard points.",
-  "tags": ["predictions", "polls", "games", "leaderboard"],
+  "short": "Prediction games with optional fictional Red Bank stakes.",
+  "tags": [
+    "predictions",
+    "polls",
+    "games",
+    "leaderboard",
+    "economy"
+  ],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
