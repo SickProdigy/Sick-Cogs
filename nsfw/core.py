@@ -43,6 +43,7 @@ class Core(commands.Cog):
 
     def __init__(self, bot: Red):
         self.bot = bot
+        self._install_help_category_alias()
         self.session = aiohttp.ClientSession(
             headers={
                 "User-Agent": (
@@ -58,7 +59,24 @@ class Core(commands.Cog):
         self._autopost_lock = asyncio.Lock()
         self.autopost_loop.start()
 
+    def _install_help_category_alias(self):
+        self._original_get_cog = self.bot.get_cog
+
+        def get_cog_with_nsfw_alias(name: str):
+            cog = self._original_get_cog(name)
+            if cog is None and isinstance(name, str) and name.casefold() == "nsfw":
+                return self._original_get_cog("Nsfw")
+            return cog
+
+        self._help_get_cog = get_cog_with_nsfw_alias
+        self.bot.get_cog = self._help_get_cog
+
+    def _remove_help_category_alias(self):
+        if self.bot.get_cog is self._help_get_cog:
+            self.bot.get_cog = self._original_get_cog
+
     def cog_unload(self):
+        self._remove_help_category_alias()
         self.autopost_loop.cancel()
         self.bot.loop.create_task(self.session.close())
 
