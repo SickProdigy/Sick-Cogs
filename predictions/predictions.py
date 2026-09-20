@@ -592,8 +592,13 @@ class Predictions(commands.Cog):
             embed.add_field(
                 name="Your pick", value=f"**{market.outcomes[market.votes[user_id]]}**", inline=False
             )
-        view = PredictionEntryView(self, ctx.guild.id, market)
-        await ctx.send(embed=embed, view=view)
+        view = PredictionEntryView(
+            self, ctx.guild.id, market, viewer_id=ctx.author.id,
+            viewer_can_manage=getattr(
+                getattr(ctx.author, "guild_permissions", None), "manage_guild", False
+            ),
+        )
+        await ctx.send(embed=embed, view=view if view.children else None)
 
     @predict.command(name="pick")
     async def predict_pick(self, ctx, market_id: int):

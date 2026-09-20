@@ -38,6 +38,20 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.disabled for item in enabled.children], [False, False])
         self.assertEqual([item.label for item in enabled.children], ["Free prediction", "Credit pool"])
 
+    async def test_member_card_hides_outcomes_after_entry(self):
+        market = self.market(stake_mode="range")
+        market.entries = {"10": {"choice": 0, "stake": 100, "state": "funded"}}
+        market.votes = {"10": 0}
+        view = PredictionEntryView(SimpleNamespace(), 55, market, viewer_id=10)
+        self.assertEqual([item.label for item in view.children], ["Manage"])
+
+    async def test_noncreator_card_has_no_actions_after_entry(self):
+        market = self.market(stake_mode="range")
+        market.entries = {"20": {"choice": 0, "stake": 100, "state": "funded"}}
+        market.votes = {"20": 0}
+        view = PredictionEntryView(SimpleNamespace(), 55, market, viewer_id=20)
+        self.assertEqual(view.children, [])
+
     async def test_closed_market_keeps_manage_and_disables_outcomes(self):
         market = self.market()
         market.closes_at = datetime.now(timezone.utc) - timedelta(seconds=1)

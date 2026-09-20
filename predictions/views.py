@@ -81,25 +81,33 @@ class StakeAmountModal(discord.ui.Modal, title="Choose your play-credit entry"):
 
 
 class PredictionEntryView(discord.ui.View):
-    def __init__(self, cog, guild_id: int, market):
+    def __init__(self, cog, guild_id: int, market, viewer_id=None, viewer_can_manage=False):
         super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
         self.market_id = market.market_id
-        for index, outcome in enumerate(market.outcomes):
-            button = discord.ui.Button(
-                label=outcome[:80], style=discord.ButtonStyle.primary,
-                custom_id=f"predictions:pick:{guild_id}:{market.market_id}:{index}",
-                disabled=not market.is_open(),
-            )
-            button.callback = self._callback(index)
-            self.add_item(button)
-        manage = discord.ui.Button(
-            label="Manage", style=discord.ButtonStyle.secondary, row=1,
-            custom_id=f"predictions:manage:{guild_id}:{market.market_id}",
+        viewer_has_entry = viewer_id is not None and (
+            str(viewer_id) in market.votes or str(viewer_id) in market.entries
         )
-        manage.callback = self._manage
-        self.add_item(manage)
+        if not viewer_has_entry:
+            for index, outcome in enumerate(market.outcomes):
+                button = discord.ui.Button(
+                    label=outcome[:80], style=discord.ButtonStyle.primary,
+                    custom_id=f"predictions:pick:{guild_id}:{market.market_id}:{index}",
+                    disabled=not market.is_open(),
+                )
+                button.callback = self._callback(index)
+                self.add_item(button)
+        show_manage = (
+            viewer_id is None or viewer_id == market.creator_id or viewer_can_manage
+        )
+        if show_manage:
+            manage = discord.ui.Button(
+                label="Manage", style=discord.ButtonStyle.secondary, row=1,
+                custom_id=f"predictions:manage:{guild_id}:{market.market_id}",
+            )
+            manage.callback = self._manage
+            self.add_item(manage)
 
     async def _manage(self, interaction: discord.Interaction):
         markets = await self.cog.config.guild(interaction.guild).markets()
