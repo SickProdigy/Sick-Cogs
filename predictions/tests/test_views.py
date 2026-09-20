@@ -38,6 +38,12 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.disabled for item in enabled.children], [False, False])
         self.assertEqual([item.label for item in enabled.children], ["Free prediction", "Credit pool"])
 
+    async def test_manager_panel_approves_paid_outcome(self):
+        view = PredictionManageView(
+            SimpleNamespace(), 10, self.market(stake_mode="fixed"), is_manager=True
+        )
+        self.assertEqual([item.label for item in view.children[:2]], ["Approve: Alpha", "Approve: Beta"])
+
     async def test_member_card_hides_outcomes_after_entry(self):
         market = self.market(stake_mode="range")
         market.entries = {"10": {"choice": 0, "stake": 100, "state": "funded"}}
@@ -72,11 +78,17 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
             ["Start", "Open", "Recent", "Mine", "Leaderboard"],
         )
 
+    async def test_home_panel_shows_review_only_to_managers(self):
+        member = PredictionHomeView(SimpleNamespace(), 10, True)
+        manager = PredictionHomeView(SimpleNamespace(), 10, True, viewer_can_manage=True)
+        self.assertNotIn("Review", [item.label for item in member.children])
+        self.assertIn("Review", [item.label for item in manager.children])
+
     async def test_manage_panel_exposes_resolution_cancel_and_audit(self):
         view = PredictionManageView(SimpleNamespace(), 10, self.market(stake_mode="fixed"))
         self.assertEqual(
             [item.label for item in view.children],
-            ["Resolve: Alpha", "Resolve: Beta", "Cancel and refund", "View audit"],
+            ["Propose: Alpha", "Propose: Beta", "Cancel and refund", "View audit"],
         )
 
     async def test_mine_browser_separates_created_and_entered_markets(self):

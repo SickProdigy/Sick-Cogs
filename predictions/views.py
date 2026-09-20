@@ -126,7 +126,10 @@ class PredictionEntryView(discord.ui.View):
             return
         await interaction.response.send_message(
             f"Manage prediction **#{self.market_id}**.",
-            view=PredictionManageView(self.cog, interaction.user.id, market), ephemeral=True,
+            view=PredictionManageView(
+                self.cog, interaction.user.id, market,
+                is_manager=interaction.user.guild_permissions.manage_guild,
+            ), ephemeral=True,
         )
 
     def _callback(self, choice: int):
@@ -159,14 +162,15 @@ class PredictionEntryView(discord.ui.View):
 
 
 class PredictionManageView(discord.ui.View):
-    def __init__(self, cog, user_id: int, market):
+    def __init__(self, cog, user_id: int, market, is_manager=False):
         super().__init__(timeout=120)
         self.cog = cog
         self.user_id = user_id
         self.market_id = market.market_id
+        action = "Approve" if market.uses_bank and is_manager else ("Propose" if market.uses_bank else "Resolve")
         for index, outcome in enumerate(market.outcomes):
             button = discord.ui.Button(
-                label=f"Resolve: {outcome}"[:80], style=discord.ButtonStyle.success,
+                label=f"{action}: {outcome}"[:80], style=discord.ButtonStyle.success,
                 row=0, custom_id=f"prediction-manage-resolve-{index}",
             )
             button.callback = self._resolve(index)
@@ -247,13 +251,18 @@ class CreatePredictionModal(discord.ui.Modal):
 
 
 class PredictionHomeView(discord.ui.View):
-    def __init__(self, cog, user_id: int, bank_enabled: bool, stake_min=10, stake_max=10000):
+    def __init__(
+        self, cog, user_id: int, bank_enabled: bool, stake_min=10, stake_max=10000,
+        viewer_can_manage=False,
+    ):
         super().__init__(timeout=300)
         self.cog = cog
         self.user_id = user_id
         self.bank_enabled = bank_enabled
         self.stake_min = stake_min
         self.stake_max = stake_max
+        if not viewer_can_manage:
+            self.remove_item(self.review)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -288,6 +297,10 @@ class PredictionHomeView(discord.ui.View):
     @discord.ui.button(label="Leaderboard", emoji="🏆", style=discord.ButtonStyle.secondary, row=1)
     async def leaderboard(self, interaction, button):
         await self.cog.predict_leaderboard.callback(self.cog, InteractionContext(interaction))
+
+    @discord.ui.button(label="Review", emoji="🛡️", style=discord.ButtonStyle.secondary, row=1)
+    async def review(self, interaction, button):
+        await self.cog.predict_review.callback(self.cog, InteractionContext(interaction))
 
 
 
@@ -384,6 +397,8 @@ class MarketBrowserView(discord.ui.View):
             return "resolved"
         if market.state in {"cancelled", "frozen"}:
             return market.state
+        if market.state == "pending_review":
+            return "pending staff review"
         return "open" if market.is_open() else "voting closed"
 
     def option_description(self, market):
@@ -393,9 +408,10 @@ class MarketBrowserView(discord.ui.View):
         return f"{state} · {len(market.votes)} votes · free"
 
     def embed(self):
-        title = {"open": "Open predictions", "recent": "Recent predictions"}.get(
-            self.mode, f"My predictions · {self.mine_tab.title()}"
-        )
+        title = {
+            "open": "Open predictions", "recent": "Recent predictions",
+            "review": "Predictions awaiting staff review",
+        }.get(self.mode, f"My predictions · {self.mine_tab.title()}")
         start = self.page * self.page_size
         page_markets = self.markets[start:start + self.page_size]
         lines = [

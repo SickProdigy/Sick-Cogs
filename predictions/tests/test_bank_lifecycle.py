@@ -101,6 +101,32 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
         recovered = cog.config.markets_value.set.await_args_list[-1].args[0]["1"]
         self.assertEqual(recovered["entries"]["10"]["state"], "recovered")
 
+    async def test_creator_proposal_holds_pool_until_staff_approval(self):
+        market = make_market({
+            "10": {"choice": 0, "stake": 100, "state": "funded"},
+            "20": {"choice": 1, "stake": 100, "state": "funded"},
+        })
+        market.created_at = datetime.now(timezone.utc) - timedelta(days=2)
+        market.closes_at = datetime.now(timezone.utc) - timedelta(days=1)
+        cog, guild = self.cog_and_guild(market)
+        balances = {10: 0, 20: 0}
+
+        async def get_balance(member): return balances[member.id]
+        async def deposit(member, amount): balances[member.id] += amount
+
+        with patch("predictions.predictions.bank.get_balance", side_effect=get_balance), \
+             patch("predictions.predictions.bank.deposit_credits", side_effect=deposit) as deposited:
+            proposed, error = await cog._propose_bank_review(guild, 1, 10, 0)
+            self.assertIsNone(error)
+            self.assertEqual(proposed.state, "pending_review")
+            self.assertEqual(proposed.review["proposed_outcome"], 0)
+            self.assertEqual(deposited.await_count, 0)
+            approved, error = await cog._finalize_bank_market(guild, 1, 0, reviewer_id=30)
+            self.assertIsNone(error)
+            self.assertEqual(approved.state, "resolved")
+            self.assertEqual(approved.review["reviewed_by"], 30)
+            self.assertEqual(balances, {10: 200, 20: 0})
+
     async def test_resolution_pays_once_and_retry_does_not_double_pay(self):
         market = make_market({
             "10": {"choice": 0, "stake": 100, "state": "funded"},

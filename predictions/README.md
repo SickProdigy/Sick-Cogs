@@ -29,6 +29,7 @@ The same main activities remain available through commands and `[p]help predict`
 [p]predict list
 [p]predict recent
 [p]predict mine
+[p]predict review
 [p]predict status <market-id>
 [p]predict pick <market-id>
 [p]predict resolve <market-id> <outcome>
@@ -59,4 +60,4 @@ Accepted amounts are locked, though members may change their selected outcome wi
 
 Bank integration is disabled by default. Disabling it stops new play-credit predictions but does not abandon existing funded markets. The limits command sets minimum entry, maximum entry, and optional per-user exposure. When Red Bank uses global balances, only the bot owner may enable play-credit predictions because those balances span servers.
 
-Anyone may start a prediction. Entries lock at its deadline. The creator resolves it after it closes; server managers may resolve early or handle recovery. Free prediction winners receive one non-transferable server point.
+Anyone may start a prediction. Entries lock at its deadline. For a paid prediction, the creator proposes an outcome after entries close, but credits remain held until a member with Manage Server permission approves that outcome or chooses a different one. Staff can use the **Review** button or `[p]predict review` to browse pending markets. A creator may cancel their own market and refund all accepted entries without approval. Free prediction winners receive one non-transferable server point.

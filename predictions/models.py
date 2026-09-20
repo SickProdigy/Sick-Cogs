@@ -24,6 +24,7 @@ class PredictionMarket:
     entries: Dict[str, dict] = field(default_factory=dict)
     state: str = "open"
     settlement: dict = field(default_factory=dict)
+    review: dict = field(default_factory=dict)
     audit: List[dict] = field(default_factory=list)
 
     def __post_init__(self):
@@ -47,7 +48,7 @@ class PredictionMarket:
             raise ValueError("Prediction house cut must be between zero and 25 percent.")
         if self.house_cut_bps and not self.treasury_user_id:
             raise ValueError("A treasury member is required for a house cut.")
-        if self.state not in {"open", "resolved", "cancelled", "frozen"}:
+        if self.state not in {"open", "pending_review", "resolved", "cancelled", "frozen"}:
             raise ValueError("Prediction state is invalid.")
 
     @property
@@ -97,7 +98,7 @@ class PredictionMarket:
             "stake_min": self.stake_min, "stake_max": self.stake_max,
             "house_cut_bps": self.house_cut_bps, "treasury_user_id": self.treasury_user_id,
             "entries": self.entries, "state": self.state, "settlement": self.settlement,
-            "audit": self.audit[-100:],
+            "review": self.review, "audit": self.audit[-100:],
         }
 
     @classmethod
@@ -119,7 +120,8 @@ class PredictionMarket:
                 None if raw.get("treasury_user_id") is None else int(raw["treasury_user_id"]),
                 {str(key): dict(value) for key, value in raw.get("entries", {}).items()},
                 str(raw.get("state", "resolved" if raw.get("resolved_outcome") is not None else "open")),
-                dict(raw.get("settlement", {})), list(raw.get("audit", []))[-100:],
+                dict(raw.get("settlement", {})), dict(raw.get("review", {})),
+                list(raw.get("audit", []))[-100:],
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Prediction market data is invalid.") from exc

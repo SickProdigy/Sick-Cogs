@@ -154,6 +154,8 @@ class Predictions(commands.Cog):
             return "Cancelled"
         if market.state == "frozen":
             return "Frozen"
+        if market.state == "pending_review":
+            return "Pending staff review"
         return "Open" if market.is_open() else "Voting closed"
 
     @staticmethod
@@ -172,6 +174,18 @@ class Predictions(commands.Cog):
         embed.add_field(name="Outcomes", value="\n".join(lines), inline=False)
         if market.is_resolved:
             embed.add_field(name="Result", value=market.outcomes[market.resolved_outcome], inline=False)
+        elif market.state == "pending_review":
+            proposed = market.review.get("proposed_outcome")
+            proposed_name = (
+                market.outcomes[int(proposed)]
+                if proposed is not None and 0 <= int(proposed) < len(market.outcomes)
+                else "Refund"
+            )
+            embed.add_field(
+                name="Proposed result",
+                value=f"**{proposed_name}** · awaiting staff approval",
+                inline=False,
+            )
         else:
             embed.add_field(name="Voting closes", value=f"<t:{int(market.closes_at.timestamp())}:F>", inline=False)
         embed.set_footer(text=f"{state} • No money, tokens, or prizes")
@@ -276,7 +290,34 @@ class Predictions(commands.Cog):
         await self._save_market(guild, markets, market)
         return True
 
-    async def _finalize_bank_market(self, guild, market_id: int, winning_choice=None, *, cancelled=False):
+    async def _propose_bank_review(
+        self, guild, market_id: int, actor_id: int, winning_choice=None, *, cancelled=False
+    ):
+        async with self._guild_lock(guild.id):
+            markets = await self.config.guild(guild).markets()
+            market = self._market_from_raw(markets.get(str(market_id)))
+            if market is None or not market.uses_bank:
+                return None, "That bank-backed prediction does not exist."
+            if market.settlement.get("state") == "complete":
+                return market, "This prediction has already been finalized."
+            if market.is_open():
+                return market, "Wait until voting closes before proposing a result."
+            market.review = {
+                "status": "pending", "proposed_outcome": winning_choice,
+                "cancelled": cancelled, "proposed_by": actor_id,
+                "proposed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            market.state = "pending_review"
+            self._audit(
+                market, "result_proposed", actor_id=str(actor_id),
+                winning_choice=winning_choice, cancelled=cancelled,
+            )
+            await self._save_market(guild, markets, market)
+            return market, None
+
+    async def _finalize_bank_market(
+        self, guild, market_id: int, winning_choice=None, *, cancelled=False, reviewer_id=None
+    ):
         async with self._guild_lock(guild.id):
             markets = await self.config.guild(guild).markets()
             market = self._market_from_raw(markets.get(str(market_id)))
@@ -293,9 +334,17 @@ class Predictions(commands.Cog):
                     "state": "planned", "winning_choice": winning_choice,
                     "cancelled": cancelled, "refunded": refunded,
                     "payouts": payouts, "house_cut": cut, "operations": {},
+                    "approved_by": reviewer_id,
                 }
+                if market.review:
+                    market.review["status"] = "approved"
+                    market.review["reviewed_by"] = reviewer_id
+                    market.review["reviewed_at"] = datetime.now(timezone.utc).isoformat()
                 market.state = "frozen"
-                self._audit(market, "settlement_planned", payouts=sum(payouts.values()), house_cut=cut)
+                self._audit(
+                    market, "settlement_planned", payouts=sum(payouts.values()),
+                    house_cut=cut, reviewer_id=reviewer_id,
+                )
                 await self._save_market(guild, markets, market)
             plan = market.settlement
             for user_id, amount in plan.get("payouts", {}).items():
@@ -346,6 +395,9 @@ class Predictions(commands.Cog):
             view=PredictionHomeView(
                 self, ctx.author.id, settings.get("bank_enabled", False),
                 int(settings.get("stake_min", 10)), int(settings.get("stake_max", 10000)),
+                viewer_can_manage=getattr(
+                    getattr(ctx.author, "guild_permissions", None), "manage_guild", False
+                ),
             ),
         )
 
@@ -665,6 +717,23 @@ class Predictions(commands.Cog):
         view = MarketBrowserView(self, ctx.author.id, markets, mode, currency)
         await ctx.send(embed=view.embed(), view=view)
 
+    @predict.command(name="review")
+    @commands.admin_or_permissions(manage_guild=True)
+    async def predict_review(self, ctx):
+        """Browse paid predictions waiting for staff approval."""
+        markets = [
+            self._market_from_raw(raw)
+            for raw in (await self.config.guild(ctx.guild).markets()).values()
+        ]
+        pending = sorted(
+            (market for market in markets if market and market.state == "pending_review"),
+            key=lambda market: market.market_id,
+        )
+        if not pending:
+            await ctx.send("No paid predictions are waiting for staff review.")
+            return
+        await self._send_browser(ctx, pending, "review")
+
     @predict.command(name="resolve", aliases=["settle"])
     async def predict_resolve(self, ctx, market_id: int, *, outcome: str):
         """Settle a closed prediction; its creator or a server manager may do so."""
@@ -672,24 +741,35 @@ class Predictions(commands.Cog):
             (await self.config.guild(ctx.guild).markets()).get(str(market_id))
         )
         if preview and preview.uses_bank:
-            is_manager = ctx.author.guild_permissions.manage_guild
+            is_manager = getattr(ctx.author.guild_permissions, "manage_guild", False)
             if preview.creator_id != ctx.author.id and not is_manager:
-                await ctx.send("Only the prediction creator or a server manager can settle it.")
-                return
-            if preview.is_open() and not is_manager:
-                await ctx.send("The prediction creator can settle it after voting closes.")
+                await ctx.send("Only the prediction creator or a server manager can submit a result.")
                 return
             index = self.outcome_index(preview, outcome)
             if index is None:
                 await ctx.send("Choose an outcome number or its exact name.")
                 return
-            market, error = await self._finalize_bank_market(ctx.guild, market_id, index)
+            if not is_manager:
+                market, error = await self._propose_bank_review(
+                    ctx.guild, market_id, ctx.author.id, index
+                )
+                if error:
+                    await ctx.send(error)
+                    return
+                await ctx.send(
+                    f"Proposed **{market.outcomes[index]}** for prediction #{market_id}. "
+                    "The credit pool remains held until a server manager approves the result."
+                )
+                return
+            market, error = await self._finalize_bank_market(
+                ctx.guild, market_id, index, reviewer_id=ctx.author.id
+            )
             if error:
                 await ctx.send(error)
                 return
             currency = await bank.get_currency_name(ctx.guild)
             await ctx.send(
-                f"Prediction #{market_id} resolved: **{market.outcomes[index]}**. "
+                f"Prediction #{market_id} approved as **{market.outcomes[index]}**. "
                 f"The {currency} pool has been finalized."
             )
             return
