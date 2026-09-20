@@ -35,7 +35,7 @@ SEEN_LIMIT = 100
 class Core(commands.Cog):
 
     __author__ = ["SickProdigy", "Predä", "aikaterna"]
-    __version__ = "3.1.0"
+    __version__ = "3.1.1"
 
     async def red_delete_data_for_user(self, **kwargs):
         """Nothing to delete."""
@@ -244,11 +244,6 @@ class Core(commands.Cog):
     @autopost_loop.before_loop
     async def before_autopost_loop(self):
         await self.bot.wait_until_red_ready()
-
-    def format_help_for_context(self, ctx: commands.Context) -> str:
-        """Thanks Sinbad!"""
-        pre_processed = super().format_help_for_context(ctx)
-        return f"{pre_processed}\n\nAuthors: {', '.join(self.__author__)}\nCog Version: {self.__version__}"
 
     async def _get_imgs(self, subs: List[str] = None):
         """Get images from Reddit API."""
