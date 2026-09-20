@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from predictions.models import PredictionMarket, calculate_payouts
+from predictions.predictions import Predictions
 
 
 class PredictionMarketTests(unittest.TestCase):
@@ -15,6 +16,16 @@ class PredictionMarketTests(unittest.TestCase):
         now = datetime(2026, 9, 17, tzinfo=timezone.utc)
         with self.assertRaises(ValueError):
             PredictionMarket(1, 2, 3, "Question", ["Yes", "yes"], now + timedelta(days=1), now)
+
+    def test_creator_with_funded_entry_cannot_approve_own_paid_result(self):
+        now = datetime(2026, 9, 17, tzinfo=timezone.utc)
+        market = PredictionMarket(
+            1, 2, 3, "Question", ["Yes", "No"], now + timedelta(days=1), now,
+            stake_mode="range", stake_min=10, stake_max=1000,
+            entries={"3": {"choice": 0, "stake": 100, "state": "funded"}},
+        )
+        self.assertFalse(Predictions.can_approve_paid_result(market, 3, True))
+        self.assertTrue(Predictions.can_approve_paid_result(market, 4, True))
 
     def test_pool_totals_and_estimated_return(self):
         now = datetime(2026, 9, 17, tzinfo=timezone.utc)

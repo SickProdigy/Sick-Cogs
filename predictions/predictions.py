@@ -138,6 +138,14 @@ class Predictions(commands.Cog):
             return None
 
     @staticmethod
+    def can_approve_paid_result(market: PredictionMarket, actor_id: int, is_manager: bool) -> bool:
+        creator_has_entry = (
+            actor_id == market.creator_id
+            and str(actor_id) in market.funded_entries()
+        )
+        return is_manager and not creator_has_entry
+
+    @staticmethod
     def outcome_index(market: PredictionMarket, choice: str) -> Optional[int]:
         if choice.isdigit():
             index = int(choice) - 1
@@ -742,6 +750,7 @@ class Predictions(commands.Cog):
         )
         if preview and preview.uses_bank:
             is_manager = getattr(ctx.author.guild_permissions, "manage_guild", False)
+            can_approve = self.can_approve_paid_result(preview, ctx.author.id, is_manager)
             if preview.creator_id != ctx.author.id and not is_manager:
                 await ctx.send("Only the prediction creator or a server manager can submit a result.")
                 return
@@ -749,7 +758,7 @@ class Predictions(commands.Cog):
             if index is None:
                 await ctx.send("Choose an outcome number or its exact name.")
                 return
-            if not is_manager:
+            if not can_approve:
                 market, error = await self._propose_bank_review(
                     ctx.guild, market_id, ctx.author.id, index
                 )
