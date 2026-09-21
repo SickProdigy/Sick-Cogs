@@ -44,6 +44,9 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 
 Develop-only cogs and experiments are not part of the stable Index release.
 
+Current develop experiments include `imagine`, a private, provider-neutral AI image generator that
+is disabled until the bot owner explicitly allowlists a server and its administrators grant access.
+
 ## External Cog Sync Helper
 
 Source links for refreshable external cog folders live in `external_cogs.json`.
