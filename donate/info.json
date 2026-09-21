@@ -12,5 +12,5 @@
   "short": "Show configured donation options",
   "tags": ["donate", "donation", "donations", "support", "paypal", "cashapp", "venmo", "crypto"],
   "type": "COG",
-  "version": "1.0.0"
+  "version": "1.1.1"
 }
