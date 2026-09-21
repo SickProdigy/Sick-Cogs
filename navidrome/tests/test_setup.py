@@ -2,9 +2,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from navidrome.client import NavidromeError
 from navidrome.navidrome import Navidrome
 from navidrome.setup import (
-    AccountCreateModal, AccountManagerView, NavidromeSetupView, UserActionView, owner_check,
+    AccountCreateModal, AccountManagerView, ConnectionModal, NavidromeSetupView, UserActionView, owner_check,
 )
 
 
@@ -50,6 +51,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         }
         group = GuildConfig(settings)
         cog = object.__new__(Navidrome)
+        cog.bot = SimpleNamespace(is_owner=AsyncMock(return_value=True))
         cog.config = SimpleNamespace(
             connections=Value(profiles or {}),
             guild=MagicMock(return_value=group),
@@ -97,8 +99,10 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         placeholders = {getattr(item, "placeholder", None) for item in view.children}
         self.assertIn("Enable announcements", labels)
         self.assertIn("Manage users", labels)
+        self.assertIn("Connect server", labels)
+        self.assertFalse(next(item for item in view.children if item.label == "Manage users").disabled)
         self.assertIn("Choose an approved Navidrome connection", placeholders)
-        self.assertIn("Choose the recently-added album channel", placeholders)
+        self.assertIn("Optional: choose an album notification channel", placeholders)
 
     async def test_enable_requires_connection_and_channel(self):
         cog, group = self.make_cog()
@@ -166,6 +170,100 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(retry_minutes, 15)
         self.assertLessEqual(retry_minutes, 20)
         self.assertEqual(cog._connection_failures["home"], 1)
+
+    async def test_connection_setup_is_owner_only_and_users_wait_for_connection(self):
+        cog, _ = self.make_cog()
+        cog.bot.is_owner.return_value = False
+        author = SimpleNamespace(id=1)
+        guild = SimpleNamespace(id=2)
+
+        view = await NavidromeSetupView.create(cog, author, guild)
+
+        connect = next(item for item in view.children if item.label == "Connect server")
+        manage = next(item for item in view.children if item.label == "Manage users")
+        self.assertTrue(connect.disabled)
+        self.assertTrue(manage.disabled)
+
+    def test_connection_modal_collects_complete_owner_setup(self):
+        cog, _ = self.make_cog()
+        modal = ConnectionModal(cog)
+
+        self.assertEqual(len(modal.children), 5)
+        self.assertEqual(modal.allow_http.default, "no")
+        self.assertEqual(modal.title, "Connect a Navidrome server")
+
+    async def test_connection_modal_tests_saves_and_selects_server(self):
+        cog, group = self.make_cog()
+        cog.bot.get_shared_api_tokens = AsyncMock(return_value={})
+        cog.bot.set_shared_api_tokens = AsyncMock()
+        cog.bot.remove_shared_api_tokens = AsyncMock()
+        client = SimpleNamespace(
+            ping=AsyncMock(return_value={"type": "Navidrome", "serverVersion": "0.58.0"}),
+            users=AsyncMock(return_value=[{"id": "admin"}]),
+        )
+        cog._client = AsyncMock(return_value=client)
+        modal = ConnectionModal(cog)
+        modal.name._value = "home"
+        modal.url._value = "https://music.example.com"
+        modal.username._value = "admin"
+        modal.password._value = "secret"
+        modal.allow_http._value = "no"
+        user = SimpleNamespace(
+            id=1, guild_permissions=SimpleNamespace(manage_guild=True)
+        )
+        interaction = SimpleNamespace(
+            user=user,
+            guild=SimpleNamespace(id=2, get_channel_or_thread=MagicMock(return_value=None)),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await modal.on_submit(interaction)
+
+        cog.bot.set_shared_api_tokens.assert_awaited_once_with(
+            "navidrome_home", username="admin", password="secret"
+        )
+        self.assertEqual(cog.config.connections.value["home"]["base_url"], "https://music.example.com")
+        self.assertEqual(group.connection.value, "home")
+        group.announcement_enabled.set.assert_awaited_with(False)
+        interaction.edit_original_response.assert_awaited_once()
+
+    async def test_connection_modal_rolls_back_failed_connection(self):
+        previous = {"base_url": "https://old.example.com", "allow_http": False}
+        cog, group = self.make_cog(profiles={"home": previous})
+        cog.bot.get_shared_api_tokens = AsyncMock(
+            return_value={"username": "old-admin", "password": "old-secret"}
+        )
+        cog.bot.set_shared_api_tokens = AsyncMock()
+        cog.bot.remove_shared_api_tokens = AsyncMock()
+        cog._client = AsyncMock(side_effect=NavidromeError("authentication failed"))
+        modal = ConnectionModal(cog)
+        modal.name._value = "home"
+        modal.url._value = "https://new.example.com"
+        modal.username._value = "new-admin"
+        modal.password._value = "new-secret"
+        modal.allow_http._value = "no"
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(
+                id=1, guild_permissions=SimpleNamespace(manage_guild=True)
+            ),
+            guild=SimpleNamespace(id=2),
+            response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await modal.on_submit(interaction)
+
+        self.assertEqual(cog.config.connections.value["home"], previous)
+        self.assertIsNone(group.connection.value)
+        self.assertEqual(cog.bot.set_shared_api_tokens.await_count, 2)
+        cog.bot.set_shared_api_tokens.assert_awaited_with(
+            "navidrome_home", username="old-admin", password="old-secret"
+        )
+        interaction.followup.send.assert_awaited_once()
+        interaction.edit_original_response.assert_not_awaited()
 
     def test_account_manager_controls_match_link_state(self):
         cog, _ = self.make_cog()

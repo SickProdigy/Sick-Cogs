@@ -11,19 +11,19 @@ clear error when a server version does not provide it.
 
 ## Owner setup
 
-Choose a short connection name such as `home`. In a DM or other private channel, store a dedicated
-Navidrome account through Red's shared token store:
+Run `[p]navidromeset setup` as the bot owner and choose **Connect server**. Enter a short
+connection name, the Navidrome URL, and a dedicated Navidrome administrator username/password.
+The form tests both library access and native user management before saving anything, then selects
+that connection for the Discord server.
+
+The equivalent text-command fallback is:
 
 ```text
 [p]set api navidrome_home username,SERVICE_USER password,SERVICE_PASSWORD
-```
-
-Then approve and test its endpoint:
-
-```text
 [p]navidromeowner connection add home https://music.example.com
 [p]navidromeowner connection test home
 [p]navidromeowner connection list
+[p]navidromeset connection home
 ```
 
 HTTPS is required by default. A bot owner can pass `true` as the final argument to explicitly allow
@@ -31,11 +31,13 @@ HTTP for a trusted private deployment. The configured account must be a Navidrom
 use account provisioning and password management. Use a dedicated bot administrator account rather
 than a personal account. A read-only account is sufficient only when user management will not be used.
 
-## Guild setup
+## Server setup and optional notifications
 
-Open the guided panel with `[p]navidromeset setup`. It lets an administrator select an approved
-connection and channel, set the interval, test the connection, preview an album, enable or disable
-announcements, and open **Manage users** for the complete interactive account lifecycle. Equivalent text commands remain available:
+Open the guided panel with `[p]navidromeset setup`. The primary controls connect or select a
+Navidrome server and open **Manage users** for the complete interactive account lifecycle.
+
+Recently-added album notifications are optional. Servers that want them can choose a channel, set
+the interval, preview an album, and enable announcements. Equivalent text commands remain available:
 
 ```text
 [p]navidromeset connection home

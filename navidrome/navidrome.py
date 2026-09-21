@@ -22,7 +22,7 @@ from .setup import NavidromeSetupView
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/0.4.0"
+USER_AGENT = "Sick-Cogs-Navidrome/0.4.1"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -41,7 +41,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
 
     default_global = {"connections": {}}
     default_guild = {
@@ -190,8 +190,8 @@ class Navidrome(commands.Cog):
         embed = discord.Embed(
             title="Navidrome setup",
             description=(
-                "Choose an owner-approved server and announcement channel, then test the "
-                "connection before enabling recently-added album posts."
+                "Connect a Navidrome server with an administrator account, then manage users. Album "
+                "notifications are optional."
             ),
             colour=discord.Colour.blurple(),
         )
@@ -222,7 +222,10 @@ class Navidrome(commands.Cog):
         if not profiles:
             embed.add_field(
                 name="Owner setup needed",
-                value="Use `navidromeowner connection add <name> <url>` after storing credentials.",
+                value=(
+                    "The bot owner can choose **Connect server** below to test and save "
+                    "the Navidrome administrator connection."
+                ),
                 inline=False,
             )
         return embed

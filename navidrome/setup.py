@@ -7,7 +7,7 @@ from typing import Dict
 
 import discord
 
-from .client import NavidromeError
+from .client import NavidromeError, validate_base_url
 
 
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
@@ -20,6 +20,110 @@ async def owner_check(interaction: discord.Interaction, author: discord.abc.User
         await interaction.response.send_message("Manage Server permission is required.", ephemeral=True)
         return False
     return True
+
+
+class ConnectionModal(discord.ui.Modal):
+    def __init__(self, cog):
+        super().__init__(title="Connect a Navidrome server")
+        self.cog = cog
+        self.name = discord.ui.TextInput(
+            label="Connection name", placeholder="home", min_length=1, max_length=32
+        )
+        self.url = discord.ui.TextInput(
+            label="Navidrome URL", placeholder="https://music.example.com", max_length=500
+        )
+        self.username = discord.ui.TextInput(
+            label="Navidrome admin username", max_length=100
+        )
+        self.password = discord.ui.TextInput(
+            label="Admin password (not posted)", max_length=500
+        )
+        self.allow_http = discord.ui.TextInput(
+            label="Allow private HTTP? (yes/no)", default="no", max_length=3
+        )
+        for item in (self.name, self.url, self.username, self.password, self.allow_http):
+            self.add_item(item)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not await self.cog.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Only the bot owner can save Navidrome server credentials.", ephemeral=True
+            )
+            return
+        name = str(self.name.value).strip().lower()
+        if not name or not re.fullmatch(r"[a-z0-9_-]+", name):
+            await interaction.response.send_message(
+                "Connection names may contain only letters, numbers, underscores, and hyphens.",
+                ephemeral=True,
+            )
+            return
+        allow_http_value = str(self.allow_http.value).strip().casefold()
+        if allow_http_value not in {"yes", "no"}:
+            await interaction.response.send_message(
+                "Enter `yes` or `no` for private HTTP.", ephemeral=True
+            )
+            return
+        allow_http = allow_http_value == "yes"
+        try:
+            base_url = validate_base_url(str(self.url.value), allow_http=allow_http)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        username = str(self.username.value).strip()
+        password = str(self.password.value)
+        if not username or not password:
+            await interaction.response.send_message(
+                "The Navidrome admin username and password are required.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        namespace = f"navidrome_{name}"
+        previous_tokens = await self.cog.bot.get_shared_api_tokens(namespace)
+        profiles = await self.cog.config.connections()
+        previous_profile = profiles.get(name)
+        await self.cog.bot.set_shared_api_tokens(
+            namespace, username=username, password=password
+        )
+        profiles[name] = {"base_url": base_url, "allow_http": allow_http}
+        await self.cog.config.connections.set(profiles)
+        try:
+            client = await self.cog._client(name)
+            ping = await client.ping()
+            users = await client.users()
+        except NavidromeError as exc:
+            if previous_tokens:
+                await self.cog.bot.set_shared_api_tokens(namespace, **previous_tokens)
+            else:
+                await self.cog.bot.remove_shared_api_tokens(
+                    namespace, "username", "password"
+                )
+            if previous_profile is None:
+                profiles.pop(name, None)
+            else:
+                profiles[name] = previous_profile
+            await self.cog.config.connections.set(profiles)
+            await interaction.followup.send(
+                f"Connection was not saved: {exc}", ephemeral=True
+            )
+            return
+
+        group = self.cog.config.guild(interaction.guild)
+        await group.connection.set(name)
+        await group.announcement_enabled.set(False)
+        await group.announced_album_ids.set([])
+        server = str(ping.get("type") or "Navidrome")
+        version = str(ping.get("serverVersion") or "unknown version")
+        await interaction.edit_original_response(
+            content=(
+                f"Connected `{name}` to {server} {version}. "
+                f"User management is ready ({len(users)} users visible)."
+            ),
+            embed=await self.cog.setup_embed(interaction.guild),
+            view=await NavidromeSetupView.create(
+                self.cog, interaction.user, interaction.guild
+            ),
+        )
 
 
 class IntervalModal(discord.ui.Modal):
@@ -89,7 +193,7 @@ class ConnectionSelect(discord.ui.Select):
 class AnnouncementChannelSelect(discord.ui.ChannelSelect):
     def __init__(self, parent: "NavidromeSetupView"):
         super().__init__(
-            placeholder="Choose the recently-added album channel",
+            placeholder="Optional: choose an album notification channel",
             channel_types=[discord.ChannelType.text, discord.ChannelType.news],
             min_values=1,
             max_values=1,
@@ -494,10 +598,32 @@ class NavidromeSetupView(discord.ui.View):
         enabled = bool(settings.get("announcement_enabled"))
         toggle.label = "Disable announcements" if enabled else "Enable announcements"
         toggle.style = discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success
+        connect = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:connect"
+        )
+        connect.disabled = not await cog.bot.is_owner(author)
+        manage = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:manage-users"
+        )
+        manage.disabled = not bool(settings.get("connection"))
         return view
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return await owner_check(interaction, self.author)
+
+    @discord.ui.button(
+        label="Connect server", style=discord.ButtonStyle.success, row=2,
+        custom_id="navidrome:connect",
+    )
+    async def connect_server(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.cog.bot.is_owner(interaction.user):
+            await interaction.response.send_message(
+                "Only the bot owner can save Navidrome server credentials.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(ConnectionModal(self.cog))
 
     @discord.ui.button(label="Set interval", style=discord.ButtonStyle.secondary, row=2)
     async def interval(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -548,7 +674,10 @@ class NavidromeSetupView(discord.ui.View):
             view=await NavidromeSetupView.create(self.cog, interaction.user, interaction.guild),
         )
 
-    @discord.ui.button(label="Manage users", style=discord.ButtonStyle.primary, row=3)
+    @discord.ui.button(
+        label="Manage users", style=discord.ButtonStyle.primary, row=2,
+        custom_id="navidrome:manage-users",
+    )
     async def manage_users(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.edit_message(
             content=None,
