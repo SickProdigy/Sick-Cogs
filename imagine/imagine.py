@@ -16,12 +16,23 @@ from .models import ImageRequest
 from .providers import CodexImageProvider, ComfyUIProvider, OpenAIImageProvider, ProviderError
 
 CONFIG_IDENTIFIER = 846261450184
-CONFIG_SCHEMA_VERSION = 2
+CONFIG_SCHEMA_VERSION = 3
 OUTPUT_PRESETS = {
     "economy": {"size": "1024x1024", "quality": "low", "background": "auto"},
     "standard": {"size": "1024x1024", "quality": "medium", "background": "auto"},
     "best": {"size": "1024x1024", "quality": "high", "background": "auto"},
     "auto": {"size": "1024x1024", "quality": "auto", "background": "auto"},
+}
+DEFAULT_GUILD = {
+    "enabled": False,
+    "provider": "openai",
+    "channel_id": None,
+    "allowed_role_ids": [],
+    "allowed_user_ids": [],
+    "cooldown_seconds": 60,
+    "daily_limit": 10,
+    "model": None,
+    **OUTPUT_PRESETS["economy"],
 }
 DEFAULT_GLOBAL = {
     "enabled": True,
@@ -46,10 +57,7 @@ class Imagine(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_global(**DEFAULT_GLOBAL)
-        self.config.register_guild(enabled=False, provider="openai", channel_id=None,
-                                   allowed_role_ids=[], allowed_user_ids=[],
-                                   cooldown_seconds=60, daily_limit=10, model=None,
-                                   size="1024x1024", quality="auto", background="auto")
+        self.config.register_guild(**DEFAULT_GUILD)
         self.config.register_member(usage_timestamps=[])
         self.session = None
         self._locks = {}
@@ -58,10 +66,19 @@ class Imagine(commands.Cog):
 
     async def cog_load(self):
         schema_version = await self.config.schema_version()
-        if schema_version < CONFIG_SCHEMA_VERSION:
+        if schema_version < 2:
             # Codex was originally staged as default-off. Access is already protected by
             # the global guild allowlist, per-guild enablement, grants, and usage limits.
             await self.config.codex_enabled.set(True)
+        if schema_version < 3:
+            # Output presets did not exist before schema 3, so the former auto values were
+            # not an explicit administrator selection. Start those guilds on economy.
+            for guild_id, settings in (await self.config.all_guilds()).items():
+                if (settings.get("size") == "1024x1024"
+                        and settings.get("quality") == "auto"
+                        and settings.get("background") == "auto"):
+                    await self.config.guild_from_id(guild_id).quality.set("low")
+        if schema_version < CONFIG_SCHEMA_VERSION:
             await self.config.schema_version.set(CONFIG_SCHEMA_VERSION)
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180))
 
@@ -203,11 +220,43 @@ class Imagine(commands.Cog):
                        f"Allowed roles: {roles}\nAllowed users: {users}\n"
                        f"Limits: {settings['daily_limit']} per user/day, {settings['cooldown_seconds']}s cooldown")
 
-    @commands.group(name="imagineset")
+    @commands.group(name="imagineset", invoke_without_command=True)
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def imagineset(self, ctx):
-        """Configure private Imagine access."""
+        """Configure private Imagine access, or show the setup guide."""
+        settings = await self.config.guild(ctx.guild).all()
+        global_data = await self.config.all()
+        prefix = ctx.clean_prefix
+        allowlisted = ctx.guild.id in global_data["allowed_guilds"]
+        grants = bool(settings["allowed_role_ids"] or settings["allowed_user_ids"])
+        output = {key: settings[key] for key in ("size", "quality", "background")}
+        preset = next((name for name, values in OUTPUT_PRESETS.items() if values == output), "custom")
+        channel = f"<#{settings['channel_id']}>" if settings["channel_id"] else "Any channel"
+        provider_setup = (f"`{prefix}imagineset codex`" if settings["provider"] == "codex"
+                          else f"`{prefix}set api openai api_key,YOUR_KEY`"
+                          if settings["provider"] == "openai"
+                          else f"`{prefix}imagineset comfyui <url>` (staging only)")
+        await ctx.send(
+            "**Imagine setup guide**\n"
+            f"{'✅' if allowlisted else '❌'} Owner allowed this server — "
+            f"`{prefix}imagineset server allow`\n"
+            f"{'✅' if settings['enabled'] else '❌'} Imagine enabled — "
+            f"`{prefix}imagineset enable`\n"
+            f"✅ Provider selected: `{settings['provider']}` — "
+            f"`{prefix}imagineset provider openai|codex|comfyui`\n"
+            f"ℹ️ Provider setup/status — {provider_setup}\n"
+            f"{'✅' if grants else '⚠️'} Member access grants — "
+            f"`{prefix}imagineset role add @Role` or `{prefix}imagineset user add @Member`\n"
+            f"✅ Output: `{preset}` ({settings['size']}, {settings['quality']}) — "
+            f"`{prefix}imagineset output economy|standard|best|auto`\n"
+            f"✅ Channel: {channel} — `{prefix}imagineset channel #channel`\n"
+            f"✅ Limits: {settings['daily_limit'] or 'unlimited'}/day, "
+            f"{settings['cooldown_seconds']}s cooldown — "
+            f"`{prefix}imagineset limits <daily> <seconds>`\n\n"
+            f"When the required items are ready, test with `{prefix}imagine <prompt>`. "
+            f"Use `{prefix}imagineset status` for the compact configuration."
+        )
 
     @imagineset.command(name="status")
     async def set_status(self, ctx):

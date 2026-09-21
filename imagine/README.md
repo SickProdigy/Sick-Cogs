@@ -60,8 +60,9 @@ The Red bot owner must allowlist each Discord server once:
 [p]imagineset server allow
 ```
 
-A server administrator can then enable Imagine, select Codex, and grant access to any combination
-of roles and individual members:
+A server administrator can run `[p]imagineset` at any time for a setup checklist showing what is
+ready, what is missing, and the exact next commands. They can then enable Imagine, select Codex,
+and grant access to any combination of roles and individual members:
 
 ```text
 [p]imagineset enable
@@ -77,7 +78,7 @@ of roles and individual members:
 
 Output presets apply to every provider and make the quality/capacity tradeoff explicit:
 
-- `economy` requests one 1024×1024 low-quality image for drafts and conserving usage.
+- `economy` is the default and requests one 1024×1024 low-quality image for drafts and conserving usage.
 - `standard` requests one 1024×1024 medium-quality image.
 - `best` requests one 1024×1024 high-quality image.
 - `auto` restores automatic quality selection at 1024×1024.
