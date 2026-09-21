@@ -1,7 +1,7 @@
 import unittest
 
 from imagine.access import evaluate_access
-from imagine.imagine import DEFAULT_GLOBAL
+from imagine.imagine import DEFAULT_GLOBAL, DEFAULT_GUILD, OUTPUT_PRESETS
 
 
 class AccessPolicyTests(unittest.TestCase):
@@ -16,6 +16,12 @@ class AccessPolicyTests(unittest.TestCase):
         self.assertTrue(DEFAULT_GLOBAL["openai_enabled"])
         self.assertTrue(DEFAULT_GLOBAL["codex_enabled"])
         self.assertFalse(DEFAULT_GLOBAL["comfyui_enabled"])
+
+    def test_economy_is_the_default_output(self):
+        self.assertEqual(
+            {key: DEFAULT_GUILD[key] for key in ("size", "quality", "background")},
+            OUTPUT_PRESETS["economy"],
+        )
 
     def test_default_deny(self):
         self.assertFalse(self.decision().allowed)
