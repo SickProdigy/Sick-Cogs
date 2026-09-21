@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from predictions.models import PredictionMarket
 from predictions.views import (
     MarketBrowserView, PredictionEntryView, PredictionHomeView, PredictionManageView,
-    PredictionStartView,
+    PredictionReviewView, PredictionStartView,
 )
 
 
@@ -37,6 +37,15 @@ class PredictionViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.disabled for item in disabled.children], [False, True])
         self.assertEqual([item.disabled for item in enabled.children], [False, False])
         self.assertEqual([item.label for item in enabled.children], ["Free prediction", "Credit pool"])
+
+    async def test_review_card_controls_are_persistent(self):
+        view = PredictionReviewView(SimpleNamespace(), 55, self.market(stake_mode="range"))
+        self.assertIsNone(view.timeout)
+        self.assertEqual(
+            [item.label for item in view.children],
+            ["Approve: Alpha", "Approve: Beta", "Refund all"],
+        )
+        self.assertTrue(all(item.custom_id for item in view.children))
 
     async def test_manager_panel_approves_paid_outcome(self):
         view = PredictionManageView(

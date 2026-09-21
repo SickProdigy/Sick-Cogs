@@ -115,10 +115,8 @@ class PredictionEntryView(discord.ui.View):
         if market is None:
             await interaction.response.send_message("That prediction no longer exists.", ephemeral=True)
             return
-        can_manage = (
-            interaction.user.id == market.creator_id
-            or interaction.user.guild_permissions.manage_guild
-        )
+        is_reviewer = await self.cog.is_reviewer(interaction.user, interaction.guild)
+        can_manage = interaction.user.id == market.creator_id or is_reviewer
         if not can_manage:
             await interaction.response.send_message(
                 "Only the prediction creator or a server manager can manage it.", ephemeral=True
@@ -128,7 +126,7 @@ class PredictionEntryView(discord.ui.View):
             f"Manage prediction **#{self.market_id}**.",
             view=PredictionManageView(
                 self.cog, interaction.user.id, market,
-                is_manager=interaction.user.guild_permissions.manage_guild,
+                is_manager=is_reviewer,
             ), ephemeral=True,
         )
 
@@ -209,6 +207,50 @@ class PredictionManageView(discord.ui.View):
             self.cog, InteractionContext(interaction), self.market_id
         )
 
+
+
+class PredictionReviewView(discord.ui.View):
+    def __init__(self, cog, guild_id: int, market):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.market_id = market.market_id
+        for index, outcome in enumerate(market.outcomes):
+            button = discord.ui.Button(
+                label=f"Approve: {outcome}"[:80], style=discord.ButtonStyle.success,
+                custom_id=f"predictions:review:{guild_id}:{market.market_id}:{index}",
+            )
+            button.callback = self._approve(index)
+            self.add_item(button)
+        refund = discord.ui.Button(
+            label="Refund all", style=discord.ButtonStyle.danger, row=1,
+            custom_id=f"predictions:review:{guild_id}:{market.market_id}:refund",
+        )
+        refund.callback = self._refund
+        self.add_item(refund)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.guild_id != self.guild_id:
+            await interaction.response.send_message(
+                "This review belongs to another server.", ephemeral=True
+            )
+            return False
+        if await self.cog.is_reviewer(interaction.user, interaction.guild):
+            return True
+        await interaction.response.send_message(
+            "You need Manage Server or a configured prediction reviewer role.", ephemeral=True
+        )
+        return False
+
+    def _approve(self, choice: int):
+        async def callback(interaction: discord.Interaction):
+            await self.cog.handle_review_interaction(interaction, self.market_id, choice)
+            self.stop()
+        return callback
+
+    async def _refund(self, interaction: discord.Interaction):
+        await self.cog.handle_review_interaction(interaction, self.market_id, None, cancelled=True)
+        self.stop()
 
 
 class CreatePredictionModal(discord.ui.Modal):

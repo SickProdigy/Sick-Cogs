@@ -23,9 +23,14 @@ class FakeConfig:
     def __init__(self, markets):
         self.markets_value = FakeValue(markets)
         self.exposure_value = FakeValue(50000)
+        self.reviewer_roles_value = FakeValue([])
 
     def guild(self, guild):
-        return SimpleNamespace(markets=self.markets_value, exposure_limit=self.exposure_value)
+        return SimpleNamespace(
+            markets=self.markets_value,
+            exposure_limit=self.exposure_value,
+            reviewer_role_ids=self.reviewer_roles_value,
+        )
 
 
 class FakeGuild:
@@ -39,7 +44,7 @@ class FakeGuild:
 
 
 def make_market(entries):
-    now = datetime(2026, 9, 20, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
     return PredictionMarket(
         1, 55, 10, "Winner?", ["A", "B"], now + timedelta(days=1), now,
         votes={user_id: entry["choice"] for user_id, entry in entries.items()},
@@ -166,7 +171,7 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("125 Gcreds", mine_embed.description)
 
     async def test_free_prediction_can_be_cancelled_without_bank_activity(self):
-        now = datetime(2026, 9, 20, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
         market = PredictionMarket(
             1, 55, 10, "Winner?", ["A", "B"], now + timedelta(days=1), now
         )
@@ -247,6 +252,18 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
         operation = next(iter(result.settlement["operations"].values()))
         self.assertEqual(operation["state"], "blocked")
         self.assertEqual(operation["reason"], "maximum balance")
+
+    async def test_any_configured_reviewer_role_grants_access(self):
+        market = make_market({})
+        cog, guild = self.cog_and_guild(market)
+        cog.config.reviewer_roles_value.value = [100, 200]
+        member = SimpleNamespace(
+            id=40, guild=guild, roles=[SimpleNamespace(id=200)],
+            guild_permissions=SimpleNamespace(manage_guild=False),
+        )
+        self.assertTrue(await cog.is_reviewer(member, guild))
+        member.roles = [SimpleNamespace(id=300)]
+        self.assertFalse(await cog.is_reviewer(member, guild))
 
     async def test_bank_account_respects_local_and_global_modes(self):
         market = make_market({"10": {"choice": 0, "stake": 100, "state": "funded"}})

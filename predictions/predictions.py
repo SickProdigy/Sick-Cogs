@@ -12,13 +12,14 @@ from redbot.core.errors import BalanceTooHigh
 
 from .models import PredictionMarket, calculate_payouts
 from .views import (
-    MarketBrowserView, PredictionEntryView, PredictionHomeView, PredictionStartView,
-    StakeConfirmView,
+    MarketBrowserView, PredictionEntryView, PredictionHomeView, PredictionReviewView,
+    PredictionStartView, StakeConfirmView,
 )
 
 
 GUILD_DEFAULTS = {
     "markets": {}, "next_market_id": 1, "channel_id": None, "scores": {},
+    "review_channel_id": None, "reviewer_role_ids": [],
     "bank_enabled": False, "stake_min": 10, "stake_max": 10000,
     "exposure_limit": 50000, "house_cut_bps": 0, "treasury_user_id": None,
 }
@@ -45,9 +46,22 @@ class Predictions(commands.Cog):
                 market = self._market_from_raw(raw)
                 if market and market.is_open():
                     self.bot.add_view(PredictionEntryView(self, int(guild_id), market))
+                elif market and market.state == "pending_review":
+                    message_id = market.review.get("message_id")
+                    self.bot.add_view(
+                        PredictionReviewView(self, int(guild_id), market),
+                        message_id=int(message_id) if message_id else None,
+                    )
 
     def _guild_lock(self, guild_id: int):
         return self._guild_locks.setdefault(guild_id, asyncio.Lock())
+
+    async def is_reviewer(self, member, guild=None) -> bool:
+        guild = guild or member.guild
+        if getattr(getattr(member, "guild_permissions", None), "manage_guild", False):
+            return True
+        role_ids = set(await self.config.guild(guild).reviewer_role_ids())
+        return any(role.id in role_ids for role in getattr(member, "roles", []))
 
     async def send_stake_confirmation(self, interaction, market_id: int, choice: int, amount: int):
         markets = await self.config.guild(interaction.guild).markets()
@@ -323,6 +337,78 @@ class Predictions(commands.Cog):
             await self._save_market(guild, markets, market)
             return market, None
 
+    async def _publish_review_card(self, guild, market: PredictionMarket) -> str:
+        channel_id = await self.config.guild(guild).review_channel_id()
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return " No review channel is configured; staff can still use `predict review`."
+        embed = await self.market_embed_with_currency(market, guild)
+        currency = await bank.get_currency_name(guild)
+        creator_entry = market.entries.get(str(market.creator_id))
+        creator_text = f"<@{market.creator_id}>"
+        if creator_entry and creator_entry.get("state") == "funded":
+            choice = int(creator_entry.get("choice", -1))
+            choice_name = market.outcomes[choice] if 0 <= choice < len(market.outcomes) else "Unknown"
+            creator_text += f" · entered **{choice_name}** with {creator_entry.get(stake, 0)} {currency}"
+        embed.add_field(name="Creator", value=creator_text, inline=False)
+        view = PredictionReviewView(self, guild.id, market)
+        message = None
+        old_channel_id = market.review.get("channel_id")
+        old_message_id = market.review.get("message_id")
+        if old_channel_id and old_message_id:
+            old_channel = guild.get_channel(int(old_channel_id))
+            if old_channel is not None:
+                try:
+                    old_message = await old_channel.fetch_message(int(old_message_id))
+                    if old_channel.id == channel.id:
+                        message = old_message
+                        await message.edit(embed=embed, view=view)
+                    else:
+                        await old_message.edit(
+                            content=f"Review moved to {channel.mention}.", view=None
+                        )
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = None
+        if message is None:
+            message = await channel.send(embed=embed, view=view)
+        market.review["channel_id"] = channel.id
+        market.review["message_id"] = message.id
+        markets = await self.config.guild(guild).markets()
+        await self._save_market(guild, markets, market)
+        self.bot.add_view(view, message_id=message.id)
+        return f" Review card posted in {channel.mention}."
+
+    async def _retire_review_card(self, guild, market: PredictionMarket):
+        channel_id = market.review.get("channel_id")
+        message_id = market.review.get("message_id")
+        channel = guild.get_channel(int(channel_id)) if channel_id else None
+        if channel is None or not message_id:
+            return
+        try:
+            message = await channel.fetch_message(int(message_id))
+            embed = await self.market_embed_with_currency(market, guild)
+            await message.edit(embed=embed, view=None)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            pass
+
+    async def handle_review_interaction(
+        self, interaction, market_id: int, choice, *, cancelled=False
+    ):
+        market, error = await self._finalize_bank_market(
+            interaction.guild, market_id, choice, cancelled=cancelled,
+            reviewer_id=interaction.user.id,
+        )
+        if error:
+            await interaction.response.send_message(error, ephemeral=True)
+            return
+        currency = await bank.get_currency_name(interaction.guild)
+        result = "Refunded all accepted entries" if cancelled else f"Approved **{market.outcomes[choice]}**"
+        embed = await self.market_embed_with_currency(market, interaction.guild)
+        await interaction.response.edit_message(
+            content=f"{result} for prediction #{market_id}. The {currency} pool is finalized.",
+            embed=embed, view=None,
+        )
+
     async def _finalize_bank_market(
         self, guild, market_id: int, winning_choice=None, *, cancelled=False, reviewer_id=None
     ):
@@ -403,9 +489,7 @@ class Predictions(commands.Cog):
             view=PredictionHomeView(
                 self, ctx.author.id, settings.get("bank_enabled", False),
                 int(settings.get("stake_min", 10)), int(settings.get("stake_max", 10000)),
-                viewer_can_manage=getattr(
-                    getattr(ctx.author, "guild_permissions", None), "manage_guild", False
-                ),
+                viewer_can_manage=await self.is_reviewer(ctx.author, ctx.guild),
             ),
         )
 
@@ -654,9 +738,7 @@ class Predictions(commands.Cog):
             )
         view = PredictionEntryView(
             self, ctx.guild.id, market, viewer_id=ctx.author.id,
-            viewer_can_manage=getattr(
-                getattr(ctx.author, "guild_permissions", None), "manage_guild", False
-            ),
+            viewer_can_manage=await self.is_reviewer(ctx.author, ctx.guild),
         )
         await ctx.send(embed=embed, view=view if view.children else None)
 
@@ -726,9 +808,11 @@ class Predictions(commands.Cog):
         await ctx.send(embed=view.embed(), view=view)
 
     @predict.command(name="review")
-    @commands.admin_or_permissions(manage_guild=True)
     async def predict_review(self, ctx):
         """Browse paid predictions waiting for staff approval."""
+        if not await self.is_reviewer(ctx.author, ctx.guild):
+            await ctx.send("You need Manage Server or a configured prediction reviewer role.")
+            return
         markets = [
             self._market_from_raw(raw)
             for raw in (await self.config.guild(ctx.guild).markets()).values()
@@ -749,7 +833,7 @@ class Predictions(commands.Cog):
             (await self.config.guild(ctx.guild).markets()).get(str(market_id))
         )
         if preview and preview.uses_bank:
-            is_manager = getattr(ctx.author.guild_permissions, "manage_guild", False)
+            is_manager = await self.is_reviewer(ctx.author, ctx.guild)
             can_approve = self.can_approve_paid_result(preview, ctx.author.id, is_manager)
             if preview.creator_id != ctx.author.id and not is_manager:
                 await ctx.send("Only the prediction creator or a server manager can submit a result.")
@@ -765,9 +849,11 @@ class Predictions(commands.Cog):
                 if error:
                     await ctx.send(error)
                     return
+                review_notice = await self._publish_review_card(ctx.guild, market)
                 await ctx.send(
                     f"Proposed **{market.outcomes[index]}** for prediction #{market_id}. "
-                    "The credit pool remains held until a server manager approves the result."
+                    "The credit pool remains held until an authorized reviewer approves the result."
+                    f"{review_notice}"
                 )
                 return
             market, error = await self._finalize_bank_market(
@@ -776,6 +862,7 @@ class Predictions(commands.Cog):
             if error:
                 await ctx.send(error)
                 return
+            await self._retire_review_card(ctx.guild, market)
             currency = await bank.get_currency_name(ctx.guild)
             await ctx.send(
                 f"Prediction #{market_id} approved as **{market.outcomes[index]}**. "
@@ -822,7 +909,7 @@ class Predictions(commands.Cog):
         if market is None:
             await ctx.send("That prediction does not exist.")
             return
-        is_manager = ctx.author.guild_permissions.manage_guild
+        is_manager = await self.is_reviewer(ctx.author, ctx.guild)
         if market.creator_id != ctx.author.id and not is_manager:
             await ctx.send("Only the prediction creator or a server manager can cancel it.")
             return
@@ -839,13 +926,19 @@ class Predictions(commands.Cog):
             await self._save_market(ctx.guild, markets, market)
             await ctx.send(f"Prediction #{market_id} cancelled.")
             return
-        _, error = await self._finalize_bank_market(ctx.guild, market_id, cancelled=True)
+        finalized, error = await self._finalize_bank_market(
+            ctx.guild, market_id, cancelled=True, reviewer_id=ctx.author.id
+        )
+        if finalized and not error:
+            await self._retire_review_card(ctx.guild, finalized)
         await ctx.send(error or f"Prediction #{market_id} cancelled; accepted entries were refunded.")
 
     @predict.command(name="audit")
-    @commands.admin_or_permissions(manage_guild=True)
     async def predict_audit(self, ctx, market_id: int):
         """Reconcile a prediction pool and its bounded Bank operation journal."""
+        if not await self.is_reviewer(ctx.author, ctx.guild):
+            await ctx.send("You need Manage Server or a configured prediction reviewer role.")
+            return
         market = self._market_from_raw(
             (await self.config.guild(ctx.guild).markets()).get(str(market_id))
         )
@@ -966,6 +1059,77 @@ class Predictions(commands.Cog):
             "House cut disabled." if not basis_points else
             f"House cut set to {basis_points / 100:g}% of the losing pool for {treasury.mention}."
         )
+
+    @predictset.group(name="review", invoke_without_command=True)
+    async def predictset_review(self, ctx):
+        """Configure the paid-prediction review channel and reviewer roles."""
+        settings = await self.config.guild(ctx.guild).all()
+        channel_id = settings.get("review_channel_id")
+        channel = ctx.guild.get_channel(channel_id) if channel_id else None
+        role_ids = settings.get("reviewer_role_ids", [])
+        roles = [ctx.guild.get_role(int(role_id)) for role_id in role_ids]
+        role_text = ", ".join(role.mention for role in roles if role) or "Manage Server only"
+        channel_text = channel.mention if channel else "not configured"
+        await ctx.send(
+            f"Review channel: {channel_text}\nReviewer roles: {role_text}",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @predictset_review.command(name="channel")
+    async def predictset_review_channel(self, ctx, channel: discord.TextChannel):
+        """Post paid-prediction approval cards in this channel."""
+        permissions = channel.permissions_for(ctx.guild.me)
+        missing = [
+            name.replace("_", " ") for name in ("view_channel", "send_messages", "embed_links")
+            if not getattr(permissions, name, False)
+        ]
+        if missing:
+            missing_text = ", ".join(missing)
+            await ctx.send(f"I need {missing_text} in {channel.mention}.")
+            return
+        await self.config.guild(ctx.guild).review_channel_id.set(channel.id)
+        markets = [
+            self._market_from_raw(raw)
+            for raw in (await self.config.guild(ctx.guild).markets()).values()
+        ]
+        pending = [market for market in markets if market and market.state == "pending_review"]
+        for market in pending:
+            await self._publish_review_card(ctx.guild, market)
+        await ctx.send(
+            f"Paid-prediction review cards will post in {channel.mention}. "
+            f"Published {len(pending)} pending card(s)."
+        )
+
+    @predictset_review.command(name="channelclear", aliases=["channeloff"])
+    async def predictset_review_channel_clear(self, ctx):
+        """Stop automatically posting paid-prediction review cards."""
+        await self.config.guild(ctx.guild).review_channel_id.set(None)
+        await ctx.send("The prediction review channel is disabled. Pending reviews remain available.")
+
+    @predictset_review.group(name="role", invoke_without_command=True)
+    async def predictset_review_role(self, ctx):
+        """List roles allowed to review paid prediction results."""
+        await self.predictset_review.callback(self, ctx)
+
+    @predictset_review_role.command(name="add")
+    async def predictset_review_role_add(self, ctx, role: discord.Role):
+        """Allow another role to review paid prediction results."""
+        async with self.config.guild(ctx.guild).reviewer_role_ids() as role_ids:
+            if role.id not in role_ids:
+                role_ids.append(role.id)
+                role_ids.sort()
+        await ctx.send(f"{role.mention} can now review paid predictions.")
+
+    @predictset_review_role.command(name="remove")
+    async def predictset_review_role_remove(self, ctx, role: discord.Role):
+        """Remove a paid-prediction reviewer role."""
+        async with self.config.guild(ctx.guild).reviewer_role_ids() as role_ids:
+            if role.id in role_ids:
+                role_ids.remove(role.id)
+                message = f"{role.mention} is no longer a prediction reviewer."
+            else:
+                message = f"{role.mention} was not a configured prediction reviewer."
+        await ctx.send(message)
 
     @predictset.command(name="channel")
     async def predictset_channel(self, ctx, channel: discord.TextChannel):
