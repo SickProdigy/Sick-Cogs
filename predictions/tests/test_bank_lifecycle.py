@@ -24,12 +24,14 @@ class FakeConfig:
         self.markets_value = FakeValue(markets)
         self.exposure_value = FakeValue(50000)
         self.reviewer_roles_value = FakeValue([])
+        self.result_channel_value = FakeValue(None)
 
     def guild(self, guild):
         return SimpleNamespace(
             markets=self.markets_value,
             exposure_limit=self.exposure_value,
             reviewer_role_ids=self.reviewer_roles_value,
+            result_channel_id=self.result_channel_value,
         )
 
 
@@ -41,6 +43,9 @@ class FakeGuild:
 
     def get_member(self, user_id):
         return self.members.get(user_id)
+
+    def get_channel(self, channel_id):
+        return None
 
 
 def make_market(entries):
@@ -252,6 +257,40 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
         operation = next(iter(result.settlement["operations"].values()))
         self.assertEqual(operation["state"], "blocked")
         self.assertEqual(operation["reason"], "maximum balance")
+
+    async def test_result_publication_reuses_existing_message(self):
+        market = make_market({"10": {"choice": 0, "stake": 100, "state": "paid"}})
+        market.resolved_outcome = 0
+        market.state = "resolved"
+        cog, guild = self.cog_and_guild(market)
+        cog.config.result_channel_value.value = 777
+
+        class FakeMessage:
+            id = 888
+
+            def __init__(self, channel):
+                self.channel = channel
+                self.edit = AsyncMock()
+
+        class FakeChannel:
+            id = 777
+            mention = "#results"
+
+            def __init__(self):
+                self.message = FakeMessage(self)
+                self.send = AsyncMock(return_value=self.message)
+                self.fetch_message = AsyncMock(return_value=self.message)
+
+        channel = FakeChannel()
+        guild.get_channel = lambda channel_id: channel if channel_id == 777 else None
+        with patch("predictions.predictions.discord.TextChannel", FakeChannel), \
+             patch("predictions.predictions.bank.get_currency_name", new=AsyncMock(return_value="Gcreds")):
+            await cog._publish_result_card(guild, market)
+            saved = PredictionMarket.from_raw(cog.config.markets_value.value["1"])
+            await cog._publish_result_card(guild, saved)
+        self.assertEqual(channel.send.await_count, 1)
+        self.assertEqual(channel.fetch_message.await_count, 1)
+        self.assertEqual(channel.message.edit.await_count, 1)
 
     async def test_any_configured_reviewer_role_grants_access(self):
         market = make_market({})

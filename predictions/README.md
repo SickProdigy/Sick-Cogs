@@ -59,10 +59,15 @@ Accepted amounts are locked, though members may change their selected outcome wi
 [p]predictset review role add @Moderator
 [p]predictset review role add @PredictionReviewer
 [p]predictset review role remove @PredictionReviewer
+[p]predictset result
+[p]predictset result channel #prediction-results
+[p]predictset result channelclear
 [p]predict audit <market-id>
 [p]predictset channel #predictions
 ```
 
 Bank integration is disabled by default. Disabling it stops new play-credit predictions but does not abandon existing funded markets. The limits command sets minimum entry, maximum entry, and optional per-user exposure. When Red Bank uses global balances, only the bot owner may enable play-credit predictions because those balances span servers.
+
+The normal prediction channel and results channel are independent. `[p]predictset channel` controls where new markets appear; `[p]predictset result channel` controls where resolved and refunded result cards are announced. Result publishing covers free and paid predictions and reuses the original announcement if settlement is retried or corrected.
 
 Anyone may start a prediction. Entries lock at its deadline. For a paid prediction, the creator proposes an outcome after entries close, but credits remain held until an authorized reviewer approves that outcome or chooses a different one. Configure one review channel per server for persistent approval cards and add any number of reviewer roles; members with Manage Server are always reviewers. Staff can also use the **Review** button or `[p]predict review` to browse pending markets. A creator may cancel their own market and refund all accepted entries without approval. Free prediction winners receive one non-transferable server point.

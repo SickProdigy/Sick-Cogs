@@ -25,6 +25,7 @@ class PredictionMarket:
     state: str = "open"
     settlement: dict = field(default_factory=dict)
     review: dict = field(default_factory=dict)
+    publication: dict = field(default_factory=dict)
     audit: List[dict] = field(default_factory=list)
 
     def __post_init__(self):
@@ -98,7 +99,8 @@ class PredictionMarket:
             "stake_min": self.stake_min, "stake_max": self.stake_max,
             "house_cut_bps": self.house_cut_bps, "treasury_user_id": self.treasury_user_id,
             "entries": self.entries, "state": self.state, "settlement": self.settlement,
-            "review": self.review, "audit": self.audit[-100:],
+            "review": self.review, "publication": self.publication,
+            "audit": self.audit[-100:],
         }
 
     @classmethod
@@ -121,7 +123,7 @@ class PredictionMarket:
                 {str(key): dict(value) for key, value in raw.get("entries", {}).items()},
                 str(raw.get("state", "resolved" if raw.get("resolved_outcome") is not None else "open")),
                 dict(raw.get("settlement", {})), dict(raw.get("review", {})),
-                list(raw.get("audit", []))[-100:],
+                dict(raw.get("publication", {})), list(raw.get("audit", []))[-100:],
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Prediction market data is invalid.") from exc

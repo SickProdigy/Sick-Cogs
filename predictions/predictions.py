@@ -19,7 +19,7 @@ from .views import (
 
 GUILD_DEFAULTS = {
     "markets": {}, "next_market_id": 1, "channel_id": None, "scores": {},
-    "review_channel_id": None, "reviewer_role_ids": [],
+    "review_channel_id": None, "reviewer_role_ids": [], "result_channel_id": None,
     "bank_enabled": False, "stake_min": 10, "stake_max": 10000,
     "exposure_limit": 50000, "house_cut_bps": 0, "treasury_user_id": None,
 }
@@ -391,6 +391,41 @@ class Predictions(commands.Cog):
         except (discord.NotFound, discord.Forbidden, discord.HTTPException):
             pass
 
+    async def _publish_result_card(self, guild, market: PredictionMarket) -> str:
+        channel_id = await self.config.guild(guild).result_channel_id()
+        channel = guild.get_channel(channel_id) if channel_id else None
+        if not isinstance(channel, discord.TextChannel):
+            return ""
+        embed = (
+            await self.market_embed_with_currency(market, guild)
+            if market.uses_bank else self.market_embed(market)
+        )
+        embed.title = f"Prediction #{market.market_id} result"
+        if market.state == "cancelled":
+            embed.add_field(name="Outcome", value="Cancelled · entries refunded", inline=False)
+        message = None
+        message_id = market.publication.get("result_message_id")
+        old_channel_id = market.publication.get("result_channel_id")
+        if message_id and old_channel_id:
+            old_channel = guild.get_channel(int(old_channel_id))
+            if old_channel is not None:
+                try:
+                    message = await old_channel.fetch_message(int(message_id))
+                    await message.edit(embed=embed)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    message = None
+        if message is None:
+            message = await channel.send(embed=embed)
+        market.publication.update({
+            "result_channel_id": message.channel.id,
+            "result_message_id": message.id,
+            "published_at": datetime.now(timezone.utc).isoformat(),
+        })
+        self._audit(market, "result_published", channel_id=message.channel.id, message_id=message.id)
+        markets = await self.config.guild(guild).markets()
+        await self._save_market(guild, markets, market)
+        return f" Result posted in {message.channel.mention}."
+
     async def handle_review_interaction(
         self, interaction, market_id: int, choice, *, cancelled=False
     ):
@@ -408,6 +443,7 @@ class Predictions(commands.Cog):
             content=f"{result} for prediction #{market_id}. The {currency} pool is finalized.",
             embed=embed, view=None,
         )
+        await self._publish_result_card(interaction.guild, market)
 
     async def _finalize_bank_market(
         self, guild, market_id: int, winning_choice=None, *, cancelled=False, reviewer_id=None
@@ -863,10 +899,11 @@ class Predictions(commands.Cog):
                 await ctx.send(error)
                 return
             await self._retire_review_card(ctx.guild, market)
+            result_notice = await self._publish_result_card(ctx.guild, market)
             currency = await bank.get_currency_name(ctx.guild)
             await ctx.send(
                 f"Prediction #{market_id} approved as **{market.outcomes[index]}**. "
-                f"The {currency} pool has been finalized."
+                f"The {currency} pool has been finalized.{result_notice}"
             )
             return
         async with self.config.guild(ctx.guild).all() as settings:
@@ -898,7 +935,11 @@ class Predictions(commands.Cog):
                 if choice == index:
                     settings["scores"][user_id] = int(settings["scores"].get(user_id, 0)) + 1
             settings["markets"][str(market_id)] = market.to_raw()
-        await ctx.send(f"Prediction #{market_id} resolved: **{market.outcomes[index]}**. Correct picks earned one server point.")
+        result_notice = await self._publish_result_card(ctx.guild, market)
+        await ctx.send(
+            f"Prediction #{market_id} resolved: **{market.outcomes[index]}**. "
+            f"Correct picks earned one server point.{result_notice}"
+        )
 
     @predict.command(name="cancel", aliases=["invalidate"])
     async def predict_cancel(self, ctx, market_id: int):
@@ -924,14 +965,19 @@ class Predictions(commands.Cog):
             self._audit(market, "prediction_cancelled", actor_id=str(ctx.author.id))
             markets = await self.config.guild(ctx.guild).markets()
             await self._save_market(ctx.guild, markets, market)
-            await ctx.send(f"Prediction #{market_id} cancelled.")
+            result_notice = await self._publish_result_card(ctx.guild, market)
+            await ctx.send(f"Prediction #{market_id} cancelled.{result_notice}")
             return
         finalized, error = await self._finalize_bank_market(
             ctx.guild, market_id, cancelled=True, reviewer_id=ctx.author.id
         )
+        result_notice = ""
         if finalized and not error:
             await self._retire_review_card(ctx.guild, finalized)
-        await ctx.send(error or f"Prediction #{market_id} cancelled; accepted entries were refunded.")
+            result_notice = await self._publish_result_card(ctx.guild, finalized)
+        await ctx.send(
+            error or f"Prediction #{market_id} cancelled; accepted entries were refunded.{result_notice}"
+        )
 
     @predict.command(name="audit")
     async def predict_audit(self, ctx, market_id: int):
@@ -1059,6 +1105,35 @@ class Predictions(commands.Cog):
             "House cut disabled." if not basis_points else
             f"House cut set to {basis_points / 100:g}% of the losing pool for {treasury.mention}."
         )
+
+    @predictset.group(name="result", aliases=["results"], invoke_without_command=True)
+    async def predictset_result(self, ctx):
+        """Configure where completed prediction results are announced."""
+        channel_id = await self.config.guild(ctx.guild).result_channel_id()
+        channel = ctx.guild.get_channel(channel_id) if channel_id else None
+        channel_text = channel.mention if channel else "not configured"
+        await ctx.send(f"Prediction results channel: {channel_text}")
+
+    @predictset_result.command(name="channel")
+    async def predictset_result_channel(self, ctx, channel: discord.TextChannel):
+        """Announce future resolved and refunded predictions in this channel."""
+        permissions = channel.permissions_for(ctx.guild.me)
+        missing = [
+            name.replace("_", " ") for name in ("view_channel", "send_messages", "embed_links")
+            if not getattr(permissions, name, False)
+        ]
+        if missing:
+            missing_text = ", ".join(missing)
+            await ctx.send(f"I need {missing_text} in {channel.mention}.")
+            return
+        await self.config.guild(ctx.guild).result_channel_id.set(channel.id)
+        await ctx.send(f"Completed prediction results will post in {channel.mention}.")
+
+    @predictset_result.command(name="channelclear", aliases=["channeloff"])
+    async def predictset_result_channel_clear(self, ctx):
+        """Stop automatically publishing prediction results."""
+        await self.config.guild(ctx.guild).result_channel_id.set(None)
+        await ctx.send("Automatic prediction result announcements are disabled.")
 
     @predictset.group(name="review", invoke_without_command=True)
     async def predictset_review(self, ctx):
