@@ -1,3 +1,4 @@
+from pathlib import Path
 import base64
 import copy
 import time
@@ -15,11 +16,12 @@ from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
+from ..backend.clanker_lifecycle import ClankerLifecycleMixin
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
 )
-from ..backend.sessions import ApprovalSessionMixin
+from ..backend.config import WalletConfigMixin
 from ..backend.usage import ProviderUsageMixin
 from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
@@ -29,15 +31,17 @@ from ..commands.views import WalletAuthorizationView, WalletIntentView, WalletRe
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
 from ..commands.admin import WalletAdminCommands
-from ..core.models import (
-    ApprovalPurpose, ApprovalStatus, IntentStatus, TransactionIntent
+from ..core.clanker import (
+    ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
+from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
+    POLYGON_MAINNET,
     SOLANA_DEVNET,
     OPTIMISM_MAINNET,
     BNB_MAINNET,
@@ -57,7 +61,21 @@ from ..core.validation import (
     parse_asset_amount,
     parse_native_amount,
 )
-from ..providers.cdp import CdpWalletProvider, _erc20_transfer_data
+from ..core.polymarket import (
+    POLYMARKET_CHAIN_ID,
+    POLYMARKET_COLLATERAL_SYMBOL,
+    POLYMARKET_NETWORK_KEY,
+    PolymarketHandoffAvailability,
+    PolymarketHandoffContext,
+    PolymarketHandoffSession,
+)
+from ..providers.base import WalletProviderError
+from ..providers.cdp import (
+    CdpWalletProvider, _erc20_transfer_data, _validate_tokenfactory_operation,
+)
+from tokenfactory.models import TokenDraft
+from tokenfactory.operations import token_operation
+from ..providers.clanker import clanker_deployment_calldata
 from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
 from ..providers.base_rpc import (
     _decode_abi_text,
@@ -164,31 +182,6 @@ class _ApprovalStore:
         for key in keys[:-1]:
             target = target.setdefault(key, {})
         target[keys[-1]] = value
-
-
-class _SessionConfig:
-    def __init__(self, deployment_id="deployment"):
-        self.deployment_id = _Value(deployment_id)
-        self.stores = {}
-
-    def user_from_id(self, user_id):
-        store = self.stores.setdefault(int(user_id), _ApprovalStore())
-        return SimpleNamespace(approval_sessions=store)
-
-    async def all_users(self):
-        return {
-            user_id: {"approval_sessions": store.data}
-            for user_id, store in self.stores.items()
-        }
-
-
-class _SessionHarness(ApprovalSessionMixin):
-    def __init__(self, deployment_id="deployment", application_id=42):
-        self.config = _SessionConfig(deployment_id)
-        self.application_id = application_id
-
-    def discord_application_id(self):
-        return self.application_id
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
@@ -321,8 +314,11 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
                             },
                             zero_contract: {
                                 "symbol": "ZERO",
+                                "name": "Created Zero Token",
                                 "decimals": 0,
                                 "status": "community",
+                                "source": "clanker",
+                                "submitted_by": 7,
                             },
                         }
                     }
@@ -336,8 +332,9 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             _account_for_network=WalletCoreCommands._account_for_network,
             _network_badge=WalletCoreCommands._network_badge,
             _network_compact_label=WalletCoreCommands._network_compact_label,
+            _add_wallet_fields=WalletCoreCommands._add_wallet_fields,
         )
-        ctx = SimpleNamespace(author=SimpleNamespace(display_name="Member"))
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7, display_name="Member"))
         embed = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
         rendered = "\n".join(
             f"{field.name}\n{field.value}" for field in embed.fields
@@ -352,16 +349,20 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             "Networks: <:base:123456789012345678> · Ethereum Sepolia", rendered
         )
         self.assertNotIn("<:base:123456789012345678> Base Sepolia", rendered)
-        evm_field = next(
-            field for field in embed.fields if field.name == "━━ EVM WALLET ━━"
-        )
+        evm_fields = [field for field in embed.fields if "EVM WALLET" in field.name]
+        evm_value = "\n".join(field.value for field in evm_fields)
+        evm_field = evm_fields[0]
         self.assertLess(
             evm_field.value.index("Networks:"), evm_field.value.index(f"`{evm}`")
         )
         self.assertNotIn(f"[{evm}]", evm_field.value)
         self.assertIn(
             f"[Base Sepolia]({BASE_SEPOLIA.explorer_address_url(evm)})",
-            evm_field.value,
+            evm_value,
+        )
+        self.assertIn(
+            f"[Ethereum Sepolia]({ETHEREUM_SEPOLIA.explorer_address_url(evm)})",
+            evm_value,
         )
         self.assertIn("━━ SOLANA WALLET ━━", rendered)
         solana_field = next(
@@ -371,9 +372,12 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             solana_field.value.index(f"`{solana}`"),
             solana_field.value.index("[Solana Devnet]"),
         )
-        self.assertEqual(len(embed.fields), 2)
+        self.assertTrue(all(len(field.value) <= 1024 for field in embed.fields))
         self.assertIn("OWNED", rendered)
+        self.assertIn(f"`{positive_contract[:8]}…{positive_contract[-6:]}`", rendered)
+        self.assertNotIn(f"/token/{positive_contract}", rendered)
         self.assertNotIn("ZERO", rendered)
+        self.assertNotIn("━━ CREATED TOKENS ━━", rendered)
         self.assertNotIn("Automatic token discovery", rendered)
         self.assertNotIn("[Arbitrum Sepolia]", rendered)
 
@@ -721,6 +725,38 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
 
+    async def test_clanker_external_handoff_is_signed_but_has_no_signer_authority(self):
+        harness = _JwtHarness(self.configuration)
+        handoff = {
+            "version": 1, "kind": "clanker-v4-external-handoff",
+            "requester_id": "7", "expires_at": int(time.time()) + 120,
+            "intent": {"launch_id": "launch", "payload_hash": "0x" + "34" * 32,
+                       "expires_at": int(time.time()) + 120},
+            "operation": {"chain_id": 84532, "to": "0x" + "12" * 20,
+                          "value": "0", "data": "0xdf40224a00",
+                          "launch_id": "launch", "payload_hash": "0x" + "34" * 32},
+            "verification_command": "!clanker verify launch <transaction_hash>",
+        }
+        token, expires_at = await harness.create_clanker_external_handoff(7, handoff)
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "clanker_external")
+        self.assertEqual(claims["sickwallet_clanker"], handoff)
+        self.assertEqual(claims["sickwallet_discord_user"], "7")
+        self.assertNotIn("sickwallet_accounts", claims)
+        self.assertNotIn("sickwallet_address", claims)
+        self.assertEqual(expires_at, handoff["expires_at"])
+        handoff["kind"] = "clanker-v4-reward-collection"
+        reward_token, _ = await harness.create_clanker_external_handoff(7, handoff)
+        reward_claims = jwt.decode(reward_token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test")
+        self.assertEqual(reward_claims["sickwallet_clanker"]["kind"], "clanker-v4-reward-collection")
+        handoff["requester_id"] = "8"
+        with self.assertRaisesRegex(ValueError, "binding"):
+            await harness.create_clanker_external_handoff(7, handoff)
+
     async def test_authorization_handoff_accepts_requested_default_days(self):
         harness = _JwtHarness(self.configuration)
         token, _ = await harness.create_authorization_handoff(
@@ -880,47 +916,36 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No signing authorization was created", ctx.send.await_args.args[0])
 
 
-class StoredApprovalSessionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_malformed_or_unknown_session_token_is_rejected(self):
-        harness = _SessionHarness()
-        self.assertIsNone(await harness.resolve_approval_session("short"))
-        self.assertIsNone(await harness.resolve_approval_session("x" * 40))
+class ClankerIntentFixtures:
+    @staticmethod
+    def clanker_intent(**overrides):
+        wallet = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        values = {
+            "intent_id": "0x" + "12" * 32,
+            "deployment_id": "deployment",
+            "discord_application_id": 42,
+            "guild_id": 100,
+            "discord_user_id": 7,
+            "profile_id": "profile-7",
+            "wallet_address": wallet,
+            "token_admin": wallet,
+            "name": "Approval Test",
+            "symbol": "APPROVE",
+            "image": "",
+            "metadata": {},
+            "context": {"interface": "SickGamingBot"},
+            "pool": ClankerPool(
+                "0x4200000000000000000000000000000000000006",
+                -230400, 200,
+                (ClankerPoolPosition(-230400, -120000, 10_000),),
+            ),
+            "rewards": (ClankerReward(wallet, wallet, 10_000),),
+            "created_at": int(time.time()),
+            "expires_at": int(time.time()) + 300,
+        }
+        values.update(overrides)
+        return ClankerDeploymentIntent.create(**values)
 
-    async def test_expired_session_is_rejected(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        digest = harness._token_digest(token)
-        harness.config.stores[7].data[digest]["expires_at"] = int(time.time()) - 1
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-    async def test_wrong_discord_user_cannot_consume_session(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        self.assertIsNone(await harness.establish_browser_session(token, 8))
-        self.assertIsNotNone(await harness.resolve_approval_session(token))
-
-    async def test_consumed_session_rejects_replay(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.RECOVERY)
-        browser_token = await harness.establish_browser_session(token, 7)
-        self.assertIsNotNone(browser_token)
-        self.assertIsNone(await harness.resolve_approval_session(token))
-        self.assertIsNone(await harness.establish_browser_session(token, 7))
-        resolved = await harness.resolve_browser_session(browser_token)
-        self.assertIsNotNone(resolved)
-        self.assertIs(resolved.status, ApprovalStatus.IDENTITY_VERIFIED)
-        self.assertIs(resolved.purpose, ApprovalPurpose.RECOVERY)
-
-    async def test_wrong_deployment_or_application_rejects_session(self):
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
-        harness.config.deployment_id = _Value("foreign-deployment")
-        self.assertIsNone(await harness.resolve_approval_session(token))
-
-        harness = _SessionHarness()
-        token = await harness.create_approval_session(7, ApprovalPurpose.SECURITY)
-        harness.application_id = 99
-        self.assertIsNone(await harness.resolve_approval_session(token))
 
 
 class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
@@ -1166,6 +1191,29 @@ class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
+    def test_polymarket_handoff_contract_is_explicitly_disabled(self):
+        handoff = PolymarketHandoffAvailability()
+        context = PolymarketHandoffContext(7, "profile", "0x" + "1" * 40)
+        self.assertEqual(handoff.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(handoff.network, POLYMARKET_NETWORK_KEY)
+        self.assertEqual(handoff.collateral_symbol, POLYMARKET_COLLATERAL_SYMBOL)
+        self.assertFalse(handoff.enabled)
+        self.assertEqual(context.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(context.reviewed_capabilities, ())
+        self.assertFalse(context.enabled)
+        with self.assertRaises(ValueError):
+            PolymarketHandoffContext(7, "profile", "not-an-address")
+        with self.assertRaises(ValueError):
+            PolymarketHandoffContext(7, "profile", reviewed_capabilities=("send",))
+
+        handle, session = PolymarketHandoffSession.create(7, "profile", "a" * 64, 200)
+        consumed = session.consume(handle, 7, 100)
+        self.assertEqual(consumed.consumed_at, 100)
+        self.assertEqual(consumed.chain_id, POLYMARKET_CHAIN_ID)
+        self.assertEqual(consumed.purpose, "polymarket-order-review")
+        with self.assertRaises(ValueError):
+            consumed.consume(handle, 7, 101)
+
     def test_base_capabilities_are_explicit_and_provider_declared(self):
         self.assertEqual(
             set(NETWORKS),
@@ -1180,9 +1228,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(KNOWN_NETWORKS) - set(NETWORKS),
-            {OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
+            {POLYGON_MAINNET.key, OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
         )
-        for network in (OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
+        for network in (POLYGON_MAINNET, OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
             with self.subTest(planned_network=network.key):
                 self.assertFalse(network.enabled)
                 self.assertFalse(network.testnet)
@@ -1190,6 +1238,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(network.supports(NetworkCapability.BALANCE))
                 self.assertFalse(network.supports(NetworkCapability.SEND))
                 self.assertFalse(network.supports(NetworkCapability.SPONSORSHIP))
+        self.assertEqual(POLYGON_MAINNET.chain_id, 137)
+        self.assertEqual(POLYGON_MAINNET.native_symbol, "POL")
+        self.assertEqual(POLYGON_MAINNET.explorer_url, "https://polygonscan.com")
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(
@@ -1776,6 +1827,492 @@ class PortfolioBalanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 
+class _ClankerLifecycleHarness(ClankerLifecycleMixin):
+    def __init__(self, intent, provider):
+        self.store = _ApprovalStore()
+        self.store.data[intent.intent_id] = intent.to_dict()
+        profile = {
+            "profile_id": intent.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": intent.network, "address": intent.wallet_address}],
+        }
+        self.config = SimpleNamespace(
+            user_from_id=lambda user_id: SimpleNamespace(
+                intents=self.store, profile=_Value(profile)
+            )
+        )
+        self.wallet_provider = provider
+
+
+class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_changed_terms_fail_before_wallet_or_provider_access(self):
+        wallet = object.__new__(CryptoWallet)
+        wallet.get_or_create_wallet_profile = AsyncMock()
+        operation = {"gas_limit": 1_500_000, "value_wei": 0}
+        with self.assertRaisesRegex(RuntimeError, "Review it again"):
+            await wallet.tokenfactory_submit_reviewed_call(
+                object(), operation, "attempt", {"gas_limit": 1}
+            )
+        wallet.get_or_create_wallet_profile.assert_not_awaited()
+
+    async def test_valid_reviewed_call_is_forwarded_to_provider(self):
+        wallet = object.__new__(CryptoWallet)
+        profile = {"profile_id": "profile"}
+        operation = {"gas_limit": 1_500_000, "value_wei": 0}
+        terms = {
+            "gas_limit": 1_500_000, "native_value_wei": 0,
+            "gas_sponsored": True, "gas_payer": "CDP paymaster",
+        }
+        wallet.config = SimpleNamespace(
+            provider_paused=AsyncMock(return_value=False),
+            user=lambda user: SimpleNamespace(
+                security_locked=AsyncMock(return_value=False)
+            ),
+        )
+        wallet.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        wallet.wallet_provider = SimpleNamespace(
+            submit_reviewed_tokenfactory_call=AsyncMock(return_value={"ok": True})
+        )
+
+        result = await wallet.tokenfactory_submit_reviewed_call(
+            object(), operation, "attempt", terms
+        )
+
+        self.assertEqual(result, {"ok": True})
+        wallet.wallet_provider.submit_reviewed_tokenfactory_call.assert_awaited_once_with(
+            profile, operation, "attempt"
+        )
+
+    def test_signer_independently_rejects_token_call_mutations(self):
+        recipient = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        request_id = "0x" + "22" * 32
+        draft = TokenDraft(
+            creator_discord_id=7, name="Reviewed Token", symbol="RVT",
+            decimals=18, supply_atomic=10**18,
+        )
+        operation = token_operation(draft, request_id, recipient)
+        self.assertEqual(
+            _validate_tokenfactory_operation(operation)[-1], "fixed_supply_token"
+        )
+        for field, value in (
+            ("value_wei", 1), ("gas_limit", 1),
+            ("recipient", "0x" + "33" * 20),
+            ("request_id", "0x" + "44" * 32),
+        ):
+            mutated = {**operation, field: value}
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                _validate_tokenfactory_operation(mutated)
+
+
+class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_spendable_balance_is_bound_to_base_sepolia_account(self):
+        provider = SimpleNamespace(get_native_balance=AsyncMock(return_value=12345))
+        harness = SimpleNamespace(
+            get_or_create_wallet_profile=AsyncMock(return_value={
+                "accounts": [{"network": BASE_SEPOLIA.key, "address": "0x" + "12" * 20}]
+            }),
+            _account_for_network=lambda profile, network: profile["accounts"][0],
+            wallet_provider=provider,
+        )
+        result = await CryptoWallet.clanker_spendable_balance(
+            harness, SimpleNamespace(id=7)
+        )
+        self.assertEqual(result["balance_wei"], 12345)
+        self.assertEqual(result["address"], "0x" + "12" * 20)
+        provider.get_native_balance.assert_awaited_once_with(
+            "0x" + "12" * 20, BASE_SEPOLIA.key
+        )
+
+
+class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_atomic_claim_rejects_replay(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+
+        claimed = await harness.begin_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1",
+            now=launch.created_at,
+        )
+        self.assertEqual(claimed, launch)
+        self.assertEqual(
+            harness.store.data[launch.intent_id]["status"],
+            IntentStatus.PROCESSING.value,
+        )
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2",
+                now=launch.created_at,
+            )
+
+    async def test_expired_intent_is_terminal(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+        with self.assertRaisesRegex(RuntimeError, "expired"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-1",
+                now=launch.expires_at,
+            )
+        self.assertEqual(
+            harness.store.data[launch.intent_id]["status"],
+            IntentStatus.EXPIRED.value,
+        )
+
+    async def test_submission_persists_acknowledgement_and_blocks_retry(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        result = {
+            "provider_status": "broadcast",
+            "user_operation_hash": "0x" + "1" * 64,
+            "transaction_hash": None,
+            "intent_id": launch.intent_id,
+            "payload_hash": launch.payload_hash,
+        }
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(return_value=result)
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+
+        stored = await harness.submit_claimed_clanker_intent(
+            7, launch.intent_id, launch.payload_hash, "attempt-1"
+        )
+        self.assertEqual(stored["status"], IntentStatus.SUBMITTED.value)
+        self.assertEqual(stored["user_operation_hash"], result["user_operation_hash"])
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.submit_claimed_clanker_intent(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+        provider.submit_clanker_deployment.assert_awaited_once()
+
+    async def test_ambiguous_provider_failure_becomes_uncertain(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(
+                side_effect=WalletProviderError("connection ended")
+            )
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+
+        with self.assertRaises(WalletProviderError):
+            await harness.submit_claimed_clanker_intent(
+                7, launch.intent_id, launch.payload_hash, "attempt-1"
+            )
+        stored = harness.store.data[launch.intent_id]
+        self.assertEqual(stored["status"], IntentStatus.UNCERTAIN.value)
+        self.assertEqual(stored["provider_status"], "unknown")
+        with self.assertRaisesRegex(RuntimeError, "already been claimed"):
+            await harness.begin_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+
+    async def test_uncertain_recovery_reuses_only_original_attempt(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        result = {
+            "provider_status": "broadcast",
+            "user_operation_hash": "0x" + "2" * 64,
+            "transaction_hash": None,
+            "intent_id": launch.intent_id,
+            "payload_hash": launch.payload_hash,
+        }
+        provider = SimpleNamespace(
+            submit_clanker_deployment=AsyncMock(return_value=result)
+        )
+        harness = _ClankerLifecycleHarness(launch, provider)
+        await harness.begin_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1",
+            now=launch.created_at,
+        )
+        await harness.mark_clanker_submission_uncertain(
+            7, launch, "attempt-1"
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "cannot be safely reclaimed"):
+            await harness.recover_uncertain_clanker_submission(
+                7, launch.intent_id, launch.payload_hash, "attempt-2"
+            )
+        stored = await harness.recover_uncertain_clanker_submission(
+            7, launch.intent_id, launch.payload_hash, "attempt-1"
+        )
+
+        self.assertEqual(stored["status"], IntentStatus.SUBMITTED.value)
+        provider.submit_clanker_deployment.assert_awaited_once()
+        self.assertEqual(
+            provider.submit_clanker_deployment.await_args.args[2], "attempt-1"
+        )
+
+    async def test_submitted_status_refresh_persists_confirmation(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        provider = SimpleNamespace(clanker_operation_status=AsyncMock(return_value={
+            "provider_status": "complete", "user_operation_hash": "0x" + "11" * 32,
+            "transaction_hash": "0x" + "22" * 32, "block_number": 123}))
+        harness = _ClankerLifecycleHarness(launch, provider)
+        harness.store.data[launch.intent_id].update({"status": "submitted",
+            "user_operation_hash": "0x" + "11" * 32})
+        result = await harness.refresh_clanker_intent_status(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["block_number"], 123)
+        provider.clanker_operation_status.assert_awaited_once()
+
+    async def test_status_and_rejection_are_bound_and_terminal(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        harness = _ClankerLifecycleHarness(launch, SimpleNamespace())
+        status = await harness.clanker_intent_status(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(status["status"], IntentStatus.PENDING.value)
+        rejected = await harness.reject_clanker_intent(7, launch.intent_id, launch.payload_hash)
+        self.assertEqual(rejected["status"], IntentStatus.REJECTED.value)
+        with self.assertRaisesRegex(RuntimeError, "no longer pending"):
+            await harness.reject_clanker_intent(7, launch.intent_id, launch.payload_hash)
+        with self.assertRaisesRegex(RuntimeError, "binding"):
+            await harness.clanker_intent_status(7, launch.intent_id, "0x" + "00" * 32)
+
+    async def test_public_clanker_status_rebinds_current_wallet_profile(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {"profile_id": launch.profile_id, "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
+        store = _ApprovalStore(); store.data[launch.intent_id] = {**launch.to_dict(), "status": "submitted"}
+        harness = SimpleNamespace(
+            get_or_create_wallet_profile=AsyncMock(return_value=profile),
+            refresh_clanker_intent_status=AsyncMock(return_value={"status": "submitted", "transaction_hash": None}),
+            config=SimpleNamespace(user=lambda user: SimpleNamespace(intents=store)),
+            _stored_clanker_intent=ClankerLifecycleMixin._stored_clanker_intent,
+        )
+        result = await CryptoWallet.clanker_internal_status(
+            harness, SimpleNamespace(id=7), launch.intent_id, launch.payload_hash
+        )
+        self.assertEqual(result["route"], "internal")
+        self.assertEqual(result["status"], "submitted")
+
+    def test_only_external_clanker_browser_controls_are_present(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "session.html").read_text(encoding="utf-8")
+        script = (root / "web" / "app.js").read_text(encoding="utf-8")
+        external = (root / "web" / "clanker-external.js").read_text(encoding="utf-8")
+        self.assertNotIn("approve-clanker", page)
+        self.assertNotIn("type=\"file\"", page)
+        self.assertIn("clanker-external.js", page)
+        self.assertIn("eth_sendTransaction", external)
+        self.assertIn("0xe85a59c628f7d27878aceb4bf3b35733630083a9", external)
+        self.assertIn("api/recovery-handoff.php", external)
+        self.assertIn("clanker_external", external)
+        self.assertIn("clanker-v4-reward-collection", external)
+        self.assertIn("immutable token administrator wallet", external)
+        self.assertIn("crypto.subtle.verify", external)
+        self.assertNotIn("api/clanker.php", script)
+        self.assertFalse((root / "web" / "api" / "clanker.php").exists())
+        self.assertFalse((root / "web" / "api" / "session.php").exists())
+
+
+class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_prepares_exact_call_without_provider_submission(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+
+        first = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        second = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["to"], launch.factory)
+        self.assertEqual(first["value"], 0)
+        self.assertTrue(first["data"].startswith("0xdf40224a"))
+        provider.get_delegation_status.assert_awaited_with(profile, BASE_SEPOLIA.key)
+
+    async def test_accepts_checksum_case_for_bound_wallet_address(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{
+                "network": BASE_SEPOLIA.key,
+                "address": "0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            }],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+
+        prepared = await provider.prepare_clanker_deployment(
+            profile, launch, "attempt-checksum"
+        )
+
+        self.assertEqual(prepared["from"], profile["accounts"][0]["address"])
+        self.assertEqual(prepared["from"].lower(), launch.wallet_address)
+
+    async def test_submits_prepared_call_and_validates_provider_echo(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        prepared = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": BASE_SEPOLIA.key,
+                "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{
+                    "to": prepared["to"],
+                    "value": str(prepared["value"]),
+                    "data": prepared["data"],
+                }],
+            }
+        ))
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+
+        result = await provider.submit_clanker_deployment(
+            profile, launch, "attempt-1"
+        )
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        args = client.send_smart_account_user_operation.await_args.args
+        self.assertEqual(args[4:8], (
+            prepared["to"], prepared["value"],
+            prepared["idempotency_key"], prepared["data"],
+        ))
+        self.assertEqual(
+            client.send_smart_account_user_operation.await_args.kwargs,
+            {"override_gas_limit": 8_000_000},
+        )
+
+    async def test_collects_only_reviewed_token_for_matching_admin(self):
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        token = "0x2222222222222222222222222222222222222222"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": admin}
+        ]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        data = "0x5763dbd0" + token[2:].rjust(64, "0")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(return_value={
+            "status": "broadcast", "userOpHash": "0x" + "1" * 64,
+            "calls": [{"to": "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f",
+                       "value": "0", "data": data}],
+        }))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+
+        result = await provider.submit_clanker_reward_collection(
+            profile, token, admin, "attempt-1"
+        )
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        args = client.send_smart_account_user_operation.await_args.args
+        self.assertEqual(args[4], "0x824bB048a5EC6e06a09aEd115E9eEA4618DC2c8f")
+        self.assertEqual(args[7], data)
+        with self.assertRaisesRegex(WalletProviderError, "not this token administrator"):
+            await provider.submit_clanker_reward_collection(
+                profile, token, "0x3333333333333333333333333333333333333333", "attempt-2"
+            )
+
+    async def test_platform_withdrawal_cannot_include_creator_treasury(self):
+        weth = "0x4200000000000000000000000000000000000006"
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        creator = "0x2222222222222222222222222222222222222222"
+        platform = "0x3333333333333333333333333333333333333333"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": platform}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        with self.assertRaisesRegex(WalletProviderError, "review policy"):
+            await provider.submit_clanker_treasury_withdrawal(
+                profile, token_admin=admin, creator_treasury=creator,
+                platform_treasury=platform, claims=[{"owner": creator, "asset": weth}],
+                attempt_id="attempt-1", platform_only=True)
+
+    async def test_platform_withdrawal_submits_only_exact_platform_calls(self):
+        weth = "0x4200000000000000000000000000000000000006"
+        admin = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        creator = "0x2222222222222222222222222222222222222222"
+        platform = "0x3333333333333333333333333333333333333333"
+        profile = {"provider_user_id": "provider-user", "accounts": [
+            {"network": BASE_SEPOLIA.key, "address": platform}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        data = "0x21c0b342" + platform[2:].rjust(64, "0") + weth[2:].rjust(64, "0")
+        client = SimpleNamespace(send_smart_account_calls=AsyncMock(return_value={
+            "network": BASE_SEPOLIA.key, "status": "broadcast",
+            "userOpHash": "0x" + "4" * 64,
+            "calls": [{"to": "0x42A95190B4088C88Dd904d930c79deC1158bF09D",
+                       "value": "0", "data": data}],}))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+        result = await provider.submit_clanker_treasury_withdrawal(
+            profile, token_admin=admin, creator_treasury=creator, platform_treasury=platform,
+            claims=[{"owner": platform, "asset": weth}], attempt_id="attempt-1",
+            platform_only=True)
+        self.assertEqual(result["provider_status"], "broadcast")
+
+    async def test_refreshes_clanker_operation_and_validates_echoed_call(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {"profile_id": launch.profile_id, "provider_user_id": "provider-user",
+                   "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}]}
+        provider = CdpWalletProvider(SimpleNamespace())
+        data = clanker_deployment_calldata(launch)
+        client = SimpleNamespace(get_smart_account_user_operation=AsyncMock(return_value={
+            "status": "complete", "userOpHash": "0x" + "11" * 32,
+            "transactionHash": "0x" + "22" * 32,
+            "calls": [{"to": launch.factory, "value": "0", "data": data}],
+            "receipts": [{"blockNumber": 123}]}))
+        provider.credentials = AsyncMock(return_value=SimpleNamespace(project_id="project-id"))
+        provider._api_client = lambda credentials: client
+        result = await provider.clanker_operation_status(profile, launch, "0x" + "11" * 32)
+        self.assertEqual(result["provider_status"], "complete")
+        self.assertEqual(result["block_number"], 123)
+
+    async def test_rejects_changed_provider_call(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {
+            "profile_id": launch.profile_id,
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        prepared = await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": BASE_SEPOLIA.key,
+                "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{
+                    "to": prepared["to"],
+                    "value": "0",
+                    "data": prepared["data"][:-1] + ("1" if prepared["data"][-1] == "0" else "0"),
+                }],
+            }
+        ))
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+
+        with self.assertRaisesRegex(WalletProviderError, "safely submit"):
+            await provider.submit_clanker_deployment(profile, launch, "attempt-1")
+
+    async def test_rejects_wrong_profile_or_inactive_delegation(self):
+        launch = ClankerIntentFixtures.clanker_intent()
+        profile = {
+            "profile_id": "wrong-profile",
+            "provider_user_id": "provider-user",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": launch.wallet_address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        with self.assertRaisesRegex(WalletProviderError, "does not match"):
+            await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+
+        profile["profile_id"] = launch.profile_id
+        provider.get_delegation_status = AsyncMock(return_value={"active": False})
+        with self.assertRaisesRegex(WalletProviderError, "authorization"):
+            await provider.prepare_clanker_deployment(profile, launch, "attempt-1")
+
+
 class TokenSendTests(unittest.IsolatedAsyncioTestCase):
     def test_token_amount_and_intent_round_trip_are_exact(self):
         self.assertEqual(parse_asset_amount("1.25", "USDC", 6), 1_250_000)
@@ -1864,6 +2401,19 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raw, b'{"jsonrpc":"2.0","result":"0x1234"}')
         self.assertEqual(content.requested_size, 64 * 1024)
 
+    async def test_smart_account_batch_preserves_exact_reviewed_calls(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"status": "pending"})
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        calls = [{"to": "0x42A95190B4088C88Dd904d930c79deC1158bF09D",
+                  "value": 0, "data": "0x21c0b342"}]
+        await client.send_smart_account_calls(
+            "end-user-id", address, "project-id", BASE_SEPOLIA.key, calls, "attempt-id")
+        request = client._request.await_args
+        self.assertEqual(request.kwargs["body"]["calls"], [
+            {"to": calls[0]["to"], "value": "0", "data": calls[0]["data"]}])
+        self.assertTrue(request.kwargs["body"]["useCdpPaymaster"] )
+
     async def test_user_operation_lookup_uses_documented_project_route(self):
         client = object.__new__(CdpApiClient)
         client._request = AsyncMock(return_value={"status": "pending"})
@@ -1931,7 +2481,7 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
-    async def test_explicit_registered_token_send_creates_typed_intent(self):
+    async def test_registered_token_send_uses_default_network(self):
         sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
         contract = "0x1111111111111111111111111111111111111111"
@@ -1952,7 +2502,8 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
                    "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}]}
         cog = SimpleNamespace(
             config=SimpleNamespace(user=lambda user: user_config,
-                                   token_registry=_Value(registry)),
+                                   token_registry=_Value(registry),
+                                   default_network=_Value(BASE_SEPOLIA.key)),
             wallet_provider=provider,
             _wallet_sensitive_allowed=AsyncMock(return_value=True),
             _wallet_read_allowed=AsyncMock(return_value=True),
@@ -1970,7 +2521,7 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
             embed_color=AsyncMock(return_value=None),
         )
         await WalletTransactionCommands.wallet_send.callback(
-            cog, ctx, "usdc", "base", recipient, "1.25"
+            cog, ctx, "usdc", recipient, "1.25"
         )
         self.assertEqual(len(intents.data), 1)
         stored = TransactionIntent.from_dict(next(iter(intents.data.values())))
@@ -1981,6 +2532,82 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored.value_wei, 1_250_000)
         provider.get_registered_token_asset.assert_awaited_once()
         provider.prepare_transaction.assert_awaited_once()
+
+    async def test_empty_send_shows_effective_default_without_provider_read(self):
+        user_config = SimpleNamespace(default_send_asset=_Value(None))
+        cog = object.__new__(WalletTransactionCommands)
+        cog.config = SimpleNamespace(
+            default_network=_Value(BASE_SEPOLIA.key),
+            user=lambda user: user_config,
+        )
+        cog._wallet_sensitive_allowed = AsyncMock(return_value=True)
+        cog._wallet_read_allowed = AsyncMock(return_value=True)
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7),
+            clean_prefix="!",
+            embed_color=AsyncMock(return_value=None),
+            send=AsyncMock(),
+        )
+
+        await WalletTransactionCommands.wallet_send.callback(cog, ctx)
+
+        cog._wallet_read_allowed.assert_not_awaited()
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Send from your testnet wallet")
+        self.assertIn("ETH", embed.fields[0].value)
+        self.assertIn("Base Sepolia", embed.fields[0].value)
+        self.assertIn("!wallet send @member 0.001", embed.fields[1].value)
+        self.assertIn("!wallet send USDC @member 1.50", embed.fields[2].value)
+
+    def test_wallet_token_defaults_is_an_alias_for_default(self):
+        self.assertIn("defaults", WalletCoreCommands.wallet_token_default.aliases)
+
+    async def test_wallet_overview_limits_assets_and_points_to_network_detail(self):
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        tokens = [
+            {
+                "contract_address": f"0x{index:040x}",
+                "symbol": f"T{index}",
+                "decimals": 0,
+                "amount_atomic": index,
+            }
+            for index in range(1, 18)
+        ]
+        profile = {
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": address}]
+        }
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                network_emojis=_Value({}), token_registry=_Value({})
+            ),
+            wallet_provider=SimpleNamespace(
+                get_native_balance=AsyncMock(return_value=0),
+                get_token_balances=AsyncMock(return_value=tokens),
+                get_registered_token_asset=AsyncMock(),
+            ),
+            _account_for_network=WalletCoreCommands._account_for_network,
+            _network_badge=WalletCoreCommands._network_badge,
+            _network_compact_label=WalletCoreCommands._network_compact_label,
+            _add_wallet_fields=WalletCoreCommands._add_wallet_fields,
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7, display_name="Member"), clean_prefix="!"
+        )
+
+        overview = await WalletCoreCommands._wallet_embed(cog, ctx, profile)
+        overview_text = "\n".join(field.value for field in overview.fields)
+        self.assertIn("**+2 more**", overview_text)
+        self.assertIn("!wallet balance base-sepolia", overview_text)
+        self.assertNotIn("T16:", overview_text)
+
+        detail = await WalletCoreCommands._wallet_embed(
+            cog, ctx, profile, network=BASE_SEPOLIA
+        )
+        detail_text = "\n".join(field.value for field in detail.fields)
+        self.assertIn("T16:", detail_text)
+        self.assertIn("T17:", detail_text)
+        self.assertNotIn("more**", detail_text)
+        self.assertTrue(all(len(field.value) <= 1024 for field in detail.fields))
 
 
 class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):

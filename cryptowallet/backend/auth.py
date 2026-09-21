@@ -169,10 +169,17 @@ class JwtAuthMixin:
             discord_user_id, profile, purpose="recovery"
         )
 
-    async def create_tokenfactory_handoff(
-        self, discord_user_id: int, draft: dict, request_id: str
+    async def create_external_companion_handoff(
+        self, discord_user_id: int, purpose: str, payload: dict
     ) -> tuple[str, int]:
-        """Sign a short-lived, CDP-independent external deployment handoff."""
+        """Sign a short-lived product payload for the shared static companion."""
+
+        claim_names = {
+            "tokenfactory_external": "sickwallet_tokenfactory",
+        }
+        claim_name = claim_names.get(purpose)
+        if claim_name is None or not isinstance(payload, dict):
+            raise ValueError("Unsupported external companion handoff")
         configuration = await self.jwt_configuration()
         if configuration is None:
             raise RuntimeError("The protected companion signing key is not configured")
@@ -190,16 +197,52 @@ class JwtAuthMixin:
             "nbf": now,
             "exp": expires_at,
             "jti": secrets.token_urlsafe(18),
-            "sickwallet_purpose": "tokenfactory_external",
+            "sickwallet_purpose": purpose,
             "sickwallet_deployment": deployment_id,
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
-            "sickwallet_tokenfactory": {**draft, "request_id": request_id},
+            claim_name: dict(payload),
         }
         token = jwt.encode(
             claims,
             configuration["private_key"],
             algorithm="ES256",
+            headers={"kid": configuration["kid"], "typ": "JWT"},
+        )
+        return token, expires_at
+
+    async def create_clanker_external_handoff(
+        self, discord_user_id: int, handoff: dict
+    ) -> tuple[str, int]:
+        """Sign a short-lived Clanker-owned external operation for the companion."""
+        configuration = await self.jwt_configuration()
+        if configuration is None:
+            raise RuntimeError("The protected companion signing key is not configured")
+        deployment_id = str(await self.config.deployment_id() or "")
+        application_id = getattr(self.bot.user, "id", None)
+        if not deployment_id or application_id is None:
+            raise RuntimeError("The protected companion identity is incomplete")
+        expected = {"version", "kind", "requester_id", "expires_at", "intent", "operation", "verification_command"}
+        if (not isinstance(handoff, dict) or set(handoff) != expected
+                or handoff.get("kind") not in {"clanker-v4-external-handoff", "clanker-v4-external-template", "clanker-v4-reward-collection"}
+                or str(handoff.get("requester_id")) != str(discord_user_id)):
+            raise ValueError("The Clanker external handoff binding is invalid")
+        now = int(time.time())
+        expires_at = min(int(handoff.get("expires_at", 0)), now + CLAIM_HANDOFF_LIFETIME_SECONDS)
+        if expires_at <= now:
+            raise ValueError("The Clanker external handoff has expired")
+        claims = {
+            "iss": configuration["issuer"], "aud": configuration["audience"],
+            "sub": str(discord_user_id), "iat": now, "nbf": now, "exp": expires_at,
+            "jti": secrets.token_urlsafe(18),
+            "sickwallet_purpose": "clanker_external",
+            "sickwallet_deployment": deployment_id,
+            "sickwallet_application": str(application_id),
+            "sickwallet_discord_user": str(discord_user_id),
+            "sickwallet_clanker": handoff,
+        }
+        token = jwt.encode(
+            claims, configuration["private_key"], algorithm="ES256",
             headers={"kid": configuration["kid"], "typ": "JWT"},
         )
         return token, expires_at

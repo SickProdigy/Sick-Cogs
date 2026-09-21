@@ -11,6 +11,15 @@ from redbot.core.bot import Red
 
 from .constants import CONFIG_IDENTIFIER
 from .models import TokenDraft
+from .operations import (
+    TOKEN_DEPLOY_GAS_LIMIT,
+    TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
+    factory_deployment_status,
+    factory_operation,
+    token_operation,
+    verify_external_transaction,
+    verify_fixed_supply_token,
+)
 from .validation import normalize_owner_address
 from .views import FactoryDeploymentView, TokenFactoryDraftView
 
@@ -19,7 +28,25 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
+
+    def execution_terms(self, *, route: str, operation: str = "token") -> dict:
+        if route not in {"discord", "external"} or operation not in {"token", "factory"}:
+            raise ValueError("Unsupported TokenFactory execution-terms request.")
+        if route == "external" and operation != "token":
+            raise ValueError("External wallets cannot deploy TokenFactory infrastructure.")
+        gas_limit = (
+            TOKEN_FACTORY_DEPLOY_GAS_LIMIT
+            if operation == "factory"
+            else TOKEN_DEPLOY_GAS_LIMIT
+        )
+        sponsored = route == "discord"
+        return {
+            "gas_limit": gas_limit,
+            "native_value_wei": 0,
+            "gas_sponsored": sponsored,
+            "gas_payer": "CDP paymaster" if sponsored else "connected external wallet",
+        }
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -99,8 +126,13 @@ class TokenFactory(commands.Cog):
         else:
             request_id = "0x" + secrets.token_hex(32)
         wallet = self._cryptowallet()
-        token, expires_at = await wallet.tokenfactory_create_external_handoff(
-            user.id, draft.to_dict(), request_id
+        token, expires_at = await wallet.create_external_companion_handoff(
+            user.id, "tokenfactory_external",
+            {
+                **draft.to_dict(),
+                "execution_terms": self.execution_terms(route="external"),
+                "request_id": request_id,
+            },
         )
         handle = await wallet.register_recovery_handoff(token, expires_at)
         await user_config.pending_deployment.set({
@@ -130,7 +162,22 @@ class TokenFactory(commands.Cog):
             raise RuntimeError("CryptoWallet must be loaded for factory deployment.")
         return wallet
 
-    async def deploy_pinned_factory(self, user, creation_code: str) -> dict:
+    async def _submit_reviewed_call(
+        self, user, operation: dict, attempt_id: str, execution_terms: dict
+    ) -> dict:
+        """Use only the current narrow CryptoWallet signer boundary."""
+
+        signer = getattr(
+            self._cryptowallet(), "tokenfactory_submit_reviewed_call", None
+        )
+        if not callable(signer):
+            raise RuntimeError(
+                "CryptoWallet is out of date. Ask the bot owner to reload "
+                "CryptoWallet, then reload TokenFactory."
+            )
+        return await signer(user, operation, attempt_id, execution_terms)
+
+    async def deploy_pinned_factory(self, user, creation_code: str, execution_terms: dict) -> dict:
         try:
             pending = await self.config.pending_factory_operation()
             if isinstance(pending, dict) and pending.get("user_operation_hash"):
@@ -147,8 +194,9 @@ class TokenFactory(commands.Cog):
                         "`tokenfactoryset verifyfactory` instead."
                     )
             attempt_id = str(uuid.uuid4())
-            result = await self._cryptowallet().tokenfactory_deploy_pinned_factory(
-                user, creation_code, attempt_id
+            operation = factory_operation(creation_code)
+            result = await self._submit_reviewed_call(
+                user, operation, attempt_id, execution_terms
             )
             if not result.get("already_deployed"):
                 await self.config.pending_factory_operation.set(
@@ -176,7 +224,9 @@ class TokenFactory(commands.Cog):
             == "0xa4e867671846a61743568f19d897fb5ffe40ad9678c9c06e791ff45dad7136f7"
         )
 
-    async def submit_token_deployment(self, user, draft: TokenDraft) -> dict:
+    async def submit_token_deployment(
+        self, user, draft: TokenDraft, execution_terms: dict
+    ) -> dict:
         if not await self.deployment_available():
             raise RuntimeError("Token deployment is disabled or emergency-paused.")
         stored = await self.config.user(user).deployment_draft()
@@ -192,16 +242,24 @@ class TokenFactory(commands.Cog):
             raise RuntimeError("The wallet profile no longer matches this token draft.")
         user_config = self.config.user(user)
         pending = await user_config.pending_deployment()
-        if isinstance(pending, dict) and pending.get("request_id"):
+        if (
+            isinstance(pending, dict)
+            and pending.get("route") == "external"
+            and pending.get("provider_status") not in {"complete", "dropped", "failed"}
+        ):
+            raise RuntimeError(
+                "An external-wallet token deployment is already active. "
+                "Verify or finish it before using Discord Wallet."
+            )
+        if (
+            isinstance(pending, dict)
+            and pending.get("request_id")
+            and pending.get("route") != "external"
+        ):
             same_draft = pending.get("draft") == draft.to_dict()
             if same_draft:
-                verified = await wallet.tokenfactory_verify_fixed_supply_token(
-                    request_id=str(pending["request_id"]),
-                    recipient=draft.owner_address,
-                    name=draft.name,
-                    symbol=draft.symbol,
-                    decimals=draft.decimals,
-                    supply_atomic=draft.supply_atomic,
+                verified = await verify_fixed_supply_token(
+                    draft, str(pending["request_id"]), draft.owner_address
                 )
                 if verified.get("deployed"):
                     return {**verified, "already_deployed": True}
@@ -224,17 +282,12 @@ class TokenFactory(commands.Cog):
         else:
             request_id = "0x" + secrets.token_hex(32)
         attempt_id = str(uuid.uuid4())
-        result = await wallet.tokenfactory_deploy_fixed_supply_token(
-            user,
-            name=draft.name,
-            symbol=draft.symbol,
-            decimals=draft.decimals,
-            supply_atomic=draft.supply_atomic,
-            recipient=draft.owner_address,
-            request_id=request_id,
-            attempt_id=attempt_id,
+        operation = token_operation(draft, request_id, draft.owner_address)
+        result = await self._submit_reviewed_call(
+            user, operation, attempt_id, execution_terms
         )
         await user_config.pending_deployment.set({
+            "route": "discord",
             "draft": draft.to_dict(),
             "request_id": request_id,
             "attempt_id": attempt_id,
@@ -286,14 +339,8 @@ class TokenFactory(commands.Cog):
         if draft.creator_discord_id != user.id:
             raise RuntimeError("The pending deployment belongs to another member.")
         recipient = normalize_owner_address(recipient)
-        result = await self._cryptowallet().tokenfactory_verify_external_transaction(
-            transaction_hash=transaction_hash,
-            request_id=str(pending["request_id"]),
-            recipient=recipient,
-            name=draft.name,
-            symbol=draft.symbol,
-            decimals=draft.decimals,
-            supply_atomic=draft.supply_atomic,
+        result = await verify_external_transaction(
+            draft, str(pending["request_id"]), recipient, transaction_hash
         )
         pending.update({
             "transaction_hash": transaction_hash.lower(),
@@ -338,13 +385,8 @@ class TokenFactory(commands.Cog):
         if draft.creator_discord_id != user.id:
             raise RuntimeError("The pending deployment belongs to another member.")
         wallet = self._cryptowallet()
-        verified = await wallet.tokenfactory_verify_fixed_supply_token(
-            request_id=str(pending["request_id"]),
-            recipient=draft.owner_address,
-            name=draft.name,
-            symbol=draft.symbol,
-            decimals=draft.decimals,
-            supply_atomic=draft.supply_atomic,
+        verified = await verify_fixed_supply_token(
+            draft, str(pending["request_id"]), draft.owner_address
         )
         if not verified.get("deployed"):
             status = await wallet.tokenfactory_operation_status(
@@ -440,7 +482,8 @@ class TokenFactory(commands.Cog):
             await ctx.send(
                 f"Verified **{result['name']} ({result['symbol']})** at "
                 f"`{result['contract_address']}` on Base Sepolia. It was added to the "
-                "community token registry."
+                "community token registry. Run `tokenfactory tokens` to view all of "
+                "your verified deployments."
             )
             return
         status = result.get("provider_status", "pending")
@@ -454,6 +497,46 @@ class TokenFactory(commands.Cog):
             message += " No matching token is confirmed yet; check again shortly."
         await ctx.send(message)
 
+    @tokenfactory.command(
+        name="tokens", aliases=("history", "deployments", "list")
+    )
+    async def tokenfactory_tokens(self, ctx: commands.Context):
+        """List your verified TokenFactory token deployments."""
+
+        deployments = await self.config.user(ctx.author).deployed_tokens()
+        if not deployments:
+            await ctx.send(
+                "You have no verified TokenFactory tokens yet. Start with "
+                "`tokenfactory create`."
+            )
+            return
+        valid = [item for item in deployments if isinstance(item, dict)]
+        newest = list(reversed(valid[-10:]))
+        embed = discord.Embed(
+            title="Your TokenFactory tokens",
+            description=(
+                f"{len(valid)} verified fixed-supply deployment"
+                f"{'s' if len(valid) != 1 else ''} on Base Sepolia."
+            ),
+            color=await ctx.embed_color(),
+        )
+        for item in newest:
+            name = str(item.get("name") or "Unnamed token")
+            symbol = str(item.get("symbol") or "TOKEN")
+            contract = str(item.get("contract_address") or "Unavailable")
+            deployed_at = int(item.get("deployed_at", 0) or 0)
+            when = f" · <t:{deployed_at}:R>" if deployed_at > 0 else ""
+            embed.add_field(
+                name=f"{name} ({symbol})",
+                value=f"`{contract}`{when}",
+                inline=False,
+            )
+        if len(valid) > len(newest):
+            embed.set_footer(text=f"Showing the latest {len(newest)} deployments")
+        else:
+            embed.set_footer(text="Testnet tokens only")
+        await ctx.send(embed=embed)
+
     @tokenfactory.command(name="status")
     async def tokenfactory_status(self, ctx: commands.Context):
         """Show the factory safety and deployment state."""
@@ -465,8 +548,16 @@ class TokenFactory(commands.Cog):
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
         embed.add_field(name="Deployment enabled", value=str(bool(enabled)), inline=True)
         embed.add_field(name="Emergency paused", value=str(bool(paused)), inline=True)
-        embed.add_field(name="Factory", value=f"`{address}`" if address else "Not configured", inline=False)
-        embed.add_field(name="Pinned code hash", value=f"`{code_hash}`" if code_hash else "Not configured", inline=False)
+        embed.add_field(
+            name="Factory",
+            value=f"`{address}`" if address else "Not configured",
+            inline=False,
+        )
+        embed.add_field(
+            name="Pinned code hash",
+            value=f"`{code_hash}`" if code_hash else "Not configured",
+            inline=False,
+        )
         if enabled and not paused and address and code_hash:
             footer = "Protected Base Sepolia member deployment is enabled"
         elif paused:
@@ -493,7 +584,7 @@ class TokenFactory(commands.Cog):
             return
         if choice in {"enable", "enabled"}:
             try:
-                state = await self._cryptowallet().tokenfactory_deployment_status()
+                state = await factory_deployment_status()
             except Exception as exc:
                 await ctx.send(f"Token deployment enablement failed: {exc}")
                 return
@@ -523,8 +614,7 @@ class TokenFactory(commands.Cog):
         """Preview the one-time pinned Base Sepolia factory deployment."""
 
         try:
-            wallet = self._cryptowallet()
-            state = await wallet.tokenfactory_deployment_status()
+            state = await factory_deployment_status()
             artifact = self._factory_artifact()
         except Exception as exc:
             await ctx.send(f"Factory deployment preflight failed: {exc}")
@@ -543,6 +633,14 @@ class TokenFactory(commands.Cog):
             color=discord.Color.orange(),
         )
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        terms = self.execution_terms(route="discord", operation="factory")
+        embed.add_field(name="Gas limit", value=f"`{terms['gas_limit']:,}`", inline=True)
+        embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
+        embed.add_field(
+            name="Network gas",
+            value="Sponsorship active · paid by CDP paymaster",
+            inline=False,
+        )
         embed.add_field(name="Destination", value=f"`{state['address']}`", inline=False)
         embed.add_field(
             name="Runtime code hash",
@@ -550,7 +648,7 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="Owner-only · explicit confirmation · no mainnet path")
-        view = FactoryDeploymentView(self, ctx.author, str(artifact["bytecode"]))
+        view = FactoryDeploymentView(self, ctx.author, str(artifact["bytecode"]), terms)
         await ctx.send(embed=embed, view=view)
 
     @tokenfactoryset.command(name="verifyfactory")
@@ -558,7 +656,7 @@ class TokenFactory(commands.Cog):
         """Verify and record the pinned factory after on-chain confirmation."""
 
         try:
-            state = await self._cryptowallet().tokenfactory_deployment_status()
+            state = await factory_deployment_status()
         except Exception as exc:
             await ctx.send(f"Factory verification failed: {exc}")
             return

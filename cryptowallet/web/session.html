@@ -19,8 +19,27 @@
       <button id="authorize-wallet" type="button">Authorize this wallet</button>
       <p id="authorization-status" role="status"></p>
     </div>
-    <p class="notice">This grants time-limited authority for the listed testnet accounts. It does not send funds, and you can revoke it anytime.</p>
+    <section id="clanker-external-workflow" hidden>
+      <h2>Clanker external wallet</h2>
+      <p id="external-clanker-status">Loading protected Clanker deployment details…</p>
+      <dl id="external-clanker-details" hidden></dl>
+      <div id="external-clanker-controls" hidden>
+        <button id="external-clanker-connect" type="button">Connect external wallet</button>
+        <p class="notice">The connected wallet is the execution wallet and gas payer. Blank token-administrator and reward roles resolve to it; explicit addresses remain unchanged. No wallet secret is sent to the website or bot.</p>
+        <button id="external-clanker-deploy" type="button" disabled>Review and deploy token</button>
+        <p id="external-clanker-result" role="status"></p>
+        <div id="external-clanker-verification" hidden>
+          <label for="external-clanker-command">Verify in Discord after confirmation</label>
+          <div class="copy-row">
+            <input id="external-clanker-command" readonly>
+            <button id="external-clanker-copy" type="button">Copy</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    <p id="session-notice" class="notice">This grants time-limited authority for the listed testnet accounts. It does not send funds, and you can revoke it anytime.</p>
   </main>
   <script src="app.js" type="module"></script>
+  <script src="clanker-external.js" type="module"></script>
 </body>
 </html>
