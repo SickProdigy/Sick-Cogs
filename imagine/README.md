@@ -20,16 +20,15 @@ OpenAI API usage is billed separately from ChatGPT and Codex subscriptions.
 
 ## Experimental Codex provider
 
-Codex can use a cached ChatGPT login and its included image-generation allowance. Install Codex
-for the same operating-system account that runs Red, then log that account in interactively:
+Codex can use a bot-managed CLI and a ChatGPT device-code login. The bot owner does not need SSH, root access, or a system-wide Codex installation. Open the owner-only setup panel:
 
 ```text
-codex login
-codex login status
+[p]imagineset codex
 ```
 
-Codex is available by default as a provider, just like OpenAI. A server administrator can select it
-inside an explicitly allowlisted and enabled server:
+Use **Install / update Codex**, then **Link ChatGPT**. The linking URL, one-time code, account status, and plan are shown only to the bot owner who presses the button. The managed CLI and its authentication cache stay in Imagine's private Red data directory. The same panel provides connection status, updates, disconnect controls, and a private **Usage** view with current rate-limit windows, reset times, and available account token summaries. Each generated Codex image also reports the input, cached, output, and reasoning tokens used by that Codex turn; those token counts are diagnostics, not a count of image credits.
+
+Codex is available by default as a provider. After linking, a server administrator can select it inside an explicitly allowlisted and enabled server:
 
 ```text
 [p]imagineset provider codex
@@ -39,13 +38,7 @@ inside an explicitly allowlisted and enabled server:
 [p]imagine draw a tiny robot tending a rooftop garden
 ```
 
-Codex follows Imagine's normal user and role allowlists. The bot owner can still use
-`[p]imagineset providerstate codex false` as an emergency kill switch, while server administrators
-decide which trusted members may use the selected provider. It runs
-`codex exec` ephemerally in a new empty temporary directory with a workspace-write sandbox, a
-restricted environment, and a five-minute timeout. It is experimental: OpenAI documents built-in
-Codex image generation and non-interactive Codex separately, but recommends the Images API for
-programmatic image generation. Never share or copy Codex's cached authentication file into Red.
+Codex follows Imagine's normal user and role allowlists. The bot owner can still use `[p]imagineset providerstate codex false` as an emergency kill switch. It runs `codex exec` ephemerally in a new empty temporary directory with a workspace-write sandbox, a restricted environment, and a five-minute timeout. The host must permit outbound HTTPS and execution from Red's data directory.
 
 ## ComfyUI staging
 

@@ -20,6 +20,7 @@ class ImageResult:
     provider: str
     model: Optional[str] = None
     revised_prompt: Optional[str] = None
+    usage: Optional[dict] = None
 
 
 @dataclass(frozen=True)

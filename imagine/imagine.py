@@ -7,8 +7,11 @@ from urllib.parse import urlsplit
 import aiohttp
 import discord
 from redbot.core import Config, checks, commands
+from redbot.core.data_manager import cog_data_path
 
 from .access import evaluate_access
+from .codex_manager import CodexManager
+from .codex_views import CodexSetupView
 from .models import ImageRequest
 from .providers import CodexImageProvider, ComfyUIProvider, OpenAIImageProvider, ProviderError
 
@@ -31,7 +34,7 @@ class Imagine(commands.Cog):
     """Private, provider-neutral image generation."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.2"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -45,6 +48,7 @@ class Imagine(commands.Cog):
         self.session = None
         self._locks = {}
         self._cooldowns = {}
+        self.codex_manager = CodexManager(cog_data_path(self) / "codex", lambda: self.session)
 
     async def cog_load(self):
         schema_version = await self.config.schema_version()
@@ -102,7 +106,13 @@ class Imagine(commands.Cog):
         if name == "codex":
             if not global_data["codex_enabled"]:
                 raise ProviderError("Codex is disabled by the bot owner.")
-            return CodexImageProvider(timeout_seconds=global_data["codex_timeout_seconds"])
+            executable = self.codex_manager.executable()
+            return CodexImageProvider(
+                executable=str(executable) if executable else "codex",
+                timeout_seconds=global_data["codex_timeout_seconds"],
+                codex_home=(self.codex_manager.codex_home
+                            if self.codex_manager.bin_path.is_file() else None),
+            )
         if name == "comfyui":
             if not global_data["comfyui_enabled"]:
                 raise ProviderError("ComfyUI is disabled by the bot owner.")
@@ -148,7 +158,15 @@ class Imagine(commands.Cog):
         usage.append(now)
         await self.config.member(ctx.author).usage_timestamps.set(usage)
         self._cooldowns[(ctx.guild.id, ctx.author.id)] = now
-        await ctx.send(f"Generated with **{result.provider}** · `{result.model}`",
+        usage = ""
+        if result.usage:
+            names = (("input_tokens", "input"), ("cached_input_tokens", "cached"),
+                     ("output_tokens", "output"), ("reasoning_output_tokens", "reasoning"))
+            parts = [f"{label}: {result.usage[key]:,}" for key, label in names
+                     if isinstance(result.usage.get(key), int)]
+            if parts:
+                usage = "\nCodex turn tokens · " + " · ".join(parts)
+        await ctx.send(f"Generated with **{result.provider}** · `{result.model}`{usage}",
                        file=discord.File(io.BytesIO(result.data), filename=f"imagine-{now}.png"),
                        allowed_mentions=discord.AllowedMentions.none())
 
@@ -314,3 +332,18 @@ class Imagine(commands.Cog):
             return
         await self.config.comfyui_endpoint.set(endpoint.rstrip("/"))
         await ctx.send("ComfyUI endpoint staged; workflow mapping is not enabled yet.")
+
+    @imagineset.command(name="codex")
+    @checks.is_owner()
+    async def set_codex(self, ctx):
+        """Open the private Codex install and account-linking controls."""
+        version = await self.codex_manager.version()
+        installed = f"Installed: `{version}`" if version else "Installed: **No**"
+        await ctx.send(
+            "**Codex setup**\n"
+            f"{installed}\n\n"
+            "Install or update the bot-managed CLI, link a ChatGPT account, check the "
+            "connection, or disconnect it. Account details and authorization codes are only "
+            "shown privately to the bot owner who presses a button.",
+            view=CodexSetupView(self, ctx.author.id),
+        )

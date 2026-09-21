@@ -21,6 +21,17 @@ class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(CodexImageProvider(timeout_seconds=1).timeout_seconds, 30)
         self.assertEqual(CodexImageProvider(timeout_seconds=9999).timeout_seconds, 900)
 
+    def test_usage_is_read_from_completed_turn(self):
+        output = (b'{"type":"turn.started"}\n'
+                  b'{"type":"turn.completed","usage":{"input_tokens":12,'
+                  b'"cached_input_tokens":3,"output_tokens":4,"reasoning_output_tokens":1}}\n')
+        self.assertEqual(CodexImageProvider._usage_from_jsonl(output), {
+            "input_tokens": 12,
+            "cached_input_tokens": 3,
+            "output_tokens": 4,
+            "reasoning_output_tokens": 1,
+        })
+
     async def test_missing_cli_has_actionable_error(self):
         provider = CodexImageProvider(executable="definitely-not-a-real-codex-binary")
         request = ImageRequest("robot", 1, 2)
