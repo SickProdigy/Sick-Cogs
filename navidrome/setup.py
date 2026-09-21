@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import datetime
+import re
+import secrets
 from typing import Dict
 
 import discord
@@ -114,6 +117,366 @@ class AnnouncementChannelSelect(discord.ui.ChannelSelect):
         )
 
 
+async def account_state(cog, guild: discord.Guild, member: discord.Member):
+    account = (await cog.config.guild(guild).accounts()).get(str(member.id))
+    if not account:
+        return None, None
+    try:
+        _, client = await cog._guild_client(guild)
+        remote = await client.user_by_username(str(account.get("username") or ""))
+    except NavidromeError:
+        remote = None
+    return account, remote
+
+
+def account_embed(member: discord.Member, account: dict | None, remote: dict | None):
+    embed = discord.Embed(
+        title="Navidrome account manager",
+        description=f"Managing {member.mention}",
+        colour=discord.Colour.blurple(),
+    )
+    if not account:
+        embed.add_field(
+            name="Status", value="No Navidrome account is linked through this server.", inline=False
+        )
+        return embed
+    embed.add_field(name="Username", value=str(account.get("username") or "Unknown"), inline=True)
+    embed.add_field(
+        name="Remote account",
+        value="Found" if remote else "Missing or unavailable",
+        inline=True,
+    )
+    if remote:
+        embed.add_field(name="Display name", value=str(remote.get("name") or "Not set"), inline=True)
+        embed.add_field(name="Email", value=str(remote.get("email") or "Not set"), inline=True)
+        embed.add_field(
+            name="Administrator", value="Yes" if remote.get("isAdmin") else "No", inline=True
+        )
+    return embed
+
+
+class AccountCreateModal(discord.ui.Modal):
+    def __init__(self, cog, author, member: discord.Member):
+        super().__init__(title="Create Navidrome account")
+        self.cog, self.author, self.member = cog, author, member
+        suggested = re.sub(r"[^A-Za-z0-9._-]", "", member.display_name)[:64]
+        self.username = discord.ui.TextInput(
+            label="Username", default=suggested if len(suggested) >= 3 else "", max_length=64
+        )
+        self.email = discord.ui.TextInput(
+            label="Email (optional)", required=False, max_length=254
+        )
+        self.add_item(self.username)
+        self.add_item(self.email)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        username = str(self.username.value).strip()
+        email = str(self.email.value).strip()
+        if not 3 <= len(username) <= 64 or not re.fullmatch(r"[A-Za-z0-9._-]+", username):
+            await interaction.followup.send(
+                "Usernames must be 3-64 characters using letters, numbers, dots, underscores, or hyphens.",
+                ephemeral=True,
+            )
+            return
+        if email and ("@" not in email or len(email) > 254):
+            await interaction.followup.send("Enter a valid email address or leave it blank.", ephemeral=True)
+            return
+        group = self.cog.config.guild(interaction.guild)
+        accounts = await group.accounts()
+        if str(self.member.id) in accounts:
+            await interaction.followup.send("That member already has a linked account.", ephemeral=True)
+            return
+        try:
+            _, client = await self.cog._guild_client(interaction.guild)
+            if await client.user_by_username(username):
+                await interaction.followup.send("That Navidrome username already exists.", ephemeral=True)
+                return
+            password = secrets.token_urlsafe(18)
+            remote = await client.create_user(
+                username, password, name=self.member.display_name[:100], email=email
+            )
+            try:
+                await self.member.send(
+                    f"Your Navidrome account for **{interaction.guild.name}** is ready.\n"
+                    f"Username: `{username}`\nTemporary password: `{password}`\n"
+                    "Sign in and change this password as soon as possible."
+                )
+            except discord.HTTPException:
+                await client.delete_user(str(remote.get("id") or ""))
+                await interaction.followup.send(
+                    "I could not DM that member, so account creation was rolled back.",
+                    ephemeral=True,
+                )
+                return
+        except NavidromeError as exc:
+            await interaction.followup.send(f"Account creation failed: {exc}", ephemeral=True)
+            return
+        accounts[str(self.member.id)] = {
+            "id": str(remote.get("id") or ""),
+            "username": str(remote.get("userName") or username),
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await interaction.edit_original_response(
+            content="Account created. Credentials were sent to the member by DM.",
+            embed=account_embed(self.member, accounts[str(self.member.id)], remote),
+            view=UserActionView(self.cog, interaction.user, self.member, accounts[str(self.member.id)], remote),
+        )
+
+
+class AccountEditModal(discord.ui.Modal):
+    def __init__(self, cog, author, member, account, remote):
+        super().__init__(title="Edit Navidrome account")
+        self.cog, self.author, self.member, self.account, self.remote = (
+            cog, author, member, account, remote
+        )
+        self.display_name = discord.ui.TextInput(
+            label="Display name", default=str((remote or {}).get("name") or ""), max_length=100
+        )
+        self.email = discord.ui.TextInput(
+            label="Email", default=str((remote or {}).get("email") or ""),
+            required=False, max_length=254,
+        )
+        self.add_item(self.display_name)
+        self.add_item(self.email)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        email = str(self.email.value).strip()
+        if email and ("@" not in email or len(email) > 254):
+            await interaction.followup.send("Enter a valid email address or leave it blank.", ephemeral=True)
+            return
+        try:
+            _, client = await self.cog._guild_client(interaction.guild)
+            remote = await client.user_by_username(str(self.account.get("username") or ""))
+            if not remote:
+                await interaction.followup.send("The linked Navidrome user no longer exists.", ephemeral=True)
+                return
+            remote = await client.update_user(
+                remote, name=str(self.display_name.value).strip()[:100], email=email
+            )
+        except NavidromeError as exc:
+            await interaction.followup.send(f"Account update failed: {exc}", ephemeral=True)
+            return
+        await interaction.edit_original_response(
+            content="Navidrome account updated.",
+            embed=account_embed(self.member, self.account, remote),
+            view=UserActionView(self.cog, interaction.user, self.member, self.account, remote),
+        )
+
+
+class UserSelect(discord.ui.UserSelect):
+    def __init__(self, parent: "AccountManagerView"):
+        super().__init__(placeholder="Choose a Discord member", min_values=1, max_values=1, row=0)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        member = interaction.guild.get_member(int(self.values[0].id))
+        if not member or member.bot:
+            await interaction.response.send_message("Choose a non-bot member of this server.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        account, remote = await account_state(self.parent_view.cog, interaction.guild, member)
+        await interaction.edit_original_response(
+            content=None,
+            embed=account_embed(member, account, remote),
+            view=UserActionView(
+                self.parent_view.cog, interaction.user, member, account, remote
+            ),
+        )
+
+
+class AccountManagerView(discord.ui.View):
+    def __init__(self, cog, author):
+        super().__init__(timeout=600)
+        self.cog, self.author = cog, author
+        self.add_item(UserSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_check(interaction, self.author)
+
+    @discord.ui.button(label="Back to setup", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None,
+            embed=await self.cog.setup_embed(interaction.guild),
+            view=await NavidromeSetupView.create(self.cog, interaction.user, interaction.guild),
+        )
+
+
+class AccountConfirmView(discord.ui.View):
+    def __init__(self, cog, author, member, account, remote, action: str):
+        super().__init__(timeout=120)
+        self.cog, self.author, self.member, self.account, self.remote, self.action = (
+            cog, author, member, account, remote, action
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_check(interaction, self.author)
+
+    @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        group = self.cog.config.guild(interaction.guild)
+        accounts = await group.accounts()
+        if self.action == "delete":
+            try:
+                _, client = await self.cog._guild_client(interaction.guild)
+                await client.delete_user(str(self.account.get("id") or ""))
+            except NavidromeError as exc:
+                await interaction.followup.send(f"Account deletion failed: {exc}", ephemeral=True)
+                return
+            message = "Deleted the Navidrome user and its Discord mapping."
+        else:
+            message = "Removed the Discord mapping. The Navidrome user was kept."
+        accounts.pop(str(self.member.id), None)
+        await group.accounts.set(accounts)
+        await interaction.edit_original_response(
+            content=message,
+            embed=account_embed(self.member, None, None),
+            view=UserActionView(self.cog, interaction.user, self.member, None, None),
+        )
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="No changes made.",
+            embed=account_embed(self.member, self.account, self.remote),
+            view=UserActionView(
+                self.cog, interaction.user, self.member, self.account, self.remote
+            ),
+        )
+
+
+class UserActionView(discord.ui.View):
+    def __init__(self, cog, author, member, account, remote):
+        super().__init__(timeout=600)
+        self.cog, self.author, self.member, self.account, self.remote = (
+            cog, author, member, account, remote
+        )
+        if not account:
+            for item in self.children:
+                if getattr(item, "custom_id", None) not in {"navidrome:user:create", "navidrome:user:back"}:
+                    item.disabled = True
+        else:
+            create = next(
+                item for item in self.children
+                if getattr(item, "custom_id", None) == "navidrome:user:create"
+            )
+            create.disabled = True
+            if not remote:
+                for item in self.children:
+                    if getattr(item, "custom_id", None) in {
+                        "navidrome:user:edit", "navidrome:user:password", "navidrome:user:delete"
+                    }:
+                        item.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_check(interaction, self.author)
+
+    @discord.ui.button(
+        label="Create", style=discord.ButtonStyle.success, custom_id="navidrome:user:create"
+    )
+    async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            AccountCreateModal(self.cog, interaction.user, self.member)
+        )
+
+    @discord.ui.button(
+        label="Edit", style=discord.ButtonStyle.primary, custom_id="navidrome:user:edit"
+    )
+    async def edit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            AccountEditModal(
+                self.cog, interaction.user, self.member, self.account, self.remote
+            )
+        )
+
+    @discord.ui.button(
+        label="Reset password", style=discord.ButtonStyle.secondary,
+        custom_id="navidrome:user:password",
+    )
+    async def password(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await self.member.send(
+                f"A Navidrome password reset was requested for **{interaction.guild.name}**. "
+                "Your temporary password will follow in another message."
+            )
+        except discord.HTTPException:
+            await interaction.response.send_message(
+                "I cannot DM that member, so the password was not changed.", ephemeral=True
+            )
+            return
+        await interaction.response.defer()
+        try:
+            _, client = await self.cog._guild_client(interaction.guild)
+            remote = await client.user_by_username(str(self.account.get("username") or ""))
+            if not remote:
+                await interaction.followup.send("The linked Navidrome user no longer exists.", ephemeral=True)
+                return
+            password = secrets.token_urlsafe(18)
+            remote = await client.update_user(remote, password=password)
+            await self.member.send(
+                f"New Navidrome temporary password: `{password}`\n"
+                "Sign in and change it as soon as possible."
+            )
+        except NavidromeError as exc:
+            await interaction.followup.send(f"Password reset failed: {exc}", ephemeral=True)
+            return
+        except discord.HTTPException:
+            await interaction.followup.send(
+                "The password changed, but the final DM failed. Reset it again.", ephemeral=True
+            )
+            return
+        await interaction.edit_original_response(
+            content="Password reset and sent to the member by DM.",
+            embed=account_embed(self.member, self.account, remote),
+            view=UserActionView(
+                self.cog, interaction.user, self.member, self.account, remote
+            ),
+        )
+
+    @discord.ui.button(
+        label="Unlink", style=discord.ButtonStyle.secondary, custom_id="navidrome:user:unlink"
+    )
+    async def unlink(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Remove only the Discord mapping and keep the Navidrome user?",
+            embed=None,
+            view=AccountConfirmView(
+                self.cog, interaction.user, self.member, self.account, self.remote, "unlink"
+            ),
+        )
+
+    @discord.ui.button(
+        label="Delete", style=discord.ButtonStyle.danger, custom_id="navidrome:user:delete"
+    )
+    async def delete(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="Permanently delete this Navidrome user and its Discord mapping?",
+            embed=None,
+            view=AccountConfirmView(
+                self.cog, interaction.user, self.member, self.account, self.remote, "delete"
+            ),
+        )
+
+    @discord.ui.button(
+        label="Back", style=discord.ButtonStyle.secondary, row=1,
+        custom_id="navidrome:user:back",
+    )
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None,
+            embed=discord.Embed(
+                title="Navidrome account manager",
+                description="Choose a Discord member to manage.",
+                colour=discord.Colour.blurple(),
+            ),
+            view=AccountManagerView(self.cog, interaction.user),
+        )
+
+
 class NavidromeSetupView(discord.ui.View):
     def __init__(self, cog, author: discord.abc.User):
         super().__init__(timeout=600)
@@ -183,6 +546,18 @@ class NavidromeSetupView(discord.ui.View):
             content=message,
             embed=await self.cog.setup_embed(interaction.guild),
             view=await NavidromeSetupView.create(self.cog, interaction.user, interaction.guild),
+        )
+
+    @discord.ui.button(label="Manage users", style=discord.ButtonStyle.primary, row=3)
+    async def manage_users(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None,
+            embed=discord.Embed(
+                title="Navidrome account manager",
+                description="Choose a Discord member to create or manage their linked account.",
+                colour=discord.Colour.blurple(),
+            ),
+            view=AccountManagerView(self.cog, interaction.user),
         )
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=3)

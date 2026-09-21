@@ -3,7 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from navidrome.navidrome import Navidrome
-from navidrome.setup import NavidromeSetupView, owner_check
+from navidrome.setup import (
+    AccountCreateModal, AccountManagerView, NavidromeSetupView, UserActionView, owner_check,
+)
 
 
 class Value:
@@ -94,6 +96,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         labels = {getattr(item, "label", None) for item in view.children}
         placeholders = {getattr(item, "placeholder", None) for item in view.children}
         self.assertIn("Enable announcements", labels)
+        self.assertIn("Manage users", labels)
         self.assertIn("Choose an approved Navidrome connection", placeholders)
         self.assertIn("Choose the recently-added album channel", placeholders)
 
@@ -163,6 +166,36 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(retry_minutes, 15)
         self.assertLessEqual(retry_minutes, 20)
         self.assertEqual(cog._connection_failures["home"], 1)
+
+    def test_account_manager_controls_match_link_state(self):
+        cog, _ = self.make_cog()
+        author = SimpleNamespace(id=1)
+        member = SimpleNamespace(id=22, display_name="Alice", mention="<@22>")
+
+        manager = AccountManagerView(cog, author)
+        unlinked = UserActionView(cog, author, member, None, None)
+        account = {"id": "nav-1", "username": "alice"}
+        remote = {"id": "nav-1", "userName": "alice", "name": "Alice"}
+        linked = UserActionView(cog, author, member, account, remote)
+
+        self.assertTrue(any(item.__class__.__name__ == "UserSelect" for item in manager.children))
+        unlinked_state = {item.label: item.disabled for item in unlinked.children}
+        linked_state = {item.label: item.disabled for item in linked.children}
+        self.assertFalse(unlinked_state["Create"])
+        self.assertTrue(unlinked_state["Edit"])
+        self.assertTrue(linked_state["Create"])
+        self.assertFalse(linked_state["Edit"])
+        self.assertFalse(linked_state["Reset password"])
+        self.assertFalse(linked_state["Unlink"])
+        self.assertFalse(linked_state["Delete"])
+
+    def test_create_modal_prefills_safe_username_and_never_accepts_a_password(self):
+        cog, _ = self.make_cog()
+        member = SimpleNamespace(id=22, display_name="Alice Example")
+        modal = AccountCreateModal(cog, SimpleNamespace(id=1), member)
+
+        self.assertEqual(modal.username.default, "AliceExample")
+        self.assertEqual(len(modal.children), 2)
 
     async def test_account_create_maps_user_without_storing_password(self):
         cog, group = self.make_cog()

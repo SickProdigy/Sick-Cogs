@@ -34,8 +34,8 @@ than a personal account. A read-only account is sufficient only when user manage
 ## Guild setup
 
 Open the guided panel with `[p]navidromeset setup`. It lets an administrator select an approved
-connection and channel, set the interval, test the connection, preview an album, and enable or
-disable announcements. Equivalent text commands remain available:
+connection and channel, set the interval, test the connection, preview an album, enable or disable
+announcements, and open **Manage users** for the complete interactive account lifecycle. Equivalent text commands remain available:
 
 ```text
 [p]navidromeset connection home
