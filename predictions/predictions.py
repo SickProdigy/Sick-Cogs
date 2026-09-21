@@ -31,7 +31,7 @@ class Predictions(commands.Cog):
     """Create and settle free or optional play-credit prediction games."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.1"
+    __version__ = "1.0.0"
     CONFIG_IDENTIFIER = 4471154655686372714528845515891787089043720058314721103476628161340921
 
     def __init__(self, bot):
