@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 
 import aiohttp
@@ -21,6 +22,11 @@ COC_DEVELOPER_URL = "https://developer.clashofclans.com/"
 COC_TOKEN_NAMESPACE = "clashofclans"
 COC_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=30)
 COC_NOTIFICATION_CONCURRENCY = 5
+COC_PROVIDER_RETRY_ATTEMPTS = 3
+COC_PROVIDER_BACKOFF_MAX_SECONDS = 30
+COC_CWL_CACHE_SECONDS = 6 * 60 * 60
+COC_CWL_ENDED_CACHE_SECONDS = 15 * 60
+COC_POLL_JITTER_MAX_SECONDS = 30
 WAR_NOTIFICATION_EVENTS = {
     "prep": "Preparation Started",
     "prepsoon": "Preparation Ending Soon",
@@ -135,6 +141,8 @@ class Coc(commands.Cog):
         self.config = Config.get_conf(self, identifier=5218831554, force_registration=True)
         self.config.register_guild(**default_guild)
         self._last_cycle_metrics = {}
+        self._cwl_war_cache = {}
+        self._poll_jitter_seconds = random.uniform(0, COC_POLL_JITTER_MAX_SECONDS)
         self.war_notification.start()
 
     def cog_unload(self):
@@ -486,155 +494,239 @@ class Coc(commands.Cog):
         embed.set_footer(text="Live CWL data is not saved · Brought to you by SickGaming.net")
         await ctx.send(embed=embed)
 
+    async def _request_json(
+        self,
+        url: str,
+        headers: dict,
+        metrics: dict | None = None,
+        attempts: int = COC_PROVIDER_RETRY_ATTEMPTS,
+    ) -> tuple[dict, int, str]:
+        """Request provider JSON with bounded 429/5xx retry and safe errors."""
+        metrics = metrics if metrics is not None else {}
+        attempts = max(1, int(attempts))
+        last_status = 0
+        last_detail = ""
+        for attempt in range(attempts):
+            metrics["api_requests"] = metrics.get("api_requests", 0) + 1
+            try:
+                async with aiohttp.request(
+                    "GET", url, headers=headers, timeout=COC_HTTP_TIMEOUT
+                ) as response:
+                    last_status = response.status
+                    if response.status == 200:
+                        return await response.json(), response.status, ""
+                    last_detail = await self._response_detail(response)
+                    retryable = response.status == 429 or 500 <= response.status < 600
+                    if response.status == 429:
+                        metrics["rate_limits"] = metrics.get("rate_limits", 0) + 1
+                    if not retryable or attempt + 1 >= attempts:
+                        break
+                    retry_after = response.headers.get("Retry-After")
+                    try:
+                        requested_delay = float(retry_after) if retry_after is not None else 0.0
+                    except (TypeError, ValueError):
+                        requested_delay = 0.0
+            except asyncio.CancelledError:
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                last_detail = type(exc).__name__
+                if attempt + 1 >= attempts:
+                    break
+                requested_delay = 0.0
+
+            exponential = min(2 ** attempt, COC_PROVIDER_BACKOFF_MAX_SECONDS)
+            delay = min(
+                max(exponential, requested_delay) + random.uniform(0, 0.5),
+                COC_PROVIDER_BACKOFF_MAX_SECONDS,
+            )
+            metrics["provider_retries"] = metrics.get("provider_retries", 0) + 1
+            await asyncio.sleep(delay)
+
+        metrics["provider_failures"] = metrics.get("provider_failures", 0) + 1
+        detail = f": {last_detail[:300]}" if last_detail else ""
+        return {}, last_status, f"Clash of Clans API returned HTTP {last_status or 'unknown'}{detail}."
+
+    async def _fetch_raid_season(
+        self, clan_tag: str, headers: dict, metrics: dict | None = None
+    ) -> tuple[dict, str]:
+        url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/capitalraidseasons?limit=1"
+        payload, status, error = await self._request_json(url, headers, metrics)
+        if status != 200:
+            return {}, error
+        seasons = payload.get("items") or []
+        return (seasons[0], "") if seasons else ({}, "No Raid Weekend season was returned.")
+
+    async def _fetch_raid_batch(
+        self, clan_tags, headers, metrics: dict, concurrency=COC_NOTIFICATION_CONCURRENCY
+    ) -> dict:
+        unique_tags = {}
+        for clan_tag in clan_tags:
+            if clan_tag:
+                unique_tags.setdefault(self._normalize_tag(clan_tag), clan_tag)
+        semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+
+        async def fetch(normalized_tag, clan_tag):
+            async with semaphore:
+                try:
+                    result = await self._fetch_raid_season(clan_tag, headers, metrics)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    metrics["raid_failures"] = metrics.get("raid_failures", 0) + 1
+                    log.warning("Could not fetch CoC Raid Weekend data for %s: %s", normalized_tag, exc)
+                    result = ({}, "The Clash of Clans API request failed.")
+                return normalized_tag, result
+
+        pairs = await asyncio.gather(
+            *(fetch(normalized, original) for normalized, original in unique_tags.items())
+        )
+        metrics["raid_fetches"] = len(unique_tags)
+        return dict(pairs)
+
     async def _check_raid_weekend_notifications(
         self,
         guild: discord.Guild,
         channel: discord.TextChannel,
         settings: dict,
-        api_key: str,
-        clan_tag: str,
-    ) -> None:
-        """Send start/end notices for the latest Clan Capital Raid Weekend."""
-
-        url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/capitalraidseasons?limit=1"
-        try:
-            async with aiohttp.request("GET", url, headers=self._api_headers(api_key), timeout=COC_HTTP_TIMEOUT) as response:
-                if response.status != 200:
-                    log.debug("Raid Weekend API returned HTTP %s for guild %s.", response.status, guild.id)
-                    return
-                payload = await response.json()
-        except aiohttp.ClientConnectionError as exc:
-            log.warning("Could not fetch Raid Weekend data for guild %s: %s", guild.id, exc)
-            return
-        except Exception:
-            log.exception("Unexpected error while checking Raid Weekend for guild %s", guild.id)
-            return
-
-        seasons = payload.get("items") or []
-        if not seasons:
-            return
-        season = seasons[0]
+        season: dict,
+    ) -> tuple[int, int, int]:
+        """Send a start/end notice and return config writes, sends, failures."""
+        if not season:
+            return 0, 0, 0
         season_key = season.get("startTime")
         state = str(season.get("state") or "unknown").lower()
         if not season_key:
-            return
+            return 0, 0, 0
 
         previous_key = settings.get("LAST_RAID_SEASON")
         previous_state = str(settings.get("LAST_RAID_STATE") or "").lower()
         guild_config = self.config.guild(guild)
         event = None
-        if previous_key is None:
-            event = "started" if state == "ongoing" else None
-        elif season_key != previous_key:
+        if previous_key is None or season_key != previous_key:
             event = "started" if state == "ongoing" else None
         elif previous_state != state and state == "ended":
             event = "ended"
 
-        if event is None:
-            await guild_config.LAST_RAID_SEASON.set(season_key)
-            await guild_config.LAST_RAID_STATE.set(state)
-            return
+        if event is not None:
+            timezone_name = str(settings.get("COC_TIMEZONE") or "America/New_York")
+            title = "Clan Capital Raid Weekend Started" if event == "started" else "Clan Capital Raid Weekend Ended"
+            description = (
+                "Raid Weekend is live. Clan members can begin their Capital attacks."
+                if event == "started"
+                else "Raid Weekend has ended. Here is the latest available clan summary."
+            )
+            embed = discord.Embed(title=title, description=description, color=0xE67E22, timestamp=None)
+            if season.get("startTime"):
+                embed.add_field(name="Started", value=self._format_coc_time(season["startTime"], timezone_name), inline=True)
+            if season.get("endTime"):
+                embed.add_field(name="Ends" if event == "started" else "Ended", value=self._format_coc_time(season["endTime"], timezone_name), inline=True)
+            embed.add_field(name="Total Attacks", value=season.get("totalAttacks", 0), inline=True)
+            embed.add_field(name="Capital Loot", value=f"{int(season.get('capitalTotalLoot', 0) or 0):,}", inline=True)
+            embed.add_field(name="Raids Completed", value=season.get("raidsCompleted", 0), inline=True)
+            embed.add_field(name="Districts Destroyed", value=season.get("enemyDistrictsDestroyed", 0), inline=True)
+            if event == "ended":
+                embed.add_field(name="Offensive Medals", value=season.get("offensiveReward", 0), inline=True)
+                embed.add_field(name="Defensive Medals", value=season.get("defensiveReward", 0), inline=True)
+            embed.set_footer(text="Brought to you by SickGaming.net")
+            try:
+                await channel.send(embed=embed)
+            except discord.HTTPException:
+                log.exception("Could not send Raid Weekend notification to channel %s in guild %s.", channel.id, guild.id)
+                return 0, 0, 1
 
-        timezone_name = str(settings.get("COC_TIMEZONE") or "America/New_York")
-        title = "Clan Capital Raid Weekend Started" if event == "started" else "Clan Capital Raid Weekend Ended"
-        description = (
-            "Raid Weekend is live. Clan members can begin their Capital attacks."
-            if event == "started"
-            else "Raid Weekend has ended. Here is the latest available clan summary."
-        )
-        embed = discord.Embed(title=title, description=description, color=0xE67E22, timestamp=None)
-        if season.get("startTime"):
-            embed.add_field(name="Started", value=self._format_coc_time(season["startTime"], timezone_name), inline=True)
-        if season.get("endTime"):
-            embed.add_field(name="Ends" if event == "started" else "Ended", value=self._format_coc_time(season["endTime"], timezone_name), inline=True)
-        embed.add_field(name="Total Attacks", value=season.get("totalAttacks", 0), inline=True)
-        embed.add_field(name="Capital Loot", value=f"{int(season.get('capitalTotalLoot', 0) or 0):,}", inline=True)
-        embed.add_field(name="Raids Completed", value=season.get("raidsCompleted", 0), inline=True)
-        embed.add_field(name="Districts Destroyed", value=season.get("enemyDistrictsDestroyed", 0), inline=True)
-        if event == "ended":
-            embed.add_field(name="Offensive Medals", value=season.get("offensiveReward", 0), inline=True)
-            embed.add_field(name="Defensive Medals", value=season.get("defensiveReward", 0), inline=True)
-        embed.set_footer(text="Brought to you by SickGaming.net")
-        try:
-            await channel.send(embed=embed)
-        except discord.HTTPException:
-            log.exception("Could not send Raid Weekend notification to channel %s in guild %s.", channel.id, guild.id)
-            return
-        await guild_config.LAST_RAID_SEASON.set(season_key)
-        await guild_config.LAST_RAID_STATE.set(state)
+        writes = [
+            await self._set_if_changed(guild_config, settings, "LAST_RAID_SEASON", season_key),
+            await self._set_if_changed(guild_config, settings, "LAST_RAID_STATE", state),
+        ]
+        return sum(writes), int(event is not None), 0
 
-    async def _fetch_cwl_war(self, clan_tag: str, headers: dict) -> tuple[dict, str]:
+    async def _fetch_cwl_war(
+        self, clan_tag: str, headers: dict, metrics: dict | None = None
+    ) -> tuple[dict, str]:
+        metrics = metrics if metrics is not None else {}
+        metrics["cwl_fallbacks"] = metrics.get("cwl_fallbacks", 0) + 1
         normalized_clan_tag = self._normalize_tag(clan_tag)
+        now = time.monotonic()
+        cached = self._cwl_war_cache.get(normalized_clan_tag)
+        if cached and cached["expires_at"] > now:
+            metrics["cwl_cache_hits"] = metrics.get("cwl_cache_hits", 0) + 1
+            war_url = f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(cached['war_tag'])}"
+            war, status, _ = await self._request_json(war_url, headers, metrics)
+            if status == 200 and normalized_clan_tag in {
+                war.get("clan", {}).get("tag"), war.get("opponent", {}).get("tag")
+            }:
+                war["_sickgaming_war_type"] = "cwl"
+                return war, ""
+            self._cwl_war_cache.pop(normalized_clan_tag, None)
+
         league_group_url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/currentwar/leaguegroup"
-
-        async with aiohttp.request("GET", league_group_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
-            if response.status != 200:
-                detail = await self._response_detail(response)
-                if detail:
-                    detail = f": {detail[:300]}"
-                return {}, f"CWL league group returned HTTP {response.status}{detail}."
-            league_group = await response.json()
-
+        league_group, status, error = await self._request_json(league_group_url, headers, metrics)
+        if status != 200:
+            return {}, error.replace("Clash of Clans API", "CWL league group")
         if league_group.get("state") == "notInWar":
             return {}, "The clan is not currently in Clan War League."
 
-        matching_wars = []
-        war_tags = [
+        war_tags = list(dict.fromkeys(
             war_tag
             for round_data in league_group.get("rounds", [])
             for war_tag in round_data.get("warTags", [])
             if war_tag and war_tag != "#0"
+        ))
+        metrics["cwl_war_scans"] = metrics.get("cwl_war_scans", 0) + len(war_tags)
+        semaphore = asyncio.Semaphore(COC_NOTIFICATION_CONCURRENCY)
+
+        async def fetch(war_tag):
+            async with semaphore:
+                url = f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(war_tag)}"
+                war, war_status, _ = await self._request_json(url, headers, metrics)
+                if war_status == 200:
+                    war["_sickgaming_war_type"] = "cwl"
+                    return war_tag, war
+                return war_tag, {}
+
+        candidates = await asyncio.gather(*(fetch(war_tag) for war_tag in war_tags))
+        matching_wars = [
+            (war_tag, war)
+            for war_tag, war in candidates
+            if normalized_clan_tag in {
+                war.get("clan", {}).get("tag"), war.get("opponent", {}).get("tag")
+            }
         ]
-
-        for war_tag in war_tags:
-            war_url = f"{COC_API_BASE}/clanwarleagues/wars/{self._clean_clan_tag(war_tag)}"
-            async with aiohttp.request("GET", war_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
-                if response.status != 200:
-                    continue
-                war = await response.json()
-            war["_sickgaming_war_type"] = "cwl"
-
-            clan = war.get("clan", {})
-            opponent = war.get("opponent", {})
-            if normalized_clan_tag in {clan.get("tag"), opponent.get("tag")}:
-                matching_wars.append(war)
-
+        selected = None
         for state in ("inWar", "preparation"):
-            for war in matching_wars:
-                if war.get("state") == state:
-                    return war, ""
-
-        if matching_wars:
-            return matching_wars[-1], ""
+            selected = next(((tag, war) for tag, war in matching_wars if war.get("state") == state), None)
+            if selected:
+                break
+        if selected is None and matching_wars:
+            selected = matching_wars[-1]
+        if selected:
+            war_tag, war = selected
+            ttl = COC_CWL_ENDED_CACHE_SECONDS if war.get("state") == "warEnded" else COC_CWL_CACHE_SECONDS
+            self._cwl_war_cache[normalized_clan_tag] = {
+                "war_tag": war_tag,
+                "expires_at": time.monotonic() + ttl,
+            }
+            return war, ""
         return {}, "CWL league group was found, but no matching war was available for this clan."
 
-    async def _fetch_current_war(self, clan_tag: str, headers: dict) -> tuple[dict, str]:
+    async def _fetch_current_war(
+        self, clan_tag: str, headers: dict, metrics: dict | None = None
+    ) -> tuple[dict, str]:
         clan_war_url = f"{COC_API_BASE}/clans/{self._clean_clan_tag(clan_tag)}/currentwar"
-
-        async with aiohttp.request("GET", clan_war_url, headers=headers, timeout=COC_HTTP_TIMEOUT) as response:
-            if response.status == 200:
-                war_data = await response.json()
-                if war_data.get("state") != "notInWar":
-                    return war_data, ""
-
-                cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers)
-                if cwl_data:
-                    return cwl_data, ""
-                return {}, f"This clan is not currently in a regular war or CWL war. {cwl_error}"
-
-            if response.status == 403:
-                cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers)
-                if cwl_data:
-                    return cwl_data, ""
-                return {}, (
-                    "Regular war data is blocked, and CWL fallback did not return war data. "
-                    f"{cwl_error}"
-                )
-
-            detail = await self._response_detail(response)
-            if detail:
-                detail = f": {detail[:300]}"
-            return {}, f"Clash of Clans API returned HTTP {response.status}{detail}."
+        war_data, status, error = await self._request_json(clan_war_url, headers, metrics)
+        if status == 200:
+            if war_data.get("state") != "notInWar":
+                return war_data, ""
+            cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers, metrics)
+            if cwl_data:
+                return cwl_data, ""
+            return {}, f"This clan is not currently in a regular war or CWL war. {cwl_error}"
+        if status == 403:
+            cwl_data, cwl_error = await self._fetch_cwl_war(clan_tag, headers, metrics)
+            if cwl_data:
+                return cwl_data, ""
+            return {}, f"Regular war data is blocked, and CWL fallback did not return war data. {cwl_error}"
+        return {}, error
 
     async def _fetch_war_batch(self, clan_tags, headers, concurrency=COC_NOTIFICATION_CONCURRENCY):
         """Fetch every normalized clan once with bounded cycle concurrency."""
@@ -643,15 +735,29 @@ class Coc(commands.Cog):
             if clan_tag:
                 unique_tags.setdefault(self._normalize_tag(clan_tag), clan_tag)
         semaphore = asyncio.Semaphore(max(1, int(concurrency)))
-        failures = 0
+        metrics = {
+            "unique_clan_tags": len(unique_tags),
+            "war_fetches": len(unique_tags),
+            "war_failures": 0,
+            "api_requests": 0,
+            "provider_retries": 0,
+            "provider_failures": 0,
+            "rate_limits": 0,
+            "cwl_fallbacks": 0,
+            "cwl_cache_hits": 0,
+            "cwl_war_scans": 0,
+            "raid_fetches": 0,
+            "raid_failures": 0,
+        }
 
         async def fetch(normalized_tag, clan_tag):
-            nonlocal failures
             async with semaphore:
                 try:
-                    result = await self._fetch_current_war(clan_tag, headers)
+                    result = await self._fetch_current_war(clan_tag, headers, metrics)
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
-                    failures += 1
+                    metrics["war_failures"] += 1
                     log.warning("Could not fetch CoC war data for %s: %s", normalized_tag, exc)
                     result = ({}, "The Clash of Clans API request failed.")
                 return normalized_tag, result
@@ -659,11 +765,7 @@ class Coc(commands.Cog):
         pairs = await asyncio.gather(
             *(fetch(normalized, original) for normalized, original in unique_tags.items())
         )
-        return dict(pairs), {
-            "unique_clan_tags": len(unique_tags),
-            "war_fetches": len(unique_tags),
-            "war_failures": failures,
-        }
+        return dict(pairs), metrics
 
     @staticmethod
     async def _set_if_changed(guild_config, settings, key, value):
@@ -672,6 +774,18 @@ class Coc(commands.Cog):
             return False
         await getattr(guild_config, key).set(value)
         settings[key] = value
+        return True
+
+    @staticmethod
+    async def _set_many_if_changed(guild_config, settings, updates):
+        """Persist a related state transition with one guild-level write."""
+        changed = {key: value for key, value in updates.items() if settings.get(key) != value}
+        if not changed:
+            return False
+        replacement = dict(settings)
+        replacement.update(changed)
+        await guild_config.set(replacement)
+        settings.update(changed)
         return True
 
     @staticmethod
@@ -1342,6 +1456,12 @@ class Coc(commands.Cog):
             return
 
         cycle_started = time.monotonic()
+        now_monotonic = time.monotonic()
+        self._cwl_war_cache = {
+            clan_tag: cached
+            for clan_tag, cached in self._cwl_war_cache.items()
+            if cached.get("expires_at", 0) > now_monotonic
+        }
         headers = self._api_headers(api_key)
         all_guilds = await self.config.all_guilds()
         enabled_guilds = sum(
@@ -1355,7 +1475,22 @@ class Coc(commands.Cog):
             if settings.get("COC_WAR_NOTIFICATIONS") and settings.get("COC_CLAN_KEY")
         ]
         war_results, metrics = await self._fetch_war_batch(war_tags, headers)
-        metrics.update({"enabled_guilds": enabled_guilds, "configured_guilds": len(all_guilds)})
+        raid_tags = [
+            settings.get("COC_CLAN_KEY")
+            for settings in all_guilds.values()
+            if settings.get("COC_RAID_WEEKEND_NOTIFICATIONS") and settings.get("COC_CLAN_KEY")
+        ]
+        raid_results = await self._fetch_raid_batch(raid_tags, headers, metrics)
+        all_cycle_tags = {
+            self._normalize_tag(tag) for tag in war_tags + raid_tags if tag
+        }
+        metrics.update({
+            "enabled_guilds": enabled_guilds,
+            "unique_clan_tags": len(all_cycle_tags),
+            "configured_guilds": len(all_guilds),
+            "discord_sends": 0,
+            "discord_failures": 0,
+        })
         config_writes = 0
         for guild_id, settings in all_guilds.items():
             war_notifications_enabled = bool(settings.get("COC_WAR_NOTIFICATIONS"))
@@ -1387,9 +1522,18 @@ class Coc(commands.Cog):
                 continue
 
             if raid_notifications_enabled:
-                await self._check_raid_weekend_notifications(
-                    guild, channel, settings, api_key, clan_tag
+                raid_season, raid_notice = raid_results.get(
+                    self._normalize_tag(clan_tag),
+                    ({}, "No cycle result was available for this clan."),
                 )
+                if not raid_season:
+                    log.debug("No Raid Weekend notification for guild %s: %s", guild_id, raid_notice)
+                raid_writes, raid_sends, raid_failures = await self._check_raid_weekend_notifications(
+                    guild, channel, settings, raid_season
+                )
+                config_writes += raid_writes
+                metrics["discord_sends"] += raid_sends
+                metrics["discord_failures"] += raid_failures
             if not war_notifications_enabled:
                 continue
 
@@ -1410,14 +1554,16 @@ class Coc(commands.Cog):
             guild_config = self.config.guild(guild)
             war_id = self._war_id(war_data)
             if war_id != settings.get("LAST_WAR_ID"):
-                await guild_config.LAST_WAR_ID.set(war_id)
-                await guild_config.WAR_NOTIFICATION_EVENTS.set({})
-                await guild_config.LAST_NOTIFICATION_STATE.set(None)
-                await guild_config.LAST_WAR_ATTACKS.set([])
-                settings["LAST_WAR_ID"] = war_id
-                settings["WAR_NOTIFICATION_EVENTS"] = {}
-                settings["LAST_NOTIFICATION_STATE"] = None
-                settings["LAST_WAR_ATTACKS"] = []
+                config_writes += await self._set_many_if_changed(
+                    guild_config,
+                    settings,
+                    {
+                        "LAST_WAR_ID": war_id,
+                        "WAR_NOTIFICATION_EVENTS": {},
+                        "LAST_NOTIFICATION_STATE": None,
+                        "LAST_WAR_ATTACKS": [],
+                    },
+                )
 
             sent_events = dict(settings.get("WAR_NOTIFICATION_EVENTS") or {})
             previous_attack_keys = settings.get("LAST_WAR_ATTACKS") or []
@@ -1498,6 +1644,7 @@ class Coc(commands.Cog):
                         allowed_mentions=allowed_mentions,
                     )
                 except discord.HTTPException:
+                    metrics["discord_failures"] += 1
                     log.exception(
                         "Could not send CoC %s notification to channel %s in guild %s.",
                         event,
@@ -1505,6 +1652,7 @@ class Coc(commands.Cog):
                         guild_id,
                     )
                     continue
+                metrics["discord_sends"] += 1
                 sent_events[event] = (datetime.now() - timedelta(hours=5)).isoformat()
                 sent_any_notification = True
 
@@ -1542,8 +1690,10 @@ class Coc(commands.Cog):
                             allowed_mentions=allowed_mentions,
                         )
                 except discord.HTTPException:
+                    metrics["discord_failures"] += 1
                     log.exception("Could not send CoC war notification to channel %s in guild %s.", channel_id, guild_id)
                     continue
+                metrics["discord_sends"] += 1
                 sent_any_notification = True
             writes = [
                 await self._set_if_changed(guild_config, settings, "WAR_START_TIME", war_data.get("startTime")),
@@ -1563,16 +1713,24 @@ class Coc(commands.Cog):
         metrics["duration_seconds"] = round(time.monotonic() - cycle_started, 3)
         self._last_cycle_metrics = metrics
         log.info(
-            "CoC notification cycle: guilds=%s unique_clans=%s war_fetches=%s "
-            "failures=%s config_writes=%s duration=%.3fs",
-            metrics["enabled_guilds"], metrics["unique_clan_tags"],
-            metrics["war_fetches"], metrics["war_failures"],
-            metrics["config_writes"], metrics["duration_seconds"],
+            "CoC notification cycle: guilds=%s unique_clans=%s logical_war_fetches=%s "
+            "raid_fetches=%s api_requests=%s retries=%s rate_limits=%s cwl_fallbacks=%s "
+            "cwl_cache_hits=%s cwl_war_scans=%s provider_failures=%s war_failures=%s "
+            "discord_sends=%s discord_failures=%s config_writes=%s duration=%.3fs",
+            metrics["enabled_guilds"], metrics["unique_clan_tags"], metrics["war_fetches"],
+            metrics["raid_fetches"], metrics["api_requests"], metrics["provider_retries"],
+            metrics["rate_limits"], metrics["cwl_fallbacks"], metrics["cwl_cache_hits"],
+            metrics["cwl_war_scans"], metrics["provider_failures"], metrics["war_failures"],
+            metrics["discord_sends"], metrics["discord_failures"], metrics["config_writes"],
+            metrics["duration_seconds"],
         )
 
     @war_notification.before_loop
     async def before_war_notification(self):
         await self.bot.wait_until_red_ready()
+        # A stable per-process startup offset avoids synchronized five-minute bursts.
+        if self._poll_jitter_seconds:
+            await asyncio.sleep(self._poll_jitter_seconds)
 
     @commands.guild_only()
     @commands.group(invoke_without_command=True, aliases=['clashofclans'], name='coc')
