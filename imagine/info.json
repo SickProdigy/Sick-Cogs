@@ -1,6 +1,6 @@
 {
   "author": ["SickProdigy"],
-  "description": "Access-controlled image generation through interchangeable OpenAI and ComfyUI providers.",
+  "description": "Access-controlled image generation through interchangeable OpenAI, Codex, and ComfyUI providers.",
   "disabled": false,
   "end_user_data_statement": "This cog stores server configuration, allowlisted role and user IDs, and bounded per-user usage timestamps for rate limiting. Prompts and generated images are sent to the configured provider but are not retained by the cog.",
   "hidden": false,
@@ -13,5 +13,5 @@
   "short": "Private, provider-neutral AI image generation.",
   "tags": ["image", "ai", "openai", "codex", "comfyui"],
   "type": "COG",
-  "version": "0.1.1"
+  "version": "0.1.2"
 }

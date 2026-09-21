@@ -13,20 +13,30 @@ from .models import ImageRequest
 from .providers import CodexImageProvider, ComfyUIProvider, OpenAIImageProvider, ProviderError
 
 CONFIG_IDENTIFIER = 846261450184
+CONFIG_SCHEMA_VERSION = 2
+DEFAULT_GLOBAL = {
+    "enabled": True,
+    "allowed_guilds": [],
+    "openai_enabled": True,
+    "codex_enabled": True,
+    "comfyui_enabled": False,
+    "codex_timeout_seconds": 300,
+    "comfyui_endpoint": None,
+    "comfyui_workflow": {},
+    "schema_version": 1,
+}
 
 
 class Imagine(commands.Cog):
     """Private, provider-neutral image generation."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.1"
+    __version__ = "0.1.2"
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
-        self.config.register_global(enabled=True, allowed_guilds=[], openai_enabled=True,
-                                    comfyui_enabled=False, codex_enabled=False, codex_timeout_seconds=300, comfyui_endpoint=None,
-                                    comfyui_workflow={})
+        self.config.register_global(**DEFAULT_GLOBAL)
         self.config.register_guild(enabled=False, provider="openai", channel_id=None,
                                    allowed_role_ids=[], allowed_user_ids=[],
                                    cooldown_seconds=60, daily_limit=10, model=None,
@@ -37,6 +47,12 @@ class Imagine(commands.Cog):
         self._cooldowns = {}
 
     async def cog_load(self):
+        schema_version = await self.config.schema_version()
+        if schema_version < CONFIG_SCHEMA_VERSION:
+            # Codex was originally staged as default-off. Access is already protected by
+            # the global guild allowlist, per-guild enablement, grants, and usage limits.
+            await self.config.codex_enabled.set(True)
+            await self.config.schema_version.set(CONFIG_SCHEMA_VERSION)
         self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180))
 
     def cog_unload(self):
@@ -179,7 +195,7 @@ class Imagine(commands.Cog):
 
     @imagineset.command(name="provider")
     async def set_provider(self, ctx, provider: str):
-        """Select openai or comfyui."""
+        """Select openai, codex, or comfyui for this server."""
         provider = provider.casefold()
         if provider not in {"openai", "codex", "comfyui"}:
             await ctx.send("Provider must be `openai`, `codex`, or `comfyui`.")

@@ -1,6 +1,7 @@
 import unittest
 
 from imagine.access import evaluate_access
+from imagine.imagine import DEFAULT_GLOBAL
 
 
 class AccessPolicyTests(unittest.TestCase):
@@ -10,6 +11,11 @@ class AccessPolicyTests(unittest.TestCase):
                   "allowed_users": [], "allowed_roles": [], "is_owner": False}
         values.update(updates)
         return evaluate_access(**values)
+
+    def test_ready_providers_are_available_by_default(self):
+        self.assertTrue(DEFAULT_GLOBAL["openai_enabled"])
+        self.assertTrue(DEFAULT_GLOBAL["codex_enabled"])
+        self.assertFalse(DEFAULT_GLOBAL["comfyui_enabled"])
 
     def test_default_deny(self):
         self.assertFalse(self.decision().allowed)

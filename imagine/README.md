@@ -28,11 +28,10 @@ codex login
 codex login status
 ```
 
-The bot owner can enable it globally, then a server administrator can select it inside an
-explicitly allowlisted server:
+Codex is available by default as a provider, just like OpenAI. A server administrator can select it
+inside an explicitly allowlisted and enabled server:
 
 ```text
-[p]imagineset providerstate codex true
 [p]imagineset provider codex
 [p]imagineset role add @VIP
 [p]imagineset role add @Admin
@@ -40,8 +39,9 @@ explicitly allowlisted server:
 [p]imagine draw a tiny robot tending a rooftop garden
 ```
 
-Codex follows Imagine's normal user and role allowlists. The bot owner retains the global provider
-switch, while server administrators decide which trusted members may use the selected provider. It runs
+Codex follows Imagine's normal user and role allowlists. The bot owner can still use
+`[p]imagineset providerstate codex false` as an emergency kill switch, while server administrators
+decide which trusted members may use the selected provider. It runs
 `codex exec` ephemerally in a new empty temporary directory with a workspace-write sandbox, a
 restricted environment, and a five-minute timeout. It is experimental: OpenAI documents built-in
 Codex image generation and non-interactive Codex separately, but recommends the Images API for
