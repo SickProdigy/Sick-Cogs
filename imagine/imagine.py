@@ -17,6 +17,12 @@ from .providers import CodexImageProvider, ComfyUIProvider, OpenAIImageProvider,
 
 CONFIG_IDENTIFIER = 846261450184
 CONFIG_SCHEMA_VERSION = 2
+OUTPUT_PRESETS = {
+    "economy": {"size": "1024x1024", "quality": "low", "background": "auto"},
+    "standard": {"size": "1024x1024", "quality": "medium", "background": "auto"},
+    "best": {"size": "1024x1024", "quality": "high", "background": "auto"},
+    "auto": {"size": "1024x1024", "quality": "auto", "background": "auto"},
+}
 DEFAULT_GLOBAL = {
     "enabled": True,
     "allowed_guilds": [],
@@ -160,13 +166,22 @@ class Imagine(commands.Cog):
         self._cooldowns[(ctx.guild.id, ctx.author.id)] = now
         usage = ""
         if result.usage:
-            names = (("input_tokens", "input"), ("cached_input_tokens", "cached"),
-                     ("output_tokens", "output"), ("reasoning_output_tokens", "reasoning"))
-            parts = [f"{label}: {result.usage[key]:,}" for key, label in names
-                     if isinstance(result.usage.get(key), int)]
+            input_tokens = result.usage.get("input_tokens")
+            cached_tokens = result.usage.get("cached_input_tokens")
+            parts = []
+            if isinstance(input_tokens, int):
+                fresh_tokens = input_tokens - cached_tokens if isinstance(cached_tokens, int) else input_tokens
+                parts.append(f"fresh input: {max(fresh_tokens, 0):,}")
+            if isinstance(cached_tokens, int):
+                parts.append(f"cached: {cached_tokens:,}")
+            for key, label in (("output_tokens", "output"),
+                               ("reasoning_output_tokens", "reasoning")):
+                if isinstance(result.usage.get(key), int):
+                    parts.append(f"{label}: {result.usage[key]:,}")
             if parts:
                 usage = "\nCodex turn tokens · " + " · ".join(parts)
-        await ctx.send(f"Generated with **{result.provider}** · `{result.model}`{usage}",
+        output = f"{settings['size']} · {settings['quality']} quality"
+        await ctx.send(f"Generated with **{result.provider}** · `{result.model}`\nOutput: {output}{usage}",
                        file=discord.File(io.BytesIO(result.data), filename=f"imagine-{now}.png"),
                        allowed_mentions=discord.AllowedMentions.none())
 
@@ -177,11 +192,14 @@ class Imagine(commands.Cog):
         channel = f"<#{settings['channel_id']}>" if settings["channel_id"] else "Any channel"
         roles = " ".join(f"<@&{x}>" for x in settings["allowed_role_ids"]) or "None"
         users = " ".join(f"<@{x}>" for x in settings["allowed_user_ids"]) or "None"
+        output = {key: settings[key] for key in ("size", "quality", "background")}
+        preset = next((name for name, values in OUTPUT_PRESETS.items() if values == output), "custom")
         await ctx.send("**Imagine status**\n"
                        f"Access now: {'Allowed' if allowed else reason}\n"
                        f"Server allowlisted: {'Yes' if ctx.guild.id in global_data['allowed_guilds'] else 'No'}\n"
                        f"Server enabled: {'Yes' if settings['enabled'] else 'No'}\n"
                        f"Provider: `{settings['provider']}`\nChannel: {channel}\n"
+                       f"Output: `{preset}` · {settings['size']} · {settings['quality']} quality\n"
                        f"Allowed roles: {roles}\nAllowed users: {users}\n"
                        f"Limits: {settings['daily_limit']} per user/day, {settings['cooldown_seconds']}s cooldown")
 
@@ -220,6 +238,32 @@ class Imagine(commands.Cog):
             return
         await self.config.guild(ctx.guild).provider.set(provider)
         await ctx.send(f"Imagine will use `{provider}`.")
+
+    @imagineset.command(name="output")
+    async def set_output(self, ctx, preset: Optional[str] = None):
+        """Select economy, standard, best, or auto image output."""
+        if preset is None:
+            settings = await self.config.guild(ctx.guild).all()
+            current = {key: settings[key] for key in ("size", "quality", "background")}
+            name = next((key for key, values in OUTPUT_PRESETS.items() if values == current), "custom")
+            await ctx.send(
+                f"Current output: `{name}` · {settings['size']} · {settings['quality']} quality.\n"
+                "Choose `economy`, `standard`, `best`, or `auto`."
+            )
+            return
+        preset = preset.casefold()
+        if preset not in OUTPUT_PRESETS:
+            await ctx.send("Output must be `economy`, `standard`, `best`, or `auto`.")
+            return
+        values = OUTPUT_PRESETS[preset]
+        guild = self.config.guild(ctx.guild)
+        await guild.size.set(values["size"])
+        await guild.quality.set(values["quality"])
+        await guild.background.set(values["background"])
+        await ctx.send(
+            f"Imagine output set to **{preset}**: {values['size']}, "
+            f"{values['quality']} quality."
+        )
 
     @imagineset.command(name="channel")
     async def set_channel(self, ctx, channel: Optional[discord.TextChannel] = None):

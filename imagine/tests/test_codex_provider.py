@@ -21,6 +21,16 @@ class CodexProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(CodexImageProvider(timeout_seconds=1).timeout_seconds, 30)
         self.assertEqual(CodexImageProvider(timeout_seconds=9999).timeout_seconds, 900)
 
+    def test_prompt_includes_requested_output_settings(self):
+        request = ImageRequest(
+            "small robot", 1, 2, size="1024x1024", quality="low", background="auto"
+        )
+        prompt = CodexImageProvider._build_prompt(request)
+        self.assertIn("Size: 1024x1024", prompt)
+        self.assertIn("Quality: low", prompt)
+        self.assertIn("Background: auto", prompt)
+        self.assertTrue(prompt.endswith("USER DESCRIPTION:\nsmall robot"))
+
     def test_usage_is_read_from_completed_turn(self):
         output = (b'{"type":"turn.started"}\n'
                   b'{"type":"turn.completed","usage":{"input_tokens":12,'

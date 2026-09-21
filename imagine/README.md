@@ -70,9 +70,20 @@ of roles and individual members:
 [p]imagineset role add @VIP
 [p]imagineset user add @SpecificUser
 [p]imagineset channel #image-lab
+[p]imagineset output economy
 [p]imagineset limits 10 60
 [p]imagineset status
 ```
+
+Output presets apply to every provider and make the quality/capacity tradeoff explicit:
+
+- `economy` requests one 1024×1024 low-quality image for drafts and conserving usage.
+- `standard` requests one 1024×1024 medium-quality image.
+- `best` requests one 1024×1024 high-quality image.
+- `auto` restores automatic quality selection at 1024×1024.
+
+Run `[p]imagineset output` without a preset to see the current setting. Existing servers remain on
+their saved output settings until an administrator selects a preset.
 
 `limits 10 60` means ten successful images per member per rolling day with a 60-second cooldown.
 Use `0` as the daily value for no per-user daily limit. Omitting the channel from
@@ -116,6 +127,7 @@ OpenAI provider:
 [p]imagineset provider openai
 [p]imagineset role add @ImageCreator
 [p]imagineset channel #image-lab
+[p]imagineset output economy
 [p]imagineset limits 10 60
 [p]imagine A tiny robot tending a rooftop garden at sunset
 ```
