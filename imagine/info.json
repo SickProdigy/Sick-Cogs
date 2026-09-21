@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Access-controlled image generation through interchangeable OpenAI, Codex, and ComfyUI providers.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server configuration, allowlisted role and user IDs, and bounded per-user usage timestamps for rate limiting. Prompts and generated images are sent to the configured provider but are not retained by the cog.",
+  "hidden": false,
+  "install_msg": "Imagine is disabled by default. The bot owner must allow the server with `[p]imagineset server allow`, then a server administrator can configure access. Store OpenAI credentials with `[p]set api openai api_key,<value>`.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "Imagine",
+  "permissions": ["attach_files", "embed_links"],
+  "requirements": [],
+  "short": "Private, provider-neutral AI image generation.",
+  "tags": ["image", "ai", "openai", "codex", "comfyui"],
+  "type": "COG",
+  "version": "0.2.0"
+}
