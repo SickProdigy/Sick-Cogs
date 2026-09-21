@@ -63,7 +63,7 @@ class Donate(commands.Cog):
     """Share configured donation links and support options."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -182,7 +182,7 @@ class Donate(commands.Cog):
         if not title or not description:
             return False, "The card title and description cannot be empty."
         settings = await self.donation_settings(guild)
-        settings.update({"title": title[:256], "description": description[:4096], "footer": footer[:2048]})
+        settings.update({"title": title[:256], "description": description[:4000], "footer": footer[:2048]})
         valid, message = self.validate_embed_budget(settings)
         if not valid:
             return False, message
@@ -275,7 +275,7 @@ class Donate(commands.Cog):
     async def donate(self, ctx: commands.Context):
         """Share this server's donation links and support options in one clean message.
 
-        Server admins can configure donations with `donate set`.
+        Server admins can configure donations with `donateset`.
         """
 
         embed = await self._donation_embed(ctx)
@@ -293,10 +293,10 @@ class Donate(commands.Cog):
         for page in pagify("\n".join(line for line in lines if line), delims=["\n"], page_length=1800):
             await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
 
-    @donate.group(name="set", invoke_without_command=True)
+    @commands.group(name="donateset", invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
-    async def donate_set(self, ctx: commands.Context):
+    async def donateset(self, ctx: commands.Context):
         """Configure this server's donation display.
 
         This is an admin command. Users can run `donate`,
@@ -305,22 +305,22 @@ class Donate(commands.Cog):
 
         message = (
             "**Donate Settings**\n\n"
-            "- `donate set setup` (alias: `interactive`)\n"
-            "- `donate set view`\n"
-            "- `donate set title <text>`\n"
-            "- `donate set description <text>`\n"
-            "- `donate set footer <text>`\n"
-            "- `donate set method <key> <label> | <value> [| note]`\n"
-            "- `donate set order <key> <number>`\n"
-            "- `donate set remove <key>`\n"
-            "- `donate set note add <text>`\n"
-            "- `donate set note remove <number>`\n"
-            "- `donate set clear`\n\n"
-            "Example: `donate set method paypal PayPal | https://paypal.me/example`"
+            "- `donateset setup` (alias: `interactive`)\n"
+            "- `donateset view`\n"
+            "- `donateset title <text>`\n"
+            "- `donateset description <text>`\n"
+            "- `donateset footer <text>`\n"
+            "- `donateset method <key> <label> | <value> [| note]`\n"
+            "- `donateset order <key> <number>`\n"
+            "- `donateset remove <key>`\n"
+            "- `donateset note add <text>`\n"
+            "- `donateset note remove <number>`\n"
+            "- `donateset clear`\n\n"
+            "Example: `donateset method paypal PayPal | https://paypal.me/example`"
         )
         await ctx.send(message)
 
-    @donate_set.command(name="setup", aliases=["interactive"])
+    @donateset.command(name="setup", aliases=["interactive"])
     @commands.bot_has_permissions(embed_links=True)
     async def donateset_setup(self, ctx: commands.Context):
         """Open the interactive donation-card setup dashboard.
@@ -332,7 +332,7 @@ class Donate(commands.Cog):
             view=DonateSetupView(self, ctx.author),
         )
 
-    @donate_set.command(name="view")
+    @donateset.command(name="view")
     @commands.bot_has_permissions(embed_links=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
@@ -341,65 +341,65 @@ class Donate(commands.Cog):
 
         await ctx.send(embed=await self._donation_embed(ctx))
 
-    @donate_set.command(name="title")
+    @donateset.command(name="title")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_title(self, ctx: commands.Context, *, title: str):
         """Set the donation embed title.
 
         Example:
-        `donate set title Support SickGaming`
+        `donateset title Support SickGaming`
         """
 
         await self.config.guild(ctx.guild).title.set(title.strip()[:256])
         await ctx.send("Donation title updated.")
 
-    @donate_set.command(name="description")
+    @donateset.command(name="description")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_description(self, ctx: commands.Context, *, description: str):
         """Set the donation embed description.
 
         Example:
-        `donate set description Donations help keep the community running.`
+        `donateset description Donations help keep the community running.`
         """
 
         await self.config.guild(ctx.guild).description.set(description.strip()[:2048])
         await ctx.send("Donation description updated.")
 
-    @donate_set.command(name="footer")
+    @donateset.command(name="footer")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_footer(self, ctx: commands.Context, *, footer: str):
         """Set the donation embed footer.
 
         Example:
-        `donate set footer Thank you for supporting SickGaming.net`
+        `donateset footer Thank you for supporting SickGaming.net`
         """
 
         await self.config.guild(ctx.guild).footer.set(footer.strip()[:2048])
         await ctx.send("Donation footer updated.")
 
-    @donate_set.command(name="method")
+    @donateset.command(name="method")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_method(self, ctx: commands.Context, key: str, *, method: str):
         """Add or update a donation method.
 
         Use:
-        `donate set method <key> <label> | <value> [| note]`
+        `donateset method <key> <label> | <value> [| note]`
 
         Examples:
-        `donate set method paypal PayPal | https://paypal.me/example`
-        `donate set method cashapp Cash App | $example`
-        `donate set method btc Bitcoin | bc1qexampleaddress | BTC only.`
+        `donateset method paypal PayPal | https://paypal.me/example`
+        `donateset method cashapp Cash App | $example`
+        `donateset method btc Bitcoin | bc1qexampleaddress | BTC only.`
         """
 
         parts = [part.strip() for part in method.split("|", 2)]
         if len(parts) < 2 or not parts[0] or not parts[1]:
             return await ctx.send(
-                "Use `donate set method <key> <label> | <value> [| note]`, "
-                "for example `donate set method paypal PayPal | https://paypal.me/example`."
+                "Use `donateset method <key> <label> | <value> [| note]`, "
+                "for example `donateset method paypal PayPal | https://paypal.me/example`."
             )
 
         method_key = self._clean_key(key)
@@ -417,7 +417,7 @@ class Donate(commands.Cog):
 
         await ctx.send(f"Donation method `{method_key}` updated.")
 
-    @donate_set.command(name="order")
+    @donateset.command(name="order")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_order(self, ctx: commands.Context, key: str, position: int):
@@ -427,7 +427,7 @@ class Donate(commands.Cog):
         them in alphabetical order. Use `0` to remove a pinned order.
 
         Example:
-        `donate set order donation-page 1`
+        `donateset order donation-page 1`
         """
 
         method_key = self._clean_key(key)
@@ -443,14 +443,14 @@ class Donate(commands.Cog):
 
         await ctx.send(f"Donation method `{method_key}` order set to {position}.")
 
-    @donate_set.command(name="remove")
+    @donateset.command(name="remove")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_remove(self, ctx: commands.Context, key: str):
         """Remove a configured donation method by key.
 
         Example:
-        `donate set remove paypal`
+        `donateset remove paypal`
         """
 
         method_key = self._clean_key(key)
@@ -461,7 +461,7 @@ class Donate(commands.Cog):
 
         await ctx.send(f"Donation method `{method_key}` removed.")
 
-    @donate_set.group(name="note", invoke_without_command=True)
+    @donateset.group(name="note", invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_note(self, ctx: commands.Context):
@@ -483,7 +483,7 @@ class Donate(commands.Cog):
         """Add a donation note.
 
         Example:
-        `donate set note add Donations are optional and never required.`
+        `donateset note add Donations are optional and never required.`
         """
 
         note = note.strip()
@@ -501,7 +501,7 @@ class Donate(commands.Cog):
         """Remove a donation note by number.
 
         Example:
-        `donate set note remove 1`
+        `donateset note remove 1`
         """
 
         async with self.config.guild(ctx.guild).notes() as notes:
@@ -510,7 +510,7 @@ class Donate(commands.Cog):
             removed = notes.pop(index - 1)
         await ctx.send(f"Removed note: {removed}", allowed_mentions=discord.AllowedMentions.none())
 
-    @donate_set.command(name="clear")
+    @donateset.command(name="clear")
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def donateset_clear(self, ctx: commands.Context):

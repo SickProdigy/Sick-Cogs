@@ -14,7 +14,7 @@ class CardDetailsModal(discord.ui.Modal):
         )
         self.description_input = discord.ui.TextInput(
             label="Description", default=data.get("description", ""),
-            style=discord.TextStyle.paragraph, max_length=4096,
+            style=discord.TextStyle.paragraph, max_length=4000,
         )
         self.footer_input = discord.ui.TextInput(
             label="Footer", default=data.get("footer", ""), max_length=2048, required=False
