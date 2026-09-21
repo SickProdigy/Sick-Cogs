@@ -22,6 +22,8 @@ Then approve and test its endpoint:
 
 ```text
 [p]navidromeowner connection add home https://music.example.com
+[p]navidromeowner connection test home
+[p]navidromeowner connection list
 ```
 
 HTTPS is required by default. A bot owner can pass `true` as the final argument to explicitly allow
@@ -29,6 +31,8 @@ HTTP for a trusted private deployment. Avoid using an administrator account when
 with access to the intended libraries is sufficient.
 
 ## Guild setup
+
+Open the guided setup panel with `[p]navidromeset setup`. It lets an administrator choose an approved connection and channel, set the interval, test the connection, preview an album, and enable or disable announcements. The equivalent text commands remain available:
 
 ```text
 [p]navidromeset connection home
@@ -58,6 +62,8 @@ history even when guilds share an approved connection.
 - `[p]navidromeset enable|disable` — control scheduled album posts.
 - `[p]navidromeset preview` — send the latest album card without changing delivery history.
 - `[p]navidromeset status` — show the guild's configuration and last successful check.
+
+Bot-owner connection commands also include `[p]navidromeowner connection test <name>` and `[p]navidromeowner connection list`.
 
 Credentials never appear in guild configuration or bot responses. Removing a connection profile
 does not delete its shared API tokens; the bot owner can remove those separately with Red's API-token

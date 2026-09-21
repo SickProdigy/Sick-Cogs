@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import io
 import logging
+import random
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
@@ -12,12 +13,13 @@ from redbot.core.bot import Red
 from redbot.core.utils import can_user_send_messages_in
 
 from .client import NavidromeClient, NavidromeError, validate_base_url
+from .setup import NavidromeSetupView
 
 
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/0.1.0"
+USER_AGENT = "Sick-Cogs-Navidrome/0.2.0"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -36,7 +38,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     default_global = {"connections": {}}
     default_guild = {
@@ -55,6 +57,8 @@ class Navidrome(commands.Cog):
         self.config.register_global(**self.default_global)
         self.config.register_guild(**self.default_guild)
         self.session: Optional[aiohttp.ClientSession] = None
+        self._poll_semaphore = asyncio.Semaphore(4)
+        self._connection_failures: Dict[str, int] = {}
         self.poll_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
@@ -164,6 +168,96 @@ class Navidrome(commands.Cog):
         value = (utc_now() + datetime.timedelta(minutes=max(15, minutes))).isoformat()
         await self.config.guild(guild).next_check_at.set(value)
 
+    async def setup_embed(self, guild: discord.Guild) -> discord.Embed:
+        settings = await self.config.guild(guild).all()
+        profiles = await self.config.connections()
+        channel = (
+            guild.get_channel_or_thread(settings["announcement_channel_id"])
+            if settings.get("announcement_channel_id")
+            else None
+        )
+        selected = settings.get("connection")
+        embed = discord.Embed(
+            title="Navidrome setup",
+            description=(
+                "Choose an owner-approved server and announcement channel, then test the "
+                "connection before enabling recently-added album posts."
+            ),
+            colour=discord.Colour.blurple(),
+        )
+        embed.add_field(
+            name="Connection",
+            value=selected or ("Not selected" if profiles else "No owner-approved connections"),
+            inline=True,
+        )
+        embed.add_field(
+            name="Connection status",
+            value="Ready to test" if selected in profiles else "Setup required",
+            inline=True,
+        )
+        embed.add_field(
+            name="Announcements",
+            value="Enabled" if settings.get("announcement_enabled") else "Disabled",
+            inline=True,
+        )
+        embed.add_field(name="Channel", value=channel.mention if channel else "Not set", inline=True)
+        embed.add_field(
+            name="Interval", value=f"{settings.get('interval_minutes', 60)} minutes", inline=True
+        )
+        embed.add_field(
+            name="Last successful check",
+            value=settings.get("last_success_at") or "Never",
+            inline=False,
+        )
+        if not profiles:
+            embed.add_field(
+                name="Owner setup needed",
+                value="Use `navidromeowner connection add <name> <url>` after storing credentials.",
+                inline=False,
+            )
+        return embed
+
+    async def enable_announcements(self, guild: discord.Guild) -> Tuple[bool, str]:
+        settings = await self.config.guild(guild).all()
+        if not settings.get("connection") or not settings.get("announcement_channel_id"):
+            return False, "Select a connection and announcement channel first."
+        channel = await self._channel(guild, int(settings["announcement_channel_id"]))
+        if not channel:
+            return False, "I cannot send messages in the configured channel."
+        try:
+            client = await self._client(settings["connection"])
+            albums = await client.newest_albums(25)
+        except NavidromeError as exc:
+            return False, f"Connection test failed: {exc}"
+        baseline = [str(album["id"]) for album in albums if album.get("id")]
+        group = self.config.guild(guild)
+        await group.announced_album_ids.set(baseline[-500:])
+        await group.announcement_enabled.set(True)
+        await group.last_success_at.set(utc_now().isoformat())
+        await self._set_next_check(guild, int(settings.get("interval_minutes", 60)))
+        return True, (
+            "Recently added album announcements are enabled. Current albums were recorded "
+            "as the baseline and will not flood the channel."
+        )
+
+    async def preview_announcement(self, guild: discord.Guild) -> Tuple[bool, str]:
+        settings = await self.config.guild(guild).all()
+        channel_id = settings.get("announcement_channel_id")
+        if not settings.get("connection") or not channel_id:
+            return False, "Select a connection and announcement channel first."
+        channel = await self._channel(guild, int(channel_id))
+        if not channel:
+            return False, "I cannot send messages in the configured channel."
+        try:
+            client = await self._client(settings["connection"])
+            albums = await client.newest_albums(1)
+        except NavidromeError as exc:
+            return False, str(exc)
+        if not albums:
+            return False, "Navidrome returned no albums to preview."
+        await self.send_album(channel, albums[0], client, content="Navidrome announcement preview")
+        return True, f"Sent a preview to {channel.mention}. Announcement history was not changed."
+
     async def _check_guild(self, guild: discord.Guild, albums: List[Dict[str, Any]], client: NavidromeClient):
         settings = await self.config.guild(guild).all()
         channel_id = settings.get("announcement_channel_id")
@@ -203,21 +297,37 @@ class Navidrome(commands.Cog):
             settings = await self.config.guild(guild).all()
             if settings.get("announcement_enabled") and settings.get("connection") and self._due(settings):
                 due.setdefault(settings["connection"], []).append(guild)
-        for name, guilds in due.items():
+        if due:
+            await asyncio.gather(
+                *(self._poll_connection(name, guilds) for name, guilds in due.items())
+            )
+
+    async def _poll_connection(self, name: str, guilds: List[discord.Guild]):
+        async with self._poll_semaphore:
             try:
                 client = await self._client(name)
                 albums = await client.newest_albums(25)
-                for guild in guilds:
-                    try:
-                        await self._check_guild(guild, albums, client)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        log.exception("Navidrome delivery failed for guild %s", guild.id)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                log.warning("Navidrome poll failed for connection %s: %s", name, type(exc).__name__)
+                failures = self._connection_failures.get(name, 0) + 1
+                self._connection_failures[name] = failures
+                delay = min(240, 15 * (2 ** min(failures - 1, 4))) + random.randint(0, 5)
+                for guild in guilds:
+                    await self._set_next_check(guild, delay)
+                log.warning(
+                    "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
+                    name, type(exc).__name__, delay,
+                )
+                return
+            self._connection_failures.pop(name, None)
+            for guild in guilds:
+                try:
+                    await self._check_guild(guild, albums, client)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("Navidrome delivery failed for guild %s", guild.id)
 
     @poll_loop.before_loop
     async def before_poll_loop(self):
@@ -328,12 +438,33 @@ class Navidrome(commands.Cog):
         lines = [f"`{name}` — {profile['base_url']}" for name, profile in sorted(profiles.items())]
         await ctx.send("\n".join(lines))
 
+    @owner_connection.command(name="test")
+    async def owner_connection_test(self, ctx: commands.Context, name: str):
+        """Test an approved connection without exposing credentials."""
+        try:
+            name = safe_profile_name(name)
+            result = await (await self._client(name)).ping()
+        except (ValueError, NavidromeError) as exc:
+            return await ctx.send(f"Connection test failed: {exc}")
+        server = str(result.get("type") or "Navidrome")
+        version = str(result.get("serverVersion") or "unknown version")
+        await ctx.send(f"Connection `{name}` is responding as {server} {version}.")
+
     @commands.group(name="navidromeset", invoke_without_command=True)
     @commands.guild_only()
     @checks.admin_or_permissions(manage_guild=True)
     async def navidromeset(self, ctx: commands.Context):
         """Configure this server's Navidrome connection and announcements."""
         await self._send_settings(ctx)
+
+    @navidromeset.command(name="setup", aliases=("interactive",))
+    @commands.bot_has_permissions(embed_links=True)
+    async def navidromeset_setup(self, ctx: commands.Context):
+        """Open the guided Navidrome setup panel."""
+        await ctx.send(
+            embed=await self.setup_embed(ctx.guild),
+            view=await NavidromeSetupView.create(self, ctx.author, ctx.guild),
+        )
 
     @navidromeset.command(name="connection")
     async def navidromeset_connection(self, ctx: commands.Context, name: str):
@@ -380,20 +511,8 @@ class Navidrome(commands.Cog):
     @navidromeset.command(name="enable")
     async def navidromeset_enable(self, ctx: commands.Context):
         """Enable album announcements and establish a no-flood baseline."""
-        settings = await self.config.guild(ctx.guild).all()
-        if not settings.get("connection") or not settings.get("announcement_channel_id"):
-            return await ctx.send("Select a connection and announcement channel first.")
-        try:
-            client = await self._client(settings["connection"])
-            albums = await client.newest_albums(25)
-        except NavidromeError as exc:
-            return await ctx.send(f"Connection test failed: {exc}")
-        baseline = [str(album["id"]) for album in albums if album.get("id")]
-        await self.config.guild(ctx.guild).announced_album_ids.set(baseline[-500:])
-        await self.config.guild(ctx.guild).announcement_enabled.set(True)
-        await self.config.guild(ctx.guild).last_success_at.set(utc_now().isoformat())
-        await self._set_next_check(ctx.guild, int(settings.get("interval_minutes", 60)))
-        await ctx.send("Recently added album announcements are enabled. Current albums were recorded as the baseline and will not flood the channel.")
+        ok, message = await self.enable_announcements(ctx.guild)
+        await ctx.send(message)
 
     @navidromeset.command(name="disable")
     async def navidromeset_disable(self, ctx: commands.Context):
@@ -405,22 +524,8 @@ class Navidrome(commands.Cog):
     @commands.bot_has_permissions(embed_links=True)
     async def navidromeset_preview(self, ctx: commands.Context):
         """Preview the newest album without changing announcement history."""
-        settings = await self.config.guild(ctx.guild).all()
-        channel_id = settings.get("announcement_channel_id")
-        if not settings.get("connection") or not channel_id:
-            return await ctx.send("Select a connection and announcement channel first.")
-        channel = await self._channel(ctx.guild, int(channel_id))
-        if not channel:
-            return await ctx.send("I cannot send messages in the configured channel.")
-        try:
-            client = await self._client(settings["connection"])
-            albums = await client.newest_albums(1)
-        except NavidromeError as exc:
-            return await ctx.send(str(exc))
-        if not albums:
-            return await ctx.send("Navidrome returned no albums to preview.")
-        await self.send_album(channel, albums[0], client, content="Navidrome announcement preview")
-        await ctx.send(f"Sent a preview to {channel.mention}. Announcement history was not changed.")
+        ok, message = await self.preview_announcement(ctx.guild)
+        await ctx.send(message)
 
     @navidromeset.command(name="status", aliases=("settings",))
     @commands.bot_has_permissions(embed_links=True)
@@ -429,12 +534,4 @@ class Navidrome(commands.Cog):
         await self._send_settings(ctx)
 
     async def _send_settings(self, ctx: commands.Context):
-        settings = await self.config.guild(ctx.guild).all()
-        channel = ctx.guild.get_channel_or_thread(settings["announcement_channel_id"]) if settings.get("announcement_channel_id") else None
-        embed = discord.Embed(title="Navidrome settings", colour=discord.Colour.blurple())
-        embed.add_field(name="Connection", value=settings.get("connection") or "Not selected", inline=True)
-        embed.add_field(name="Announcements", value="Enabled" if settings.get("announcement_enabled") else "Disabled", inline=True)
-        embed.add_field(name="Channel", value=channel.mention if channel else "Not set", inline=True)
-        embed.add_field(name="Interval", value=f"{settings.get('interval_minutes', 60)} minutes", inline=True)
-        embed.add_field(name="Last successful check", value=settings.get("last_success_at") or "Never", inline=False)
-        await ctx.send(embed=embed)
+        await ctx.send(embed=await self.setup_embed(ctx.guild))
