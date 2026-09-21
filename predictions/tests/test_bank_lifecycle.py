@@ -136,6 +136,15 @@ class PredictionBankLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(approved.state, "resolved")
             self.assertEqual(approved.review["reviewed_by"], 30)
             self.assertEqual(balances, {10: 200, 20: 0})
+            self.assertEqual(approved.review["proposed_by"], 10)
+            self.assertEqual(approved.settlement["approved_by"], 30)
+            self.assertEqual(approved.settlement["finalized_by"], 30)
+            self.assertIn("approved_at", approved.settlement)
+            self.assertIn("finalized_at", approved.settlement)
+            proposed_event = next(item for item in approved.audit if item["event"] == "result_proposed")
+            completed_event = next(item for item in approved.audit if item["event"] == "settlement_complete")
+            self.assertEqual(proposed_event["actor_id"], "10")
+            self.assertEqual(completed_event["finalized_by"], "30")
 
     async def test_resolution_pays_once_and_retry_does_not_double_pay(self):
         market = make_market({

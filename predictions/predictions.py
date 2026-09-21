@@ -31,7 +31,7 @@ class Predictions(commands.Cog):
     """Create and settle free or optional play-credit prediction games."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
     CONFIG_IDENTIFIER = 4471154655686372714528845515891787089043720058314721103476628161340921
 
     def __init__(self, bot):
@@ -465,11 +465,17 @@ class Predictions(commands.Cog):
                     "cancelled": cancelled, "refunded": refunded,
                     "payouts": payouts, "house_cut": cut, "operations": {},
                     "approved_by": reviewer_id,
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
                 }
-                if market.review:
-                    market.review["status"] = "approved"
-                    market.review["reviewed_by"] = reviewer_id
-                    market.review["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                market.review = dict(market.review)
+                market.review["status"] = "approved"
+                market.review["reviewed_by"] = reviewer_id
+                market.review["reviewed_at"] = datetime.now(timezone.utc).isoformat()
+                if reviewer_id is not None:
+                    self._audit(
+                        market, "result_reviewed", actor_id=str(reviewer_id),
+                        winning_choice=winning_choice, cancelled=cancelled,
+                    )
                 market.state = "frozen"
                 self._audit(
                     market, "settlement_planned", payouts=sum(payouts.values()),
@@ -491,6 +497,10 @@ class Predictions(commands.Cog):
                     guild, markets, market, f"{plan['id']}:treasury", int(treasury_id), cut, "house_cut"
                 ):
                     return market, "Finalization is frozen; the treasury credit needs review."
+            finalized_at = datetime.now(timezone.utc).isoformat()
+            finalizer_id = plan.get("approved_by", reviewer_id)
+            plan["finalized_by"] = finalizer_id
+            plan["finalized_at"] = finalized_at
             plan["state"] = "complete"
             market.resolved_outcome = None if cancelled else winning_choice
             market.state = "cancelled" if cancelled else "resolved"
@@ -499,7 +509,11 @@ class Predictions(commands.Cog):
                     entry["state"] = "refunded" if plan.get("refunded") or cancelled else (
                         "paid" if user_id in plan.get("payouts", {}) else "lost"
                     )
-            self._audit(market, "settlement_complete", state=market.state)
+            self._audit(
+                market, "settlement_complete", state=market.state,
+                finalized_by=None if finalizer_id is None else str(finalizer_id),
+                winning_choice=winning_choice, cancelled=cancelled,
+            )
             await self._save_market(guild, markets, market)
             return market, None
 
@@ -561,6 +575,7 @@ class Predictions(commands.Cog):
             market_id = int(settings["next_market_id"])
             settings["next_market_id"] = market_id + 1
             market = PredictionMarket(market_id, ctx.guild.id, ctx.author.id, question, outcomes, now + parsed_duration, now)
+            self._audit(market, "market_created", actor_id=str(ctx.author.id), uses_bank=False)
             settings["markets"][str(market_id)] = market.to_raw()
             channel_id = settings.get("channel_id")
         destination = ctx.guild.get_channel(channel_id) if channel_id else ctx.channel
@@ -606,6 +621,9 @@ class Predictions(commands.Cog):
                     stake_min=minimum, stake_max=maximum,
                     house_cut_bps=int(current.get("house_cut_bps", 0)),
                     treasury_user_id=current.get("treasury_user_id"),
+                )
+                self._audit(
+                    market, "market_created", actor_id=str(ctx.author.id), uses_bank=True
                 )
                 current["markets"][str(market_id)] = market.to_raw()
                 channel_id = current.get("channel_id")
@@ -1004,6 +1022,15 @@ class Predictions(commands.Cog):
             state = operation.get("state", "unknown")
             states[state] = states.get(state, 0) + 1
         state_text = ", ".join(f"{key}: {value}" for key, value in sorted(states.items())) or "none"
+        proposed_by = market.review.get("proposed_by")
+        reviewed_by = market.review.get("reviewed_by")
+        finalized_by = settlement.get("finalized_by")
+        lifecycle = (
+            f"Creator ID: {market.creator_id} · "
+            f"Proposed by ID: {proposed_by if proposed_by else 'Not proposed'} · "
+            f"Reviewed by ID: {reviewed_by if reviewed_by else 'Not reviewed'} · "
+            f"Finalized by ID: {finalized_by if finalized_by else 'Not finalized'}"
+        )
         recent = market.audit[-10:]
         events = "\n".join(
             f"• {item.get('event', 'unknown')} · {item.get('at', 'unknown')}" for item in recent
@@ -1013,6 +1040,7 @@ class Predictions(commands.Cog):
             f"State: **{market.state}** · Pool: **{funded_pool}** · "
             f"Planned payouts: **{payouts}** · Treasury cut: **{cut}**\n"
             f"Reconciliation: **{payouts + cut}/{funded_pool}** · Operations: {state_text}\n"
+            f"{lifecycle}\n"
             f"{events}",
             allowed_mentions=discord.AllowedMentions.none(),
         )

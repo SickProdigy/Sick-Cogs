@@ -66,6 +66,8 @@ Accepted amounts are locked, though members may change their selected outcome wi
 [p]predictset channel #predictions
 ```
 
+The staff audit identifies who created the market, proposed its result, reviewed it, and finalized the settlement, with a bounded timestamped operation journal.
+
 Bank integration is disabled by default. Disabling it stops new play-credit predictions but does not abandon existing funded markets. The limits command sets minimum entry, maximum entry, and optional per-user exposure. When Red Bank uses global balances, only the bot owner may enable play-credit predictions because those balances span servers.
 
 The normal prediction channel and results channel are independent. `[p]predictset channel` controls where new markets appear; `[p]predictset result channel` controls where resolved and refunded result cards are announced. Result publishing covers free and paid predictions and reuses the original announcement if settlement is retried or corrected.
