@@ -47,6 +47,7 @@ class DonateSetupTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(details.title_input.default, DEFAULT_TITLE)
         self.assertEqual(details.description_input.default, DEFAULT_DESCRIPTION)
+        self.assertEqual(details.description_input.max_length, 4000)
         self.assertEqual(method.key_input.default, "paypal")
         self.assertEqual(method.order_input.default, "2")
 
@@ -156,7 +157,9 @@ class DonateSetupTests(unittest.IsolatedAsyncioTestCase):
         response.send_message.assert_awaited_once()
 
     def test_existing_text_commands_and_setup_are_registered(self):
-        names = {command.name for command in Donate.donate_set.commands}
+        self.assertEqual(Donate.donateset.name, "donateset")
+        self.assertIsNone(Donate.donateset.parent)
+        names = {command.name for command in Donate.donateset.commands}
         self.assertTrue({
             "setup", "view", "title", "description", "footer", "method",
             "order", "remove", "note", "clear",
