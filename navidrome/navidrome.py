@@ -22,7 +22,7 @@ from .setup import NavidromeSetupView
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/0.4.1"
+USER_AGENT = "Sick-Cogs-Navidrome/0.4.2"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -41,7 +41,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.4.1"
+    __version__ = "0.4.2"
 
     default_global = {"connections": {}}
     default_guild = {

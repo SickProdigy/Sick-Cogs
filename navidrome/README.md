@@ -34,7 +34,9 @@ than a personal account. A read-only account is sufficient only when user manage
 ## Server setup and optional notifications
 
 Open the guided panel with `[p]navidromeset setup`. The primary controls connect or select a
-Navidrome server and open **Manage users** for the complete interactive account lifecycle.
+Navidrome server and open **Manage users**. The bot owner can browse every account already present on
+Navidrome, including accounts with no Discord link, and can create, edit, reset, or delete standalone
+users. Its Discord-member picker remains available for accounts that should be linked to a member.
 
 Recently-added album notifications are optional. Servers that want them can choose a channel, set
 the interval, preview an album, and enable announcements. Equivalent text commands remain available:

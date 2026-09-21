@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 from navidrome.client import NavidromeError
 from navidrome.navidrome import Navidrome
 from navidrome.setup import (
-    AccountCreateModal, AccountManagerView, ConnectionModal, NavidromeSetupView, UserActionView, owner_check,
+    AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
+    DirectUserActionView, DirectUsersView, NavidromeSetupView, UserActionView, owner_check,
 )
 
 
@@ -286,6 +287,63 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(linked_state["Reset password"])
         self.assertFalse(linked_state["Unlink"])
         self.assertFalse(linked_state["Delete"])
+
+    async def test_direct_user_browser_lists_linked_and_unlinked_accounts(self):
+        cog, group = self.make_cog()
+        group.accounts.value = {"22": {"id": "one", "username": "linked"}}
+        users = [
+            {"id": "one", "userName": "linked", "isAdmin": False},
+            {"id": "two", "userName": "standalone", "isAdmin": False},
+        ]
+        client = SimpleNamespace(users=AsyncMock(return_value=users))
+        cog._guild_client = AsyncMock(return_value=("home", client))
+
+        embed, view = await DirectUsersView.create(
+            cog, SimpleNamespace(id=1), SimpleNamespace(id=2)
+        )
+
+        self.assertIn("2 user(s)", embed.description)
+        select = next(item for item in view.children if item.__class__.__name__ == "DirectUserSelect")
+        descriptions = {option.label: option.description for option in select.options}
+        self.assertEqual(descriptions["linked"], "Linked to Discord")
+        self.assertEqual(descriptions["standalone"], "Not linked to Discord")
+
+    def test_direct_admin_account_cannot_be_deleted_from_discord(self):
+        cog, _ = self.make_cog()
+        remote = {"id": "admin", "userName": "admin", "isAdmin": True}
+
+        view = DirectUserActionView(cog, SimpleNamespace(id=1), remote)
+
+        delete = next(item for item in view.children if item.label == "Delete")
+        self.assertTrue(delete.disabled)
+
+    async def test_direct_create_does_not_require_or_store_discord_mapping(self):
+        cog, group = self.make_cog()
+        remote = {"id": "nav-1", "userName": "guest", "isAdmin": False}
+        client = SimpleNamespace(
+            user_by_username=AsyncMock(return_value=None),
+            create_user=AsyncMock(return_value=remote),
+            users=AsyncMock(return_value=[remote]),
+        )
+        cog._guild_client = AsyncMock(return_value=("home", client))
+        modal = DirectAccountCreateModal(cog)
+        modal.username._value = "guest"
+        modal.display_name._value = "Guest"
+        modal.email._value = ""
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=1),
+            guild=SimpleNamespace(id=2),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+
+        await modal.on_submit(interaction)
+
+        client.create_user.assert_awaited_once()
+        self.assertEqual(group.accounts.value, {})
+        interaction.followup.send.assert_awaited_once()
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
     def test_create_modal_prefills_safe_username_and_never_accepts_a_password(self):
         cog, _ = self.make_cog()
