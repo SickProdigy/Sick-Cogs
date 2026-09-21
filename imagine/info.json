@@ -13,5 +13,5 @@
   "short": "Private, provider-neutral AI image generation.",
   "tags": ["image", "ai", "openai", "codex", "comfyui"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

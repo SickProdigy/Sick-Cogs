@@ -19,7 +19,7 @@ class Imagine(commands.Cog):
     """Private, provider-neutral image generation."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -106,9 +106,6 @@ class Imagine(commands.Cog):
             await ctx.send("Prompts may contain at most 32,000 characters.")
             return
         allowed, reason, settings, global_data = await self._access(ctx)
-        if settings["provider"] == "codex" and not await self.bot.is_owner(ctx.author):
-            await ctx.send("The experimental Codex provider is restricted to the bot owner.")
-            return
         if not allowed:
             await ctx.send(reason)
             return
