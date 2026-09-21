@@ -1,7 +1,7 @@
 """Tightly scoped role delegation for game communities and clans."""
 
 import re
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence, Tuple
 
 import discord
 from redbot.core import Config, commands
@@ -51,28 +51,35 @@ class GameRoles(commands.Cog):
             and role < bot_member.top_role
         )
 
+    async def _send_manager_dashboard(self, ctx):
+        from .views import AssignmentDashboard
+
+        games = await self.config.guild(ctx.guild).games()
+        eligible = {key: self._profile(games, key) for key in sorted(games) if self._profile(games, key) and self._can_manage(ctx.author, self._profile(games, key))}
+        if not eligible:
+            await ctx.send("You do not manage any configured game-role profiles.")
+            return
+        view = AssignmentDashboard(self, ctx.author, eligible)
+        await ctx.send(embed=view.embed(), view=view)
+
     @commands.group(name="gameroles", aliases=["clanroles"], invoke_without_command=True)
     @commands.guild_only()
     async def gameroles(self, ctx):
-        """Manage delegated roles for Rust, Ark, and other game communities."""
-        games = await self.config.guild(ctx.guild).games()
-        if not games:
-            await ctx.send(
-                "No game-role profiles are configured. A server manager can start with "
-                f"`{ctx.clean_prefix}gameroles manager add rust @Rust-General`."
-            )
-            return
-        lines = []
-        for key in sorted(games):
-            profile = self._profile(games, key)
-            lines.append(
-                f"**{key}** — {len(profile.get('manager_roles', []))} manager role(s), "
-                f"{len(profile.get('assignable_roles', []))} assignable role(s)"
-            )
-        await ctx.send(embed=discord.Embed(title="Game-role profiles", description="\n".join(lines), color=discord.Color.blurple()))
+        """Assign approved game roles through a dashboard or fallback commands."""
+        await self._send_manager_dashboard(ctx)
 
-    @gameroles.group(name="manager", invoke_without_command=True)
+    @commands.group(name="gameroleset", invoke_without_command=True)
     @commands.admin_or_permissions(manage_roles=True)
+    @commands.guild_only()
+    async def gameroleset(self, ctx):
+        """Configure delegated game-role profiles."""
+        from .views import SetupDashboard
+
+        view = SetupDashboard(self, ctx.author)
+        await view.prepare(ctx.guild)
+        await ctx.send(embed=await view.embed(ctx.guild), view=view)
+
+    @gameroleset.group(name="manager", invoke_without_command=True)
     async def gameroles_manager(self, ctx):
         """Configure roles allowed to manage one game's approved roles."""
         await ctx.send_help()
@@ -110,8 +117,7 @@ class GameRoles(commands.Cog):
                 removed = True
         await ctx.send(f"{role.mention} is no longer a **{key}** manager." if removed else "That manager role was not configured.")
 
-    @gameroles.group(name="allow", invoke_without_command=True)
-    @commands.admin_or_permissions(manage_roles=True)
+    @gameroleset.group(name="allow", invoke_without_command=True)
     async def gameroles_allow(self, ctx):
         """Configure roles that delegated managers may add or remove."""
         await ctx.send_help()
@@ -149,21 +155,22 @@ class GameRoles(commands.Cog):
                 removed = True
         await ctx.send(f"{role.mention} is no longer an approved **{key}** role." if removed else "That approved role was not configured.")
 
-    async def _change_role(self, ctx, game: str, member: discord.Member, role: discord.Role, *, add: bool):
-        key = self.normalize_game(game)
-        if key is None:
-            await ctx.send("That game profile name is invalid.")
-            return
+    def _authorized_profile(self, member: discord.Member, games: Dict, role: discord.Role, game: Optional[str] = None) -> Optional[str]:
+        keys = [self.normalize_game(game)] if game is not None else sorted(games)
+        for key in keys:
+            if key is None:
+                continue
+            profile = self._profile(games, key)
+            if role.id in profile.get("assignable_roles", []) and self._can_manage(member, profile):
+                return key
+        return None
+
+    async def _change_role(self, ctx, game: Optional[str], member: discord.Member, role: discord.Role, *, add: bool):
         games = await self.config.guild(ctx.guild).games()
-        profile = self._profile(games, key)
-        if not profile:
-            await ctx.send(f"The **{key}** game-role profile is not configured.")
-            return
-        if not self._can_manage(ctx.author, profile):
-            await ctx.send(f"You are not configured to manage **{key}** roles.")
-            return
-        if role.id not in profile.get("assignable_roles", []):
-            await ctx.send(f"{role.mention} is not an approved **{key}** role.")
+        key = self._authorized_profile(ctx.author, games, role, game)
+        if key is None:
+            suffix = f" for **{game}**" if game else " in any profile you manage"
+            await ctx.send(f"{role.mention} is not an approved role{suffix}.")
             return
         if not self._role_is_manageable(ctx.guild, role):
             await ctx.send("I cannot manage that role. Check my Manage Roles permission and role position.")
@@ -189,17 +196,35 @@ class GameRoles(commands.Cog):
         action = "added to" if add else "removed from"
         await ctx.send(f"{role.mention} was {action} {member.mention} by {ctx.author.mention}.", allowed_mentions=discord.AllowedMentions.none())
 
+    async def _parse_assignment(self, ctx, arguments: Sequence[str]) -> Optional[Tuple[Optional[str], discord.Member, discord.Role]]:
+        if len(arguments) not in (2, 3):
+            await ctx.send(f"Use `{ctx.clean_prefix}gameroles add [game] <member> <role>`.")
+            return None
+        game = arguments[0] if len(arguments) == 3 else None
+        member_arg, role_arg = arguments[-2:]
+        try:
+            member = await commands.MemberConverter().convert(ctx, member_arg)
+            role = await commands.RoleConverter().convert(ctx, role_arg)
+        except commands.BadArgument as exc:
+            await ctx.send(str(exc))
+            return None
+        return game, member, role
+
     @gameroles.command(name="add", aliases=["assign"])
-    async def gameroles_add(self, ctx, game: str, member: discord.Member, role: discord.Role):
-        """Add an approved game role to a member."""
-        await self._change_role(ctx, game, member, role, add=True)
+    async def gameroles_add(self, ctx, *arguments: str):
+        """Add an approved game role; the optional game keeps legacy syntax working."""
+        parsed = await self._parse_assignment(ctx, arguments)
+        if parsed:
+            await self._change_role(ctx, *parsed, add=True)
 
     @gameroles.command(name="remove", aliases=["unassign"])
-    async def gameroles_remove(self, ctx, game: str, member: discord.Member, role: discord.Role):
-        """Remove an approved game role from a member."""
-        await self._change_role(ctx, game, member, role, add=False)
+    async def gameroles_remove(self, ctx, *arguments: str):
+        """Remove an approved game role; the optional game keeps legacy syntax working."""
+        parsed = await self._parse_assignment(ctx, arguments)
+        if parsed:
+            await self._change_role(ctx, *parsed, add=False)
 
-    @gameroles.command(name="show", aliases=["status"])
+    @gameroleset.command(name="show", aliases=["status"])
     async def gameroles_show(self, ctx, game: str):
         """Show the configured manager and member roles for a game."""
         key = self.normalize_game(game)

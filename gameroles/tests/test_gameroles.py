@@ -29,3 +29,31 @@ class GameRolesTests(unittest.TestCase):
     def test_malformed_profile_is_treated_as_empty(self):
         self.assertEqual(GameRoles._profile({"rust": []}, "rust"), {})
         self.assertEqual(GameRoles._profile({}, "rust"), {})
+
+
+class ProfileResolutionTests(unittest.TestCase):
+    def test_short_form_finds_authorized_profile(self):
+        cog = object.__new__(GameRoles)
+        member = SimpleNamespace(
+            guild_permissions=SimpleNamespace(manage_roles=False),
+            roles=[SimpleNamespace(id=20)],
+        )
+        role = SimpleNamespace(id=99)
+        games = {
+            "ark": {"manager_roles": [30], "assignable_roles": [99]},
+            "rust": {"manager_roles": [20], "assignable_roles": [99]},
+        }
+        self.assertEqual(cog._authorized_profile(member, games, role), "rust")
+
+    def test_explicit_profile_does_not_fall_through(self):
+        cog = object.__new__(GameRoles)
+        member = SimpleNamespace(
+            guild_permissions=SimpleNamespace(manage_roles=False),
+            roles=[SimpleNamespace(id=20)],
+        )
+        role = SimpleNamespace(id=99)
+        games = {
+            "ark": {"manager_roles": [30], "assignable_roles": [99]},
+            "rust": {"manager_roles": [20], "assignable_roles": [99]},
+        }
+        self.assertIsNone(cog._authorized_profile(member, games, role, "ark"))

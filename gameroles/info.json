@@ -4,7 +4,7 @@
   "disabled": false,
   "end_user_data_statement": "This cog stores server role IDs used for game-role delegation. It does not store member data.",
   "hidden": false,
-  "install_msg": "Use `[p]help gameroles` to configure delegated Rust, Ark, or other game roles.",
+  "install_msg": "Use `[p]gameroleset` for interactive administrator setup and `[p]gameroles` to assign approved roles.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 8, 0],
   "name": "GameRoles",
