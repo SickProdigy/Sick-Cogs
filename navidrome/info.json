@@ -2,9 +2,9 @@
     "author": [
         "SickProdigy"
     ],
-    "description": "Connect each Discord server to an approved Navidrome library, browse recent albums, and announce new additions.",
+    "description": "Connect each Discord server to an approved Navidrome library, manage linked users, browse recent albums, and announce new additions.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores guild connection selections, announcement settings, and announced album IDs. This initial version stores no member data. Navidrome credentials are read from Red shared API tokens.",
+    "end_user_data_statement": "This cog stores guild connection selections, announcement settings, announced album IDs, and Discord-to-Navidrome account mappings. It does not store generated user passwords. Navidrome administrator credentials are read from Red shared API tokens.",
     "hidden": false,
     "install_msg": "Store credentials privately with `[p]set api navidrome_NAME username,YOUR_USER password,YOUR_PASSWORD`, approve the endpoint with `[p]navidromeowner connection add NAME URL`, then run `[p]navidromeset setup`.",
     "min_bot_version": "3.5.0",
@@ -13,7 +13,7 @@
     ],
     "name": "Navidrome",
     "requirements": [],
-    "short": "Per-server Navidrome library connections and album announcements",
+    "short": "Per-server Navidrome connections, linked users, and album announcements",
     "tags": [
         "music",
         "navidrome",
@@ -22,5 +22,5 @@
         "notifications"
     ],
     "type": "COG",
-    "version": "0.2.0"
+    "version": "0.3.0"
 }

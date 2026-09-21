@@ -3,6 +3,8 @@ import datetime
 import io
 import logging
 import random
+import re
+import secrets
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
@@ -11,6 +13,7 @@ from discord.ext import tasks
 from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
 from redbot.core.utils import can_user_send_messages_in
+from redbot.core.utils.chat_formatting import pagify
 
 from .client import NavidromeClient, NavidromeError, validate_base_url
 from .setup import NavidromeSetupView
@@ -19,7 +22,7 @@ from .setup import NavidromeSetupView
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/0.2.0"
+USER_AGENT = "Sick-Cogs-Navidrome/0.3.0"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -38,7 +41,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
 
     default_global = {"connections": {}}
     default_guild = {
@@ -49,6 +52,7 @@ class Navidrome(commands.Cog):
         "next_check_at": None,
         "announced_album_ids": [],
         "last_success_at": None,
+        "accounts": {},
     }
 
     def __init__(self, bot: Red):
@@ -62,8 +66,14 @@ class Navidrome(commands.Cog):
         self.poll_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
-        """This phase stores no member data."""
-        return
+        """Remove Discord-to-Navidrome mappings without deleting remote accounts."""
+        user_id = str(kwargs.get("user_id") or "")
+        if not user_id:
+            return
+        for guild_id, settings in (await self.config.all_guilds()).items():
+            accounts = dict(settings.get("accounts", {}))
+            if accounts.pop(user_id, None) is not None:
+                await self.config.guild_from_id(guild_id).accounts.set(accounts)
 
     def cog_unload(self):
         self.poll_loop.cancel()
@@ -361,6 +371,17 @@ class Navidrome(commands.Cog):
         """Show non-sensitive Navidrome server and library information."""
         await self._send_info(ctx)
 
+    @navidrome.command(name="account")
+    async def navidrome_account(self, ctx: commands.Context):
+        """Show your Discord-linked Navidrome account."""
+        account = (await self.config.guild(ctx.guild).accounts()).get(str(ctx.author.id))
+        if not account:
+            return await ctx.send("You do not have a linked Navidrome account in this server.")
+        await ctx.send(
+            f"Your linked Navidrome username is `{account.get('username', 'unknown')}`. "
+            "Ask a server administrator if you need a password reset."
+        )
+
     @navidrome.command(name="recent")
     @commands.bot_has_permissions(embed_links=True)
     async def navidrome_recent(self, ctx: commands.Context, count: int = 5):
@@ -443,12 +464,17 @@ class Navidrome(commands.Cog):
         """Test an approved connection without exposing credentials."""
         try:
             name = safe_profile_name(name)
-            result = await (await self._client(name)).ping()
+            client = await self._client(name)
+            result = await client.ping()
+            users = await client.users()
         except (ValueError, NavidromeError) as exc:
             return await ctx.send(f"Connection test failed: {exc}")
         server = str(result.get("type") or "Navidrome")
         version = str(result.get("serverVersion") or "unknown version")
-        await ctx.send(f"Connection `{name}` is responding as {server} {version}.")
+        await ctx.send(
+            f"Connection `{name}` is responding as {server} {version}. "
+            f"Native user management is available ({len(users)} users visible)."
+        )
 
     @commands.group(name="navidromeset", invoke_without_command=True)
     @commands.guild_only()
@@ -526,6 +552,197 @@ class Navidrome(commands.Cog):
         """Preview the newest album without changing announcement history."""
         ok, message = await self.preview_announcement(ctx.guild)
         await ctx.send(message)
+
+    @navidromeset.group(name="user", invoke_without_command=True)
+    async def navidromeset_user(self, ctx: commands.Context):
+        """Manage Discord-linked Navidrome accounts for this server."""
+        await ctx.send_help()
+
+    @navidromeset_user.command(name="list")
+    async def navidromeset_user_list(self, ctx: commands.Context):
+        """List accounts provisioned through this Discord server."""
+        accounts = await self.config.guild(ctx.guild).accounts()
+        if not accounts:
+            return await ctx.send("No Discord-linked Navidrome accounts are recorded.")
+        lines = []
+        for discord_id, account in sorted(
+            accounts.items(), key=lambda item: str(item[1].get("username", "")).casefold()
+        ):
+            member = ctx.guild.get_member(int(discord_id))
+            who = member.mention if member else f"Discord user `{discord_id}`"
+            lines.append(f"{who} - `{account.get('username', 'unknown')}`")
+        for page in pagify("\n".join(lines), delims=["\n"], page_length=1800):
+            await ctx.send(page, allowed_mentions=discord.AllowedMentions.none())
+
+    @navidromeset_user.command(name="info")
+    async def navidromeset_user_info(self, ctx: commands.Context, member: discord.Member):
+        """Show the current remote record for a linked member."""
+        account = (await self.config.guild(ctx.guild).accounts()).get(str(member.id))
+        if not account:
+            return await ctx.send("That member has no linked Navidrome account in this server.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            user = await client.user_by_username(str(account.get("username") or ""))
+        except NavidromeError as exc:
+            return await ctx.send(f"Could not read the Navidrome user: {exc}")
+        if not user:
+            return await ctx.send(
+                "The linked Navidrome user no longer exists. Use the unlink command to clear "
+                "the stale Discord mapping."
+            )
+        embed = discord.Embed(title="Navidrome account", colour=discord.Colour.blurple())
+        embed.add_field(name="Discord member", value=member.mention, inline=False)
+        embed.add_field(name="Username", value=str(user.get("userName") or "Unknown"), inline=True)
+        embed.add_field(name="Display name", value=str(user.get("name") or "Not set"), inline=True)
+        embed.add_field(name="Email", value=str(user.get("email") or "Not set"), inline=True)
+        embed.add_field(name="Administrator", value="Yes" if user.get("isAdmin") else "No", inline=True)
+        await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    @navidromeset_user.command(name="create")
+    async def navidromeset_user_create(
+        self, ctx: commands.Context, member: discord.Member, username: str, email: str = ""
+    ):
+        """Create a non-admin Navidrome user and privately send its temporary password."""
+        username = username.strip()
+        if not 3 <= len(username) <= 64 or not re.fullmatch(r"[A-Za-z0-9._-]+", username):
+            return await ctx.send(
+                "Usernames must be 3-64 characters using letters, numbers, dots, underscores, or hyphens."
+            )
+        if email and ("@" not in email or len(email) > 254):
+            return await ctx.send("Enter a valid email address or omit it.")
+        group = self.config.guild(ctx.guild)
+        accounts = await group.accounts()
+        if str(member.id) in accounts:
+            return await ctx.send("That member already has a linked Navidrome account.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            if await client.user_by_username(username):
+                return await ctx.send("That Navidrome username already exists.")
+            password = secrets.token_urlsafe(18)
+            user = await client.create_user(
+                username, password, name=member.display_name[:100], email=email
+            )
+            try:
+                await member.send(
+                    f"Your Navidrome account for **{ctx.guild.name}** is ready.\n"
+                    f"Username: `{username}`\nTemporary password: `{password}`\n"
+                    "Sign in and change this password as soon as possible."
+                )
+            except discord.HTTPException:
+                await client.delete_user(str(user.get("id") or ""))
+                return await ctx.send(
+                    "I could not DM that member, so the newly created Navidrome account was rolled back."
+                )
+        except NavidromeError as exc:
+            return await ctx.send(f"Navidrome account creation failed: {exc}")
+        accounts[str(member.id)] = {
+            "id": str(user.get("id") or ""),
+            "username": str(user.get("userName") or username),
+            "created_at": utc_now().isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await ctx.send(
+            f"Created Navidrome user `{username}` for {member.mention}; credentials were sent by DM.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @navidromeset_user.command(name="name")
+    async def navidromeset_user_name(
+        self, ctx: commands.Context, member: discord.Member, *, display_name: str
+    ):
+        """Change a linked user's Navidrome display name."""
+        await self._update_linked_user(ctx, member, name=display_name.strip()[:100])
+
+    @navidromeset_user.command(name="email")
+    async def navidromeset_user_email(
+        self, ctx: commands.Context, member: discord.Member, email: str
+    ):
+        """Change a linked user's Navidrome email address."""
+        if "@" not in email or len(email) > 254:
+            return await ctx.send("Enter a valid email address.")
+        await self._update_linked_user(ctx, member, email=email)
+
+    @navidromeset_user.command(name="password", aliases=("resetpassword",))
+    async def navidromeset_user_password(self, ctx: commands.Context, member: discord.Member):
+        """Reset a linked user's password and send it privately."""
+        account = (await self.config.guild(ctx.guild).accounts()).get(str(member.id))
+        if not account:
+            return await ctx.send("That member has no linked Navidrome account in this server.")
+        try:
+            await member.send(
+                f"A Navidrome password reset was requested for **{ctx.guild.name}**. "
+                "Your temporary password will follow in a second message."
+            )
+        except discord.HTTPException:
+            return await ctx.send("I cannot DM that member, so their password was not changed.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            user = await client.user_by_username(str(account.get("username") or ""))
+            if not user:
+                return await ctx.send("The linked Navidrome user no longer exists.")
+            password = secrets.token_urlsafe(18)
+            await client.update_user(user, password=password)
+            await member.send(
+                f"New Navidrome temporary password: `{password}`\n"
+                "Sign in and change it as soon as possible."
+            )
+        except (NavidromeError, discord.HTTPException) as exc:
+            if isinstance(exc, NavidromeError):
+                return await ctx.send(f"Navidrome password reset failed: {exc}")
+            return await ctx.send(
+                "The password changed, but the final DM failed. Run the reset command again."
+            )
+        await ctx.send(f"Reset {member.mention}'s Navidrome password and sent it by DM.")
+
+    @navidromeset_user.command(name="unlink")
+    async def navidromeset_user_unlink(self, ctx: commands.Context, member: discord.Member):
+        """Remove only the Discord mapping; keep the Navidrome account."""
+        group = self.config.guild(ctx.guild)
+        accounts = await group.accounts()
+        if accounts.pop(str(member.id), None) is None:
+            return await ctx.send("That member has no linked Navidrome account in this server.")
+        await group.accounts.set(accounts)
+        await ctx.send("Removed the Discord mapping. The Navidrome account was not deleted.")
+
+    @navidromeset_user.command(name="delete")
+    async def navidromeset_user_delete(
+        self, ctx: commands.Context, member: discord.Member, confirmation: str = ""
+    ):
+        """Permanently delete a linked Navidrome account; append `confirm`."""
+        if confirmation.casefold() != "confirm":
+            return await ctx.send(
+                f"This permanently deletes the linked Navidrome user. Run "
+                f"`{ctx.clean_prefix}navidromeset user delete {member} confirm` to continue."
+            )
+        group = self.config.guild(ctx.guild)
+        accounts = await group.accounts()
+        account = accounts.get(str(member.id))
+        if not account:
+            return await ctx.send("That member has no linked Navidrome account in this server.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            await client.delete_user(str(account.get("id") or ""))
+        except NavidromeError as exc:
+            return await ctx.send(f"Navidrome user deletion failed: {exc}")
+        accounts.pop(str(member.id), None)
+        await group.accounts.set(accounts)
+        await ctx.send("Deleted the Navidrome user and removed its Discord mapping.")
+
+    async def _update_linked_user(
+        self, ctx: commands.Context, member: discord.Member, **changes: Any
+    ):
+        account = (await self.config.guild(ctx.guild).accounts()).get(str(member.id))
+        if not account:
+            return await ctx.send("That member has no linked Navidrome account in this server.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            user = await client.user_by_username(str(account.get("username") or ""))
+            if not user:
+                return await ctx.send("The linked Navidrome user no longer exists.")
+            await client.update_user(user, **changes)
+        except NavidromeError as exc:
+            return await ctx.send(f"Navidrome user update failed: {exc}")
+        await ctx.send(f"Updated {member.mention}'s Navidrome account.")
 
     @navidromeset.command(name="status", aliases=("settings",))
     @commands.bot_has_permissions(embed_links=True)

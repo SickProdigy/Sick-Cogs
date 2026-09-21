@@ -44,6 +44,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "next_check_at": None,
             "announced_album_ids": [],
             "last_success_at": None,
+            "accounts": {},
         }
         group = GuildConfig(settings)
         cog = object.__new__(Navidrome)
@@ -62,6 +63,15 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         owner_names = {command.name for command in owner_connection.commands}
         self.assertIn("setup", guild_names)
         self.assertIn("test", owner_names)
+        user_group = next(
+            command for command in Navidrome.navidromeset.commands if command.name == "user"
+        )
+        self.assertEqual(
+            {command.name for command in user_group.commands},
+            {"list", "info", "create", "name", "email", "password", "unlink", "delete"},
+        )
+        member_names = {command.name for command in Navidrome.navidrome.commands}
+        self.assertIn("account", member_names)
 
     async def test_setup_view_shows_connection_channel_and_controls(self):
         cog, _ = self.make_cog(
@@ -153,6 +163,53 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(retry_minutes, 15)
         self.assertLessEqual(retry_minutes, 20)
         self.assertEqual(cog._connection_failures["home"], 1)
+
+    async def test_account_create_maps_user_without_storing_password(self):
+        cog, group = self.make_cog()
+        remote = {
+            "id": "nav-user-1", "userName": "alice", "name": "Alice",
+            "email": "", "isAdmin": False,
+        }
+        client = SimpleNamespace(
+            user_by_username=AsyncMock(return_value=None),
+            create_user=AsyncMock(return_value=remote),
+        )
+        cog._guild_client = AsyncMock(return_value=("home", client))
+        member = SimpleNamespace(
+            id=22, display_name="Alice", mention="<@22>", send=AsyncMock()
+        )
+        guild = SimpleNamespace(id=2, name="Test Server")
+        ctx = SimpleNamespace(guild=guild, send=AsyncMock())
+
+        await Navidrome.navidromeset_user_create.callback(
+            cog, ctx, member, "alice", ""
+        )
+
+        client.create_user.assert_awaited_once()
+        member.send.assert_awaited_once()
+        mapped = group.accounts.value["22"]
+        self.assertEqual(mapped["id"], "nav-user-1")
+        self.assertNotIn("password", mapped)
+        self.assertIn("Temporary password", member.send.await_args.args[0])
+
+    async def test_account_delete_requires_explicit_confirmation(self):
+        cog, group = self.make_cog()
+        group.accounts.value = {
+            "22": {"id": "nav-user-1", "username": "alice"}
+        }
+        member = SimpleNamespace(id=22)
+        ctx = SimpleNamespace(
+            guild=SimpleNamespace(id=2), clean_prefix="!", send=AsyncMock()
+        )
+        cog._guild_client = AsyncMock()
+
+        await Navidrome.navidromeset_user_delete.callback(
+            cog, ctx, member, ""
+        )
+
+        cog._guild_client.assert_not_awaited()
+        self.assertIn("confirm", ctx.send.await_args.args[0])
+        self.assertIn("22", group.accounts.value)
 
     async def test_setup_panel_rejects_another_user(self):
         response = SimpleNamespace(send_message=AsyncMock())
