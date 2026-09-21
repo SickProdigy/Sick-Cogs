@@ -3,11 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/cdp-wallet.js --bundle --format=esm --minify --legal-comments=none --outfile=cdp-wallet.js"
+    "build": "esbuild src/cdp-wallet.js --bundle --format=esm --minify --legal-comments=none --outfile=cdp-wallet.js",
+    "build:clanker": "esbuild src/clanker-external.js --bundle --format=esm --minify --legal-comments=none --outfile=clanker-external.js"
   },
   "dependencies": {
     "@coinbase/cdp-core": "0.0.123",
-    "react": "19.2.8"
+    "react": "19.2.8",
+    "viem": "2.56.3"
   },
   "devDependencies": {
     "esbuild": "0.28.2"

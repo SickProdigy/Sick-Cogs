@@ -180,7 +180,10 @@ class WalletActivityCommands:
     async def wallet_txid(
         self, ctx: commands.Context, network_key: str, txid: str
     ):
-        """Look up a public transaction on an explicitly selected testnet."""
+        """Look up a transaction.
+
+        Looks up a public transaction on an explicitly selected testnet.
+        """
         network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.TRANSACTION_LOOKUP):
             await ctx.send(
@@ -379,7 +382,10 @@ class WalletActivityCommands:
 
     @WalletCoreCommands.wallet.command(name="transactions", aliases=("tx", "trans", "history"))
     async def wallet_transactions(self, ctx: commands.Context, network_key: str = None):
-        """Browse your wallet's indexed incoming and outgoing blockchain activity."""
+        """Browse wallet activity.
+
+        Browses indexed incoming and outgoing blockchain activity for your wallet.
+        """
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return

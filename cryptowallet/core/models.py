@@ -21,19 +21,6 @@ class IntentStatus(str, Enum):
     FAILED = "failed"
 
 
-class ApprovalPurpose(str, Enum):
-    CLAIM = "claim"
-    RECOVERY = "recovery"
-    SECURITY = "security"
-    TRANSACTION = "transaction"
-
-
-class ApprovalStatus(str, Enum):
-    PENDING = "pending"
-    IDENTITY_VERIFIED = "identity_verified"
-    EXPIRED = "expired"
-
-
 @dataclass(slots=True)
 class PublicAccount:
     """Non-secret account metadata safe for persistent cog storage."""
@@ -162,55 +149,4 @@ class TransactionIntent:
             user_operation_hash=data.get("user_operation_hash"),
             transaction_hash=data.get("transaction_hash"),
             block_number=data.get("block_number"),
-        )
-
-
-@dataclass(slots=True)
-class ApprovalSession:
-    """One-time browser handoff state stored without its bearer token."""
-
-    token_digest: str
-    deployment_id: str
-    discord_application_id: int
-    discord_user_id: int
-    purpose: ApprovalPurpose
-    created_at: int
-    expires_at: int
-    status: ApprovalStatus = ApprovalStatus.PENDING
-    intent_id: str | None = None
-    consumed_at: int | None = None
-    browser_token_digest: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "token_digest": self.token_digest,
-            "deployment_id": self.deployment_id,
-            "discord_application_id": self.discord_application_id,
-            "discord_user_id": self.discord_user_id,
-            "purpose": self.purpose.value,
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-            "status": self.status.value,
-            "intent_id": self.intent_id,
-            "consumed_at": self.consumed_at,
-            "browser_token_digest": self.browser_token_digest,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ApprovalSession":
-        purpose = data["purpose"]
-        if purpose == "enrollment":
-            purpose = ApprovalPurpose.CLAIM.value
-        return cls(
-            token_digest=str(data["token_digest"]),
-            deployment_id=str(data["deployment_id"]),
-            discord_application_id=int(data["discord_application_id"]),
-            discord_user_id=int(data["discord_user_id"]),
-            purpose=ApprovalPurpose(purpose),
-            created_at=int(data["created_at"]),
-            expires_at=int(data["expires_at"]),
-            status=ApprovalStatus(data.get("status", ApprovalStatus.PENDING.value)),
-            intent_id=data.get("intent_id"),
-            consumed_at=data.get("consumed_at"),
-            browser_token_digest=data.get("browser_token_digest"),
         )

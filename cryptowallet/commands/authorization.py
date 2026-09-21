@@ -52,7 +52,10 @@ class WalletAuthorizationCommands:
 
     @WalletCoreCommands.wallet.command(name="authorize", aliases=("auth",))
     async def wallet_authorize(self, ctx: commands.Context, days: int = None):
-        """Authorize limited bot actions for your provisioned wallet."""
+        """Authorize protected signing.
+
+        Authorizes limited bot actions for your provisioned wallet.
+        """
         if not await self._wallet_read_allowed(
             ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):
@@ -165,7 +168,10 @@ class WalletAuthorizationCommands:
 
     @WalletCoreCommands.wallet.command(name="authorization", aliases=("authstatus",))
     async def wallet_authorization(self, ctx: commands.Context):
-        """Show whether the bot currently has limited signing authorization."""
+        """Show authorization status.
+
+        Shows whether the bot currently has limited signing authorization.
+        """
         if not await self._wallet_read_allowed(
             ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):
@@ -204,7 +210,10 @@ class WalletAuthorizationCommands:
 
     @WalletCoreCommands.wallet.command(name="revoke", aliases=("deauthorize", "de-auth", "deauth"))
     async def wallet_revoke(self, ctx: commands.Context):
-        """Revoke limited signing authorization for every account in your wallet profile."""
+        """Revoke signing access.
+
+        Revokes limited signing authorization for every account in your wallet profile.
+        """
         if not await self._wallet_read_allowed(
             ctx, "authorization", WALLET_PROVIDER_COOLDOWN_SECONDS
         ):

@@ -139,6 +139,20 @@ POLYGON_AMOY = Network(
     capabilities=NetworkCapabilities(balance=True, transaction_lookup=True),
 )
 
+POLYGON_MAINNET = Network(
+    key="polygon",
+    name="Polygon Mainnet",
+    family=ChainFamily.EVM,
+    chain_id=137,
+    native_symbol="POL",
+    native_decimals=18,
+    explorer_url="https://polygonscan.com",
+    testnet=False,
+    enabled=False,
+    capabilities=NetworkCapabilities(sponsorship=False),
+)
+
+
 AVALANCHE_FUJI = Network(
     key="avalanche-fuji",
     name="Avalanche Fuji",
@@ -233,6 +247,7 @@ KNOWN_NETWORKS = {
         ETHEREUM_SEPOLIA,
         ARBITRUM_SEPOLIA,
         POLYGON_AMOY,
+        POLYGON_MAINNET,
         AVALANCHE_FUJI,
         SOLANA_DEVNET,
         OPTIMISM_MAINNET,

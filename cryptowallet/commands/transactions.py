@@ -152,6 +152,81 @@ class WalletTransactionCommands:
         ))
         return view
 
+    async def _send_help_embed(self, ctx: commands.Context) -> discord.Embed:
+        """Describe wallet send forms and the caller's effective short-form default."""
+
+        server_network = NETWORKS.get(await self.config.default_network()) or BASE_SEPOLIA
+        default_asset = await self.config.user(ctx.author).default_send_asset()
+        default_network = server_network
+        default_symbol = server_network.native_symbol
+        default_kind = "native coin"
+        if isinstance(default_asset, dict):
+            selected_network = NETWORKS.get(str(default_asset.get("network") or ""))
+            if selected_network is not None:
+                default_network = selected_network
+                default_symbol = str(
+                    default_asset.get("symbol") or selected_network.native_symbol
+                )
+                default_kind = (
+                    "registered token"
+                    if default_asset.get("contract")
+                    else "native coin"
+                )
+
+        prefix = ctx.clean_prefix
+        embed = discord.Embed(
+            title="Send from your testnet wallet",
+            description=(
+                "Prepare a transfer for review. Nothing is sent until you confirm "
+                "the transaction card."
+            ),
+            color=await ctx.embed_color(),
+        )
+        embed.add_field(
+            name="Your default",
+            value=(
+                f"**{default_symbol}** on **{default_network.name}** "
+                f"({default_kind}).\nThe two-argument command uses this default."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Send your default asset",
+            value=(
+                f"`{prefix}wallet send <recipient> <amount>`\n"
+                f"Example: `{prefix}wallet send @member 0.001`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Send an asset on your default network",
+            value=(
+                f"`{prefix}wallet send <asset> <recipient> <amount>`\n"
+                f"Example: `{prefix}wallet send USDC @member 1.50`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Choose both asset and network",
+            value=(
+                f"`{prefix}wallet send <asset> <network> <recipient> <amount>`\n"
+                f"Example: `{prefix}wallet send ETH eth @member 0.001`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Recipient and settings",
+            value=(
+                "Use a wallet address or mention a non-bot server member. "
+                f"See `{prefix}wallet networks` for network names, "
+                f"`{prefix}wallet token list` for registered tokens, or "
+                f"`{prefix}wallet token default` to view or change your default."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Testnet assets only")
+        return embed
+
     @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
         titles = {
@@ -588,13 +663,33 @@ class WalletTransactionCommands:
 
     @WalletCoreCommands.wallet.command(name="send")
     async def wallet_send(self, ctx: commands.Context, *arguments: str):
-        """Prepare an unsigned native-token or registered ERC-20 transfer."""
+        """Prepare a transfer.
+
+        Nothing is sent until you confirm the transaction card.
+
+        Usage:
+        - ``wallet send <recipient> <amount>`` uses your selected default asset,
+          or the server's default network and native coin if none is selected.
+        - ``wallet send <asset> <recipient> <amount>`` sends that asset on your
+          default network.
+        - ``wallet send <asset> <network> <recipient> <amount>`` sends an
+          enabled registered token.
+
+        A recipient can be a wallet address or a non-bot server-member mention.
+        Run this command without arguments for examples and your current default.
+        """
         if not await self._wallet_sensitive_allowed(ctx):
+            return
+        if not arguments:
+            await ctx.send(embed=await self._send_help_embed(ctx))
             return
         if not await self._wallet_read_allowed(ctx, "send", WALLET_PROVIDER_COOLDOWN_SECONDS):
             return
         if len(arguments) not in {2, 3, 4}:
-            await ctx.send("Use `wallet send <recipient> <amount>`, `wallet send <network> <recipient> <amount>`, or `wallet send <asset> <network> <recipient> <amount>`.")
+            await ctx.send(
+                "That command has the wrong number of arguments. Run "
+                f"`{ctx.clean_prefix}wallet send` to see formats and examples."
+            )
             return
         asset_selector = None
         if len(arguments) == 2:
@@ -606,8 +701,12 @@ class WalletTransactionCommands:
             else:
                 network = NETWORKS.get(await self.config.default_network())
         elif len(arguments) == 3:
-            network = self._send_network(arguments[0])
-            to_address, amount = arguments[1:]
+            asset_selector, to_address, amount = arguments
+            default_asset = await self.config.user(ctx.author).default_send_asset()
+            if isinstance(default_asset, dict):
+                network = NETWORKS.get(str(default_asset.get("network") or ""))
+            else:
+                network = NETWORKS.get(await self.config.default_network())
         else:
             asset_selector, network_value, to_address, amount = arguments
             network = self._send_network(network_value)
@@ -719,7 +818,10 @@ class WalletTransactionCommands:
 
     @WalletCoreCommands.wallet.command(name="intent", aliases=("transaction",))
     async def wallet_intent(self, ctx: commands.Context, reference: str):
-        """Show one of your private stored intents by bot reference."""
+        """Show one transfer intent.
+
+        Shows one of your private stored transaction intents by bot reference.
+        """
         intents = await self.expire_and_trim_intents(ctx.author)
         lookup = reference.strip()
         data = intents.get(lookup)

@@ -55,6 +55,15 @@ function decodeHandoff() {
   };
 }
 
+async function loadSession() {
+  if (!window.location.hash.includes("handoff=")) {
+    throw new Error("This protected wallet authorization link is missing its handoff token.");
+  }
+  const candidate = new URLSearchParams(window.location.hash.slice(1)).get("handoff") || "";
+  if (candidate.split(".").length === 3) return decodeHandoff();
+  throw new Error("Protected external-wallet handoff loading below.");
+}
+
 function configureAuthorization(session) {
   if (
     session.purpose !== "authorize" ||
@@ -106,9 +115,9 @@ function configureAuthorization(session) {
 }
 
 if (statusElement && detailsElement) {
-  Promise.resolve().then(decodeHandoff)
+  Promise.resolve().then(loadSession)
     .then((session) => {
-      statusElement.textContent = "Protected wallet handoff loaded.";
+      statusElement.textContent = "Protected wallet authorization loaded.";
       addDetail("Purpose", session.purpose);
       addDetail("Approval link expires", new Date(session.expires_at * 1000).toLocaleString());
       if (session.wallet?.accounts?.length) {

@@ -12,9 +12,11 @@ A capability must be enabled in both the network registry and the active provide
 
 Base Sepolia and Solana devnet are the only send-enabled networks. Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji are enabled only for their reviewed read-only capabilities. Solana devnet has a distinct CDP Solana account with native SOL balance, recent activity, transaction-signature lookup, explorer support, protected native-SOL sends, and isolated Coinbase key export. Solana tokens remain disabled.
 
-OP Mainnet, BNB Chain, and Zora are staged as disabled metadata-only definitions using CDP's documented network identifiers. They have no enabled balance, discovery, history, send, delegation, or sponsorship capability and do not appear in ordinary wallet cards. Future mainnet sends must use user-funded native gas; this project does not promise bot-funded gas. Enabling any of these entries still requires the separate mainnet security, legal, policy, fee-estimation, and transaction-verification review.
+Polygon Mainnet, OP Mainnet, BNB Chain, and Zora are staged as disabled metadata-only definitions. Polygon Mainnet is reserved for a separately reviewed future Polymarket CLOB V2 handoff (chain ID 137, pUSD collateral); it has no enabled wallet capabilities today. The other entries use CDP's documented network identifiers. They have no enabled balance, discovery, history, send, delegation, or sponsorship capability and do not appear in ordinary wallet cards. Future mainnet sends must use user-funded native gas; this project does not promise bot-funded gas. Enabling any of these entries still requires the separate mainnet security, legal, policy, fee-estimation, and transaction-verification review. The shared Polymarket handoff contract is likewise metadata-only: Polygon chain 137 and pUSD are named so a later adapter has an explicit target, but it is disabled and cannot provision accounts, read balances, approve collateral, or sign a transaction.
 
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
+
+See [Polygon / Polymarket handoff boundary](docs/polygon-polymarket-handoff.md) for the develop-only provider-neutral execution decision record.
 
 ## Intended experience
 
@@ -95,98 +97,11 @@ Never merge accounts by username, display name, supplied platform ID, or wallet 
 
 ## Companion site
 
-The packaged browser assets live in [`web/`](web/) and are intended to be published at:
+The shared browser assets live in [`web/`](web/) and are intended to be published at `https://sickgaming.net/cryptowallet`. They serve CryptoWallet authorization and recovery plus external-wallet handoffs owned by TokenFactory and Clanker.
 
-```text
-https://sickgaming.net/cryptowallet
-```
+CryptoWallet authorization uses a three-minute signed JWT in the URL fragment. Recovery and external-wallet operations use opaque one-time handles registered by the bot through the authenticated outbound PHP/MySQL relay described in [`web/server/README.md`](web/server/README.md). The cog exposes no inbound HTTP listener and requires no website pairing or Discord OAuth bridge. Ordinary wallet provisioning, balances, activity, and authorized signing remain bot-first.
 
-Authorization authenticates the bot's short-lived signed handoff directly with CDP. Recovery
-instead requires the server-side one-time relay described in `web/server/README.md`: Discord
-receives only an opaque handle, and the browser consumes that handle once to obtain the protected
-CDP handoff. Neither flow requires the legacy cog listener or website pairing. Ordinary
-provisioning and read-only commands do not require the website at all.
-
-`backend/companion.py`, the pairing commands, and the signed PHP relay remain packaged as dormant
-infrastructure for a future server-consumed workflow. They are not part of routine deployment.
-Keep the listener disabled or bound to loopback; never expose it publicly merely to connect
-separate website and bot hosts.
-
-Static files can be served by the companion, the SickGaming web server, or a future MyBB plugin. Static files cannot safely contain or replace server-side functionality for:
-
-- Discord OAuth callbacks
-- custom-auth JWT signing and JWKS publication
-- CDP API authentication
-- wallet recovery state
-- signer export
-- delegated-authority changes
-
-No API key, OAuth client secret, wallet secret, signing key, or private user material may be embedded in `web/`.
-
-### Deferred private companion API
-
-The repository retains a versioned browser-session and response contract for future use. If that
-workflow is deliberately enabled on a private or loopback deployment, the protected flow is:
-
-```text
-GET /cryptowallet/session/<one-time-token>
-→ Discord OAuth
-→ GET /cryptowallet/oauth/callback
-→ one-time token is consumed
-→ short-lived HttpOnly browser cookie is issued
-→ redirect to /cryptowallet/session
-→ browser calls /cryptowallet/api/session.php
-→ PHP signs GET /api/v1/session to the cog backend and forwards the browser cookie
-```
-
-Cog endpoint `GET /api/v1/session` requires both a valid paired-server signature and the user's
-browser cookie. The public PHP proxy returns its stable JSON envelope containing only
-server-authoritative session data. Transaction fields are loaded from the stored intent; the
-endpoint does not accept addresses, amounts, wallet identifiers, or authorization decisions from
-browser input.
-
-Success envelope:
-
-```json
-{"data": {"version": 1, "purpose": "claim", "expires_at": 0, "identity_verified": true, "wallet": {"address": "0x...", "claimed": false}, "cdp": {"project_id": "..."}, "transaction": null}}
-```
-
-Error envelope:
-
-```json
-{"error": {"code": "session_unavailable", "message": "The wallet session is missing, invalid, or expired."}}
-```
-
-The browser cookie is distinct from the OAuth state token, marked `Secure`, `HttpOnly`, and
-`SameSite=Strict`, scoped to the configured companion path, and expires with the approval session.
-
-This is not the active authorization/export path and is not yet the finished SickGaming two-server
-contract. Keep it disabled unless the complete authenticated deployment is being tested.
-
-### Website-server authentication v1
-
-After pairing, the website server signs protected requests with the returned credential. It sends:
-
-```text
-X-SickWallet-Installation: <installation-id>
-X-SickWallet-Timestamp: <unix-seconds>
-X-SickWallet-Nonce: <unique-random-value>
-X-SickWallet-Signature: <lowercase-hex-hmac-sha256>
-```
-
-The signature key is the durable credential. Its canonical UTF-8 input is:
-
-```text
-v1\n<timestamp>\n<nonce>\n<METHOD>\n<backend-path>\n<sha256-body-hex>
-```
-
-The backend rejects unknown installations, invalid signatures, query strings, timestamps outside
-the five-minute window, and reused nonces. It retains at most 500 recent nonces and clears them
-when the website is unpaired. `GET /api/v1/server/status` is the first protected endpoint and can
-be used by the website backend to confirm its stored credential.
-
-This credential belongs only in the website server's secret storage. Frontend JavaScript must
-never construct these headers or receive the credential.
+Browser assets never receive CDP API secrets, the JWT private key, raw private keys, recovery phrases, relay secrets, or unrestricted signing credentials.
 
 ## Current commands
 
@@ -252,12 +167,6 @@ Owner commands:
 [p]walletset jwksfile
 [p]walletset approvalurl https://sickgaming.net/cryptowallet
 [p]walletset clearapprovalurl
-[p]walletset pair
-[p]walletset paircancel
-[p]walletset pairstatus
-[p]walletset unpair
-[p]walletset companion start [port]
-[p]walletset companion stop
 ```
 
 ### Discord application emojis
@@ -355,41 +264,7 @@ Fuji support explicit TXID lookup but not indexed activity.
 
 ## Current implementation status
 
-Completed:
-
-1. Provider-neutral cog foundation.
-2. Wallet profile, public account, transaction intent, and capability-aware provider models.
-3. Explicit EVM/Solana chain-family metadata with capability-limited testnet registrations.
-4. Network-dispatched address and native atomic-unit validation with legacy Base wei compatibility.
-5. Expiring, user-scoped unsigned transaction intents.
-6. Loopback companion listener and HTTPS public-URL configuration.
-7. One-time state digests, expiration, replay prevention, and Discord OAuth identity matching.
-8. Packaged wallet home, recovery, and security pages.
-9. Deployment- and Discord-application-bound browser sessions.
-10. Initial versioned, read-only companion session API with a separate HttpOnly browser token.
-11. Atomic, single-use website-server pairing with revocable credentials in Red shared API tokens.
-12. HMAC-authenticated website-server requests with timestamp and nonce replay protection.
-13. PHP CLI pairing and status tools with server-only, atomic credential storage.
-14. Signed PHP session proxy requiring paired-server authentication plus the user browser session.
-15. Server-only CDP credential loading and readiness reporting without exposing secret values.
-16. Idempotent, deployment-scoped CDP end-user, EVM smart-account, and Solana-account provisioning.
-17. Per-user concurrency control and public profile persistence after successful provisioning.
-18. Aggregated native and registered-token balance reads across enabled testnets.
-19. Explorer-linked multi-network portfolio display in `wallet` and `wallet balance`.
-20. Automatically generated, server-only P-256 custom-auth signing key with stable JWK thumbprint.
-21. Owner-only public JWKS export and a static PHP JWKS endpoint with no bot connection.
-22. Three-minute, issuer-, audience-, deployment-, application-, purpose-, user-, and address-bound
-    authorization handoff JWTs delivered only by DM and carried in the URL fragment.
-23. Pinned, self-hosted Coinbase browser SDK bundle using custom authentication.
-24. Exact CDP user and signed account-set matching before user-scoped delegation.
-25. Explicit browser creation of a policy-limited delegation for all provisioned accounts.
-26. Atomic, idempotent Base Sepolia smart-account submission checkpoint in version `0.16.0`.
-27. Minimal authenticated CDP v2 HTTP integration using Red's existing `aiohttp` stack, avoiding
-    the official Python SDK's incompatible networking dependency upgrades.
-28. Submitted-operation reconciliation with bounded automatic polling, user-only confirmation
-    notices, persistent transaction hashes/signatures, and on-demand refresh after a cog restart.
-29. Read-only Ethereum Sepolia, Arbitrum Sepolia, Polygon Amoy, and Avalanche Fuji capabilities.
-30. Solana devnet balance, activity, lookup, protected native sends, confirmation, and key export.
+CryptoWallet currently provides Base Sepolia and supported testnet wallet provisioning, public portfolio and activity reads, protected sends, revocable delegated signing, persistent confirmation recovery, signed browser authorization, and the outbound one-time relay used by recovery and external-wallet workflows. It intentionally has no inbound web server, website pairing protocol, or Discord OAuth session layer.
 
 ### CDP and custom-auth configuration
 
@@ -416,8 +291,7 @@ do not invent or enter this value. The private key never goes to CDP, PHP, brows
 companion website. The public key is published as JWKS through `web/api/jwks.php`.
 
 The API key must belong to the same CDP project as `project_id`. Never substitute a Coinbase
-consumer account key, Advanced Trade key, wallet private key, seed phrase, Discord token, or
-companion pairing credential for any field above.
+consumer account key, Advanced Trade key, wallet private key, seed phrase, Discord token, or any companion-site credential for any field above.
 
 #### Required setup order
 
@@ -514,16 +388,13 @@ cryptowallet/
 ├── backend/
 │   ├── __init__.py
 │   ├── auth.py         # ES256 key lifecycle, JWKS, and custom-auth JWTs
-│   ├── companion.py    # HTTP routes, OAuth, and listener lifecycle
 │   ├── config.py       # Config registration and stored-data helpers
 │   ├── confirmation.py # Persistent global confirmation scheduler
-│   ├── pairing.py      # Website-server pairing and credential lifecycle
 │   ├── provisioning.py # Idempotent automatic wallet provisioning
-│   ├── sessions.py     # One-time state and replay prevention
 │   └── usage.py        # CDP traffic limits, accounting, and owner warnings
 ├── core/
 │   ├── __init__.py
-│   ├── models.py       # Profiles, accounts, intents, and approval sessions
+│   ├── models.py       # Profiles, accounts, and transaction intents
 │   ├── networks.py     # Supported chain metadata
 │   └── validation.py   # Address and amount validation
 ├── providers/
@@ -545,14 +416,14 @@ cryptowallet/
 │   ├── package.json      # Pinned frontend dependencies and bundle command
 │   ├── package-lock.json
 │   ├── src/              # Auditable browser SDK integration source
-│   ├── api/              # Signed session/JWT/claim proxies and public JWKS endpoint
-│   └── server/           # Deploy outside document root; PHP pairing/signing toolkit
+│   ├── api/              # One-time relay, result callback, and public JWKS endpoints
+│   └── server/           # Access-denied PHP/MySQL relay configuration
 └── info.json
 ```
 
 ## Base Sepolia threat model
 
-Protected assets are user testnet funds, signer ownership, the immutable Discord-to-CDP wallet mapping, CDP and Discord OAuth credentials, the deployment JWT key, limited signing delegations, and short-lived handoff tokens. The bot host and server-side secret stores are trusted; Discord accounts, Discord channels and DMs, browser assets, public RPC endpoints, explorer data, and all user input are treated as potentially compromised. CDP is currently trusted to preserve embedded-wallet identities, secure signer material, and enforce time-limited user-scoped delegation.
+Protected assets are user testnet funds, signer ownership, the immutable Discord-to-CDP wallet mapping, CDP credentials, the deployment JWT key, limited signing delegations, and short-lived handoff tokens. The bot host and server-side secret stores are trusted; Discord accounts, Discord channels and DMs, browser assets, public RPC endpoints, explorer data, and all user input are treated as potentially compromised. CDP is currently trusted to preserve embedded-wallet identities, secure signer material, and enforce time-limited user-scoped delegation.
 
 | Threat | Enforced control | Residual risk and response |
 | --- | --- | --- |
@@ -567,7 +438,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 
 ### Adversarial acceptance checklist
 
-Automated coverage verifies malformed and expired JWTs, wrong project audience, unsupported purpose creation, mismatched profile, provider, and Discord identity, missing or invalid accounts, unknown and expired stored sessions, wrong-user consumption, replay rejection in the private session layer, foreign deployment and application rejection, emergency-lock authorization blocking, and uncertain-submission persistence. The combined Base Sepolia test must still verify:
+Automated coverage verifies malformed and expired JWTs, wrong project audience, unsupported purpose creation, mismatched profile, provider, and Discord identity, missing or invalid accounts, expired handoffs, wrong-user relay consumption, replay rejection, foreign deployment and application rejection, emergency-lock authorization blocking, and uncertain-submission persistence. The combined Base Sepolia test must still verify:
 
 - lock immediately after creating a pending intent, then confirm its old approval button cannot submit;
 - lock with active delegation, verify revocation, and confirm only a bot owner can unlock;
@@ -583,7 +454,7 @@ Recovery handoffs are registered by the bot over authenticated outbound HTTPS an
 at rest by the public relay. The DM URL carries an opaque random handle that is consumed atomically
 once; replay, expiry, and unknown handles return the same unavailable response. Authorization still
 uses a direct three-minute signed handoff and must not be described as single-use. Normal wallet
-provisioning, reads, and sends do not depend on the relay, listener, or pairing workflow.
+provisioning, reads, and authorized sends do not depend on the relay.
 The packaged `/setup/` wizard can initialize the MySQL/MariaDB relay tables and private server-side
 configuration on DirectAdmin-style hosting. It stays available until installation succeeds, then
 writes a private lock file and refuses reuse. Deploy it only when you are ready to complete setup.

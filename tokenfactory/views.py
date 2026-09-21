@@ -138,7 +138,9 @@ class TokenFactoryDraftView(discord.ui.View):
         except Exception as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
             return
-        confirmation = TokenDeploymentConfirmView(self.cog, self.user, draft)
+        confirmation = TokenDeploymentConfirmView(
+            self.cog, self.user, draft, self.cog.execution_terms(route="discord")
+        )
         await interaction.followup.send(
             embed=confirmation.embed(), view=confirmation, ephemeral=True
         )
@@ -172,12 +174,13 @@ class TokenFactoryDraftView(discord.ui.View):
 class TokenDeploymentConfirmView(discord.ui.View):
     """Requester-bound final confirmation for one immutable token draft."""
 
-    def __init__(self, cog: "TokenFactory", user, draft: TokenDraft):
+    def __init__(self, cog: "TokenFactory", user, draft: TokenDraft, execution_terms: dict):
         super().__init__(timeout=180)
         self.cog = cog
         self.user = user
         self.user_id = user.id
         self.draft = draft
+        self.execution_terms = execution_terms
         self.processing = False
 
     def embed(self) -> discord.Embed:
@@ -199,6 +202,9 @@ class TokenDeploymentConfirmView(discord.ui.View):
         embed.add_field(name="Decimals", value=str(self.draft.decimals), inline=True)
         embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
         embed.add_field(name="Recipient", value=f"`{self.draft.owner_address}`", inline=False)
+        embed.add_field(name="Gas limit", value=f"`{self.execution_terms['gas_limit']:,}`", inline=True)
+        embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
+        embed.add_field(name="Network gas", value="Sponsorship active · paid by CDP paymaster", inline=False)
         embed.add_field(
             name="Authority",
             value="No later minting, administrator, upgrade, or bot ownership.",
@@ -215,7 +221,7 @@ class TokenDeploymentConfirmView(discord.ui.View):
         )
         return False
 
-    @discord.ui.button(label="Deploy test token", style=discord.ButtonStyle.danger, emoji="⚠️")
+    @discord.ui.button(label="Deploy token", style=discord.ButtonStyle.danger, emoji="⚠️")
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.processing:
             await interaction.response.send_message(
@@ -227,22 +233,59 @@ class TokenDeploymentConfirmView(discord.ui.View):
             item.disabled = True
         await interaction.response.edit_message(view=self)
         try:
-            result = await self.cog.submit_token_deployment(self.user, self.draft)
+            result = await self.cog.submit_token_deployment(self.user, self.draft, self.execution_terms)
         except Exception as exc:
             await interaction.followup.send(f"Token deployment failed: {exc}", ephemeral=True)
             return
         if result.get("already_deployed"):
-            message = (
-                f"This token already exists at `{result['token_address']}`. "
-                "Run `tokenfactory deployment` to verify and record it."
+            embed = discord.Embed(
+                title="Token already deployed",
+                description=(
+                    "The reviewed token already exists on Base Sepolia. "
+                    "Verify it to save it in your TokenFactory history."
+                ),
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="Token contract",
+                value=f"`{result['token_address']}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="Next step",
+                value="Run `tokenfactory deployment` to verify and record it.",
+                inline=False,
             )
         else:
-            message = (
-                "Fixed-supply token deployment submitted. "
-                f"User operation: `{result['user_operation_hash']}`\n"
-                "Run `tokenfactory deployment` after confirmation."
+            embed = discord.Embed(
+                title="Token deployment submitted",
+                description=(
+                    "Your sponsored Base Sepolia deployment was accepted and is now "
+                    "waiting for network confirmation."
+                ),
+                color=discord.Color.gold(),
             )
-        await interaction.followup.send(message, ephemeral=True)
+            embed.add_field(
+                name="Token",
+                value=f"{self.draft.name} ({self.draft.symbol})",
+                inline=False,
+            )
+            embed.add_field(
+                name="User operation",
+                value=f"`{result['user_operation_hash']}`",
+                inline=False,
+            )
+            embed.add_field(
+                name="Next step",
+                value=(
+                    "Wait a few seconds, then run `tokenfactory deployment`. "
+                    "That command verifies this pending deployment and saves it to "
+                    "your token history."
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="Sponsored by CDP paymaster · no native ETH charged")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -254,12 +297,13 @@ class TokenDeploymentConfirmView(discord.ui.View):
 class FactoryDeploymentView(discord.ui.View):
     """One-use owner confirmation for the pinned infrastructure deployment."""
 
-    def __init__(self, cog: "TokenFactory", user, creation_code: str):
+    def __init__(self, cog: "TokenFactory", user, creation_code: str, execution_terms: dict):
         super().__init__(timeout=180)
         self.cog = cog
         self.user = user
         self.user_id = user.id
         self.creation_code = creation_code
+        self.execution_terms = execution_terms
         self.processing = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -288,7 +332,7 @@ class FactoryDeploymentView(discord.ui.View):
         await interaction.response.edit_message(view=self)
         try:
             result = await self.cog.deploy_pinned_factory(
-                self.user, self.creation_code
+                self.user, self.creation_code, self.execution_terms
             )
         except RuntimeError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
