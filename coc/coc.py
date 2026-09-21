@@ -1,3 +1,6 @@
+import asyncio
+import time
+
 import aiohttp
 import discord
 from discord.ext import tasks
@@ -17,6 +20,7 @@ COC_API_BASE = "https://api.clashofclans.com/v1"
 COC_DEVELOPER_URL = "https://developer.clashofclans.com/"
 COC_TOKEN_NAMESPACE = "clashofclans"
 COC_HTTP_TIMEOUT = aiohttp.ClientTimeout(total=30)
+COC_NOTIFICATION_CONCURRENCY = 5
 WAR_NOTIFICATION_EVENTS = {
     "prep": "Preparation Started",
     "prepsoon": "Preparation Ending Soon",
@@ -130,6 +134,7 @@ class Coc(commands.Cog):
         }
         self.config = Config.get_conf(self, identifier=5218831554, force_registration=True)
         self.config.register_guild(**default_guild)
+        self._last_cycle_metrics = {}
         self.war_notification.start()
 
     def cog_unload(self):
@@ -630,6 +635,44 @@ class Coc(commands.Cog):
             if detail:
                 detail = f": {detail[:300]}"
             return {}, f"Clash of Clans API returned HTTP {response.status}{detail}."
+
+    async def _fetch_war_batch(self, clan_tags, headers, concurrency=COC_NOTIFICATION_CONCURRENCY):
+        """Fetch every normalized clan once with bounded cycle concurrency."""
+        unique_tags = {}
+        for clan_tag in clan_tags:
+            if clan_tag:
+                unique_tags.setdefault(self._normalize_tag(clan_tag), clan_tag)
+        semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+        failures = 0
+
+        async def fetch(normalized_tag, clan_tag):
+            nonlocal failures
+            async with semaphore:
+                try:
+                    result = await self._fetch_current_war(clan_tag, headers)
+                except Exception as exc:
+                    failures += 1
+                    log.warning("Could not fetch CoC war data for %s: %s", normalized_tag, exc)
+                    result = ({}, "The Clash of Clans API request failed.")
+                return normalized_tag, result
+
+        pairs = await asyncio.gather(
+            *(fetch(normalized, original) for normalized, original in unique_tags.items())
+        )
+        return dict(pairs), {
+            "unique_clan_tags": len(unique_tags),
+            "war_fetches": len(unique_tags),
+            "war_failures": failures,
+        }
+
+    @staticmethod
+    async def _set_if_changed(guild_config, settings, key, value):
+        """Persist one registered value only when its effective value changed."""
+        if settings.get(key) == value:
+            return False
+        await getattr(guild_config, key).set(value)
+        settings[key] = value
+        return True
 
     @staticmethod
     def _war_fingerprint(war_data: dict) -> str:
@@ -1298,8 +1341,22 @@ class Coc(commands.Cog):
         if not api_key:
             return
 
+        cycle_started = time.monotonic()
         headers = self._api_headers(api_key)
         all_guilds = await self.config.all_guilds()
+        enabled_guilds = sum(
+            1 for settings in all_guilds.values()
+            if settings.get("COC_WAR_NOTIFICATIONS")
+            or settings.get("COC_RAID_WEEKEND_NOTIFICATIONS")
+        )
+        war_tags = [
+            settings.get("COC_CLAN_KEY")
+            for settings in all_guilds.values()
+            if settings.get("COC_WAR_NOTIFICATIONS") and settings.get("COC_CLAN_KEY")
+        ]
+        war_results, metrics = await self._fetch_war_batch(war_tags, headers)
+        metrics.update({"enabled_guilds": enabled_guilds, "configured_guilds": len(all_guilds)})
+        config_writes = 0
         for guild_id, settings in all_guilds.items():
             war_notifications_enabled = bool(settings.get("COC_WAR_NOTIFICATIONS"))
             raid_notifications_enabled = bool(settings.get("COC_RAID_WEEKEND_NOTIFICATIONS"))
@@ -1336,15 +1393,10 @@ class Coc(commands.Cog):
             if not war_notifications_enabled:
                 continue
 
-            try:
-                war_data, notice = await self._fetch_current_war(clan_tag, headers)
-            except aiohttp.ClientConnectionError as exc:
-                log.warning("Could not fetch CoC war data for guild %s: %s", guild_id, exc)
-                continue
-            except Exception:
-                log.exception("Unexpected error while checking CoC war notifications for guild %s", guild_id)
-                continue
-
+            war_data, notice = war_results.get(
+                self._normalize_tag(clan_tag),
+                ({}, "No cycle result was available for this clan."),
+            )
             if not war_data:
                 log.debug("No CoC war notification sent for guild %s: %s", guild_id, notice)
                 continue
@@ -1367,7 +1419,7 @@ class Coc(commands.Cog):
                 settings["LAST_NOTIFICATION_STATE"] = None
                 settings["LAST_WAR_ATTACKS"] = []
 
-            sent_events = settings.get("WAR_NOTIFICATION_EVENTS") or {}
+            sent_events = dict(settings.get("WAR_NOTIFICATION_EVENTS") or {})
             previous_attack_keys = settings.get("LAST_WAR_ATTACKS") or []
             current_attack_keys = self._current_attack_keys(war_data, clan_tag)
             state = war_data.get("state")
@@ -1493,14 +1545,30 @@ class Coc(commands.Cog):
                     log.exception("Could not send CoC war notification to channel %s in guild %s.", channel_id, guild_id)
                     continue
                 sent_any_notification = True
-            await guild_config.WAR_START_TIME.set(war_data.get("startTime"))
-            await guild_config.WAR_END_TIME.set(war_data.get("endTime"))
-            await guild_config.LAST_API_PULL.set((datetime.now() - timedelta(hours=5)).isoformat())
+            writes = [
+                await self._set_if_changed(guild_config, settings, "WAR_START_TIME", war_data.get("startTime")),
+                await self._set_if_changed(guild_config, settings, "WAR_END_TIME", war_data.get("endTime")),
+                await self._set_if_changed(guild_config, settings, "LAST_NOTIFICATION_STATE", fingerprint),
+                await self._set_if_changed(guild_config, settings, "LAST_WAR_ATTACKS", current_attack_keys),
+                await self._set_if_changed(guild_config, settings, "WAR_NOTIFICATION_EVENTS", sent_events),
+            ]
+            config_writes += sum(writes)
             if sent_any_notification:
-                await guild_config.LAST_NOTIFICATION_TIMESTAMP.set((datetime.now() - timedelta(hours=5)).isoformat())
-            await guild_config.LAST_NOTIFICATION_STATE.set(fingerprint)
-            await guild_config.LAST_WAR_ATTACKS.set(current_attack_keys)
-            await guild_config.WAR_NOTIFICATION_EVENTS.set(sent_events)
+                timestamp = (datetime.now() - timedelta(hours=5)).isoformat()
+                config_writes += await self._set_if_changed(
+                    guild_config, settings, "LAST_NOTIFICATION_TIMESTAMP", timestamp
+                )
+
+        metrics["config_writes"] = config_writes
+        metrics["duration_seconds"] = round(time.monotonic() - cycle_started, 3)
+        self._last_cycle_metrics = metrics
+        log.info(
+            "CoC notification cycle: guilds=%s unique_clans=%s war_fetches=%s "
+            "failures=%s config_writes=%s duration=%.3fs",
+            metrics["enabled_guilds"], metrics["unique_clan_tags"],
+            metrics["war_fetches"], metrics["war_failures"],
+            metrics["config_writes"], metrics["duration_seconds"],
+        )
 
     @war_notification.before_loop
     async def before_war_notification(self):

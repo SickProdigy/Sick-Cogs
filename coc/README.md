@@ -119,6 +119,8 @@ The bare command shows the current format and explains both choices. Pass `card`
 ## War Notifications
 
 War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
+
+Each scheduler cycle normalizes and de-duplicates configured clan tags, then fetches unique wars with a bounded concurrency of five. Servers following the same clan share that cycle's upstream result while retaining independent channels, event settings, and notification history. The cog logs aggregate cycle duration, enabled-server count, unique-clan count, fetch failures, and configuration-write count without logging API credentials. Unchanged war state is not rewritten to Red Config.
 Clan War League notifications use the same event settings but can be muted independently. Regular war notifications are unaffected:
 
 ```text
