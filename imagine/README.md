@@ -18,6 +18,30 @@ You can add multiple users and roles. Review access with `[p]imagineset status`;
 with `[p]imagineset disable`. The key stays in Red shared API tokens, not cog configuration.
 OpenAI API usage is billed separately from ChatGPT and Codex subscriptions.
 
+## Experimental Codex provider
+
+Codex can use a cached ChatGPT login and its included image-generation allowance. Install Codex
+for the same operating-system account that runs Red, then log that account in interactively:
+
+```text
+codex login
+codex login status
+```
+
+The bot owner can then enable and select it inside the one explicitly allowlisted server:
+
+```text
+[p]imagineset providerstate codex true
+[p]imagineset provider codex
+[p]imagine draw a tiny robot tending a rooftop garden
+```
+
+This provider is always bot-owner-only, even when Imagine has allowed users or roles. It runs
+`codex exec` ephemerally in a new empty temporary directory with a workspace-write sandbox, a
+restricted environment, and a five-minute timeout. It is experimental: OpenAI documents built-in
+Codex image generation and non-interactive Codex separately, but recommends the Images API for
+programmatic image generation. Never share or copy Codex's cached authentication file into Red.
+
 ## ComfyUI staging
 
 ```text

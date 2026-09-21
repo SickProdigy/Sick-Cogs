@@ -10,7 +10,7 @@ from redbot.core import Config, checks, commands
 
 from .access import evaluate_access
 from .models import ImageRequest
-from .providers import ComfyUIProvider, OpenAIImageProvider, ProviderError
+from .providers import CodexImageProvider, ComfyUIProvider, OpenAIImageProvider, ProviderError
 
 CONFIG_IDENTIFIER = 846261450184
 
@@ -25,7 +25,7 @@ class Imagine(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_global(enabled=True, allowed_guilds=[], openai_enabled=True,
-                                    comfyui_enabled=False, comfyui_endpoint=None,
+                                    comfyui_enabled=False, codex_enabled=False, codex_timeout_seconds=300, comfyui_endpoint=None,
                                     comfyui_workflow={})
         self.config.register_guild(enabled=False, provider="openai", channel_id=None,
                                    allowed_role_ids=[], allowed_user_ids=[],
@@ -83,6 +83,10 @@ class Imagine(commands.Cog):
                 raise ProviderError("OpenAI is disabled by the bot owner.")
             tokens = await self.bot.get_shared_api_tokens("openai")
             return OpenAIImageProvider(self.session, tokens.get("api_key", ""))
+        if name == "codex":
+            if not global_data["codex_enabled"]:
+                raise ProviderError("Codex is disabled by the bot owner.")
+            return CodexImageProvider(timeout_seconds=global_data["codex_timeout_seconds"])
         if name == "comfyui":
             if not global_data["comfyui_enabled"]:
                 raise ProviderError("ComfyUI is disabled by the bot owner.")
@@ -102,6 +106,9 @@ class Imagine(commands.Cog):
             await ctx.send("Prompts may contain at most 32,000 characters.")
             return
         allowed, reason, settings, global_data = await self._access(ctx)
+        if settings["provider"] == "codex" and not await self.bot.is_owner(ctx.author):
+            await ctx.send("The experimental Codex provider is restricted to the bot owner.")
+            return
         if not allowed:
             await ctx.send(reason)
             return
@@ -177,8 +184,8 @@ class Imagine(commands.Cog):
     async def set_provider(self, ctx, provider: str):
         """Select openai or comfyui."""
         provider = provider.casefold()
-        if provider not in {"openai", "comfyui"}:
-            await ctx.send("Provider must be `openai` or `comfyui`.")
+        if provider not in {"openai", "codex", "comfyui"}:
+            await ctx.send("Provider must be `openai`, `codex`, or `comfyui`.")
             return
         await self.config.guild(ctx.guild).provider.set(provider)
         await ctx.send(f"Imagine will use `{provider}`.")
@@ -255,8 +262,8 @@ class Imagine(commands.Cog):
     async def set_provider_state(self, ctx, provider: str, enabled: bool):
         """Enable or disable an image provider bot-wide."""
         provider = provider.casefold()
-        if provider not in {"openai", "comfyui"}:
-            await ctx.send("Provider must be `openai` or `comfyui`.")
+        if provider not in {"openai", "codex", "comfyui"}:
+            await ctx.send("Provider must be `openai`, `codex`, or `comfyui`.")
             return
         await getattr(self.config, f"{provider}_enabled").set(enabled)
         await ctx.send(f"`{provider}` is now {'enabled' if enabled else 'disabled'} bot-wide.")

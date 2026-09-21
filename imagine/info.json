@@ -11,7 +11,7 @@
   "permissions": ["attach_files", "embed_links"],
   "requirements": [],
   "short": "Private, provider-neutral AI image generation.",
-  "tags": ["image", "ai", "openai", "comfyui"],
+  "tags": ["image", "ai", "openai", "codex", "comfyui"],
   "type": "COG",
   "version": "0.1.0"
 }
