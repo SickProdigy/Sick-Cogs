@@ -40,6 +40,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `imagine` - Private, provider-neutral AI image generation with OpenAI and managed Codex support.
 - `movies` - Configurable TMDb new movie release announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
+- `predictions` - Interactive server prediction games with optional fictional Red Bank stakes and staff-reviewed payouts.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rocketleague` - Cached RLCS tournament schedules and configurable server announcements.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
