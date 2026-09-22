@@ -1020,15 +1020,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         if record.get("vault_percentage"):
             vault = payload.get("vault") or {}
             lockup_seconds = int(vault.get("lockupDuration") or 0)
-            vault_lines = ["{}% of supply | Time: {}".format(
-                int(record["vault_percentage"]), _format_vault_duration(lockup_seconds)
-            )]
+            vault_lines = ["{}% of supply".format(int(record["vault_percentage"]))]
             block_timestamp = record.get("block_timestamp")
             if block_timestamp is not None and lockup_seconds:
                 release_at = int(block_timestamp) + lockup_seconds
-                vault_lines.append("Unlocks: <t:{}:F> (<t:{}:R>)".format(
-                    release_at, release_at
-                ))
+                vault_lines.append("Unlocks: <t:{}:f>".format(release_at))
             embed.add_field(name="Vault", value="\n".join(vault_lines), inline=False)
         if record.get("airdrop_amount"):
             embed.add_field(name="Airdrop", value="{:,} tokens".format(

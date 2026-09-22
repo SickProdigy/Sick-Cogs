@@ -312,8 +312,11 @@ class PublicTokenRundownTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-user", rendered)
         self.assertNotIn("private-guild", rendered)
         self.assertNotIn("Reward split", rendered)
-        self.assertIn("10% of supply | Time: 1 week", rendered)
-        self.assertIn("Unlocks:", rendered)
+        vault = next(field.value for field in embed.fields if field.name == "Vault")
+        self.assertIn("10% of supply", vault)
+        self.assertNotIn("Time:", vault)
+        self.assertIn("Unlocks: <t:1800604800:f>", vault)
+        self.assertNotIn(":R>", vault)
 
     async def test_token_command_requires_unique_public_match(self):
         records = [
