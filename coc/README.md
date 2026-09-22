@@ -119,6 +119,15 @@ The bare command shows the current format and explains both choices. Pass `card`
 ## War Notifications
 
 War notifications check about every 5 minutes and post to the configured war channel. Each event is tracked per war so it only fires once for that war.
+
+Each scheduler cycle normalizes and de-duplicates configured clan tags, then fetches unique wars and Raid Weekend data with a bounded concurrency of five. Servers following the same clan share that cycle's upstream result while retaining independent channels, event settings, and notification history. CWL discovery caches the relevant war tag, so later cycles update that war directly instead of rescanning every group war. The cache is refreshed after an ended war and is rebuilt safely after a cog reload.
+
+Each bot process uses a small stable scheduling offset to avoid synchronized five-minute bursts. Provider HTTP 429 and temporary 5xx responses use bounded exponential backoff with jitter and honor a numeric Retry-After value up to the retry cap. Discord deliveries remain awaited and sequential per guild so discord.py/Red can honor Discord's route and global rate limits; failed sends are not marked delivered and will retry on a later cycle.
+
+The cycle log reports enabled guilds, unique clans, logical war and Raid fetches, raw API requests, retries, 429 responses, CWL fallbacks/cache hits/scans, provider failures, Discord sends/failures, Config writes, and duration. It never logs the API key. Unchanged war and Raid Weekend state is not rewritten to Red Config, and a new-war reset is stored as one related state transition.
+
+For normal operation, keep the default five-minute scheduler and concurrency of five. The Clash developer portal is the authority for the API key's current limits; the cog does not assume or bypass a specific quota. Repeated 429s, provider failures, cycle durations approaching 300 seconds, or Discord failures in the cycle log should be investigated before adding more servers. Do not lower the polling interval to work around delayed data.
+
 Clan War League notifications use the same event settings but can be muted independently. Regular war notifications are unaffected:
 
 ```text
