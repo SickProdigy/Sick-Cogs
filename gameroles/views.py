@@ -112,11 +112,13 @@ class SetupDashboard(OwnedView):
         if self.selected:
             self.add_item(ProfileRoleSelect(self, "manager_roles", True))
             self.add_item(ProfileRoleSelect(self, "assignable_roles", True))
-        self.add_item(CreateProfileButton(self))
-        if self.selected:
             self.add_item(RemoveRolesButton(self, "manager_roles"))
             self.add_item(RemoveRolesButton(self, "assignable_roles"))
             self.add_item(DeleteProfileButton(self))
+            self.add_item(BackButton(self))
+        else:
+            self.add_item(CreateProfileButton(self))
+        self.add_item(DoneButton(self))
         await interaction.response.edit_message(embed=await self.embed(interaction.guild), view=self)
 
     async def prepare(self, guild):
@@ -124,6 +126,29 @@ class SetupDashboard(OwnedView):
         if games:
             self.add_item(ProfileSelect(self, games))
         self.add_item(CreateProfileButton(self))
+        self.add_item(DoneButton(self))
+
+
+class BackButton(discord.ui.Button):
+    def __init__(self, view):
+        super().__init__(label="Back", style=discord.ButtonStyle.secondary)
+        self.parent_view = view
+
+    async def callback(self, interaction):
+        await self.parent_view.rebuild(interaction)
+
+
+class DoneButton(discord.ui.Button):
+    def __init__(self, view):
+        super().__init__(label="Done", style=discord.ButtonStyle.success)
+        self.parent_view = view
+
+    async def callback(self, interaction):
+        self.parent_view.selected = None
+        embed = await self.parent_view.embed(interaction.guild)
+        embed.description = "Setup saved. Run the setup command again whenever you need to make changes."
+        await interaction.response.edit_message(embed=embed, view=None)
+        self.parent_view.stop()
 
 
 class CreateProfileButton(discord.ui.Button):
