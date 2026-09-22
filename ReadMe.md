@@ -46,7 +46,8 @@ Develop-only cogs and experiments are not part of the stable Index release.
 
 Current develop experiments include `imagine`, a private, provider-neutral AI image generator that
 is disabled until the bot owner explicitly allowlists a server and its administrators grant access,
-and `navidrome`, a per-server Navidrome library connection and album announcement cog.
+`mybb`, a per-server bridge for browsing and publishing through the SickProdigy MyBB API, and
+`navidrome`, a per-server Navidrome library connection and album announcement cog.
 
 ## External Cog Sync Helper
 
