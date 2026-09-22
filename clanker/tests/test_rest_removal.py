@@ -295,8 +295,12 @@ class PublicTokenRundownTests(unittest.IsolatedAsyncioTestCase):
             "transaction_hash": "0x" + "34" * 32,
             "supply": "100000000000", "created_at": "2026-09-22T00:00:00+00:00",
             "token_admin": WALLET, "creator_bps": 8000, "platform_bps": 2000,
+            "vault_percentage": 10, "block_timestamp": 1_800_000_000,
             "requester_name": "private-user", "origin_guild_name": "private-guild",
-            "payload": {"metadata": {"description": "Public token details."}},
+            "payload": {
+                "metadata": {"description": "Public token details."},
+                "vault": {"lockupDuration": 604800},
+            },
         }
         embed = Clanker.token_rundown_embed(record)
         rendered = " ".join(
@@ -307,6 +311,9 @@ class PublicTokenRundownTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(record["token_address"], rendered)
         self.assertNotIn("private-user", rendered)
         self.assertNotIn("private-guild", rendered)
+        self.assertNotIn("Reward split", rendered)
+        self.assertIn("10% of supply | Time: 1 week", rendered)
+        self.assertIn("Unlocks:", rendered)
 
     async def test_token_command_requires_unique_public_match(self):
         records = [
