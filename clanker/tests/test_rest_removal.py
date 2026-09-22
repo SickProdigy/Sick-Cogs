@@ -287,6 +287,87 @@ class AsyncAuditLog:
         return False
 
 
+class PublicTokenRundownTests(unittest.IsolatedAsyncioTestCase):
+    def test_rundown_omits_requester_and_origin_metadata(self):
+        record = {
+            "status": "internal_confirmed", "symbol": "YOMA", "name": "Yoma",
+            "token_address": "0x" + "12" * 20,
+            "transaction_hash": "0x" + "34" * 32,
+            "supply": "100000000000", "created_at": "2026-09-22T00:00:00+00:00",
+            "token_admin": WALLET, "creator_bps": 8000, "platform_bps": 2000,
+            "requester_name": "private-user", "origin_guild_name": "private-guild",
+            "payload": {"metadata": {"description": "Public token details."}},
+        }
+        embed = Clanker.token_rundown_embed(record)
+        rendered = " ".join(
+            [embed.title, embed.description or "", embed.footer.text]
+            + [field.name + " " + field.value for field in embed.fields]
+        )
+        self.assertIn("Yoma", rendered)
+        self.assertIn(record["token_address"], rendered)
+        self.assertNotIn("private-user", rendered)
+        self.assertNotIn("private-guild", rendered)
+
+    async def test_token_command_requires_unique_public_match(self):
+        records = [
+            {"status": "internal_confirmed", "symbol": "YOMA", "token_address": "0x" + "12" * 20},
+            {"status": "internal_confirmed", "symbol": "YOMA", "token_address": "0x" + "34" * 20},
+        ]
+        cog = Clanker.__new__(Clanker)
+        cog.all_launch_records = AsyncMock(return_value=records)
+        ctx = SimpleNamespace(send=AsyncMock())
+        await Clanker.clanker_token.callback(cog, ctx, token="YOMA")
+        self.assertIn("more than one token", ctx.send.await_args.args[0])
+
+
+class OperationalControlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bot_requesters_are_rejected_before_policy_reads(self):
+        cog = Clanker.__new__(Clanker)
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7, bot=True),
+            message=SimpleNamespace(webhook_id=None), send=AsyncMock(),
+        )
+        result = await cog.check_launch_controls(ctx, {})
+        self.assertFalse(result)
+        ctx.send.assert_awaited_once_with("Bots and webhooks cannot create Clanker launch requests.")
+
+    async def test_blocked_user_cannot_create_but_history_is_not_modified(self):
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            emergency_paused=AsyncMock(return_value=False),
+            blocked_user_ids=AsyncMock(return_value=[7]),
+        )
+        cog.user_launch_records = AsyncMock()
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7, bot=False),
+            guild=SimpleNamespace(id=100), message=SimpleNamespace(webhook_id=None),
+            send=AsyncMock(),
+        )
+        result = await cog.check_launch_controls(ctx, {})
+        self.assertFalse(result)
+        cog.user_launch_records.assert_not_awaited()
+        ctx.send.assert_awaited_once_with("You are blocked from creating Clanker launch requests.")
+
+    async def test_outstanding_request_cap_is_enforced(self):
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            emergency_paused=AsyncMock(return_value=False),
+            blocked_user_ids=AsyncMock(return_value=[]),
+            blocked_guild_ids=AsyncMock(return_value=[]),
+            max_outstanding_per_user=AsyncMock(return_value=2),
+        )
+        cog.user_launch_records = AsyncMock(return_value=[
+            {"status": "dry_run"}, {"status": "internal_uncertain"}
+        ])
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7, bot=False), guild=SimpleNamespace(id=100),
+            message=SimpleNamespace(webhook_id=None), send=AsyncMock(),
+        )
+        result = await cog.check_launch_controls(ctx, {})
+        self.assertFalse(result)
+        self.assertIn("2 unfinished", ctx.send.await_args.args[0])
+
+
 class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_saved_draft_gets_fresh_execution_window(self):
         payload = Clanker.build_payload(

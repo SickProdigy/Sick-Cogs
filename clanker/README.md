@@ -64,6 +64,7 @@ Recipient lists generate an OpenZeppelin `StandardMerkleTree`-compatible root an
 - `[p]clanker card` — open an empty interactive draft flow.
 - `[p]clanker launch <symbol> [token name]` — open the normal interactive flow with its ticker and optional name prefilled.
 - `[p]clanker status` — show draft and guild-control configuration.
+- `[p]clanker token <symbol|launch reference|contract>` — show a public confirmed-token rundown without requester or source-server metadata.
 - `[p]clanker drafts [limit]` — show the same requester-owned draft navigator in servers and DMs, then reopen the current editable or verified card.
 - `[p]clanker draft <launch_id>` — reopen one current interactive draft card by compact reference.
 - `[p]clanker draftremove <launch_id>` — review and confirm deletion of one unsubmitted draft.
@@ -90,6 +91,13 @@ The first launch of a symbol for each requester uses the lowercase symbol as its
 - `[p]clankerset blockedrole <@role>` / `clearblockedrole` — manage blocked access.
 - `[p]clankerset cooldown <seconds>` — configure the per-user draft cooldown.
 - `[p]clankerset dailymax <number>` — configure the rolling daily draft limit.
+- `[p]clankerset pause <true|false>` — emergency-pause or resume new launch creation.
+- `[p]clankerset maxoutstanding <number>` — cap each user’s unfinished requests.
+- `[p]clankerset blockuser|unblockuser <user_id>` — reversibly control one requester.
+- `[p]clankerset blockguild|unblockguild <guild_id>` — reversibly control one launch source.
+- `[p]clankerset blocks` — review deployment-wide pause, cap, and block state.
+- `[p]clankerset analytics [days]` — show private owner-only activity and source totals.
+- `[p]clankerset owneraudit [limit]` — review owner control changes.
 - `[p]clankerset vault ...` — manage vault allocation, lockup, vesting, recipient, and enablement.
 - `[p]clankerset airdrop ...` — manage default airdrop data and proof exports.
 

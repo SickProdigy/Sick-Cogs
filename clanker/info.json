@@ -9,8 +9,8 @@
     "permissions": ["embed_links", "attach_files"],
     "name": "Clanker",
     "requirements": [],
-    "short": "Base Sepolia Clanker launch orchestrator",
+    "short": "Base Sepolia launches, token rundowns, rewards, and owner controls",
     "tags": ["clanker", "base", "tokens", "crypto", "memes"],
     "type": "COG",
-    "version": "0.1.0"
+    "version": "0.2.0"
 }

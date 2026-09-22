@@ -131,6 +131,124 @@ class ClankerAdminMixin:
         await self.config.guild(ctx.guild).daily_max_per_user.set(launches)
         await ctx.send("Clanker daily launch limit disabled." if launches == 0 else f"Clanker daily launch limit set to {launches} per user.")
 
+    @clankerset.command(name="pause")
+    async def clankerset_pause(self, ctx: commands.Context, paused: bool):
+        """Pause or resume all new Clanker launch creation."""
+        await self.config.emergency_paused.set(paused)
+        await self.record_owner_action(ctx.author.id, "pause" if paused else "resume")
+        await ctx.send("Clanker launch creation is now {}.".format("paused" if paused else "available"))
+
+    @clankerset.command(name="maxoutstanding")
+    async def clankerset_maxoutstanding(self, ctx: commands.Context, maximum: commands.Range[int, 1, 100]):
+        """Set the deployment-wide unfinished-request cap per user."""
+        await self.config.max_outstanding_per_user.set(maximum)
+        await self.record_owner_action(ctx.author.id, "max_outstanding", maximum)
+        await ctx.send("Users may keep up to {} unfinished Clanker requests.".format(maximum))
+
+    @clankerset.command(name="blockuser")
+    async def clankerset_blockuser(self, ctx: commands.Context, user_id: int):
+        """Block one Discord user from creating new launches."""
+        if user_id <= 0 or user_id == int(ctx.author.id):
+            await ctx.send("Enter a valid Discord user ID other than your own.")
+            return
+        values = {int(value) for value in await self.config.blocked_user_ids()}
+        values.add(user_id)
+        await self.config.blocked_user_ids.set(sorted(values))
+        await self.record_owner_action(ctx.author.id, "block_user", user_id)
+        await ctx.send("Blocked user `{}` from new Clanker launches.".format(user_id))
+
+    @clankerset.command(name="unblockuser")
+    async def clankerset_unblockuser(self, ctx: commands.Context, user_id: int):
+        """Remove a Clanker launch block from one Discord user."""
+        values = {int(value) for value in await self.config.blocked_user_ids()}
+        values.discard(user_id)
+        await self.config.blocked_user_ids.set(sorted(values))
+        await self.record_owner_action(ctx.author.id, "unblock_user", user_id)
+        await ctx.send("Removed the Clanker block for user `{}`.".format(user_id))
+
+    @clankerset.command(name="blockguild")
+    async def clankerset_blockguild(self, ctx: commands.Context, guild_id: int):
+        """Block one Discord server as a source of new launches."""
+        if guild_id <= 0:
+            await ctx.send("Enter a valid Discord server ID.")
+            return
+        values = {int(value) for value in await self.config.blocked_guild_ids()}
+        values.add(guild_id)
+        await self.config.blocked_guild_ids.set(sorted(values))
+        await self.record_owner_action(ctx.author.id, "block_guild", guild_id)
+        await ctx.send("Blocked server `{}` as a source of new Clanker launches.".format(guild_id))
+
+    @clankerset.command(name="unblockguild")
+    async def clankerset_unblockguild(self, ctx: commands.Context, guild_id: int):
+        """Remove a Clanker source block from one Discord server."""
+        values = {int(value) for value in await self.config.blocked_guild_ids()}
+        values.discard(guild_id)
+        await self.config.blocked_guild_ids.set(sorted(values))
+        await self.record_owner_action(ctx.author.id, "unblock_guild", guild_id)
+        await ctx.send("Removed the Clanker source block for server `{}`.".format(guild_id))
+
+    @clankerset.command(name="blocks")
+    async def clankerset_blocks(self, ctx: commands.Context):
+        """Show current deployment-wide Clanker safety controls."""
+        users = await self.config.blocked_user_ids()
+        guilds = await self.config.blocked_guild_ids()
+        embed = discord.Embed(title="Clanker operational controls", color=discord.Color.orange())
+        embed.add_field(name="Emergency pause", value="On" if await self.config.emergency_paused() else "Off")
+        embed.add_field(name="Outstanding cap", value=str(await self.config.max_outstanding_per_user()))
+        def bounded_ids(values):
+            shown = ["`{}`".format(value) for value in values[:25]]
+            if len(values) > 25:
+                shown.append("… and {} more".format(len(values) - 25))
+            return ", ".join(shown) or "None"
+
+        embed.add_field(name="Blocked users", value=bounded_ids(users), inline=False)
+        embed.add_field(name="Blocked servers", value=bounded_ids(guilds), inline=False)
+        await ctx.send(embed=embed)
+
+    @clankerset.command(name="analytics")
+    async def clankerset_analytics(self, ctx: commands.Context, days: commands.Range[int, 1, 365] = 30):
+        """Show private deployment-wide launch activity and source counts."""
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        records = []
+        for record in await self.all_launch_records():
+            try:
+                created = datetime.datetime.fromisoformat(str(record.get("created_at") or "").replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if created >= cutoff:
+                records.append(record)
+        statuses = {}
+        sources = {}
+        users = set()
+        for record in records:
+            status = str(record.get("status") or "unknown")
+            statuses[status] = statuses.get(status, 0) + 1
+            source = int(record.get("origin_guild_id", 0) or 0)
+            sources[source] = sources.get(source, 0) + 1
+            requester = int(record.get("requester_id", 0) or 0)
+            if requester:
+                users.add(requester)
+        embed = discord.Embed(title="Clanker owner analytics", description="Private operational totals for the last {} day{}.".format(days, "" if days == 1 else "s"), color=discord.Color.blue())
+        embed.add_field(name="Records", value=str(len(records)))
+        embed.add_field(name="Unique requesters", value=str(len(users)))
+        embed.add_field(name="Statuses", value="\n".join("{}: {}".format(key.replace("_", " ").title(), value) for key, value in sorted(statuses.items())) or "None", inline=False)
+        top_sources = sorted(sources.items(), key=lambda item: (-item[1], item[0]))[:10]
+        source_lines = []
+        for guild_id, count in top_sources:
+            guild = self.bot.get_guild(guild_id) if guild_id else None
+            label = guild.name if guild is not None else ("DM or unknown" if not guild_id else str(guild_id))
+            source_lines.append("{} (`{}`): {}".format(label, guild_id, count))
+        embed.add_field(name="Top sources", value="\n".join(source_lines) or "None", inline=False)
+        await ctx.send(embed=embed)
+
+    @clankerset.command(name="owneraudit")
+    async def clankerset_owneraudit(self, ctx: commands.Context, limit: commands.Range[int, 1, 25] = 10):
+        """Show recent reversible owner control changes."""
+        entries = await self.config.owner_audit_log()
+        lines = ["{} · {}{}".format(entry.get("created_at", "unknown"), str(entry.get("action") or "unknown").replace("_", " "), " · {}".format(entry["target"]) if entry.get("target") is not None else "") for entry in entries[-limit:]]
+        embed = discord.Embed(title="Clanker owner-control audit", description="\n".join(lines) or "No owner control changes recorded.", color=discord.Color.blue())
+        await ctx.send(embed=embed)
+
     @clankerset.group(name="vault")
     async def clankerset_vault(self, ctx: commands.Context):
         """Manage optional token vault defaults."""

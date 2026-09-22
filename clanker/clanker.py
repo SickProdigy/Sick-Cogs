@@ -69,6 +69,7 @@ async def clanker_guild_or_dm_history(ctx: commands.Context) -> bool:
         return True
     dm_commands = {
         "clanker",
+        "clanker token",
         "clanker drafts",
         "clanker draft",
         "clanker launches",
@@ -266,13 +267,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     """Prepare and orchestrate Clanker token launch requests on Base Sepolia."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     default_global = {
         "treasury_address": None,
         "platform_bps": 2000,
         "platform_config_migrated": False,
         "record_storage_version": 0,
+        "emergency_paused": False,
+        "blocked_user_ids": [],
+        "blocked_guild_ids": [],
+        "max_outstanding_per_user": 5,
+        "owner_audit_log": [],
     }
 
     default_user = {"launch_records": []}
@@ -864,6 +870,41 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return embed
 
     async def check_launch_controls(self, ctx: commands.Context, settings: Dict[str, Any]) -> bool:
+        if getattr(ctx.author, "bot", False) or getattr(ctx.message, "webhook_id", None):
+            await ctx.send("Bots and webhooks cannot create Clanker launch requests.")
+            return False
+        if await self.config.emergency_paused():
+            await ctx.send("Clanker launch creation is paused by the bot owner.")
+            return False
+        blocked_users = {int(value) for value in await self.config.blocked_user_ids()}
+        if int(ctx.author.id) in blocked_users:
+            await ctx.send("You are blocked from creating Clanker launch requests.")
+            return False
+        blocked_guilds = {int(value) for value in await self.config.blocked_guild_ids()}
+        if int(ctx.guild.id) in blocked_guilds:
+            await ctx.send("Clanker launch creation is blocked for this server.")
+            return False
+        outstanding_statuses = {
+            "dry_run", "verified", "awaiting_cryptowallet_approval",
+            "internal_submitted", "internal_uncertain",
+        }
+        max_outstanding = int(await self.config.max_outstanding_per_user())
+        if max_outstanding > 0:
+            owned = await self.user_launch_records(ctx.author.id)
+            outstanding = sum(
+                1 for record in owned
+                if record.get("status") in outstanding_statuses
+                and not record.get("dismissed_by_requester")
+            )
+            if outstanding >= max_outstanding:
+                await ctx.send(
+                    "You already have {} unfinished Clanker launch request{}. "
+                    "Finish or remove one before creating another.".format(
+                        outstanding, "" if outstanding == 1 else "s"
+                    )
+                )
+                return False
+
         launch_channel_id = settings.get("launch_channel_id")
         if launch_channel_id and ctx.channel.id != launch_channel_id:
             channel = ctx.guild.get_channel(launch_channel_id)
@@ -915,6 +956,86 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             self.user_cooldowns[key] = now
 
         return True
+
+    async def record_owner_action(
+        self, actor_id: int, action: str, target: Optional[int] = None
+    ) -> None:
+        """Append a bounded operational audit entry without collecting extra user data."""
+        entry = {
+            "created_at": utc_now(), "actor_id": int(actor_id),
+            "action": str(action),
+            "target": int(target) if target is not None else None,
+        }
+        async with self.config.owner_audit_log() as entries:
+            entries.append(entry)
+            del entries[:-500]
+
+    @staticmethod
+    def token_rundown_embed(record: Dict[str, Any]) -> discord.Embed:
+        """Render public token facts without requester or origin-server metadata."""
+        symbol = str(record.get("symbol") or "?").upper()
+        name = str(record.get("name") or "Unnamed token")
+        token = str(record.get("token_address") or "")
+        transaction = str(record.get("transaction_hash") or "")
+        payload = record.get("payload") or {}
+        metadata = payload.get("metadata") or {}
+        embed = discord.Embed(
+            title="{} ({}{})".format(name, chr(36), symbol),
+            description=str(metadata.get("description") or "").strip() or None,
+            color=discord.Color.green(),
+        )
+        if token:
+            embed.add_field(
+                name="Contract",
+                value=("`{}`\n[BaseScan](https://sepolia.basescan.org/address/{}) · "
+                       "[Clanker](https://www.clanker.world/clanker/{})").format(
+                           token, token, token
+                       ),
+                inline=False,
+            )
+        if transaction:
+            embed.add_field(
+                name="Launch transaction",
+                value="[View on BaseScan](https://sepolia.basescan.org/tx/{})".format(transaction),
+                inline=False,
+            )
+        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        try:
+            supply = "{:,}".format(int(record.get("supply") or 0))
+        except (TypeError, ValueError):
+            supply = "Unknown"
+        embed.add_field(name="Supply", value=supply, inline=True)
+        created = str(record.get("created_at") or "")
+        try:
+            moment = datetime.datetime.fromisoformat(created.replace("Z", "+00:00"))
+            created = "{} ({})".format(
+                discord.utils.format_dt(moment, style="f"),
+                discord.utils.format_dt(moment, style="R"),
+            )
+        except ValueError:
+            created = created or "Unknown"
+        embed.add_field(name="Launched", value=created, inline=False)
+        embed.add_field(name="Token administrator", value="`{}`".format(
+            record.get("token_admin") or "Unknown"), inline=False)
+        embed.add_field(
+            name="Reward split",
+            value="Creator {:g}% · Platform {:g}%".format(
+                int(record.get("creator_bps") or 0) / 100,
+                int(record.get("platform_bps") or 0) / 100,
+            ),
+            inline=False,
+        )
+        if record.get("vault_percentage"):
+            embed.add_field(name="Vault", value="{}% of supply".format(
+                int(record["vault_percentage"])), inline=True)
+        if record.get("airdrop_amount"):
+            embed.add_field(name="Airdrop", value="{:,} tokens".format(
+                int(record["airdrop_amount"])), inline=True)
+        image_url = str(payload.get("image") or "")
+        if image_url.startswith("https://"):
+            embed.set_thumbnail(url=image_url)
+        embed.set_footer(text="Public Clanker token overview · Base Sepolia testnet")
+        return embed
 
     async def user_launch_records(
         self, user_id: int, guild: Optional[discord.Guild] = None
@@ -2404,6 +2525,34 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         Starts the launch card with a ticker and optional token name already filled in.
         """
         await self._open_clanker_card(ctx, symbol, name)
+
+    @clanker.command(name="token", aliases=("rundown",))
+    async def clanker_token(self, ctx: commands.Context, *, token: str):
+        """Show a public confirmed-token overview by symbol, launch reference, or address."""
+        query = token.strip().casefold()
+        records = [
+            record for record in await self.all_launch_records()
+            if record.get("status") in {"internal_confirmed", "external_confirmed"}
+            and record.get("token_address")
+        ]
+        matches = [
+            record for record in records
+            if query in {
+                str(record.get("token_address") or "").casefold(),
+                str(record.get("launch_id") or "").casefold(),
+                str(record.get("launch_ref") or "").casefold(),
+                str(record.get("symbol") or "").casefold(),
+            }
+        ]
+        if not matches:
+            await ctx.send("No confirmed Clanker token matched that symbol, reference, or address.")
+            return
+        if len(matches) > 1:
+            await ctx.send(
+                "That symbol matches more than one token. Use its launch reference or contract address."
+            )
+            return
+        await ctx.send(embed=self.token_rundown_embed(matches[0]))
 
     @clanker.command(name="audit")
     @checks.mod_or_permissions(manage_guild=True)
