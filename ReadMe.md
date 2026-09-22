@@ -31,6 +31,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 
 - `avatar` - Display a Discord user's avatar as a direct, clickable image URL.
 - `azerothcore` - AzerothCore/WoW server utilities using SOAP.
+- `clanker` - Base Sepolia token launches with reviewed CryptoWallet execution, token rundowns, rewards, and owner controls.
 - `coc` - Clash of Clans clan and war status utilities.
 - `dadjokes` - On-demand and scheduled random dad jokes.
 - `cryptowallet` - Provider-backed multichain testnet wallets with protected authorization, recovery, and sends.
