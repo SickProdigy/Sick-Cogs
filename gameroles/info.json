@@ -13,5 +13,5 @@
   "short": "Delegated game and clan role management.",
   "tags": ["roles", "games", "clans", "rust", "ark"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "1.0.0"
 }

@@ -15,7 +15,7 @@ class GameRoles(commands.Cog):
     """Let trusted game roles assign only explicitly approved member roles."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "1.0.0"
     CONFIG_IDENTIFIER = 771683711016269361842125069837015824197
 
     def __init__(self, bot):
