@@ -1,1 +1,17 @@
-{"author":["SickProdigy"],"description":"Staff-facing summaries and browsing for Red ModLog cases.","disabled":false,"end_user_data_statement":"This cog does not persist user data. It reads existing Red ModLog cases.","hidden":false,"install_msg":"Use `[p]help incidents`. This staff-only cog reads existing Red ModLog cases and does not create a separate incident database.","min_bot_version":"3.5.0","min_python_version":[3,8,0],"name":"Incidents","permissions":["embed_links"],"requirements":[],"short":"Staff summaries for existing Red ModLog cases.","tags":["moderation","modlog","incidents","reports"],"type":"COG","version":"0.1.0"}
+{
+  "author": ["SickProdigy"],
+  "description": "Interactive staff browsing, search, filtering, and summaries over Red ModLog cases.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server role IDs used for staff access. It does not copy or own moderation case data; case data is read from Red ModLog.",
+  "hidden": false,
+  "install_msg": "Load Red's ModLog, then use `[p]incidents` for the staff dashboard and `[p]incidentset` to grant additional staff roles access.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "Incidents",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Interactive staff reporting over existing Red ModLog cases.",
+  "tags": ["moderation", "modlog", "incidents", "reports"],
+  "type": "COG",
+  "version": "0.2.0"
+}
