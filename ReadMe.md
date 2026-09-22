@@ -37,6 +37,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `dictionary` - English definitions, pronunciations, related words, and community slang.
 - `donate` - Configurable donation information command.
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
+- `gameroles` - Interactive, tightly scoped role delegation for game and clan communities.
 - `imagine` - Private, provider-neutral AI image generation with OpenAI and managed Codex support.
 - `movies` - Configurable TMDb new movie release announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
