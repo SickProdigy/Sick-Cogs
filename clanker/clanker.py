@@ -267,7 +267,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     """Prepare and orchestrate Clanker token launch requests on Base Sepolia."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "1.0.0"
 
     default_global = {
         "treasury_address": None,
