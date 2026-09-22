@@ -205,7 +205,7 @@ class ClankerAdminMixin:
         embed.add_field(name="Blocked servers", value=bounded_ids(guilds), inline=False)
         await ctx.send(embed=embed)
 
-    @clankerset.command(name="analytics")
+    @clankerset.command(name="analytics", aliases=("metrics",))
     async def clankerset_analytics(self, ctx: commands.Context, days: commands.Range[int, 1, 365] = 30):
         """Show private deployment-wide launch activity and source counts."""
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)

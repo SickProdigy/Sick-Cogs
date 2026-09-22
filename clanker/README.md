@@ -96,7 +96,7 @@ The first launch of a symbol for each requester uses the lowercase symbol as its
 - `[p]clankerset blockuser|unblockuser <user_id>` — reversibly control one requester.
 - `[p]clankerset blockguild|unblockguild <guild_id>` — reversibly control one launch source.
 - `[p]clankerset blocks` — review deployment-wide pause, cap, and block state.
-- `[p]clankerset analytics [days]` — show private owner-only activity and source totals.
+- `[p]clankerset analytics [days]` or `[p]clankerset metrics [days]` — show private owner-only activity and source totals.
 - `[p]clankerset owneraudit [limit]` — review owner control changes.
 - `[p]clankerset vault ...` — manage vault allocation, lockup, vesting, recipient, and enablement.
 - `[p]clankerset airdrop ...` — manage default airdrop data and proof exports.
