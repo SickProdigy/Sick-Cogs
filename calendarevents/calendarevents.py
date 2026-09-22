@@ -5,21 +5,36 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import discord
 from redbot.core import Config, commands
+from discord.ext import tasks
 from .google import GoogleCalendarClient
 from .models import CalendarEvent
 
 
 class CalendarEvents(commands.Cog):
-    """Manage a server-owned shared Google Calendar."""
+    """Manage native Discord events and optional shared Google calendars."""
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     CONFIG_IDENTIFIER = 9329894641121951861707075415179419308323035696195774470464762724187261
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=self.CONFIG_IDENTIFIER, force_registration=True)
-        self.config.register_guild(calendar_id=None, channel_id=None, manager_role_id=None,
-                                   timezone="UTC", ics_url=None, event_owners={})
+        self.config.register_guild(
+            calendar_id=None,
+            channel_id=None,
+            manager_role_id=None,
+            timezone="UTC",
+            ics_url=None,
+            event_owners={},
+            reminder_channel_id=None,
+            reminder_role_id=None,
+            reminder_offsets=[1440, 720, 360, 60],
+            reminder_state={},
+        )
+        self.reminder_loop.start()
+
+    def cog_unload(self):
+        self.reminder_loop.cancel()
 
     async def red_delete_data_for_user(self, *, requester, user_id):
         for guild_id, data in (await self.config.all_guilds()).items():
@@ -28,10 +43,14 @@ class CalendarEvents(commands.Cog):
             if clean != owners:
                 await self.config.guild_from_id(guild_id).event_owners.set(clean)
 
+    async def is_manager(self, member):
+        role_id = await self.config.guild(member.guild).manager_role_id()
+        return member.guild_permissions.manage_guild or (
+            role_id is not None and any(role.id == role_id for role in member.roles)
+        )
+
     async def _manager(self, ctx):
-        role_id = await self.config.guild(ctx.guild).manager_role_id()
-        allowed = ctx.author.guild_permissions.manage_guild or (
-            role_id is not None and any(role.id == role_id for role in ctx.author.roles))
+        allowed = await self.is_manager(ctx.author)
         if not allowed:
             await ctx.send("You need **Manage Server** or the configured calendar manager role.")
         return allowed
@@ -75,6 +94,108 @@ class CalendarEvents(commands.Cog):
         except (AttributeError, ValueError):
             return value or "Unknown"
 
+    @staticmethod
+    def normalize_offsets(values):
+        converted = [int(value) for value in values]
+        if any(value < 0 or value > 40320 for value in converted):
+            raise ValueError("Reminder offsets must be from 0 to 40320 minutes.")
+        offsets = sorted(set(converted), reverse=True)
+        if not offsets or len(offsets) > 8:
+            raise ValueError("Choose between 1 and 8 reminder offsets from 0 to 40320 minutes.")
+        return offsets
+
+    @staticmethod
+    def due_offset(start_time, offsets, sent, now=None):
+        now = now or datetime.now(timezone.utc)
+        remaining = (start_time.astimezone(timezone.utc) - now).total_seconds() / 60
+        if remaining < -2:
+            return None
+        due = sorted((offset for offset in offsets if remaining <= offset and str(offset) not in sent))
+        return due[0] if due else None
+
+    @staticmethod
+    def event_url(guild_id, event_id):
+        return f"https://discord.com/events/{guild_id}/{event_id}"
+
+    async def create_discord_event(self, guild, member, *, title, start, end, location, description=""):
+        if not await self.is_manager(member):
+            raise PermissionError("You need Manage Server or the configured calendar manager role.")
+        title, location, description = title.strip(), location.strip(), description.strip()
+        if not title or not location:
+            raise ValueError("The event needs both a title and a location or link.")
+        if start <= datetime.now(timezone.utc):
+            raise ValueError("The event start must be in the future.")
+        if end <= start:
+            raise ValueError("The event end must be after its start.")
+        return await guild.create_scheduled_event(
+            name=title[:100],
+            description=description[:1000] or "Created with CalendarEvents.",
+            start_time=start,
+            end_time=end,
+            entity_type=discord.EntityType.external,
+            privacy_level=discord.PrivacyLevel.guild_only,
+            location=location[:100],
+            reason=f"CalendarEvents: created by {member} ({member.id})",
+        )
+
+    async def _send_event_reminder(self, guild, event, channel, role, offset):
+        start = event.start_time.astimezone(timezone.utc)
+        title = "Event starting now" if offset == 0 else "Upcoming server event"
+        embed = discord.Embed(title=title, description=f"**[{event.name}]({self.event_url(guild.id, event.id)})**", color=discord.Color.blurple())
+        embed.add_field(name="Starts", value=f"<t:{int(start.timestamp())}:F> (<t:{int(start.timestamp())}:R>)", inline=False)
+        location = getattr(event, "location", None)
+        if location:
+            embed.add_field(name="Location", value=location, inline=False)
+        if getattr(event, "description", None):
+            embed.add_field(name="Details", value=event.description[:1024], inline=False)
+        content = role.mention if role else None
+        await channel.send(content=content, embed=embed, allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False))
+
+    @tasks.loop(minutes=1)
+    async def reminder_loop(self):
+        now = datetime.now(timezone.utc)
+        for guild in list(self.bot.guilds):
+            data = await self.config.guild(guild).all()
+            channel = guild.get_channel(data.get("reminder_channel_id"))
+            if channel is None:
+                continue
+            role = guild.get_role(data.get("reminder_role_id")) if data.get("reminder_role_id") else None
+            offsets = data.get("reminder_offsets") or []
+            state = data.get("reminder_state") or {}
+            try:
+                events = await guild.fetch_scheduled_events(with_counts=False)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+            active_keys = set()
+            changed = False
+            for event in events:
+                if event.status != discord.EventStatus.scheduled:
+                    continue
+                start_key = str(int(event.start_time.timestamp()))
+                event_key = f"{event.id}:{start_key}"
+                active_keys.add(event_key)
+                sent = set(state.get(event_key, []))
+                offset = self.due_offset(event.start_time, offsets, sent, now)
+                if offset is None:
+                    continue
+                try:
+                    await self._send_event_reminder(guild, event, channel, role, offset)
+                except (discord.Forbidden, discord.HTTPException):
+                    continue
+                sent.update(str(value) for value in offsets if value >= offset)
+                state[event_key] = sorted(sent, key=int, reverse=True)
+                changed = True
+            stale = [key for key in state if key not in active_keys]
+            for key in stale:
+                state.pop(key, None)
+                changed = True
+            if changed:
+                await self.config.guild(guild).reminder_state.set(state)
+
+    @reminder_loop.before_loop
+    async def before_reminder_loop(self):
+        await self.bot.wait_until_red_ready()
+
     @commands.group(name="calendar", aliases=["cal", "calendarevents"], invoke_without_command=True)
     @commands.guild_only()
     async def calendar(self, ctx):
@@ -89,7 +210,9 @@ class CalendarEvents(commands.Cog):
             f"`{ctx.clean_prefix}calendar add <start> <end> <title>` - create an event\n"
             f"`{ctx.clean_prefix}calendar show <event ID>` - details and ICS export"))
         embed.set_footer(text=f"Server managers: {ctx.clean_prefix}calendarset")
-        await ctx.send(embed=embed)
+        from .views import CalendarDashboard
+        view = CalendarDashboard(self, ctx.author)
+        await ctx.send(embed=embed, view=view)
 
     @calendar.command(name="add", aliases=["create"])
     async def calendar_add(self, ctx, starts_at: str, ends_at: str, *, title: str):
@@ -218,6 +341,11 @@ class CalendarEvents(commands.Cog):
         embed.add_field(name="Manager role", value=role.mention if role else "Manage Server only")
         embed.add_field(name="Timezone", value=data["timezone"])
         embed.add_field(name="ICS subscription", value="Configured" if data["ics_url"] else "Not set")
+        reminder_channel = ctx.guild.get_channel(data.get("reminder_channel_id"))
+        reminder_role = ctx.guild.get_role(data.get("reminder_role_id"))
+        embed.add_field(name="Reminder channel", value=reminder_channel.mention if reminder_channel else "Disabled")
+        embed.add_field(name="Reminder role", value=reminder_role.mention if reminder_role else "No mention")
+        embed.add_field(name="Reminder offsets", value=", ".join(f"{value}m" for value in data.get("reminder_offsets", [])) or "None", inline=False)
         await ctx.send(embed=embed)
 
     @calendarset.command(name="serviceaccount")
@@ -281,3 +409,34 @@ class CalendarEvents(commands.Cog):
             return
         await self.config.guild(ctx.guild).ics_url.set(subscription_url)
         await ctx.send("ICS subscription URL saved." if subscription_url else "ICS subscription URL cleared.")
+
+
+    @calendarset.command(name="reminderchannel")
+    async def calendarset_reminderchannel(self, ctx, channel: discord.TextChannel = None):
+        """Set the repeated reminder channel; omit to disable reminders."""
+        if not await self._manager(ctx):
+            return
+        await self.config.guild(ctx.guild).reminder_channel_id.set(channel.id if channel else None)
+        await ctx.send(f"Event reminders will post in {channel.mention}." if channel else "Event reminders disabled.")
+
+    @calendarset.command(name="reminderrole")
+    async def calendarset_reminderrole(self, ctx, role: discord.Role = None):
+        """Set an optional role mention for event reminders; omit to clear."""
+        if not await self._manager(ctx):
+            return
+        await self.config.guild(ctx.guild).reminder_role_id.set(role.id if role else None)
+        await ctx.send(f"Event reminders will mention {role.mention}." if role else "Reminder role cleared.")
+
+    @calendarset.command(name="reminders")
+    async def calendarset_reminders(self, ctx, *minutes: int):
+        """Set 1–8 reminder offsets in minutes, such as 1440 720 360 60."""
+        if not await self._manager(ctx):
+            return
+        try:
+            offsets = self.normalize_offsets(minutes)
+        except (TypeError, ValueError) as error:
+            await ctx.send(str(error))
+            return
+        await self.config.guild(ctx.guild).reminder_offsets.set(offsets)
+        await self.config.guild(ctx.guild).reminder_state.clear()
+        await ctx.send("Reminder offsets saved: " + ", ".join(f"{value} minutes" for value in offsets))

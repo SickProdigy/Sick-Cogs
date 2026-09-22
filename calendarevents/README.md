@@ -1,10 +1,26 @@
 # CalendarEvents
 
-CalendarEvents connects each Discord server to a Google Calendar owned by that community. Google is the source of truth: Discord manages events while Apple Calendar, Outlook, MyBB, websites, and other tools can subscribe to the same calendar.
+CalendarEvents manages Discord's native scheduled events and can connect each Discord server to its own Google Calendar. Discord events and repeated reminders work without Google. Google remains the planned shared source for eventual Discord, Apple Calendar, Outlook, MyBB, and website synchronization.
 
-The bot uses one Google service account. A server owner shares only their chosen calendar with that service-account email, so servers do not share calendar data and nobody grants access to a personal Google account.
+The optional Google integration uses one bot-owned service account. A server owner shares only their chosen calendar with that service-account email, so servers do not share calendar data and nobody grants access to a personal Google account.
 
-## Bot-owner setup
+## Discord scheduled events and reminders
+
+Run `[p]calendar` to open the dashboard. A server manager or configured calendar manager can create an external Discord scheduled event with a title, timezone-aware start/end, location or link, and description. The dashboard also lists the server's upcoming native Discord events.
+
+Configure repeated reminders with:
+
+```text
+[p]calendarset reminderchannel #general
+[p]calendarset reminderrole @Events
+[p]calendarset reminders 1440 720 360 60
+```
+
+That example posts at roughly 24 hours, 12 hours, 6 hours, and 1 hour before each event. Choose 1–8 unique offsets between 0 and 40320 minutes; `0` means event start. Omit the channel to disable bot reminders and omit the role to stop mentions. Discord's own Interested notifications continue to work independently.
+
+Reminder delivery state is persisted, so cog reloads and bot restarts do not intentionally repeat a delivered reminder. If reminders are enabled after an offset already passed, the cog sends only the closest currently relevant reminder rather than posting every missed reminder at once.
+
+## Optional Google bot-owner setup
 
 1. Create a Google Cloud project and enable the Google Calendar API.
 2. Create a service account. It needs no Google Cloud project roles.
@@ -17,7 +33,7 @@ The bot uses one Google service account. A server owner shares only their chosen
 
 Keep the private key's line breaks encoded as `\n` if needed. Never run this command publicly, commit the JSON key, or put it in cog configuration.
 
-## Server setup
+## Optional Google server setup
 
 A member with **Manage Server** runs:
 
@@ -31,7 +47,7 @@ Use `[p]calendarset info` for a safe settings summary. It never prints the calen
 
 ## Commands
 
-- `[p]calendar` - setup status and a short guide
+- `[p]calendar` - interactive Discord event dashboard and setup status
 - `[p]calendar add 2026-09-20T18:00-04:00 2026-09-20T20:00-04:00 Team meeting`
 - `[p]calendar list`
 - `[p]calendar show <event ID>` - Google link and portable ICS copy

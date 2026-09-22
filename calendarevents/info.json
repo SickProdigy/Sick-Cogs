@@ -1,17 +1,17 @@
 {
   "author": ["SickProdigy"],
-  "description": "Connect each Discord server to its own shared Google Calendar.",
+  "description": "Manage native Discord scheduled events and reminders with optional per-server Google Calendar access.",
   "disabled": false,
   "end_user_data_statement": "Google stores calendar events. This cog stores per-server calendar settings and minimal Discord user IDs associated with events created through the bot.",
   "hidden": false,
-  "install_msg": "The bot owner must configure a Google Calendar service account. Then use [p]calendarset serviceaccount and [p]calendarset calendar.",
+  "install_msg": "Use `[p]calendar` for native Discord events and `[p]calendarset reminderchannel` for reminders. Google Calendar is optional; use `[p]calendarset serviceaccount` when linking it.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "CalendarEvents",
-  "permissions": ["embed_links", "attach_files"],
+  "permissions": ["embed_links", "attach_files", "manage_events"],
   "requirements": ["cryptography>=41,<51"],
-  "short": "Manage a server-owned Google Calendar from Discord.",
+  "short": "Native Discord events and reminders with optional Google Calendar access.",
   "tags": ["calendar", "events", "ics", "google-calendar"],
   "type": "COG",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }
