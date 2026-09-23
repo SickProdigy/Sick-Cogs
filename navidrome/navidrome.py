@@ -45,6 +45,25 @@ async def navidrome_config_permission(ctx: commands.Context) -> bool:
     )
 
 
+def normalized_music_name(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_value = normalized.encode("ascii", "ignore").decode().casefold()
+    return "".join(character for character in ascii_value if character.isalnum())
+
+
+def exact_local_match(media_type: str, query: str, matches) -> Optional[Dict[str, Any]]:
+    wanted = normalized_music_name(query)
+    for item in matches:
+        title = item.get("name") or item.get("album") or item.get("title") or ""
+        candidates = [title]
+        if media_type == "album":
+            artist = item.get("artist") or item.get("artistName") or ""
+            candidates.extend((f"{artist} {title}", f"{title} {artist}"))
+        if any(normalized_music_name(candidate) == wanted for candidate in candidates):
+            return item
+    return None
+
+
 def lidarr_requester_tag(username: str) -> str:
     normalized = unicodedata.normalize("NFKD", username).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")
@@ -897,8 +916,9 @@ class Navidrome(commands.Cog):
                 album_count=5 if media_type == "album" else 0,
             )
             matches = local["artists" if media_type == "artist" else "albums"]
-            if matches:
-                title = matches[0].get("name") or matches[0].get("album") or query
+            local_match = exact_local_match(media_type, query, matches)
+            if local_match:
+                title = local_match.get("name") or local_match.get("album") or query
                 return (
                     f"`{title}` already appears in this Navidrome library; "
                     "no Lidarr request was made.", None, None

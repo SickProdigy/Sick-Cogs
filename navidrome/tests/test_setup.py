@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from navidrome.client import NavidromeError
 from navidrome.navidrome import (
     LidarrConfirmView, LidarrRequestModal, LidarrRequestTypeView, LidarrResultView, Navidrome,
-    lidarr_requester_tag, navidrome_config_permission,
+    exact_local_match, lidarr_requester_tag, navidrome_config_permission,
 )
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
@@ -347,6 +347,45 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(view, LidarrResultView)
         select = view.children[0]
         self.assertEqual([option.description for option in select.options], ["Artist A", "Artist B"])
+
+    def test_local_library_check_ignores_fuzzy_mismatches(self):
+        self.assertIsNone(exact_local_match(
+            "artist", "paul wall", [{"name": "Paul Wall, Aqualeo"}]
+        ))
+        self.assertIsNone(exact_local_match(
+            "album", "paul wall", [{"album": "The Great Wall", "artist": "Various"}]
+        ))
+
+    def test_local_library_check_accepts_normalized_exact_matches(self):
+        artist = {"name": "Beyoncé"}
+        album = {"album": "Red Headed Stranger", "artist": "Willie Nelson"}
+        self.assertIs(exact_local_match("artist", "beyonce", [artist]), artist)
+        self.assertIs(
+            exact_local_match("album", "Willie Nelson Red Headed Stranger", [album]), album
+        )
+
+    async def test_fuzzy_local_result_continues_to_lidarr(self):
+        cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
+        navidrome = SimpleNamespace(search=AsyncMock(return_value={
+            "artists": [{"name": "Paul Wall, Aqualeo"}], "albums": []
+        }))
+        candidate = {"artistName": "Paul Wall", "foreignArtistId": "paul-wall"}
+        lidarr = SimpleNamespace(lookup=AsyncMock(return_value=[candidate]))
+        cog._guild_client = AsyncMock(return_value=("home", navidrome))
+        cog._lidarr_client = AsyncMock(return_value=("home", lidarr, {}))
+        guild = SimpleNamespace(id=2)
+        member = SimpleNamespace(
+            id=8, name="user", guild_permissions=SimpleNamespace(manage_guild=False), roles=[]
+        )
+
+        content, embed, view = await cog.prepare_lidarr_request(
+            guild, member, "artist", "paul wall"
+        )
+
+        lidarr.lookup.assert_awaited_once_with("artist", "paul wall")
+        self.assertIsNone(content)
+        self.assertIn("Paul Wall", embed.description)
+        self.assertIsInstance(view, LidarrConfirmView)
 
     async def test_navidrome_request_stops_before_lidarr_when_available(self):
         cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
