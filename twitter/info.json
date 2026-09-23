@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Publish new posts from configured X accounts into selected Discord channels using the native X API.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores per-server X account IDs, usernames, destination channel IDs, manager role IDs, polling settings, and last-seen post IDs. It does not store member data. The bot-owner X bearer token is stored separately in Red shared API tokens.",
+    "hidden": false,
+    "install_msg": "The bot owner must configure a native X API bearer token with `[p]set api twitter bearer_token,YOUR_TOKEN`. Server managers can then use `[p]twitterset add #channel username`, `[p]twitterset enabled true`, and `[p]twitterset status`. Native X API reads are billable; review current X pricing before enabling polling.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links"],
+    "name": "Twitter",
+    "requirements": [],
+    "short": "Native X post announcements",
+    "tags": ["twitter", "x", "social", "feeds", "notifications"],
+    "type": "COG",
+    "version": "0.1.0"
+}
