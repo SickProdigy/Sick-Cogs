@@ -59,6 +59,22 @@ class LidarrClientTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(LidarrError, message):
                     await client.request("GET", "system/status")
 
+    async def test_discovery_uses_root_folder_profile_defaults(self):
+        session = FakeSession([
+            FakeResponse({"version": "2.0"}),
+            FakeResponse([{
+                "path": "/music", "accessible": True,
+                "defaultQualityProfileId": 3, "defaultMetadataProfileId": 4,
+            }]),
+            FakeResponse([{"id": 2}, {"id": 3}]),
+            FakeResponse([{"id": 4}]),
+        ])
+        client = LidarrClient(session, "https://lidarr.example.com", "secret")
+        result = await client.discover_configuration()
+        self.assertEqual(result["root_folder_path"], "/music")
+        self.assertEqual(result["quality_profile_id"], 3)
+        self.assertEqual(result["metadata_profile_id"], 4)
+
     async def test_validation_checks_root_and_both_profiles(self):
         session = FakeSession([
             FakeResponse({"version": "2.0"}),

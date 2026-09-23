@@ -184,16 +184,19 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         }
         cog.get_session = AsyncMock(return_value=SimpleNamespace())
         ctx = SimpleNamespace(send=AsyncMock())
-        validator = AsyncMock(return_value={"version": "2.0"})
+        discover = AsyncMock(return_value={
+            "status": {"version": "2.0"}, "root_folder_path": "/music",
+            "quality_profile_id": 3, "metadata_profile_id": 4,
+        })
 
         with patch("navidrome.navidrome.LidarrClient") as client_type:
-            client_type.return_value.validate_configuration = validator
+            client_type.return_value.discover_configuration = discover
             await Navidrome.owner_lidarr_configure.callback(
-                cog, ctx, "home", "/music", 3, 4, False
+                cog, ctx, None, None, None, None, None
             )
 
-        validator.assert_awaited_once_with(
-            root_folder_path="/music", quality_profile_id=3, metadata_profile_id=4
+        discover.assert_awaited_once_with(
+            root_folder_path=None, quality_profile_id=None, metadata_profile_id=None
         )
         saved = cog.config.connections.value["home"]["lidarr"]
         self.assertTrue(saved["enabled"])
