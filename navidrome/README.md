@@ -147,8 +147,9 @@ The command shows the selected Lidarr result, the exact `discord` and sanitized
 change. Existing tags are retained. Duplicate requests report the already-managed state and add the
 new requester tag to the managed artist when possible.
 
-For an owner-managed connection, store `lidarr_url` and `lidarr_api_key` in that connection's
-`navidrome_<name>` Red shared-token namespace, then validate the root folder and profiles:
+For a bot with one owner-managed connection, store `lidarr_url` and `lidarr_api_key` in the universal
+`lidarr` Red shared-token namespace. Multi-profile bots use each connection's `navidrome_<name>`
+namespace so credentials cannot cross profiles. Then validate the root folder and profiles:
 
 ```text
 [p]navidromeowner lidarr configure [name] [root-folder] [quality-profile-id] [metadata-profile-id] [allow-http]

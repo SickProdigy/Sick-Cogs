@@ -188,6 +188,17 @@ class Navidrome(commands.Cog):
     def guild_token_namespace(guild_id: int) -> str:
         return f"{TOKEN_PREFIX}guild_{int(guild_id)}"
 
+    async def _owner_lidarr_tokens(self, name: str) -> Tuple[str, Dict[str, str]]:
+        profiles = await self.config.connections()
+        namespaces = ["lidarr", f"{TOKEN_PREFIX}{name}"] if len(profiles) == 1 else [f"{TOKEN_PREFIX}{name}"]
+        last_tokens: Dict[str, str] = {}
+        for namespace in namespaces:
+            tokens = await self.bot.get_shared_api_tokens(namespace)
+            last_tokens = tokens
+            if tokens.get("lidarr_url") and tokens.get("lidarr_api_key"):
+                return namespace, tokens
+        return namespaces[0], last_tokens
+
     async def _lidarr_client(
         self, guild: discord.Guild
     ) -> Tuple[str, LidarrClient, Dict[str, Any]]:
@@ -204,11 +215,12 @@ class Navidrome(commands.Cog):
             if not profile:
                 raise LidarrError("This server has no approved Navidrome connection.")
             name = str(selected)
-            namespace = f"{TOKEN_PREFIX}{selected}"
+            namespace, tokens = await self._owner_lidarr_tokens(str(selected))
             public_only = False
             allow_http = bool(profile.get("lidarr_allow_http"))
         lidarr = dict((profile or {}).get("lidarr") or {})
-        tokens = await self.bot.get_shared_api_tokens(namespace)
+        if settings.get("connection_mode") == "guild_managed":
+            tokens = await self.bot.get_shared_api_tokens(namespace)
         base_url = str(tokens.get("lidarr_url") or "").strip()
         api_key = str(tokens.get("lidarr_api_key") or "")
         if not lidarr.get("enabled") or not base_url or not api_key:
@@ -882,8 +894,7 @@ class Navidrome(commands.Cog):
         profile = profiles.get(name)
         if not profile:
             return await ctx.send("That Navidrome connection is not registered.")
-        namespace = f"{TOKEN_PREFIX}{name}"
-        tokens = await self.bot.get_shared_api_tokens(namespace)
+        namespace, tokens = await self._owner_lidarr_tokens(name)
         base_url = str(tokens.get("lidarr_url") or "").strip()
         api_key = str(tokens.get("lidarr_api_key") or "")
         if not base_url or not api_key:

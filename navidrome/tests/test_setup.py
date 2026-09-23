@@ -156,7 +156,26 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.base_url, "https://lidarr.example.com")
         self.assertFalse(client.public_only)
         self.assertEqual(settings["quality_profile_id"], 3)
-        cog.bot.get_shared_api_tokens.assert_awaited_once_with("navidrome_home")
+        cog.bot.get_shared_api_tokens.assert_awaited_once_with("lidarr")
+
+    async def test_single_profile_lidarr_falls_back_to_legacy_scoped_tokens(self):
+        cog, _ = self.make_cog(
+            profiles={"home": {
+                "base_url": "https://music.example.com",
+                "lidarr": {"enabled": True, "root_folder_path": "/music",
+                           "quality_profile_id": 3, "metadata_profile_id": 4},
+            }}, settings={"connection": "home"},
+        )
+        cog.bot.get_shared_api_tokens.side_effect = [
+            {}, {"lidarr_url": "https://lidarr.example.com", "lidarr_api_key": "secret"},
+        ]
+        cog.get_session = AsyncMock(return_value=SimpleNamespace())
+        _, client, _ = await cog._lidarr_client(SimpleNamespace(id=42))
+        self.assertEqual(client.base_url, "https://lidarr.example.com")
+        self.assertEqual(
+            [call.args[0] for call in cog.bot.get_shared_api_tokens.await_args_list],
+            ["lidarr", "navidrome_home"],
+        )
 
     async def test_guild_lidarr_client_is_public_only_and_isolated(self):
         cog, _ = self.make_cog(settings={
