@@ -94,7 +94,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             {command.name for command in user_group.commands},
-            {"list", "info", "create", "name", "email", "password", "unlink", "delete"},
+            {"list", "info", "create", "link", "name", "email", "password", "unlink", "delete"},
         )
         member_names = {command.name for command in Navidrome.navidrome.commands}
         self.assertIn("account", member_names)
@@ -699,8 +699,10 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         unlinked_state = {item.label: item.disabled for item in unlinked.children}
         linked_state = {item.label: item.disabled for item in linked.children}
         self.assertFalse(unlinked_state["Create"])
+        self.assertFalse(unlinked_state["Link existing"])
         self.assertTrue(unlinked_state["Edit"])
         self.assertTrue(linked_state["Create"])
+        self.assertTrue(linked_state["Link existing"])
         self.assertFalse(linked_state["Edit"])
         self.assertFalse(linked_state["Reset password"])
         self.assertFalse(linked_state["Unlink"])
@@ -798,6 +800,22 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mapped["id"], "nav-user-1")
         self.assertNotIn("password", mapped)
         self.assertIn("Temporary password", member.send.await_args.args[0])
+
+    async def test_existing_account_can_be_linked_without_creating_user(self):
+        cog, group = self.make_cog()
+        remote = {"id": "nav-user-1", "userName": "sickprodigy", "isAdmin": True}
+        client = SimpleNamespace(user_by_username=AsyncMock(return_value=remote))
+        cog._guild_client = AsyncMock(return_value=("home", client))
+        member = SimpleNamespace(id=22, mention="<@22>")
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=2), send=AsyncMock())
+
+        await Navidrome.navidromeset_user_link.callback(
+            cog, ctx, member, username="sickprodigy"
+        )
+
+        self.assertEqual(group.accounts.value["22"]["id"], "nav-user-1")
+        self.assertEqual(group.accounts.value["22"]["username"], "sickprodigy")
+        self.assertIn("Linked Navidrome user", ctx.send.await_args.args[0])
 
     async def test_account_delete_requires_explicit_confirmation(self):
         cog, group = self.make_cog()

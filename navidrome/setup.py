@@ -926,6 +926,83 @@ class AccountManagerView(discord.ui.View):
         )
 
 
+class ExistingAccountSelect(discord.ui.Select):
+    def __init__(self, parent, users):
+        options = []
+        for remote in users[:25]:
+            username = str(remote.get("userName") or "Unknown")
+            description = "Administrator" if remote.get("isAdmin") else "Existing Navidrome user"
+            options.append(discord.SelectOption(
+                label=username[:100], value=str(remote.get("id") or username),
+                description=description,
+            ))
+        super().__init__(placeholder="Choose an existing Navidrome account", options=options)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        group = self.parent_view.cog.config.guild(interaction.guild)
+        accounts = await group.accounts()
+        member_key = str(self.parent_view.member.id)
+        if member_key in accounts:
+            await interaction.response.send_message(
+                "That member already has a linked account.", ephemeral=True
+            )
+            return
+        remote = next(
+            (user for user in self.parent_view.users
+             if str(user.get("id") or user.get("userName")) == self.values[0]),
+            None,
+        )
+        if not remote:
+            await interaction.response.send_message(
+                "That Navidrome account is no longer available.", ephemeral=True
+            )
+            return
+        remote_id = str(remote.get("id") or "")
+        username = str(remote.get("userName") or "")
+        if any(
+            str(account.get("id") or "") == remote_id
+            or str(account.get("username") or "").casefold() == username.casefold()
+            for account in accounts.values()
+        ):
+            await interaction.response.send_message(
+                "That Navidrome account is already linked to another Discord member.",
+                ephemeral=True,
+            )
+            return
+        accounts[member_key] = {
+            "id": remote_id,
+            "username": username,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await interaction.response.edit_message(
+            content=f"Linked existing Navidrome user `{username}`.",
+            embed=account_embed(self.parent_view.member, accounts[member_key], remote),
+            view=UserActionView(
+                self.parent_view.cog, interaction.user, self.parent_view.member,
+                accounts[member_key], remote,
+            ),
+        )
+
+
+class ExistingAccountLinkView(discord.ui.View):
+    def __init__(self, cog, author, member, users):
+        super().__init__(timeout=300)
+        self.cog, self.author, self.member, self.users = cog, author, member, users
+        self.add_item(ExistingAccountSelect(self, users))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await owner_check(interaction, self.author)
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content=None, embed=account_embed(self.member, None, None),
+            view=UserActionView(self.cog, interaction.user, self.member, None, None),
+        )
+
+
 class AccountConfirmView(discord.ui.View):
     def __init__(self, cog, author, member, account, remote, action: str):
         super().__init__(timeout=120)
@@ -978,14 +1055,16 @@ class UserActionView(discord.ui.View):
         )
         if not account:
             for item in self.children:
-                if getattr(item, "custom_id", None) not in {"navidrome:user:create", "navidrome:user:back"}:
+                if getattr(item, "custom_id", None) not in {
+                    "navidrome:user:create", "navidrome:user:link", "navidrome:user:back"
+                }:
                     item.disabled = True
         else:
-            create = next(
-                item for item in self.children
-                if getattr(item, "custom_id", None) == "navidrome:user:create"
-            )
-            create.disabled = True
+            for item in self.children:
+                if getattr(item, "custom_id", None) in {
+                    "navidrome:user:create", "navidrome:user:link"
+                }:
+                    item.disabled = True
             if not remote:
                 for item in self.children:
                     if getattr(item, "custom_id", None) in {
@@ -1002,6 +1081,46 @@ class UserActionView(discord.ui.View):
     async def create(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
             AccountCreateModal(self.cog, interaction.user, self.member)
+        )
+
+    @discord.ui.button(
+        label="Link existing", style=discord.ButtonStyle.primary,
+        custom_id="navidrome:user:link",
+    )
+    async def link(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer()
+        try:
+            _, client = await self.cog._guild_client(interaction.guild)
+            users = await client.users()
+        except NavidromeError as exc:
+            await interaction.followup.send(
+                f"Could not load Navidrome users: {exc}", ephemeral=True
+            )
+            return
+        accounts = await self.cog.config.guild(interaction.guild).accounts()
+        linked_ids = {str(account.get("id") or "") for account in accounts.values()}
+        linked_names = {
+            str(account.get("username") or "").casefold() for account in accounts.values()
+        }
+        available = sorted(
+            (user for user in users
+             if str(user.get("id") or "") not in linked_ids
+             and str(user.get("userName") or "").casefold() not in linked_names),
+            key=lambda user: str(user.get("userName") or "").casefold(),
+        )
+        if not available:
+            await interaction.followup.send(
+                "There are no unlinked Navidrome accounts available.", ephemeral=True
+            )
+            return
+        note = "Choose the existing Navidrome account to link."
+        if len(available) > 25:
+            note += " Showing the first 25 unlinked accounts."
+        await interaction.edit_original_response(
+            content=note, embed=None,
+            view=ExistingAccountLinkView(
+                self.cog, interaction.user, self.member, available
+            ),
         )
 
     @discord.ui.button(
