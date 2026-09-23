@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from navidrome.client import NavidromeError
 from navidrome.navidrome import (
-    LidarrConfirmView, Navidrome, lidarr_requester_tag, navidrome_config_permission,
+    LidarrConfirmView, LidarrRequestTypeView, LidarrResultView, Navidrome,
+    lidarr_requester_tag, navidrome_config_permission,
 )
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
@@ -59,6 +60,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "manager_role_id": None,
             "lidarr_identity_policy": "linked_required",
             "lidarr_requester_role_id": None,
+            "lidarr_request_channel_id": None,
             "lidarr_cooldown_seconds": 300,
             "lidarr_daily_limit": 5,
             "lidarr_audit": [],
@@ -104,15 +106,17 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             command for command in Navidrome.navidrome.commands if command.name == "request"
         )
         self.assertIn("`artist`", request_command.help)
-        self.assertIn("`album`", request_command.help)
-        self.assertIn("!navidrome request artist Willie Nelson", request_command.help)
-        self.assertIn("Individual tracks cannot be requested", request_command.help)
+        self.assertIn("`release`", request_command.help)
+        self.assertIn("!navi req artist Willie Nelson", request_command.help)
+        self.assertIn("song searches resolve to releases", request_command.help)
+        self.assertIn("req", request_command.aliases)
+        self.assertIn("navi", Navidrome.navidrome.aliases)
         lidarr_group = next(
             command for command in Navidrome.navidromeset.commands if command.name == "lidarr"
         )
         self.assertEqual(
             {command.name for command in lidarr_group.commands},
-            {"identity", "requesterrole", "limits", "audit"},
+            {"identity", "requesterrole", "requestchannel", "clearrequestchannel", "limits", "audit"},
         )
 
     async def test_setup_view_shows_connection_channel_and_controls(self):
@@ -280,6 +284,51 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(account)
         self.assertIn("no longer valid", error)
 
+    async def test_request_without_arguments_shows_artist_and_release_buttons(self):
+        cog, _ = self.make_cog()
+        ctx = SimpleNamespace(author=SimpleNamespace(id=8), send=AsyncMock())
+
+        await Navidrome.navidrome_request.callback(cog, ctx)
+
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIsInstance(view, LidarrRequestTypeView)
+        self.assertEqual({item.label for item in view.children}, {"Artist", "Release"})
+
+    async def test_song_without_query_opens_release_search_button(self):
+        cog, _ = self.make_cog()
+        ctx = SimpleNamespace(author=SimpleNamespace(id=8), send=AsyncMock())
+
+        await Navidrome.navidrome_request.callback(cog, ctx, "song")
+
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertEqual([item.label for item in view.children], ["Release"])
+
+    async def test_song_alias_searches_releases_and_returns_result_picker(self):
+        cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
+        navidrome = SimpleNamespace(search=AsyncMock(return_value={"artists": [], "albums": []}))
+        candidates = [
+            {"title": "Song", "foreignAlbumId": "one", "artist": {"artistName": "Artist A"}},
+            {"title": "Song", "foreignAlbumId": "two", "artist": {"artistName": "Artist B"}},
+        ]
+        lidarr = SimpleNamespace(lookup=AsyncMock(return_value=candidates))
+        cog._guild_client = AsyncMock(return_value=("home", navidrome))
+        cog._lidarr_client = AsyncMock(return_value=("home", lidarr, {}))
+        guild = SimpleNamespace(id=2)
+        member = SimpleNamespace(
+            id=8, name="user", guild_permissions=SimpleNamespace(manage_guild=False), roles=[]
+        )
+
+        content, embed, view = await cog.prepare_lidarr_request(
+            guild, member, "song", "Song Artist A"
+        )
+
+        lidarr.lookup.assert_awaited_once_with("album", "Song Artist A")
+        self.assertIn("2 results", content)
+        self.assertIsNone(embed)
+        self.assertIsInstance(view, LidarrResultView)
+        select = view.children[0]
+        self.assertEqual([option.description for option in select.options], ["Artist A", "Artist B"])
+
     async def test_navidrome_request_stops_before_lidarr_when_available(self):
         cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
         navidrome = SimpleNamespace(search=AsyncMock(return_value={
@@ -343,6 +392,38 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         client.add_artist.assert_awaited_once()
         self.assertEqual(group.lidarr_audit.value[-1]["outcome"], "added")
         self.assertEqual(group.lidarr_audit.value[-1]["discord_user_id"], 8)
+
+    async def test_confirmed_request_notifies_configured_guild_channel(self):
+        cog, _ = self.make_cog(settings={
+            "lidarr_identity_policy": "discord_only", "lidarr_request_channel_id": 55,
+        })
+        cog._lidarr_cooldowns = {}
+        client = SimpleNamespace(
+            ensure_tag=AsyncMock(side_effect=[1, 2]), artists=AsyncMock(return_value=[]),
+            add_artist=AsyncMock(return_value={"id": 10}),
+        )
+        channel = SimpleNamespace(send=AsyncMock())
+        cog._channel = AsyncMock(return_value=channel)
+        cog._lidarr_client = AsyncMock(return_value=("home", client, {
+            "root_folder_path": "/music", "quality_profile_id": 3,
+            "metadata_profile_id": 4, "monitor": "all",
+        }))
+        guild = SimpleNamespace(id=2)
+        member = SimpleNamespace(
+            id=8, name="Test User", mention="<@8>",
+            guild_permissions=SimpleNamespace(manage_guild=False), roles=[],
+            __str__=lambda self: "Test User",
+        )
+
+        await cog.execute_lidarr_request(
+            guild, member, "artist", {"artistName": "Example", "foreignArtistId": "mbid"}
+        )
+
+        cog._channel.assert_awaited_once_with(guild, 55)
+        channel.send.assert_awaited_once()
+        embed = channel.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "New Lidarr request")
+        self.assertIn("Example", embed.description)
 
     async def test_guild_lidarr_modal_rolls_back_failed_validation(self):
         cog, group = self.make_cog(settings={
