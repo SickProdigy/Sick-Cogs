@@ -219,6 +219,19 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(retry_minutes, 20)
         self.assertEqual(cog._connection_failures["home"], 1)
 
+    async def test_repeated_connection_failure_disables_announcements(self):
+        cog, group = self.make_cog()
+        cog._client = AsyncMock(side_effect=RuntimeError("provider failure"))
+        cog._set_next_check = AsyncMock()
+        cog._poll_semaphore = __import__("asyncio").Semaphore(2)
+        cog._connection_failures = {"home": 2}
+
+        await cog._poll_connection("home", [SimpleNamespace(id=1)])
+
+        group.announcement_enabled.set.assert_awaited_once_with(False)
+        group.next_check_at.set.assert_awaited_once_with(None)
+        cog._set_next_check.assert_not_awaited()
+
     async def test_connection_setup_is_owner_only_and_users_wait_for_connection(self):
         cog, _ = self.make_cog()
         cog.bot.is_owner.return_value = False

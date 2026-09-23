@@ -411,11 +411,21 @@ class Navidrome(commands.Cog):
                 self._connection_failures[key] = failures
                 delay = min(240, 15 * (2 ** min(failures - 1, 4))) + random.randint(0, 5)
                 for guild in guilds:
-                    await self._set_next_check(guild, delay)
-                log.warning(
-                    "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
-                    key, type(exc).__name__, delay,
-                )
+                    if failures >= 3:
+                        await self.config.guild(guild).announcement_enabled.set(False)
+                        await self.config.guild(guild).next_check_at.set(None)
+                    else:
+                        await self._set_next_check(guild, delay)
+                if failures >= 3:
+                    log.error(
+                        "Navidrome announcements disabled after repeated connection failures for %s (%s)",
+                        key, type(exc).__name__,
+                    )
+                else:
+                    log.warning(
+                        "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
+                        key, type(exc).__name__, delay,
+                    )
                 return
             self._connection_failures.pop(key, None)
             for guild in guilds:
