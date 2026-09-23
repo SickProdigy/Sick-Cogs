@@ -17,6 +17,7 @@ from redbot.core.utils import can_user_send_messages_in
 from redbot.core.utils.chat_formatting import pagify
 
 from .client import NavidromeClient, NavidromeError, validate_base_url
+from .lidarr import LidarrClient, LidarrError
 from .setup import NavidromeSetupView
 
 
@@ -130,6 +131,37 @@ class Navidrome(commands.Cog):
     @staticmethod
     def guild_token_namespace(guild_id: int) -> str:
         return f"{TOKEN_PREFIX}guild_{int(guild_id)}"
+
+    async def _lidarr_client(
+        self, guild: discord.Guild
+    ) -> Tuple[str, LidarrClient, Dict[str, Any]]:
+        settings = await self.config.guild(guild).all()
+        if settings.get("connection_mode") == "guild_managed":
+            name = "Guild managed"
+            profile = settings.get("guild_connection") or {}
+            namespace = self.guild_token_namespace(guild.id)
+            public_only = True
+            allow_http = False
+        else:
+            selected = settings.get("connection")
+            profile = await self._profile(selected) if selected else None
+            if not profile:
+                raise LidarrError("This server has no approved Navidrome connection.")
+            name = str(selected)
+            namespace = f"{TOKEN_PREFIX}{selected}"
+            public_only = False
+            allow_http = bool(profile.get("lidarr_allow_http"))
+        lidarr = dict((profile or {}).get("lidarr") or {})
+        tokens = await self.bot.get_shared_api_tokens(namespace)
+        base_url = str(tokens.get("lidarr_url") or "").strip()
+        api_key = str(tokens.get("lidarr_api_key") or "")
+        if not lidarr.get("enabled") or not base_url or not api_key:
+            raise LidarrError("Lidarr requests are not configured for this connection.")
+        client = LidarrClient(
+            await self.get_session(), base_url, api_key,
+            public_only=public_only, allow_http=allow_http,
+        )
+        return name, client, lidarr
 
     async def _guild_client(self, guild: discord.Guild) -> Tuple[str, NavidromeClient]:
         settings = await self.config.guild(guild).all()
@@ -580,6 +612,77 @@ class Navidrome(commands.Cog):
             f"Connection `{name}` is responding as {server} {version}. "
             f"Native user management is available ({len(users)} users visible)."
         )
+
+    @navidromeowner.group(name="lidarr", invoke_without_command=True)
+    async def navidromeowner_lidarr(self, ctx: commands.Context):
+        """Configure Lidarr for an owner-managed Navidrome connection."""
+        await ctx.send_help()
+
+    @navidromeowner_lidarr.command(name="configure", aliases=("set",))
+    async def owner_lidarr_configure(
+        self, ctx: commands.Context, name: str, root_folder_path: str,
+        quality_profile_id: int, metadata_profile_id: int, allow_http: bool = False,
+    ):
+        """Validate and enable Lidarr after its URL and API key are stored as shared tokens."""
+        try:
+            name = safe_profile_name(name)
+        except ValueError as exc:
+            return await ctx.send(str(exc))
+        profiles = await self.config.connections()
+        profile = profiles.get(name)
+        if not profile:
+            return await ctx.send("That Navidrome connection is not registered.")
+        namespace = f"{TOKEN_PREFIX}{name}"
+        tokens = await self.bot.get_shared_api_tokens(namespace)
+        base_url = str(tokens.get("lidarr_url") or "").strip()
+        api_key = str(tokens.get("lidarr_api_key") or "")
+        if not base_url or not api_key:
+            return await ctx.send(
+                f"Set `lidarr_url` and `lidarr_api_key` first with Red's shared API token "
+                f"command for `{namespace}` in a private channel."
+            )
+        settings = {
+            "enabled": True, "root_folder_path": root_folder_path,
+            "quality_profile_id": quality_profile_id,
+            "metadata_profile_id": metadata_profile_id, "monitor": "all",
+        }
+        try:
+            client = LidarrClient(
+                await self.get_session(), base_url, api_key, allow_http=allow_http
+            )
+            status = await client.validate_configuration(**{
+                key: settings[key] for key in (
+                    "root_folder_path", "quality_profile_id", "metadata_profile_id"
+                )
+            })
+        except LidarrError as exc:
+            return await ctx.send(f"Lidarr was not enabled: {exc}")
+        profile = dict(profile)
+        profile["lidarr"] = settings
+        profile["lidarr_allow_http"] = bool(allow_http)
+        profiles[name] = profile
+        await self.config.connections.set(profiles)
+        await ctx.send(
+            f"Lidarr {status.get('version', 'unknown')} is enabled for `{name}`. "
+            "The API key remains hidden in Red's shared token store."
+        )
+
+    @navidromeowner_lidarr.command(name="disable")
+    async def owner_lidarr_disable(self, ctx: commands.Context, name: str):
+        """Disable requests without displaying or deleting separately stored credentials."""
+        try:
+            name = safe_profile_name(name)
+        except ValueError as exc:
+            return await ctx.send(str(exc))
+        profiles = await self.config.connections()
+        if name not in profiles:
+            return await ctx.send("That Navidrome connection is not registered.")
+        profile = dict(profiles[name])
+        profile.pop("lidarr", None)
+        profile.pop("lidarr_allow_http", None)
+        profiles[name] = profile
+        await self.config.connections.set(profiles)
+        await ctx.send(f"Lidarr requests are disabled for `{name}`.")
 
     @commands.group(name="navidromeset", invoke_without_command=True)
     @commands.guild_only()
