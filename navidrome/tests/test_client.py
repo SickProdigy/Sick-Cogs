@@ -1,7 +1,9 @@
 import unittest
 from types import SimpleNamespace
 
-from navidrome.client import NavidromeClient, NavidromeError, validate_base_url
+from navidrome.client import (
+    NavidromeClient, NavidromeError, validate_base_url, validate_public_base_url,
+)
 
 
 class FakeResponse:
@@ -69,6 +71,15 @@ class NavidromeClientTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 validate_base_url(value)
+
+    async def test_public_validation_rejects_private_ip_literal(self):
+        with self.assertRaisesRegex(ValueError, "public"):
+            await validate_public_base_url("https://127.0.0.1:4533")
+
+    async def test_public_validation_allows_global_ip_literal(self):
+        self.assertEqual(
+            await validate_public_base_url("https://8.8.8.8"), "https://8.8.8.8"
+        )
 
     def test_subsonic_auth_uses_salted_token_not_plaintext_password(self):
         client = NavidromeClient(

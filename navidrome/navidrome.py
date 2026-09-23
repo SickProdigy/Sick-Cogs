@@ -22,7 +22,7 @@ from .setup import NavidromeSetupView
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/1.0.0"
+USER_AGENT = "Sick-Cogs-Navidrome/1.1.0"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -41,11 +41,13 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
 
-    default_global = {"connections": {}}
+    default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
         "connection": None,
+        "connection_mode": "owner_managed",
+        "guild_connection": None,
         "announcement_enabled": False,
         "announcement_channel_id": None,
         "interval_minutes": 60,
@@ -101,11 +103,39 @@ class Navidrome(commands.Cog):
             raise NavidromeError("The approved connection is missing its credentials.")
         return NavidromeClient(await self.get_session(), profile["base_url"], username, password)
 
+    @staticmethod
+    def guild_token_namespace(guild_id: int) -> str:
+        return f"{TOKEN_PREFIX}guild_{int(guild_id)}"
+
     async def _guild_client(self, guild: discord.Guild) -> Tuple[str, NavidromeClient]:
-        name = await self.config.guild(guild).connection()
+        settings = await self.config.guild(guild).all()
+        if settings.get("connection_mode") == "guild_managed":
+            profile = settings.get("guild_connection") or {}
+            base_url = str(profile.get("base_url") or "")
+            if not base_url:
+                raise NavidromeError("This server's guild-managed Navidrome connection is missing.")
+            tokens = await self.bot.get_shared_api_tokens(self.guild_token_namespace(guild.id))
+            username = str(tokens.get("username") or "").strip()
+            password = str(tokens.get("password") or "")
+            if not username or not password:
+                raise NavidromeError("This server's guild-managed connection is missing credentials.")
+            client = NavidromeClient(
+                await self.get_session(), base_url, username, password, public_only=True
+            )
+            return "Guild managed", client
+        name = settings.get("connection")
         if not name:
             raise NavidromeError("This server has not selected a Navidrome connection.")
         return name, await self._client(name)
+
+    async def _reset_connection_state(self, guild: discord.Guild, *, clear_accounts: bool):
+        group = self.config.guild(guild)
+        await group.announcement_enabled.set(False)
+        await group.announced_album_ids.set([])
+        await group.last_success_at.set(None)
+        await group.next_check_at.set(None)
+        if clear_accounts:
+            await group.accounts.set({})
 
     async def _channel(self, guild: discord.Guild, channel_id: int) -> Optional[GuildMessageable]:
         channel = guild.get_channel_or_thread(channel_id)
@@ -181,12 +211,17 @@ class Navidrome(commands.Cog):
     async def setup_embed(self, guild: discord.Guild) -> discord.Embed:
         settings = await self.config.guild(guild).all()
         profiles = await self.config.connections()
+        guild_connections_enabled = await self.config.guild_connections_enabled()
         channel = (
             guild.get_channel_or_thread(settings["announcement_channel_id"])
             if settings.get("announcement_channel_id")
             else None
         )
+        mode = settings.get("connection_mode", "owner_managed")
         selected = settings.get("connection")
+        guild_profile = settings.get("guild_connection") or {}
+        active_name = "Guild managed" if mode == "guild_managed" else selected
+        ready = bool(guild_profile.get("base_url")) if mode == "guild_managed" else selected in profiles
         embed = discord.Embed(
             title="Navidrome setup",
             description=(
@@ -197,12 +232,17 @@ class Navidrome(commands.Cog):
         )
         embed.add_field(
             name="Connection",
-            value=selected or ("Not selected" if profiles else "No owner-approved connections"),
+            value=active_name or ("Not selected" if profiles else "No owner-approved connections"),
+            inline=True,
+        )
+        embed.add_field(
+            name="Connection mode",
+            value="Guild managed" if mode == "guild_managed" else "Bot-owner managed",
             inline=True,
         )
         embed.add_field(
             name="Connection status",
-            value="Ready to test" if selected in profiles else "Setup required",
+            value="Ready to test" if ready else "Setup required",
             inline=True,
         )
         embed.add_field(
@@ -219,7 +259,7 @@ class Navidrome(commands.Cog):
             value=settings.get("last_success_at") or "Never",
             inline=False,
         )
-        if not profiles:
+        if not profiles and mode != "guild_managed":
             embed.add_field(
                 name="Owner setup needed",
                 value=(
@@ -228,17 +268,23 @@ class Navidrome(commands.Cog):
                 ),
                 inline=False,
             )
+        if guild_connections_enabled:
+            embed.add_field(
+                name="Guild-managed setup",
+                value="Available to members with Manage Server. Public HTTPS endpoints only.",
+                inline=False,
+            )
         return embed
 
     async def enable_announcements(self, guild: discord.Guild) -> Tuple[bool, str]:
         settings = await self.config.guild(guild).all()
-        if not settings.get("connection") or not settings.get("announcement_channel_id"):
+        if not settings.get("announcement_channel_id"):
             return False, "Select a connection and announcement channel first."
         channel = await self._channel(guild, int(settings["announcement_channel_id"]))
         if not channel:
             return False, "I cannot send messages in the configured channel."
         try:
-            client = await self._client(settings["connection"])
+            _, client = await self._guild_client(guild)
             albums = await client.newest_albums(25)
         except NavidromeError as exc:
             return False, f"Connection test failed: {exc}"
@@ -256,13 +302,13 @@ class Navidrome(commands.Cog):
     async def preview_announcement(self, guild: discord.Guild) -> Tuple[bool, str]:
         settings = await self.config.guild(guild).all()
         channel_id = settings.get("announcement_channel_id")
-        if not settings.get("connection") or not channel_id:
+        if not channel_id:
             return False, "Select a connection and announcement channel first."
         channel = await self._channel(guild, int(channel_id))
         if not channel:
             return False, "I cannot send messages in the configured channel."
         try:
-            client = await self._client(settings["connection"])
+            _, client = await self._guild_client(guild)
             albums = await client.newest_albums(1)
         except NavidromeError as exc:
             return False, str(exc)
@@ -308,32 +354,46 @@ class Navidrome(commands.Cog):
             if await self.bot.cog_disabled_in_guild(self, guild):
                 continue
             settings = await self.config.guild(guild).all()
-            if settings.get("announcement_enabled") and settings.get("connection") and self._due(settings):
-                due.setdefault(settings["connection"], []).append(guild)
+            configured = (
+                bool((settings.get("guild_connection") or {}).get("base_url"))
+                if settings.get("connection_mode") == "guild_managed"
+                else bool(settings.get("connection"))
+            )
+            if settings.get("announcement_enabled") and configured and self._due(settings):
+                key = (
+                    f"guild:{guild.id}"
+                    if settings.get("connection_mode") == "guild_managed"
+                    else f"owner:{settings['connection']}"
+                )
+                due.setdefault(key, []).append(guild)
         if due:
             await asyncio.gather(
                 *(self._poll_connection(name, guilds) for name, guilds in due.items())
             )
 
-    async def _poll_connection(self, name: str, guilds: List[discord.Guild]):
+    async def _poll_connection(self, key: str, guilds: List[discord.Guild]):
         async with self._poll_semaphore:
             try:
-                client = await self._client(name)
+                if key.startswith("guild:"):
+                    _, client = await self._guild_client(guilds[0])
+                else:
+                    name = key.split(":", 1)[1] if key.startswith("owner:") else key
+                    client = await self._client(name)
                 albums = await client.newest_albums(25)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                failures = self._connection_failures.get(name, 0) + 1
-                self._connection_failures[name] = failures
+                failures = self._connection_failures.get(key, 0) + 1
+                self._connection_failures[key] = failures
                 delay = min(240, 15 * (2 ** min(failures - 1, 4))) + random.randint(0, 5)
                 for guild in guilds:
                     await self._set_next_check(guild, delay)
                 log.warning(
                     "Navidrome poll failed for connection %s (%s); retry in about %s minutes",
-                    name, type(exc).__name__, delay,
+                    key, type(exc).__name__, delay,
                 )
                 return
-            self._connection_failures.pop(name, None)
+            self._connection_failures.pop(key, None)
             for guild in guilds:
                 try:
                     await self._check_guild(guild, albums, client)
@@ -405,6 +465,14 @@ class Navidrome(commands.Cog):
     async def navidromeowner(self, ctx: commands.Context):
         """Manage bot-owner-approved Navidrome connections."""
         await ctx.send_help()
+
+    @navidromeowner.command(name="guildconnections")
+    async def navidromeowner_guildconnections(self, ctx: commands.Context, enabled: bool):
+        """Allow or deny guild administrators from storing their own public-HTTPS connection."""
+        await self.config.guild_connections_enabled.set(enabled)
+        await ctx.send(
+            f"Guild-managed Navidrome connections are now {'enabled' if enabled else 'disabled'}."
+        )
 
     @navidromeowner.group(name="connection", invoke_without_command=True)
     async def owner_connection(self, ctx: commands.Context):
@@ -508,16 +576,42 @@ class Navidrome(commands.Cog):
             await (await self._client(name)).ping()
         except NavidromeError as exc:
             return await ctx.send(f"Connection test failed: {exc}")
-        await self.config.guild(ctx.guild).connection.set(name)
-        await self.config.guild(ctx.guild).announcement_enabled.set(False)
-        await self.config.guild(ctx.guild).announced_album_ids.set([])
+        group = self.config.guild(ctx.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.bot.remove_shared_api_tokens(
+                self.guild_token_namespace(ctx.guild.id), "username", "password"
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
+        await group.connection.set(name)
+        await self._reset_connection_state(ctx.guild, clear_accounts=changed_server)
         await ctx.send(f"This server now uses Navidrome connection `{name}`. Announcements remain disabled.")
 
     @navidromeset.command(name="disconnect")
-    async def navidromeset_disconnect(self, ctx: commands.Context):
-        """Disconnect this Discord server without deleting owner credentials."""
+    async def navidromeset_disconnect(self, ctx: commands.Context, confirmation: str = ""):
+        """Disconnect this server and delete any guild-owned credentials."""
+        if confirmation.casefold() != "confirm":
+            await ctx.send(
+                f"Run `{ctx.clean_prefix}navidromeset disconnect confirm` to disconnect, clear linked-account mappings, and delete this guild's stored connection credentials."
+            )
+            return
+        await self.bot.remove_shared_api_tokens(
+            self.guild_token_namespace(ctx.guild.id), "username", "password"
+        )
         await self.config.guild(ctx.guild).clear()
-        await ctx.send("Disconnected this server from Navidrome and cleared its announcement history.")
+        await ctx.send(
+            "Disconnected this server from Navidrome, deleted any guild-owned credentials, and cleared its local mappings and announcement history."
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        await self.bot.remove_shared_api_tokens(
+            self.guild_token_namespace(guild.id), "username", "password"
+        )
+        await self.config.guild(guild).clear()
 
     @navidromeset.command(name="channel", aliases=("announcechannel",))
     async def navidromeset_channel(self, ctx: commands.Context, channel: Optional[GuildMessageable] = None):
