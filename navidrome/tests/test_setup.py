@@ -121,6 +121,70 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Choose an approved Navidrome connection", placeholders)
         self.assertIn("Optional: choose an album notification channel", placeholders)
 
+    async def test_owner_lidarr_client_uses_profile_token_namespace(self):
+        cog, _ = self.make_cog(
+            profiles={"home": {
+                "base_url": "https://music.example.com",
+                "lidarr": {"enabled": True, "root_folder_path": "/music",
+                           "quality_profile_id": 3, "metadata_profile_id": 4},
+            }},
+            settings={"connection": "home"},
+        )
+        cog.bot.get_shared_api_tokens.return_value = {
+            "lidarr_url": "https://lidarr.example.com", "lidarr_api_key": "secret"
+        }
+        cog.get_session = AsyncMock(return_value=SimpleNamespace())
+
+        name, client, settings = await cog._lidarr_client(SimpleNamespace(id=42))
+
+        self.assertEqual(name, "home")
+        self.assertEqual(client.base_url, "https://lidarr.example.com")
+        self.assertFalse(client.public_only)
+        self.assertEqual(settings["quality_profile_id"], 3)
+        cog.bot.get_shared_api_tokens.assert_awaited_once_with("navidrome_home")
+
+    async def test_guild_lidarr_client_is_public_only_and_isolated(self):
+        cog, _ = self.make_cog(settings={
+            "connection_mode": "guild_managed",
+            "guild_connection": {
+                "base_url": "https://music.example.com",
+                "lidarr": {"enabled": True, "root_folder_path": "/music",
+                           "quality_profile_id": 3, "metadata_profile_id": 4},
+            },
+        })
+        cog.bot.get_shared_api_tokens.return_value = {
+            "lidarr_url": "https://lidarr.example.com", "lidarr_api_key": "secret"
+        }
+        cog.get_session = AsyncMock(return_value=SimpleNamespace())
+
+        _, client, _ = await cog._lidarr_client(SimpleNamespace(id=42))
+
+        self.assertTrue(client.public_only)
+        cog.bot.get_shared_api_tokens.assert_awaited_once_with("navidrome_guild_42")
+
+    async def test_owner_lidarr_configure_validates_before_saving(self):
+        cog, _ = self.make_cog(profiles={"home": {"base_url": "https://music.example.com"}})
+        cog.bot.get_shared_api_tokens.return_value = {
+            "lidarr_url": "https://lidarr.example.com", "lidarr_api_key": "secret"
+        }
+        cog.get_session = AsyncMock(return_value=SimpleNamespace())
+        ctx = SimpleNamespace(send=AsyncMock())
+        validator = AsyncMock(return_value={"version": "2.0"})
+
+        with patch("navidrome.navidrome.LidarrClient") as client_type:
+            client_type.return_value.validate_configuration = validator
+            await Navidrome.owner_lidarr_configure.callback(
+                cog, ctx, "home", "/music", 3, 4, False
+            )
+
+        validator.assert_awaited_once_with(
+            root_folder_path="/music", quality_profile_id=3, metadata_profile_id=4
+        )
+        saved = cog.config.connections.value["home"]["lidarr"]
+        self.assertTrue(saved["enabled"])
+        self.assertEqual(saved["root_folder_path"], "/music")
+        ctx.send.assert_awaited_once()
+
     async def test_guild_client_uses_isolated_namespace_and_public_only(self):
         cog, _ = self.make_cog(settings={
             "connection_mode": "guild_managed",
