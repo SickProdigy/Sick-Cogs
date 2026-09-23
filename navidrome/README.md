@@ -1,6 +1,7 @@
 # Navidrome
 
-Connect each Discord guild to one bot-owner-approved Navidrome server. Members can inspect the
+Connect each Discord guild to either a bot-owner-approved Navidrome profile or an isolated
+guild-managed public HTTPS server. Members can inspect the
 library and recent albums, administrators can manage Discord-linked Navidrome users, and new albums
 can be announced without duplicate posts after reloads or restarts.
 
@@ -30,6 +31,27 @@ HTTPS is required by default. A bot owner can pass `true` as the final argument 
 HTTP for a trusted private deployment. The configured account must be a Navidrome administrator to
 use account provisioning and password management. Use a dedicated bot administrator account rather
 than a personal account. A read-only account is sufficient only when user management will not be used.
+
+## Guild-managed connections
+
+Guild-managed connections are disabled by default. The bot owner may opt in globally:
+
+```text
+[p]navidromeowner guildconnections true
+```
+
+A member with Manage Server can then open `[p]navidromeset setup` and choose **Connect this server**.
+The form accepts a public HTTPS Navidrome URL and dedicated administrator credentials. Credentials
+are stored in the guild-isolated `navidrome_guild_<guild_id>` shared-token namespace and are never
+displayed after submission. The cog validates library and native user access before keeping the
+connection; a failed test restores the previous connection and credentials.
+
+Guild-managed destinations must resolve only to public IP addresses. Resolution is checked when the
+connection is saved and again before requests. HTTP, loopback, private, link-local, multicast, and
+reserved destinations are rejected. Trusted LAN/HTTP deployments must continue using a bot-owner
+profile. Switching to a different server clears stale Discord-to-Navidrome mappings and disables
+announcements. Disconnect with `[p]navidromeset disconnect confirm`; this also deletes the guild-owned
+credentials.
 
 ## Server setup and optional notifications
 
@@ -65,7 +87,7 @@ when guilds share an approved connection.
 - `[p]navidromeset` - show current settings.
 - `[p]navidromeset setup` - open the guided interactive setup panel.
 - `[p]navidromeset connection <name>` - select an approved connection.
-- `[p]navidromeset disconnect` - clear this guild's selection and announcement history.
+- `[p]navidromeset disconnect confirm` - clear local mappings/history and delete guild-owned credentials.
 - `[p]navidromeset channel [channel]` - choose the announcement channel.
 - `[p]navidromeset interval <15-1440>` - set the polling interval in minutes.
 - `[p]navidromeset enable|disable` - control scheduled album posts.
@@ -92,5 +114,7 @@ delivery fails, creation is rolled back. Deletion requires an explicit `confirm`
 `unlink` keeps the remote account.
 
 A guild administrator can manage only accounts mapped through that guild. The owner connection test
-verifies that the configured credentials can access native user management. Removing a connection
-profile does not delete its shared API tokens; the bot owner removes those separately through Red.
+verifies that the configured credentials can access native user management. Removing an owner-managed
+connection profile does not delete its shared API tokens; the bot owner removes those separately
+through Red. Guild-owned credentials are deleted on confirmed disconnect or when the bot leaves the
+guild.

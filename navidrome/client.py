@@ -1,5 +1,7 @@
 import asyncio
 import hashlib
+import ipaddress
+import socket
 import secrets
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote, urlsplit
@@ -21,15 +23,46 @@ def validate_base_url(value: str, *, allow_http: bool = False) -> str:
     return value
 
 
+async def validate_public_base_url(value: str) -> str:
+    """Require guild-managed endpoints to resolve only to public addresses."""
+    value = validate_base_url(value)
+    parsed = urlsplit(value)
+    hostname = str(parsed.hostname or "").rstrip(".").casefold()
+    try:
+        addresses = [ipaddress.ip_address(hostname)]
+    except ValueError:
+        try:
+            records = await asyncio.get_running_loop().getaddrinfo(
+                hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            )
+        except socket.gaierror as exc:
+            raise ValueError(f"Could not resolve Navidrome host {hostname}.") from exc
+        addresses = list({ipaddress.ip_address(record[4][0]) for record in records})
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError(
+            "Guild-managed Navidrome servers must resolve only to public addresses."
+        )
+    return value
+
+
 class NavidromeClient:
     API_VERSION = "1.16.1"
     CLIENT_NAME = "SickCogs"
 
-    def __init__(self, session: aiohttp.ClientSession, base_url: str, username: str, password: str):
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        base_url: str,
+        username: str,
+        password: str,
+        *,
+        public_only: bool = False,
+    ):
         self.session = session
         self.base_url = base_url.rstrip("/")
         self.username = username
         self.password = password
+        self.public_only = public_only
         self._native_token: Optional[str] = None
         self._native_login_lock = asyncio.Lock()
 
@@ -45,7 +78,15 @@ class NavidromeClient:
             "f": "json",
         }
 
+    async def _validate_target(self):
+        if self.public_only:
+            try:
+                await validate_public_base_url(self.base_url)
+            except ValueError as exc:
+                raise NavidromeError(str(exc)) from exc
+
     async def request(self, endpoint: str, **params: Any) -> Dict[str, Any]:
+        await self._validate_target()
         query = self._auth_params()
         query.update({key: str(value) for key, value in params.items() if value is not None})
         url = f"{self.base_url}/rest/{endpoint}.view"
@@ -99,6 +140,10 @@ class NavidromeClient:
     async def cover_art(self, cover_art_id: Optional[str]) -> Optional[bytes]:
         if not cover_art_id:
             return None
+        try:
+            await self._validate_target()
+        except NavidromeError:
+            return None
         params = self._auth_params()
         params.update({"id": str(cover_art_id), "size": "500"})
         try:
@@ -117,6 +162,7 @@ class NavidromeClient:
         return data if 0 < len(data) <= 8_000_000 else None
 
     async def _native_login(self) -> str:
+        await self._validate_target()
         if self._native_token:
             return self._native_token
         async with self._native_login_lock:

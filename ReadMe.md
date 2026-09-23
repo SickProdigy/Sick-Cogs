@@ -37,6 +37,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `donate` - Configurable donation information command.
 - `giveaways` - Persistent button giveaways with core entry rules and weighted draws.
 - `movies` - Configurable TMDb new movie release announcements.
+- `navidrome` - Per-server Navidrome connections, linked users, and album announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
 - `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
@@ -46,9 +47,8 @@ Develop-only cogs and experiments are not part of the stable Index release.
 
 Current develop experiments include `imagine`, a private, provider-neutral AI image generator that
 is disabled until the bot owner explicitly allowlists a server and its administrators grant access,
-`mybb`, a per-server bridge for browsing and publishing through the SickProdigy MyBB API,
-`navidrome`, a per-server Navidrome library connection and album announcement cog, and `twitter`,
-a native X API post announcement cog.
+`mybb`, a per-server bridge for browsing and publishing through the SickProdigy MyBB API, and
+`twitter`, a native X API post announcement cog.
 
 ## External Cog Sync Helper
 

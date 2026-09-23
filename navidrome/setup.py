@@ -7,7 +7,7 @@ from typing import Dict
 
 import discord
 
-from .client import NavidromeError, validate_base_url
+from .client import NavidromeError, validate_base_url, validate_public_base_url
 
 
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
@@ -109,9 +109,21 @@ class ConnectionModal(discord.ui.Modal):
             return
 
         group = self.cog.config.guild(interaction.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.cog.bot.remove_shared_api_tokens(
+                self.cog.guild_token_namespace(interaction.guild.id),
+                "username",
+                "password",
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
         await group.connection.set(name)
-        await group.announcement_enabled.set(False)
-        await group.announced_album_ids.set([])
+        await self.cog._reset_connection_state(
+            interaction.guild, clear_accounts=changed_server
+        )
         server = str(ping.get("type") or "Navidrome")
         version = str(ping.get("serverVersion") or "unknown version")
         await interaction.edit_original_response(
@@ -123,6 +135,93 @@ class ConnectionModal(discord.ui.Modal):
             view=await NavidromeSetupView.create(
                 self.cog, interaction.user, interaction.guild
             ),
+        )
+
+
+class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navidrome"):
+    url = discord.ui.TextInput(
+        label="Public Navidrome HTTPS URL",
+        placeholder="https://music.example.com",
+        max_length=500,
+    )
+    username = discord.ui.TextInput(label="Navidrome admin username", max_length=100)
+    password = discord.ui.TextInput(label="Admin password (stored securely)", max_length=500)
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "Manage Server permission is required.", ephemeral=True
+            )
+            return
+        if not await self.cog.config.guild_connections_enabled():
+            await interaction.response.send_message(
+                "The bot owner has disabled guild-managed Navidrome connections.",
+                ephemeral=True,
+            )
+            return
+        try:
+            base_url = await validate_public_base_url(str(self.url.value))
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        username = str(self.username.value).strip()
+        password = str(self.password.value)
+        if not username or not password:
+            await interaction.response.send_message(
+                "The Navidrome admin username and password are required.", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer()
+        guild = interaction.guild
+        group = self.cog.config.guild(guild)
+        previous = await group.all()
+        namespace = self.cog.guild_token_namespace(guild.id)
+        previous_tokens = await self.cog.bot.get_shared_api_tokens(namespace)
+        await self.cog.bot.set_shared_api_tokens(
+            namespace, username=username, password=password
+        )
+        await group.connection_mode.set("guild_managed")
+        await group.guild_connection.set({"base_url": base_url})
+        try:
+            _, client = await self.cog._guild_client(guild)
+            ping = await client.ping()
+            users = await client.users()
+        except NavidromeError as exc:
+            if previous_tokens:
+                await self.cog.bot.set_shared_api_tokens(namespace, **previous_tokens)
+            else:
+                await self.cog.bot.remove_shared_api_tokens(
+                    namespace, "username", "password"
+                )
+            await group.connection_mode.set(
+                previous.get("connection_mode", "owner_managed")
+            )
+            await group.guild_connection.set(previous.get("guild_connection"))
+            await interaction.followup.send(
+                f"Guild connection was not saved: {exc}", ephemeral=True
+            )
+            return
+
+        changed_server = (
+            previous.get("connection_mode") != "guild_managed"
+            or (previous.get("guild_connection") or {}).get("base_url") != base_url
+        )
+        await group.connection.set(None)
+        await self.cog._reset_connection_state(guild, clear_accounts=changed_server)
+        server = str(ping.get("type") or "Navidrome")
+        version = str(ping.get("serverVersion") or "unknown version")
+        await interaction.edit_original_response(
+            content=(
+                f"Connected this Discord server to {server} {version}. "
+                f"User management is ready ({len(users)} users visible)."
+            ),
+            embed=await self.cog.setup_embed(guild),
+            view=await NavidromeSetupView.create(self.cog, interaction.user, guild),
         )
 
 
@@ -178,9 +277,21 @@ class ConnectionSelect(discord.ui.Select):
             await interaction.followup.send(f"Connection test failed: {exc}", ephemeral=True)
             return
         group = self.parent_view.cog.config.guild(interaction.guild)
+        previous_mode = await group.connection_mode()
+        previous_name = await group.connection()
+        changed_server = previous_mode != "owner_managed" or previous_name != name
+        if previous_mode == "guild_managed":
+            await self.parent_view.cog.bot.remove_shared_api_tokens(
+                self.parent_view.cog.guild_token_namespace(interaction.guild.id),
+                "username",
+                "password",
+            )
+            await group.guild_connection.set(None)
+        await group.connection_mode.set("owner_managed")
         await group.connection.set(name)
-        await group.announcement_enabled.set(False)
-        await group.announced_album_ids.set([])
+        await self.parent_view.cog._reset_connection_state(
+            interaction.guild, clear_accounts=changed_server
+        )
         await interaction.edit_original_response(
             content=f"Selected `{name}`. Announcements remain disabled.",
             embed=await self.parent_view.cog.setup_embed(interaction.guild),
@@ -906,11 +1017,20 @@ class NavidromeSetupView(discord.ui.View):
             if getattr(item, "custom_id", None) == "navidrome:connect"
         )
         connect.disabled = not await cog.bot.is_owner(author)
+        guild_connect = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:guild-connect"
+        )
+        guild_connect.disabled = not await cog.config.guild_connections_enabled()
         manage = next(
             item for item in view.children
             if getattr(item, "custom_id", None) == "navidrome:manage-users"
         )
-        manage.disabled = not bool(settings.get("connection"))
+        manage.disabled = not (
+            bool((settings.get("guild_connection") or {}).get("base_url"))
+            if settings.get("connection_mode") == "guild_managed"
+            else bool(settings.get("connection"))
+        )
         return view
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -928,6 +1048,18 @@ class NavidromeSetupView(discord.ui.View):
             return
         await interaction.response.send_modal(ConnectionModal(self.cog))
 
+    @discord.ui.button(
+        label="Connect this server", style=discord.ButtonStyle.success, row=3,
+        custom_id="navidrome:guild-connect",
+    )
+    async def connect_guild(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.cog.config.guild_connections_enabled():
+            await interaction.response.send_message(
+                "The bot owner has disabled guild-managed connections.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(GuildConnectionModal(self.cog))
+
     @discord.ui.button(label="Set interval", style=discord.ButtonStyle.secondary, row=2)
     async def interval(self, interaction: discord.Interaction, button: discord.ui.Button):
         current = await self.cog.config.guild(interaction.guild).interval_minutes()
@@ -939,12 +1071,9 @@ class NavidromeSetupView(discord.ui.View):
     )
     async def test_connection(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer()
-        name = await self.cog.config.guild(interaction.guild).connection()
-        if not name:
-            await interaction.followup.send("Choose a connection first.", ephemeral=True)
-            return
         try:
-            await (await self.cog._client(name)).ping()
+            name, client = await self.cog._guild_client(interaction.guild)
+            await client.ping()
         except NavidromeError as exc:
             await interaction.followup.send(f"Connection test failed: {exc}", ephemeral=True)
             return
