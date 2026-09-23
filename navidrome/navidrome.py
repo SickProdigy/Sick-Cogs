@@ -5,6 +5,7 @@ import logging
 import random
 import re
 import secrets
+import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
@@ -28,6 +29,18 @@ GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.Stag
 
 def utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
+
+
+async def navidrome_config_permission(ctx: commands.Context) -> bool:
+    """Allow administrators or a guild's explicitly delegated Navidrome manager role."""
+    if await ctx.bot.is_owner(ctx.author) or ctx.author.guild_permissions.manage_guild:
+        return True
+    role_id = await ctx.cog.config.guild(ctx.guild).manager_role_id()
+    if role_id and any(role.id == role_id for role in ctx.author.roles):
+        return True
+    raise commands.CheckFailure(
+        "Manage Server or the configured Navidrome manager role is required."
+    )
 
 
 def safe_profile_name(value: str) -> str:
@@ -55,6 +68,7 @@ class Navidrome(commands.Cog):
         "announced_album_ids": [],
         "last_success_at": None,
         "accounts": {},
+        "manager_role_id": None,
     }
 
     def __init__(self, bot: Red):
@@ -65,6 +79,7 @@ class Navidrome(commands.Cog):
         self.session: Optional[aiohttp.ClientSession] = None
         self._poll_semaphore = asyncio.Semaphore(4)
         self._connection_failures: Dict[str, int] = {}
+        self._connection_test_times: Dict[int, float] = {}
         self.poll_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
@@ -88,6 +103,15 @@ class Navidrome(commands.Cog):
                 timeout=aiohttp.ClientTimeout(total=20), headers={"User-Agent": USER_AGENT}
             )
         return self.session
+
+    def claim_connection_test(self, guild_id: int) -> bool:
+        """Allow one guild-owned credential test per minute per guild."""
+        now = time.monotonic()
+        previous = self._connection_test_times.get(int(guild_id), 0.0)
+        if now - previous < 60:
+            return False
+        self._connection_test_times[int(guild_id)] = now
+        return True
 
     async def _profile(self, name: str) -> Optional[Dict[str, Any]]:
         return (await self.config.connections()).get(name)
@@ -549,7 +573,7 @@ class Navidrome(commands.Cog):
 
     @commands.group(name="navidromeset", invoke_without_command=True)
     @commands.guild_only()
-    @checks.admin_or_permissions(manage_guild=True)
+    @commands.check(navidrome_config_permission)
     async def navidromeset(self, ctx: commands.Context):
         """Configure this server's Navidrome connection and announcements."""
         await self._send_settings(ctx)
@@ -564,6 +588,7 @@ class Navidrome(commands.Cog):
         )
 
     @navidromeset.command(name="connection")
+    @checks.admin_or_permissions(manage_guild=True)
     async def navidromeset_connection(self, ctx: commands.Context, name: str):
         """Select a bot-owner-approved connection for this server."""
         try:
@@ -591,6 +616,7 @@ class Navidrome(commands.Cog):
         await ctx.send(f"This server now uses Navidrome connection `{name}`. Announcements remain disabled.")
 
     @navidromeset.command(name="disconnect")
+    @checks.admin_or_permissions(manage_guild=True)
     async def navidromeset_disconnect(self, ctx: commands.Context, confirmation: str = ""):
         """Disconnect this server and delete any guild-owned credentials."""
         if confirmation.casefold() != "confirm":
@@ -605,6 +631,21 @@ class Navidrome(commands.Cog):
         await ctx.send(
             "Disconnected this server from Navidrome, deleted any guild-owned credentials, and cleared its local mappings and announcement history."
         )
+
+    @navidromeset.command(name="managerrole")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def navidromeset_managerrole(
+        self, ctx: commands.Context, role: Optional[discord.Role] = None
+    ):
+        """Set or clear the role allowed to perform non-secret routine configuration."""
+        await self.config.guild(ctx.guild).manager_role_id.set(role.id if role else None)
+        if role:
+            await ctx.send(
+                f"{role.mention} may now use routine Navidrome configuration. "
+                "Manage Server is still required to create, replace, or disconnect credentials."
+            )
+        else:
+            await ctx.send("The optional Navidrome manager role is cleared.")
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
