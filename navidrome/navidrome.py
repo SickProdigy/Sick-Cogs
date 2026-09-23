@@ -722,7 +722,20 @@ class Navidrome(commands.Cog):
     async def navidrome_request(
         self, ctx: commands.Context, media_type: str, *, query: str
     ):
-        """Request an artist or album through the configured Lidarr server."""
+        """Search Navidrome, then request missing music through Lidarr.
+
+        Available types:
+        - `artist` - request an artist and their monitored releases
+        - `album` - request a specific album
+
+        Examples:
+        `!navidrome request artist Willie Nelson`
+        `!navidrome request album Red Headed Stranger`
+
+        Individual tracks cannot be requested because Lidarr manages artists and albums.
+        If the music is already in Navidrome, no request is sent. Otherwise, you must
+        confirm the matching Lidarr result before anything is added.
+        """
         media_type = media_type.casefold()
         if media_type not in {"artist", "album"}:
             return await ctx.send(

@@ -100,6 +100,13 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         member_names = {command.name for command in Navidrome.navidrome.commands}
         self.assertIn("account", member_names)
         self.assertIn("request", member_names)
+        request_command = next(
+            command for command in Navidrome.navidrome.commands if command.name == "request"
+        )
+        self.assertIn("`artist`", request_command.help)
+        self.assertIn("`album`", request_command.help)
+        self.assertIn("!navidrome request artist Willie Nelson", request_command.help)
+        self.assertIn("Individual tracks cannot be requested", request_command.help)
         lidarr_group = next(
             command for command in Navidrome.navidromeset.commands if command.name == "lidarr"
         )
