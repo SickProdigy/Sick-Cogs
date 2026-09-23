@@ -54,6 +54,7 @@ reserved destinations are rejected. Trusted LAN/HTTP deployments must continue u
 profile; private guild-managed destinations are intentionally not allowlistable. DNS is checked
 before every request and the connected peer address is checked before response data is accepted.
 JSON and artwork responses have fixed size limits and all HTTP operations use bounded timeouts.
+Announcements are disabled after three consecutive backend failures instead of retrying indefinitely.
 Switching to a different server clears stale Discord-to-Navidrome mappings and disables
 announcements. Disconnect with `[p]navidromeset disconnect confirm`; this also deletes the guild-owned
 credentials.
