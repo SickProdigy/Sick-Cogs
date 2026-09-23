@@ -63,6 +63,7 @@ class LidarrClient:
                 json=payload,
                 headers={"X-Api-Key": self.api_key},
                 allow_redirects=False,
+                timeout=aiohttp.ClientTimeout(total=60),
             ) as response:
                 if self.public_only and not _response_peer_is_public(response):
                     raise LidarrError("The guild-managed Lidarr connection reached an unsafe destination.")
@@ -88,7 +89,10 @@ class LidarrClient:
         except NavidromeError as exc:
             raise LidarrError(str(exc).replace("Navidrome", "Lidarr")) from exc
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise LidarrError("Could not reach the configured Lidarr server.") from exc
+            operation = path.strip("/").split("?", 1)[0] or "API"
+            raise LidarrError(
+                f"Could not reach the configured Lidarr server while requesting `{operation}`."
+            ) from exc
 
     async def discover_configuration(
         self, *, root_folder_path: Optional[str] = None,

@@ -47,7 +47,17 @@ class LidarrClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call[1], "https://lidarr.example.com/api/v1/system/status")
         self.assertEqual(call[2]["headers"], {"X-Api-Key": "secret"})
         self.assertFalse(call[2]["allow_redirects"])
+        self.assertEqual(call[2]["timeout"].total, 60)
         self.assertNotIn("secret", call[1])
+
+    async def test_connection_error_identifies_safe_operation(self):
+        class FailingSession:
+            def request(self, method, url, **kwargs):
+                raise TimeoutError
+
+        client = LidarrClient(FailingSession(), "https://lidarr.example.com", "secret")
+        with self.assertRaisesRegex(LidarrError, "artist/lookup"):
+            await client.request("GET", "artist/lookup", params={"term": "Example"})
 
     async def test_redirect_and_auth_errors_are_safe(self):
         for status, message in ((302, "redirect"), (401, "API key")):
