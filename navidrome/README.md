@@ -44,12 +44,17 @@ A member with Manage Server can then open `[p]navidromeset setup` and choose **C
 The form accepts a public HTTPS Navidrome URL and dedicated administrator credentials. Credentials
 are stored in the guild-isolated `navidrome_guild_<guild_id>` shared-token namespace and are never
 displayed after submission. The cog validates library and native user access before keeping the
-connection; a failed test restores the previous connection and credentials.
+connection; a failed test restores the previous connection and credentials. Creating or replacing
+the connection requires typing `CONNECT`, and connection tests are limited to one attempt per guild
+per minute.
 
 Guild-managed destinations must resolve only to public IP addresses. Resolution is checked when the
 connection is saved and again before requests. HTTP, loopback, private, link-local, multicast, and
 reserved destinations are rejected. Trusted LAN/HTTP deployments must continue using a bot-owner
-profile. Switching to a different server clears stale Discord-to-Navidrome mappings and disables
+profile; private guild-managed destinations are intentionally not allowlistable. DNS is checked
+before every request and the connected peer address is checked before response data is accepted.
+JSON and artwork responses have fixed size limits and all HTTP operations use bounded timeouts.
+Switching to a different server clears stale Discord-to-Navidrome mappings and disables
 announcements. Disconnect with `[p]navidromeset disconnect confirm`; this also deletes the guild-owned
 credentials.
 
@@ -93,6 +98,7 @@ when guilds share an approved connection.
 - `[p]navidromeset enable|disable` - control scheduled album posts.
 - `[p]navidromeset preview` - preview the latest album without changing delivery history.
 - `[p]navidromeset status` - show configuration and the last successful check.
+- `[p]navidromeset managerrole [role]` - delegate routine configuration without credential access.
 
 ### Linked user commands
 
@@ -118,3 +124,8 @@ verifies that the configured credentials can access native user management. Remo
 connection profile does not delete its shared API tokens; the bot owner removes those separately
 through Red. Guild-owned credentials are deleted on confirmed disconnect or when the bot leaves the
 guild.
+
+An optional manager role may use routine settings and account tools, but creating, replacing, or
+disconnecting a guild-owned connection always requires Manage Server. Red data-deletion requests
+remove the requesting Discord user's local account mapping; they do not delete the remote Navidrome
+account. Removing the bot from a guild clears that guild's configuration and guild-token namespace.

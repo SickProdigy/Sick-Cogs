@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from navidrome.client import NavidromeError
-from navidrome.navidrome import Navidrome
+from navidrome.navidrome import Navidrome, navidrome_config_permission
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
     GuildConnectionModal,
@@ -53,6 +53,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "announced_album_ids": [],
             "last_success_at": None,
             "accounts": {},
+            "manager_role_id": None,
         }
         settings = defaults | (settings or {})
         group = GuildConfig(settings)
@@ -69,6 +70,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             guild=MagicMock(return_value=group),
         )
         cog._reset_connection_state = AsyncMock()
+        cog.claim_connection_test = MagicMock(return_value=True)
         return cog, group
 
     def test_commands_register_setup_and_owner_test(self):
@@ -238,6 +240,42 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         button = next(item for item in view.children if item.label == "Connect this server")
         self.assertFalse(button.disabled)
 
+    async def test_manager_role_grants_routine_configuration_only(self):
+        cog, group = self.make_cog(settings={"manager_role_id": 99})
+        author = SimpleNamespace(
+            guild_permissions=SimpleNamespace(manage_guild=False),
+            roles=[SimpleNamespace(id=99)],
+        )
+        ctx = SimpleNamespace(
+            bot=SimpleNamespace(is_owner=AsyncMock(return_value=False)),
+            author=author, cog=cog, guild=SimpleNamespace(id=2),
+        )
+
+        self.assertTrue(await navidrome_config_permission(ctx))
+        self.assertEqual(group.manager_role_id.value, 99)
+
+    async def test_connection_test_throttle_is_per_guild(self):
+        cog = object.__new__(Navidrome)
+        cog._connection_test_times = {}
+        self.assertTrue(cog.claim_connection_test(1))
+        self.assertFalse(cog.claim_connection_test(1))
+        self.assertTrue(cog.claim_connection_test(2))
+
+    async def test_guild_connection_modal_requires_explicit_confirmation(self):
+        cog, _ = self.make_cog(guild_connections_enabled=True)
+        modal = GuildConnectionModal(cog)
+        modal.confirmation._value = "no"
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
+            guild=SimpleNamespace(id=2),
+            response=SimpleNamespace(send_message=AsyncMock()),
+        )
+
+        await modal.on_submit(interaction)
+
+        interaction.response.send_message.assert_awaited_once()
+        cog.bot.set_shared_api_tokens.assert_not_awaited()
+
     async def test_guild_connection_modal_saves_isolated_tokens(self):
         cog, group = self.make_cog(guild_connections_enabled=True)
         client = SimpleNamespace(
@@ -250,6 +288,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         modal.url._value = "https://music.example.com"
         modal.username._value = "admin"
         modal.password._value = "secret"
+        modal.confirmation._value = "CONNECT"
         interaction = SimpleNamespace(
             user=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
             guild=SimpleNamespace(id=2),
@@ -283,6 +322,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         modal.url._value = "https://music.example.com"
         modal.username._value = "admin"
         modal.password._value = "secret"
+        modal.confirmation._value = "CONNECT"
         interaction = SimpleNamespace(
             user=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
             guild=SimpleNamespace(id=2),

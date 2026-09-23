@@ -146,6 +146,9 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
     )
     username = discord.ui.TextInput(label="Navidrome admin username", max_length=100)
     password = discord.ui.TextInput(label="Admin password (stored securely)", max_length=500)
+    confirmation = discord.ui.TextInput(
+        label="Type CONNECT to confirm replacement", min_length=7, max_length=7
+    )
 
     def __init__(self, cog):
         super().__init__()
@@ -160,6 +163,18 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
         if not await self.cog.config.guild_connections_enabled():
             await interaction.response.send_message(
                 "The bot owner has disabled guild-managed Navidrome connections.",
+                ephemeral=True,
+            )
+            return
+        if str(self.confirmation.value).strip().casefold() != "connect":
+            await interaction.response.send_message(
+                "Type `CONNECT` to confirm storing or replacing this server's credentials.",
+                ephemeral=True,
+            )
+            return
+        if not self.cog.claim_connection_test(interaction.guild.id):
+            await interaction.response.send_message(
+                "Please wait one minute before testing another guild-managed connection.",
                 ephemeral=True,
             )
             return

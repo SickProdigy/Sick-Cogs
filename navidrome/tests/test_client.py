@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 
@@ -6,12 +7,24 @@ from navidrome.client import (
 )
 
 
+class FakeContent:
+    def __init__(self, data):
+        self.data = data
+
+    async def iter_chunked(self, size):
+        for offset in range(0, len(self.data), size):
+            yield self.data[offset:offset + size]
+
+
 class FakeResponse:
     def __init__(self, status=200, payload=None, text=None):
         self.status = status
         self.payload = payload
         self._text = text
         self.headers = {}
+        data = text.encode() if text is not None else json.dumps(payload).encode()
+        self.content = FakeContent(data)
+        self.connection = None
 
     async def __aenter__(self):
         return self
@@ -42,6 +55,9 @@ class FakeSession:
 
     def post(self, url, **kwargs):
         return self._next("POST", url, kwargs)
+
+    def get(self, url, **kwargs):
+        return self._next("GET", url, kwargs)
 
     def request(self, method, url, **kwargs):
         return self._next(method, url, kwargs)
@@ -80,6 +96,22 @@ class NavidromeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             await validate_public_base_url("https://8.8.8.8"), "https://8.8.8.8"
         )
+
+    async def test_json_response_rejects_declared_oversize_payload(self):
+        response = FakeResponse(payload={"ok": True})
+        response.headers["Content-Length"] = "2000001"
+        client = NavidromeClient(
+            SimpleNamespace(), "https://music.example.com", "bot", "secret"
+        )
+        with self.assertRaisesRegex(NavidromeError, "too large"):
+            await client._json_response(response)
+
+    def test_public_only_rejects_response_without_verified_public_peer(self):
+        client = NavidromeClient(
+            SimpleNamespace(), "https://music.example.com", "bot", "secret", public_only=True
+        )
+        with self.assertRaisesRegex(NavidromeError, "unsafe destination"):
+            client._validate_response_peer(FakeResponse(payload={}))
 
     def test_subsonic_auth_uses_salted_token_not_plaintext_password(self):
         client = NavidromeClient(
