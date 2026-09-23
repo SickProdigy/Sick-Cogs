@@ -1226,6 +1226,43 @@ class Navidrome(commands.Cog):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    @navidromeset_user.command(name="link")
+    async def navidromeset_user_link(
+        self, ctx: commands.Context, member: discord.Member, *, username: str
+    ):
+        """Link a Discord member to an existing Navidrome user."""
+        group = self.config.guild(ctx.guild)
+        accounts = await group.accounts()
+        if str(member.id) in accounts:
+            return await ctx.send("That member already has a linked Navidrome account.")
+        try:
+            _, client = await self._guild_client(ctx.guild)
+            user = await client.user_by_username(username.strip())
+        except NavidromeError as exc:
+            return await ctx.send(f"Could not read the Navidrome user: {exc}")
+        if not user:
+            return await ctx.send("That Navidrome username does not exist.")
+        remote_id = str(user.get("id") or "")
+        remote_name = str(user.get("userName") or username.strip())
+        if any(
+            str(account.get("id") or "") == remote_id
+            or str(account.get("username") or "").casefold() == remote_name.casefold()
+            for account in accounts.values()
+        ):
+            return await ctx.send(
+                "That Navidrome account is already linked to another Discord member."
+            )
+        accounts[str(member.id)] = {
+            "id": remote_id,
+            "username": remote_name,
+            "created_at": utc_now().isoformat(),
+        }
+        await group.accounts.set(accounts)
+        await ctx.send(
+            f"Linked Navidrome user `{remote_name}` to {member.mention}.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
     @navidromeset_user.command(name="name")
     async def navidromeset_user_name(
         self, ctx: commands.Context, member: discord.Member, *, display_name: str
