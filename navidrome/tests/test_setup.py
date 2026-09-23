@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from navidrome.client import NavidromeError
 from navidrome.navidrome import (
-    LidarrConfirmView, LidarrRequestTypeView, LidarrResultView, Navidrome,
+    LidarrConfirmView, LidarrRequestModal, LidarrRequestTypeView, LidarrResultView, Navidrome,
     lidarr_requester_tag, navidrome_config_permission,
 )
 from navidrome.setup import (
@@ -283,6 +283,23 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         account, error = await cog._request_identity(SimpleNamespace(id=2), member)
         self.assertIsNone(account)
         self.assertIn("no longer valid", error)
+
+    async def test_request_modal_sends_text_result_without_none_components(self):
+        cog, _ = self.make_cog()
+        cog.prepare_lidarr_request = AsyncMock(return_value=("Search failed safely.", None, None))
+        modal = LidarrRequestModal(cog, 8, "artist")
+        modal.query._value = "paul wall"
+        interaction = SimpleNamespace(
+            guild=SimpleNamespace(id=2), user=SimpleNamespace(id=8),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        await modal.on_submit(interaction)
+
+        interaction.followup.send.assert_awaited_once_with(
+            "Search failed safely.", ephemeral=True
+        )
 
     async def test_request_without_arguments_shows_artist_and_release_buttons(self):
         cog, _ = self.make_cog()
