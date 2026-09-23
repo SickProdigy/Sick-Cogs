@@ -83,6 +83,132 @@ class LidarrConfirmView(discord.ui.View):
         await interaction.response.edit_message(content="Lidarr request cancelled.", view=self)
 
 
+def lidarr_candidate_text(media_type: str, candidate: Dict[str, Any]) -> Tuple[str, str]:
+    if media_type == "artist":
+        label = str(candidate.get("artistName") or "Unknown artist")
+        detail = str(candidate.get("disambiguation") or "Artist").replace("\n", " ")
+    else:
+        label = str(candidate.get("title") or "Unknown release")
+        artist = str((candidate.get("artist") or {}).get("artistName") or "Unknown artist")
+        date = str(candidate.get("releaseDate") or "")[:4]
+        detail = f"{artist}{f' · {date}' if date else ''}"
+    return label[:100], detail[:100]
+
+
+def lidarr_confirmation_embed(
+    member: discord.Member, account: Optional[Dict[str, Any]], media_type: str,
+    candidate: Dict[str, Any],
+) -> discord.Embed:
+    title, detail = lidarr_candidate_text(media_type, candidate)
+    embed = discord.Embed(
+        title=f"Confirm Lidarr {'artist' if media_type == 'artist' else 'release'} request",
+        description=f"**{title}**\n{detail}", colour=discord.Colour.orange(),
+    )
+    embed.add_field(
+        name="Attribution tags",
+        value=f"`discord`, `{lidarr_requester_tag(member.name)}`", inline=False,
+    )
+    embed.add_field(
+        name="Identity",
+        value=(f"Linked Navidrome account: `{account.get('username')}`" if account
+               else "Discord-only identity"), inline=False,
+    )
+    embed.set_footer(text="Nothing will be changed in Lidarr until you confirm.")
+    return embed
+
+
+class LidarrResultSelect(discord.ui.Select):
+    def __init__(self, parent):
+        options = []
+        for index, candidate in enumerate(parent.candidates[:25]):
+            label, detail = lidarr_candidate_text(parent.media_type, candidate)
+            options.append(discord.SelectOption(
+                label=label, value=str(index), description=detail,
+            ))
+        super().__init__(placeholder="Choose the correct Lidarr result", options=options)
+        self.parent_view = parent
+
+    async def callback(self, interaction: discord.Interaction):
+        candidate = self.parent_view.candidates[int(self.values[0])]
+        await interaction.response.edit_message(
+            content=None,
+            embed=lidarr_confirmation_embed(
+                interaction.user, self.parent_view.account,
+                self.parent_view.media_type, candidate,
+            ),
+            view=LidarrConfirmView(
+                self.parent_view.cog, interaction.user.id,
+                self.parent_view.media_type, candidate,
+            ),
+        )
+
+
+class LidarrResultView(discord.ui.View):
+    def __init__(self, cog, author_id: int, media_type: str, candidates, account):
+        super().__init__(timeout=120)
+        self.cog, self.author_id = cog, author_id
+        self.media_type, self.candidates, self.account = media_type, candidates, account
+        self.add_item(LidarrResultSelect(self))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who started this search can choose a result.", ephemeral=True
+            )
+            return False
+        return True
+
+
+class LidarrRequestModal(discord.ui.Modal):
+    def __init__(self, cog, author_id: int, media_type: str):
+        label = "Artist" if media_type == "artist" else "Release, album, single, or song"
+        title = "Search Lidarr artists" if media_type == "artist" else "Search Lidarr releases"
+        super().__init__(title=title)
+        self.cog, self.author_id, self.media_type = cog, author_id, media_type
+        self.query = discord.ui.TextInput(label=label, min_length=2, max_length=200)
+        self.add_item(self.query)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        content, embed, view = await self.cog.prepare_lidarr_request(
+            interaction.guild, interaction.user, self.media_type, str(self.query.value)
+        )
+        await interaction.followup.send(
+            content=content, embed=embed, view=view, ephemeral=True
+        )
+
+
+class LidarrRequestTypeView(discord.ui.View):
+    def __init__(self, cog, author_id: int, only_type: Optional[str] = None):
+        super().__init__(timeout=120)
+        self.cog, self.author_id = cog, author_id
+        if only_type:
+            keep = "Artist" if only_type == "artist" else "Release"
+            for item in list(self.children):
+                if getattr(item, "label", None) != keep:
+                    self.remove_item(item)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who opened this request menu can use it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Artist", style=discord.ButtonStyle.primary)
+    async def artist(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            LidarrRequestModal(self.cog, interaction.user.id, "artist")
+        )
+
+    @discord.ui.button(label="Release", style=discord.ButtonStyle.primary)
+    async def release(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(
+            LidarrRequestModal(self.cog, interaction.user.id, "album")
+        )
+
+
 def safe_profile_name(value: str) -> str:
     name = value.strip().lower()
     if not name or len(name) > 32 or not all(char.isalnum() or char in "_-" for char in name):
@@ -111,6 +237,7 @@ class Navidrome(commands.Cog):
         "manager_role_id": None,
         "lidarr_identity_policy": "linked_required",
         "lidarr_requester_role_id": None,
+        "lidarr_request_channel_id": None,
         "lidarr_cooldown_seconds": 300,
         "lidarr_daily_limit": 5,
         "lidarr_audit": [],
@@ -275,6 +402,32 @@ class Navidrome(commands.Cog):
         })
         await group.lidarr_audit.set(audit[-500:])
 
+    async def _notify_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any], outcome: str,
+    ) -> None:
+        channel_id = await self.config.guild(guild).lidarr_request_channel_id()
+        if not channel_id:
+            return
+        channel = await self._channel(guild, int(channel_id))
+        if not channel:
+            return
+        title, detail = lidarr_candidate_text(media_type, candidate)
+        embed = discord.Embed(
+            title="New Lidarr request",
+            description=f"**{title}**\n{detail}",
+            colour=discord.Colour.green(),
+        )
+        embed.add_field(name="Requested by", value=member.mention, inline=True)
+        embed.add_field(
+            name="Type", value="Artist" if media_type == "artist" else "Release", inline=True
+        )
+        embed.add_field(name="Result", value=outcome.replace("-", " ").title(), inline=True)
+        try:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            log.warning("Could not send Lidarr request notification for guild %s", guild.id)
+
     async def execute_lidarr_request(
         self, guild: discord.Guild, member: discord.Member, media_type: str,
         candidate: Dict[str, Any],
@@ -341,6 +494,7 @@ class Navidrome(commands.Cog):
             return f"Lidarr request failed: {exc}"
         self._lidarr_cooldowns[(guild.id, member.id)] = now
         await self._record_lidarr_audit(guild, member, media_type, candidate, outcome, account)
+        await self._notify_lidarr_request(guild, member, media_type, candidate, outcome)
         labels = "discord, " + lidarr_requester_tag(member.name)
         return f"Lidarr request {outcome.replace('-', ' ')}. Attribution tags: `{labels}`."
 
@@ -663,7 +817,7 @@ class Navidrome(commands.Cog):
     async def before_poll_loop(self):
         await self.bot.wait_until_red_ready()
 
-    @commands.group(name="navidrome", invoke_without_command=True)
+    @commands.group(name="navidrome", aliases=("navi",), invoke_without_command=True)
     @commands.guild_only()
     @commands.bot_has_permissions(embed_links=True)
     async def navidrome(self, ctx: commands.Context):
@@ -717,38 +871,21 @@ class Navidrome(commands.Cog):
         for album in albums:
             await self.send_album(ctx.channel, album, client)
 
-    @navidrome.command(name="request")
-    @commands.bot_has_permissions(embed_links=True)
-    async def navidrome_request(
-        self, ctx: commands.Context, media_type: str, *, query: str
+    async def prepare_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str, query: str
     ):
-        """Search Navidrome, then request missing music through Lidarr.
-
-        Available types:
-        - `artist` - request an artist and their monitored releases
-        - `album` - request a specific album
-
-        Examples:
-        `!navidrome request artist Willie Nelson`
-        `!navidrome request album Red Headed Stranger`
-
-        Individual tracks cannot be requested because Lidarr manages artists and albums.
-        If the music is already in Navidrome, no request is sent. Otherwise, you must
-        confirm the matching Lidarr result before anything is added.
-        """
         media_type = media_type.casefold()
+        media_type = "album" if media_type in {"release", "album", "song", "single"} else media_type
         if media_type not in {"artist", "album"}:
-            return await ctx.send(
-                "Choose `artist` or `album`. Lidarr does not acquire individual tracks directly."
-            )
+            return "Choose `artist` or `release`.", None, None
         query = query.strip()
         if len(query) < 2 or len(query) > 200:
-            return await ctx.send("Enter a search between 2 and 200 characters.")
-        account, error = await self._request_identity(ctx.guild, ctx.author)
+            return "Enter a search between 2 and 200 characters.", None, None
+        account, error = await self._request_identity(guild, member)
         if error:
-            return await ctx.send(error)
+            return error, None, None
         try:
-            _, navidrome = await self._guild_client(ctx.guild)
+            _, navidrome = await self._guild_client(guild)
             local = await navidrome.search(
                 query, artist_count=5 if media_type == "artist" else 0,
                 album_count=5 if media_type == "album" else 0,
@@ -756,41 +893,64 @@ class Navidrome(commands.Cog):
             matches = local["artists" if media_type == "artist" else "albums"]
             if matches:
                 title = matches[0].get("name") or matches[0].get("album") or query
-                return await ctx.send(
-                    f"`{title}` already appears in this Navidrome library; no Lidarr request was made."
+                return (
+                    f"`{title}` already appears in this Navidrome library; "
+                    "no Lidarr request was made.", None, None
                 )
-            _, lidarr, _ = await self._lidarr_client(ctx.guild)
+            _, lidarr, _ = await self._lidarr_client(guild)
             candidates = await lidarr.lookup(media_type, query)
         except (NavidromeError, LidarrError) as exc:
-            return await ctx.send(str(exc))
+            return str(exc), None, None
         if not candidates:
+            return "Lidarr found no matching result. Try including the artist name.", None, None
+        if len(candidates) == 1:
+            candidate = candidates[0]
+            return None, lidarr_confirmation_embed(member, account, media_type, candidate), LidarrConfirmView(
+                self, member.id, media_type, candidate
+            )
+        return (
+            f"Lidarr found {len(candidates)} results. Choose the correct one.", None,
+            LidarrResultView(self, member.id, media_type, candidates, account),
+        )
+
+    @navidrome.command(name="request", aliases=("req",))
+    @commands.bot_has_permissions(embed_links=True)
+    async def navidrome_request(
+        self, ctx: commands.Context, media_type: Optional[str] = None, *, query: str = ""
+    ):
+        """Search Navidrome, then request an artist or release through Lidarr.
+
+        Use `artist` for an artist, or `release` for an album, EP, or single.
+        `album`, `single`, and `song` are accepted as release aliases.
+
+        Examples:
+        `!navi req artist Willie Nelson`
+        `!navi req release Willie Nelson Red Headed Stranger`
+        `!navi req song Artist Name Song Name`
+
+        Run `!navi req` to choose Artist or Release with buttons. Lidarr acquires
+        releases rather than individual tracks, so song searches resolve to releases.
+        """
+        if media_type is None:
             return await ctx.send(
-                "Lidarr found no matching artist or album. Try a more specific search."
+                "What would you like to request? Releases include albums, EPs, and singles.",
+                view=LidarrRequestTypeView(self, ctx.author.id),
             )
-        candidate = candidates[0]
-        title = candidate.get("artistName") or candidate.get("title") or "Unknown result"
-        artist = (candidate.get("artist") or {}).get("artistName")
-        description = f"**{title}**" + (f" by **{artist}**" if artist else "")
-        if len(candidates) > 1:
-            description += (
-                f"\n\nLidarr returned {len(candidates)} results. "
-                "Refine the search if this first result is not correct."
+        normalized = media_type.casefold()
+        if not query and normalized in {"artist", "release", "album", "song", "single"}:
+            chosen = "artist" if normalized == "artist" else "album"
+            label = "Artist" if chosen == "artist" else "Release"
+            return await ctx.send(
+                f"Click **{label}** to enter your search.",
+                view=LidarrRequestTypeView(self, ctx.author.id, chosen),
             )
-        tag = lidarr_requester_tag(ctx.author.name)
-        embed = discord.Embed(
-            title=f"Confirm Lidarr {media_type} request", description=description,
-            colour=discord.Colour.orange(),
+        content, embed, view = await self.prepare_lidarr_request(
+            ctx.guild, ctx.author, normalized, query
         )
-        embed.add_field(name="Attribution tags", value=f"`discord`, `{tag}`", inline=False)
-        embed.add_field(
-            name="Identity",
-            value=(f"Linked Navidrome account: `{account.get('username')}`" if account
-                   else "Discord-only identity"), inline=False,
-        )
-        embed.set_footer(text="Nothing will be changed in Lidarr until you confirm.")
-        await ctx.send(
-            embed=embed, view=LidarrConfirmView(self, ctx.author.id, media_type, candidate)
-        )
+        if embed is None and view is None:
+            await ctx.send(content)
+        else:
+            await ctx.send(content=content, embed=embed, view=view)
 
     @commands.group(name="navidromeowner", invoke_without_command=True)
     @checks.is_owner()
@@ -1025,9 +1185,12 @@ class Navidrome(commands.Cog):
         """Configure this server's Lidarr request policy."""
         settings = await self.config.guild(ctx.guild).all()
         role_id = settings.get("lidarr_requester_role_id")
+        channel_id = settings.get("lidarr_request_channel_id")
+        request_channel = f"<#{channel_id}>" if channel_id else "Not set"
         await ctx.send(
             f"Identity policy: `{settings.get('lidarr_identity_policy', 'linked_required')}`\n"
             f"Requester role: {f'<@&{role_id}>' if role_id else 'Any member'}\n"
+            f"Request channel: {request_channel}\n"
             f"Cooldown: {settings.get('lidarr_cooldown_seconds', 300)} seconds\n"
             f"Daily limit: {settings.get('lidarr_daily_limit', 5)} per member"
         )
@@ -1058,6 +1221,23 @@ class Navidrome(commands.Cog):
             f"Lidarr requester role set to {role.mention}." if role
             else "The Lidarr requester role restriction is cleared."
         )
+
+    @navidromeset_lidarr.command(name="requestchannel")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_request_channel(
+        self, ctx: commands.Context, channel: Optional[GuildMessageable] = None
+    ):
+        """Set the channel notified after confirmed Lidarr requests."""
+        channel = channel or ctx.channel
+        await self.config.guild(ctx.guild).lidarr_request_channel_id.set(channel.id)
+        await ctx.send(f"Confirmed Lidarr requests will be reported in {channel.mention}.")
+
+    @navidromeset_lidarr.command(name="clearrequestchannel")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_clear_request_channel(self, ctx: commands.Context):
+        """Disable confirmed Lidarr request notifications."""
+        await self.config.guild(ctx.guild).lidarr_request_channel_id.set(None)
+        await ctx.send("Lidarr request channel notifications are disabled.")
 
     @navidromeset_lidarr.command(name="limits")
     @checks.admin_or_permissions(manage_guild=True)
