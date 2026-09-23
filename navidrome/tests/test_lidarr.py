@@ -109,6 +109,16 @@ class LidarrClientTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(LidarrError, "not individual tracks"):
             await client.lookup("track", "song")
 
+    async def test_artist_lookup_filters_by_musicbrainz_id(self):
+        mb_id = "12345678-1234-1234-1234-123456789abc"
+        session = FakeSession([FakeResponse([{"foreignArtistId": mb_id}])])
+        client = LidarrClient(session, "https://lidarr.example.com", "secret")
+
+        artists = await client.artists(mb_id=mb_id)
+
+        self.assertEqual(artists[0]["foreignArtistId"], mb_id)
+        self.assertEqual(session.calls[0][2]["params"], {"mbId": mb_id})
+
     async def test_ensure_tag_reuses_case_insensitive_match(self):
         client = LidarrClient(
             FakeSession([FakeResponse([{"id": 8, "label": "Discord"}])]),
