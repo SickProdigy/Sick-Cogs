@@ -173,9 +173,15 @@ class LidarrRequestModal(discord.ui.Modal):
         content, embed, view = await self.cog.prepare_lidarr_request(
             interaction.guild, interaction.user, self.media_type, str(self.query.value)
         )
-        await interaction.followup.send(
-            content=content, embed=embed, view=view, ephemeral=True
-        )
+        if embed is None and view is None:
+            await interaction.followup.send(content, ephemeral=True)
+        else:
+            kwargs = {"ephemeral": True, "view": view}
+            if content is not None:
+                kwargs["content"] = content
+            if embed is not None:
+                kwargs["embed"] = embed
+            await interaction.followup.send(**kwargs)
 
 
 class LidarrRequestTypeView(discord.ui.View):
