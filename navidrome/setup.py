@@ -8,6 +8,7 @@ from typing import Dict
 import discord
 
 from .client import NavidromeError, validate_base_url, validate_public_base_url
+from .lidarr import LidarrError
 
 
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
@@ -115,8 +116,7 @@ class ConnectionModal(discord.ui.Modal):
         if previous_mode == "guild_managed":
             await self.cog.bot.remove_shared_api_tokens(
                 self.cog.guild_token_namespace(interaction.guild.id),
-                "username",
-                "password",
+                "username", "password", "lidarr_url", "lidarr_api_key",
             )
             await group.guild_connection.set(None)
         await group.connection_mode.set("owner_managed")
@@ -201,7 +201,15 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
             namespace, username=username, password=password
         )
         await group.connection_mode.set("guild_managed")
-        await group.guild_connection.set({"base_url": base_url})
+        staged_profile = {"base_url": base_url}
+        old_profile = previous.get("guild_connection") or {}
+        if (
+            previous.get("connection_mode") == "guild_managed"
+            and old_profile.get("base_url") == base_url
+            and old_profile.get("lidarr")
+        ):
+            staged_profile["lidarr"] = old_profile["lidarr"]
+        await group.guild_connection.set(staged_profile)
         try:
             _, client = await self.cog._guild_client(guild)
             ping = await client.ping()
@@ -226,6 +234,10 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
             previous.get("connection_mode") != "guild_managed"
             or (previous.get("guild_connection") or {}).get("base_url") != base_url
         )
+        if changed_server:
+            await self.cog.bot.remove_shared_api_tokens(
+                namespace, "lidarr_url", "lidarr_api_key"
+            )
         await group.connection.set(None)
         await self.cog._reset_connection_state(guild, clear_accounts=changed_server)
         server = str(ping.get("type") or "Navidrome")
@@ -237,6 +249,88 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
             ),
             embed=await self.cog.setup_embed(guild),
             view=await NavidromeSetupView.create(self.cog, interaction.user, guild),
+        )
+
+
+class GuildLidarrModal(discord.ui.Modal, title="Connect this server to Lidarr"):
+    url = discord.ui.TextInput(label="Public Lidarr HTTPS URL", max_length=500)
+    api_key = discord.ui.TextInput(label="Lidarr API key (stored securely)", max_length=500)
+    root = discord.ui.TextInput(label="Root folder path", placeholder="/music", max_length=500)
+    profiles = discord.ui.TextInput(label="Quality ID, metadata ID", placeholder="3,4", max_length=30)
+    confirmation = discord.ui.TextInput(label="Type CONNECT to confirm", min_length=7, max_length=7)
+
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            return await interaction.response.send_message(
+                "Manage Server permission is required.", ephemeral=True
+            )
+        if str(self.confirmation.value).strip().casefold() != "connect":
+            return await interaction.response.send_message(
+                "Type `CONNECT` to confirm storing or replacing Lidarr credentials.", ephemeral=True
+            )
+        group = self.cog.config.guild(interaction.guild)
+        profile = await group.guild_connection()
+        if not profile or await group.connection_mode() != "guild_managed":
+            return await interaction.response.send_message(
+                "Connect this guild's Navidrome server before adding guild-owned Lidarr.",
+                ephemeral=True,
+            )
+        try:
+            base_url = await validate_public_base_url(str(self.url.value))
+            parts = [int(value.strip()) for value in str(self.profiles.value).split(",")]
+            if len(parts) != 2 or any(value < 1 for value in parts):
+                raise ValueError
+        except ValueError:
+            return await interaction.response.send_message(
+                "Enter a public HTTPS URL and profile IDs as `quality,metadata`.", ephemeral=True
+            )
+        api_key = str(self.api_key.value).strip()
+        root = str(self.root.value).strip()
+        if not api_key or not root:
+            return await interaction.response.send_message(
+                "The API key and root folder are required.", ephemeral=True
+            )
+        await interaction.response.defer(ephemeral=True)
+        namespace = self.cog.guild_token_namespace(interaction.guild.id)
+        previous_tokens = await self.cog.bot.get_shared_api_tokens(namespace)
+        previous_profile = dict(profile)
+        new_profile = dict(profile)
+        new_profile["lidarr"] = {
+            "enabled": True, "root_folder_path": root, "quality_profile_id": parts[0],
+            "metadata_profile_id": parts[1], "monitor": "all",
+        }
+        await self.cog.bot.set_shared_api_tokens(
+            namespace, lidarr_url=base_url, lidarr_api_key=api_key
+        )
+        await group.guild_connection.set(new_profile)
+        try:
+            _, client, settings = await self.cog._lidarr_client(interaction.guild)
+            status = await client.validate_configuration(
+                root_folder_path=settings["root_folder_path"],
+                quality_profile_id=settings["quality_profile_id"],
+                metadata_profile_id=settings["metadata_profile_id"],
+            )
+        except LidarrError as exc:
+            if previous_tokens.get("lidarr_url") and previous_tokens.get("lidarr_api_key"):
+                await self.cog.bot.set_shared_api_tokens(
+                    namespace, lidarr_url=previous_tokens["lidarr_url"],
+                    lidarr_api_key=previous_tokens["lidarr_api_key"],
+                )
+            else:
+                await self.cog.bot.remove_shared_api_tokens(
+                    namespace, "lidarr_url", "lidarr_api_key"
+                )
+            await group.guild_connection.set(previous_profile)
+            return await interaction.followup.send(
+                f"Lidarr was not saved: {exc}", ephemeral=True
+            )
+        await interaction.followup.send(
+            f"Lidarr {status.get('version', 'unknown')} is enabled. The API key will not be displayed.",
+            ephemeral=True,
         )
 
 
@@ -298,8 +392,7 @@ class ConnectionSelect(discord.ui.Select):
         if previous_mode == "guild_managed":
             await self.parent_view.cog.bot.remove_shared_api_tokens(
                 self.parent_view.cog.guild_token_namespace(interaction.guild.id),
-                "username",
-                "password",
+                "username", "password", "lidarr_url", "lidarr_api_key",
             )
             await group.guild_connection.set(None)
         await group.connection_mode.set("owner_managed")
@@ -1037,6 +1130,11 @@ class NavidromeSetupView(discord.ui.View):
             if getattr(item, "custom_id", None) == "navidrome:guild-connect"
         )
         guild_connect.disabled = not await cog.config.guild_connections_enabled()
+        guild_lidarr = next(
+            item for item in view.children
+            if getattr(item, "custom_id", None) == "navidrome:guild-lidarr"
+        )
+        guild_lidarr.disabled = settings.get("connection_mode") != "guild_managed"
         manage = next(
             item for item in view.children
             if getattr(item, "custom_id", None) == "navidrome:manage-users"
@@ -1074,6 +1172,13 @@ class NavidromeSetupView(discord.ui.View):
             )
             return
         await interaction.response.send_modal(GuildConnectionModal(self.cog))
+
+    @discord.ui.button(
+        label="Connect Lidarr", style=discord.ButtonStyle.secondary, row=3,
+        custom_id="navidrome:guild-lidarr",
+    )
+    async def connect_lidarr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(GuildLidarrModal(self.cog))
 
     @discord.ui.button(label="Set interval", style=discord.ButtonStyle.secondary, row=2)
     async def interval(self, interaction: discord.Interaction, button: discord.ui.Button):

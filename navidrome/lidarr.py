@@ -136,6 +136,13 @@ class LidarrClient:
             raise LidarrError("Lidarr did not return the created tag.")
         return int(created["id"])
 
+    async def update_artist_tags(self, artist: Dict[str, Any], tag_ids: List[int]):
+        payload = dict(artist)
+        payload["tags"] = sorted(set(
+            int(value) for value in list(payload.get("tags") or []) + list(tag_ids)
+        ))
+        return await self.request("PUT", f"artist/{int(payload['id'])}", payload=payload)
+
     async def add_artist(self, candidate: Dict[str, Any], settings: Dict[str, Any], tag_ids: List[int]):
         payload = dict(candidate)
         payload.update({

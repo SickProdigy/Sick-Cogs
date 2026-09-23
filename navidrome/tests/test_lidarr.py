@@ -99,6 +99,13 @@ class LidarrClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await client.ensure_tag("discord"), 8)
         self.assertEqual(len(client.session.calls), 1)
 
+    async def test_update_artist_tags_preserves_unrelated_tags(self):
+        session = FakeSession([FakeResponse({"id": 12})])
+        client = LidarrClient(session, "https://lidarr.example.com", "secret")
+        await client.update_artist_tags({"id": 12, "tags": [99]}, [1, 2])
+        self.assertEqual(session.calls[0][2]["json"]["tags"], [1, 2, 99])
+        self.assertEqual(session.calls[0][0], "PUT")
+
     async def test_artist_payload_applies_profiles_monitoring_and_tags(self):
         session = FakeSession([FakeResponse({"id": 12})])
         client = LidarrClient(session, "https://lidarr.example.com", "secret")

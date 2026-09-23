@@ -170,6 +170,17 @@ class NavidromeClient:
         root = await self.request("getAlbumList2", type="newest", size=max(1, min(size, 50)))
         return list(root.get("albumList2", {}).get("album", []) or [])
 
+    async def search(self, query: str, *, artist_count: int = 5, album_count: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        root = await self.request(
+            "search3", query=query, artistCount=max(0, min(artist_count, 20)),
+            albumCount=max(0, min(album_count, 20)), songCount=0,
+        )
+        result = root.get("searchResult3", {})
+        return {
+            "artists": list(result.get("artist", []) or []),
+            "albums": list(result.get("album", []) or []),
+        }
+
     async def library_summary(self) -> Dict[str, Any]:
         ping = await self.ping()
         folders = await self.request("getMusicFolders")
