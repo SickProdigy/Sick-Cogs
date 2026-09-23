@@ -914,8 +914,10 @@ class Navidrome(commands.Cog):
             return None, lidarr_confirmation_embed(member, account, media_type, candidate), LidarrConfirmView(
                 self, member.id, media_type, candidate
             )
+        safe_query = discord.utils.escape_markdown(discord.utils.escape_mentions(query))
         return (
-            f"Lidarr found {len(candidates)} results. Choose the correct one.", None,
+            f'Lidarr found {len(candidates)} results for "{safe_query}". '
+            "Choose the correct one.", None,
             LidarrResultView(self, member.id, media_type, candidates, account),
         )
 

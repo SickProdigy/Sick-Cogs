@@ -340,7 +340,9 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         )
 
         lidarr.lookup.assert_awaited_once_with("album", "Song Artist A")
-        self.assertIn("2 results", content)
+        self.assertEqual(
+            content, 'Lidarr found 2 results for "Song Artist A". Choose the correct one.'
+        )
         self.assertIsNone(embed)
         self.assertIsInstance(view, LidarrResultView)
         select = view.children[0]
