@@ -11,6 +11,18 @@ from .client import NavidromeError, validate_base_url, validate_public_base_url
 from .lidarr import LidarrClient, LidarrError
 
 
+def account_credentials_message(guild_name: str, username: str, password: str) -> str:
+    return (
+        "# Your Navidrome account is ready\n"
+        f"**Server:** {discord.utils.escape_markdown(guild_name)}\n\n"
+        "**Username**\n"
+        f"```text\n{username}\n```\n"
+        "**Temporary password**\n"
+        f"```text\n{password}\n```\n"
+        "Sign in and change your temporary password as soon as possible."
+    )
+
+
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
     if interaction.user.id != author.id:
         await interaction.response.send_message(
@@ -516,9 +528,9 @@ class AccountCreateModal(discord.ui.Modal):
             )
             try:
                 await self.member.send(
-                    f"Your Navidrome account for **{interaction.guild.name}** is ready.\n"
-                    f"Username: `{username}`\nTemporary password: `{password}`\n"
-                    "Sign in and change this password as soon as possible."
+                    account_credentials_message(
+                        interaction.guild.name, username, password
+                    )
                 )
             except discord.HTTPException:
                 await client.delete_user(str(remote.get("id") or ""))

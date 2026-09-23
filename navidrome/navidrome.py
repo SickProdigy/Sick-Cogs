@@ -19,7 +19,7 @@ from redbot.core.utils.chat_formatting import pagify
 
 from .client import NavidromeClient, NavidromeError, validate_base_url
 from .lidarr import LidarrClient, LidarrError
-from .setup import NavidromeSetupView
+from .setup import NavidromeSetupView, account_credentials_message
 
 
 log = logging.getLogger("red.sick-cogs.Navidrome")
@@ -1204,9 +1204,7 @@ class Navidrome(commands.Cog):
             )
             try:
                 await member.send(
-                    f"Your Navidrome account for **{ctx.guild.name}** is ready.\n"
-                    f"Username: `{username}`\nTemporary password: `{password}`\n"
-                    "Sign in and change this password as soon as possible."
+                    account_credentials_message(ctx.guild.name, username, password)
                 )
             except discord.HTTPException:
                 await client.delete_user(str(user.get("id") or ""))

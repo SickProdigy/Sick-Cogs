@@ -9,7 +9,8 @@ from navidrome.navidrome import (
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
     GuildConnectionModal, GuildLidarrModal,
-    DirectUserActionView, DirectUsersView, NavidromeSetupView, UserActionView, owner_check,
+    DirectUserActionView, DirectUsersView, NavidromeSetupView, UserActionView,
+    account_credentials_message, owner_check,
 )
 
 
@@ -773,6 +774,15 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(modal.username.default, "AliceExample")
         self.assertEqual(len(modal.children), 2)
 
+    def test_account_credentials_message_separates_username_and_password(self):
+        message = account_credentials_message("Test Server", "alice", "temporary-secret")
+
+        self.assertIn("# Your Navidrome account is ready", message)
+        self.assertIn("**Username**\n```text\nalice\n```", message)
+        self.assertIn(
+            "**Temporary password**\n```text\ntemporary-secret\n```", message
+        )
+
     async def test_account_create_maps_user_without_storing_password(self):
         cog, group = self.make_cog()
         remote = {
@@ -799,7 +809,9 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         mapped = group.accounts.value["22"]
         self.assertEqual(mapped["id"], "nav-user-1")
         self.assertNotIn("password", mapped)
-        self.assertIn("Temporary password", member.send.await_args.args[0])
+        dm = member.send.await_args.args[0]
+        self.assertIn("**Username**\n```text\nalice\n```", dm)
+        self.assertIn("**Temporary password**\n```text\n", dm)
 
     async def test_existing_account_can_be_linked_without_creating_user(self):
         cog, group = self.make_cog()
