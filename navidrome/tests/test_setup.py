@@ -205,7 +205,8 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(send=AsyncMock())
         discover = AsyncMock(return_value={
             "status": {"version": "2.0"}, "root_folder_path": "/music",
-            "quality_profile_id": 3, "metadata_profile_id": 4,
+            "quality_profile_id": 3, "quality_profile_name": "Lossless",
+            "metadata_profile_id": 4, "metadata_profile_name": "Standard",
         })
 
         with patch("navidrome.navidrome.LidarrClient") as client_type:
@@ -340,12 +341,12 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "connection_mode": "guild_managed",
             "guild_connection": {"base_url": "https://music.example.com"},
         })
-        cog._lidarr_client = AsyncMock(side_effect=__import__("navidrome.lidarr", fromlist=["LidarrError"]).LidarrError("bad profile"))
+        cog.get_session = AsyncMock(return_value=SimpleNamespace())
         modal = GuildLidarrModal(cog)
         modal.url._value = "https://lidarr.example.com"
         modal.api_key._value = "secret"
         modal.root._value = "/music"
-        modal.profiles._value = "3,4"
+        modal.profiles._value = "Lossless, Standard"
         modal.confirmation._value = "CONNECT"
         interaction = SimpleNamespace(
             user=SimpleNamespace(guild_permissions=SimpleNamespace(manage_guild=True)),
@@ -353,12 +354,15 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
-        with patch("navidrome.setup.validate_public_base_url", AsyncMock(return_value="https://lidarr.example.com")):
+        with patch("navidrome.setup.validate_public_base_url", AsyncMock(return_value="https://lidarr.example.com")), patch(
+            "navidrome.setup.LidarrClient"
+        ) as client_type:
+            client_type.return_value.discover_configuration = AsyncMock(
+                side_effect=__import__("navidrome.lidarr", fromlist=["LidarrError"]).LidarrError("bad profile")
+            )
             await modal.on_submit(interaction)
         self.assertEqual(group.guild_connection.value, {"base_url": "https://music.example.com"})
-        cog.bot.remove_shared_api_tokens.assert_awaited_once_with(
-            "navidrome_guild_2", "lidarr_url", "lidarr_api_key"
-        )
+        cog.bot.set_shared_api_tokens.assert_not_awaited()
 
     async def test_guild_client_uses_isolated_namespace_and_public_only(self):
         cog, _ = self.make_cog(settings={

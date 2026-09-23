@@ -874,8 +874,8 @@ class Navidrome(commands.Cog):
     @navidromeowner_lidarr.command(name="configure", aliases=("set",))
     async def owner_lidarr_configure(
         self, ctx: commands.Context, name: Optional[str] = None,
-        root_folder_path: Optional[str] = None, quality_profile_id: Optional[int] = None,
-        metadata_profile_id: Optional[int] = None, allow_http: Optional[bool] = None,
+        root_folder_path: Optional[str] = None, quality_profile_id: Optional[str] = None,
+        metadata_profile_id: Optional[str] = None, allow_http: Optional[bool] = None,
     ):
         """Discover defaults, validate, and enable Lidarr for a Navidrome profile."""
         profiles = await self.config.connections()
@@ -924,8 +924,9 @@ class Navidrome(commands.Cog):
         await ctx.send(
             f"Lidarr {status.get('version', 'unknown')} is enabled for `{name}` using "
             f"root `{settings['root_folder_path']}`, quality profile "
-            f"`{settings['quality_profile_id']}`, and metadata profile "
-            f"`{settings['metadata_profile_id']}`. The API key remains hidden."
+            f"`{settings['quality_profile_name']}` (ID {settings['quality_profile_id']}), and "
+            f"metadata profile `{settings['metadata_profile_name']}` "
+            f"(ID {settings['metadata_profile_id']}). The API key remains hidden."
         )
 
     @navidromeowner_lidarr.command(name="disable")
