@@ -114,6 +114,21 @@ def lidarr_candidate_text(media_type: str, candidate: Dict[str, Any]) -> Tuple[s
     return label[:100], detail[:100]
 
 
+def musicbrainz_url(media_type: str, candidate: Dict[str, Any]) -> Optional[str]:
+    foreign_id = str(
+        candidate.get("foreignArtistId") if media_type == "artist"
+        else candidate.get("foreignAlbumId")
+        or ""
+    )
+    if not re.fullmatch(
+        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        foreign_id,
+    ):
+        return None
+    entity = "artist" if media_type == "artist" else "release-group"
+    return f"https://musicbrainz.org/{entity}/{foreign_id.lower()}"
+
+
 def lidarr_confirmation_embed(
     member: discord.Member, account: Optional[Dict[str, Any]], media_type: str,
     candidate: Dict[str, Any],
@@ -123,6 +138,11 @@ def lidarr_confirmation_embed(
         title=f"Confirm Lidarr {'artist' if media_type == 'artist' else 'release'} request",
         description=f"**{title}**\n{detail}", colour=discord.Colour.orange(),
     )
+    mb_url = musicbrainz_url(media_type, candidate)
+    if mb_url:
+        embed.add_field(
+            name="MusicBrainz", value=f"[Open the selected result]({mb_url})", inline=False
+        )
     embed.add_field(
         name="Attribution tags",
         value=f"`discord`, `{lidarr_requester_tag(member.name)}`", inline=False,
@@ -495,10 +515,7 @@ class Navidrome(commands.Cog):
             tag_ids = [source_tag, requester_tag]
             if media_type == "artist":
                 foreign_id = str(candidate.get("foreignArtistId") or "")
-                existing = next(
-                    (item for item in await client.artists()
-                     if str(item.get("foreignArtistId")) == foreign_id), None
-                )
+                existing = next(iter(await client.artists(mb_id=foreign_id)), None)
                 if existing:
                     before = set(existing.get("tags") or [])
                     await client.update_artist_tags(existing, tag_ids)
@@ -512,8 +529,7 @@ class Navidrome(commands.Cog):
                 if existing:
                     artist_foreign_id = str((candidate.get("artist") or {}).get("foreignArtistId") or "")
                     managed_artist = next(
-                        (item for item in await client.artists()
-                         if str(item.get("foreignArtistId")) == artist_foreign_id), None
+                        iter(await client.artists(mb_id=artist_foreign_id)), None
                     )
                     if managed_artist:
                         before = set(managed_artist.get("tags") or [])

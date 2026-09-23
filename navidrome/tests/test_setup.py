@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from navidrome.client import NavidromeError
 from navidrome.navidrome import (
     LidarrConfirmView, LidarrRequestModal, LidarrRequestTypeView, LidarrResultView, Navidrome,
-    exact_local_match, lidarr_requester_tag, navidrome_config_permission,
+    exact_local_match, lidarr_confirmation_embed, lidarr_requester_tag,
+    navidrome_config_permission,
 )
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
@@ -234,6 +235,21 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(saved["enabled"])
         self.assertEqual(saved["root_folder_path"], "/music")
         ctx.send.assert_awaited_once()
+
+    def test_lidarr_confirmation_links_valid_musicbrainz_ids(self):
+        mb_id = "12345678-1234-1234-1234-123456789abc"
+        member = SimpleNamespace(name="Listener")
+        artist_embed = lidarr_confirmation_embed(
+            member, None, "artist", {"artistName": "Example", "foreignArtistId": mb_id}
+        )
+        release_embed = lidarr_confirmation_embed(
+            member, None, "album", {"title": "Example", "foreignAlbumId": mb_id}
+        )
+
+        artist_link = next(field.value for field in artist_embed.fields if field.name == "MusicBrainz")
+        release_link = next(field.value for field in release_embed.fields if field.name == "MusicBrainz")
+        self.assertIn(f"musicbrainz.org/artist/{mb_id}", artist_link)
+        self.assertIn(f"musicbrainz.org/release-group/{mb_id}", release_link)
 
     def test_lidarr_confirmation_view_has_confirm_and_cancel(self):
         view = LidarrConfirmView(

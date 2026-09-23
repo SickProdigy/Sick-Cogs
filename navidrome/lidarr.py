@@ -160,8 +160,9 @@ class LidarrClient:
             raise LidarrError("Lidarr returned an invalid lookup response.")
         return result
 
-    async def artists(self) -> List[Dict[str, Any]]:
-        result = await self.request("GET", "artist")
+    async def artists(self, *, mb_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        params = {"mbId": mb_id} if mb_id else None
+        result = await self.request("GET", "artist", params=params)
         return result if isinstance(result, list) else []
 
     async def albums(self, *, foreign_album_id: str) -> List[Dict[str, Any]]:
