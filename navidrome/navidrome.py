@@ -861,15 +861,24 @@ class Navidrome(commands.Cog):
 
     @navidromeowner_lidarr.command(name="configure", aliases=("set",))
     async def owner_lidarr_configure(
-        self, ctx: commands.Context, name: str, root_folder_path: str,
-        quality_profile_id: int, metadata_profile_id: int, allow_http: bool = False,
+        self, ctx: commands.Context, name: Optional[str] = None,
+        root_folder_path: Optional[str] = None, quality_profile_id: Optional[int] = None,
+        metadata_profile_id: Optional[int] = None, allow_http: Optional[bool] = None,
     ):
-        """Validate and enable Lidarr after its URL and API key are stored as shared tokens."""
+        """Discover defaults, validate, and enable Lidarr for a Navidrome profile."""
+        profiles = await self.config.connections()
+        if name is None:
+            if len(profiles) == 1:
+                name = next(iter(profiles))
+            elif not profiles:
+                return await ctx.send("No Navidrome connections are registered.")
+            else:
+                choices = ", ".join(f"`{item}`" for item in sorted(profiles))
+                return await ctx.send(f"Choose a Navidrome connection: {choices}")
         try:
             name = safe_profile_name(name)
         except ValueError as exc:
             return await ctx.send(str(exc))
-        profiles = await self.config.connections()
         profile = profiles.get(name)
         if not profile:
             return await ctx.send("That Navidrome connection is not registered.")
@@ -882,20 +891,18 @@ class Navidrome(commands.Cog):
                 f"Set `lidarr_url` and `lidarr_api_key` first with Red's shared API token "
                 f"command for `{namespace}` in a private channel."
             )
-        settings = {
-            "enabled": True, "root_folder_path": root_folder_path,
-            "quality_profile_id": quality_profile_id,
-            "metadata_profile_id": metadata_profile_id, "monitor": "all",
-        }
+        inferred_http = base_url.casefold().startswith("http://")
+        allow_http = inferred_http if allow_http is None else allow_http
         try:
             client = LidarrClient(
                 await self.get_session(), base_url, api_key, allow_http=allow_http
             )
-            status = await client.validate_configuration(**{
-                key: settings[key] for key in (
-                    "root_folder_path", "quality_profile_id", "metadata_profile_id"
-                )
-            })
+            discovered = await client.discover_configuration(
+                root_folder_path=root_folder_path, quality_profile_id=quality_profile_id,
+                metadata_profile_id=metadata_profile_id,
+            )
+            status = discovered.pop("status")
+            settings = {"enabled": True, **discovered, "monitor": "all"}
         except LidarrError as exc:
             return await ctx.send(f"Lidarr was not enabled: {exc}")
         profile = dict(profile)
@@ -904,8 +911,10 @@ class Navidrome(commands.Cog):
         profiles[name] = profile
         await self.config.connections.set(profiles)
         await ctx.send(
-            f"Lidarr {status.get('version', 'unknown')} is enabled for `{name}`. "
-            "The API key remains hidden in Red's shared token store."
+            f"Lidarr {status.get('version', 'unknown')} is enabled for `{name}` using "
+            f"root `{settings['root_folder_path']}`, quality profile "
+            f"`{settings['quality_profile_id']}`, and metadata profile "
+            f"`{settings['metadata_profile_id']}`. The API key remains hidden."
         )
 
     @navidromeowner_lidarr.command(name="disable")

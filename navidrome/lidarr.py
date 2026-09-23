@@ -90,8 +90,9 @@ class LidarrClient:
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise LidarrError("Could not reach the configured Lidarr server.") from exc
 
-    async def validate_configuration(
-        self, *, root_folder_path: str, quality_profile_id: int, metadata_profile_id: int
+    async def discover_configuration(
+        self, *, root_folder_path: Optional[str] = None,
+        quality_profile_id: Optional[int] = None, metadata_profile_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         status = await self.request("GET", "system/status")
         roots = await self.request("GET", "rootfolder")
@@ -99,13 +100,41 @@ class LidarrClient:
         metadata = await self.request("GET", "metadataprofile")
         if not isinstance(status, dict) or not status.get("version"):
             raise LidarrError("Lidarr did not return valid system status.")
-        if not any(str(item.get("path")) == root_folder_path for item in roots or []):
-            raise LidarrError("The configured Lidarr root folder does not exist.")
-        if not any(int(item.get("id", 0)) == quality_profile_id for item in qualities or []):
+        usable_roots = [item for item in roots or [] if item.get("accessible", True)]
+        root = next(
+            (item for item in usable_roots if str(item.get("path")) == root_folder_path),
+            None,
+        ) if root_folder_path else (usable_roots[0] if usable_roots else None)
+        if root is None:
+            raise LidarrError(
+                "The configured Lidarr root folder does not exist." if root_folder_path
+                else "Lidarr has no accessible root folder."
+            )
+        quality_id = int(
+            quality_profile_id or root.get("defaultQualityProfileId")
+            or ((qualities or [{}])[0].get("id") or 0)
+        )
+        metadata_id = int(
+            metadata_profile_id or root.get("defaultMetadataProfileId")
+            or ((metadata or [{}])[0].get("id") or 0)
+        )
+        if not any(int(item.get("id", 0)) == quality_id for item in qualities or []):
             raise LidarrError("The configured Lidarr quality profile does not exist.")
-        if not any(int(item.get("id", 0)) == metadata_profile_id for item in metadata or []):
+        if not any(int(item.get("id", 0)) == metadata_id for item in metadata or []):
             raise LidarrError("The configured Lidarr metadata profile does not exist.")
-        return status
+        return {
+            "status": status, "root_folder_path": str(root["path"]),
+            "quality_profile_id": quality_id, "metadata_profile_id": metadata_id,
+        }
+
+    async def validate_configuration(
+        self, *, root_folder_path: str, quality_profile_id: int, metadata_profile_id: int
+    ) -> Dict[str, Any]:
+        discovered = await self.discover_configuration(
+            root_folder_path=root_folder_path, quality_profile_id=quality_profile_id,
+            metadata_profile_id=metadata_profile_id,
+        )
+        return discovered["status"]
 
     async def lookup(self, media_type: str, term: str) -> List[Dict[str, Any]]:
         if media_type not in {"artist", "album"}:

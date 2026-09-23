@@ -151,8 +151,13 @@ For an owner-managed connection, store `lidarr_url` and `lidarr_api_key` in that
 `navidrome_<name>` Red shared-token namespace, then validate the root folder and profiles:
 
 ```text
-[p]navidromeowner lidarr configure <name> <root-folder> <quality-profile-id> <metadata-profile-id> [allow-http]
+[p]navidromeowner lidarr configure [name] [root-folder] [quality-profile-id] [metadata-profile-id] [allow-http]
 ```
+
+When only one Navidrome profile exists, omit every argument: the command selects that profile,
+polls Lidarr, uses its first accessible root folder and configured default profiles, and infers HTTP
+from the stored URL. With multiple profiles, provide the Navidrome profile name. Optional explicit
+values override discovery.
 
 For a guild-managed public HTTPS connection, use **Connect Lidarr** in `[p]navidromeset setup`. Its
 URL and API key stay in the guild's isolated shared-token namespace. The form validates the root
