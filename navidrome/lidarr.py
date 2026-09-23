@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import aiohttp
 
@@ -92,7 +92,8 @@ class LidarrClient:
 
     async def discover_configuration(
         self, *, root_folder_path: Optional[str] = None,
-        quality_profile_id: Optional[int] = None, metadata_profile_id: Optional[int] = None,
+        quality_profile_id: Optional[Union[int, str]] = None,
+        metadata_profile_id: Optional[Union[int, str]] = None,
     ) -> Dict[str, Any]:
         status = await self.request("GET", "system/status")
         roots = await self.request("GET", "rootfolder")
@@ -110,21 +111,36 @@ class LidarrClient:
                 "The configured Lidarr root folder does not exist." if root_folder_path
                 else "Lidarr has no accessible root folder."
             )
-        quality_id = int(
-            quality_profile_id or root.get("defaultQualityProfileId")
-            or ((qualities or [{}])[0].get("id") or 0)
+        def choose_profile(items, requested, default_id, label):
+            if not items:
+                raise LidarrError(f"Lidarr has no {label} profiles.")
+            if requested is None:
+                selected = next(
+                    (item for item in items if int(item.get("id", 0)) == int(default_id or 0)),
+                    items[0],
+                )
+            else:
+                value = str(requested).strip()
+                selected = (
+                    next((item for item in items if int(item.get("id", 0)) == int(value)), None)
+                    if value.isdigit() else
+                    next((item for item in items if str(item.get("name", "")).casefold() == value.casefold()), None)
+                )
+                if selected is None:
+                    available = ", ".join(str(item.get("name") or item.get("id")) for item in items)
+                    raise LidarrError(f"Unknown Lidarr {label} profile. Available: {available}.")
+            return int(selected["id"]), str(selected.get("name") or selected["id"])
+
+        quality_id, quality_name = choose_profile(
+            qualities or [], quality_profile_id, root.get("defaultQualityProfileId"), "quality"
         )
-        metadata_id = int(
-            metadata_profile_id or root.get("defaultMetadataProfileId")
-            or ((metadata or [{}])[0].get("id") or 0)
+        metadata_id, metadata_name = choose_profile(
+            metadata or [], metadata_profile_id, root.get("defaultMetadataProfileId"), "metadata"
         )
-        if not any(int(item.get("id", 0)) == quality_id for item in qualities or []):
-            raise LidarrError("The configured Lidarr quality profile does not exist.")
-        if not any(int(item.get("id", 0)) == metadata_id for item in metadata or []):
-            raise LidarrError("The configured Lidarr metadata profile does not exist.")
         return {
             "status": status, "root_folder_path": str(root["path"]),
-            "quality_profile_id": quality_id, "metadata_profile_id": metadata_id,
+            "quality_profile_id": quality_id, "quality_profile_name": quality_name,
+            "metadata_profile_id": metadata_id, "metadata_profile_name": metadata_name,
         }
 
     async def validate_configuration(

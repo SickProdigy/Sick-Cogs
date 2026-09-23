@@ -8,7 +8,7 @@ from typing import Dict
 import discord
 
 from .client import NavidromeError, validate_base_url, validate_public_base_url
-from .lidarr import LidarrError
+from .lidarr import LidarrClient, LidarrError
 
 
 async def owner_check(interaction: discord.Interaction, author: discord.abc.User) -> bool:
@@ -255,8 +255,13 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this server to Navid
 class GuildLidarrModal(discord.ui.Modal, title="Connect this server to Lidarr"):
     url = discord.ui.TextInput(label="Public Lidarr HTTPS URL", max_length=500)
     api_key = discord.ui.TextInput(label="Lidarr API key (stored securely)", max_length=500)
-    root = discord.ui.TextInput(label="Root folder path", placeholder="/music", max_length=500)
-    profiles = discord.ui.TextInput(label="Quality ID, metadata ID", placeholder="3,4", max_length=30)
+    root = discord.ui.TextInput(
+        label="Root folder (blank uses default)", placeholder="/music", required=False, max_length=500
+    )
+    profiles = discord.ui.TextInput(
+        label="Quality, metadata (names or IDs)", placeholder="Lossless, Standard",
+        required=False, max_length=100,
+    )
     confirmation = discord.ui.TextInput(label="Type CONNECT to confirm", min_length=7, max_length=7)
 
     def __init__(self, cog):
@@ -281,55 +286,45 @@ class GuildLidarrModal(discord.ui.Modal, title="Connect this server to Lidarr"):
             )
         try:
             base_url = await validate_public_base_url(str(self.url.value))
-            parts = [int(value.strip()) for value in str(self.profiles.value).split(",")]
-            if len(parts) != 2 or any(value < 1 for value in parts):
-                raise ValueError
-        except ValueError:
+        except ValueError as exc:
+            return await interaction.response.send_message(str(exc), ephemeral=True)
+        values = [value.strip() for value in str(self.profiles.value).split(",") if value.strip()]
+        if values and len(values) != 2:
             return await interaction.response.send_message(
-                "Enter a public HTTPS URL and profile IDs as `quality,metadata`.", ephemeral=True
+                "Enter profiles as `Quality, Metadata`, or leave the field blank for defaults.",
+                ephemeral=True,
             )
         api_key = str(self.api_key.value).strip()
-        root = str(self.root.value).strip()
-        if not api_key or not root:
+        if not api_key:
             return await interaction.response.send_message(
-                "The API key and root folder are required.", ephemeral=True
+                "The API key is required.", ephemeral=True
             )
         await interaction.response.defer(ephemeral=True)
+        try:
+            client = LidarrClient(
+                await self.cog.get_session(), base_url, api_key, public_only=True
+            )
+            discovered = await client.discover_configuration(
+                root_folder_path=str(self.root.value).strip() or None,
+                quality_profile_id=values[0] if values else None,
+                metadata_profile_id=values[1] if values else None,
+            )
+            status = discovered.pop("status")
+        except LidarrError as exc:
+            return await interaction.followup.send(
+                f"Lidarr was not saved: {exc}", ephemeral=True
+            )
         namespace = self.cog.guild_token_namespace(interaction.guild.id)
-        previous_tokens = await self.cog.bot.get_shared_api_tokens(namespace)
-        previous_profile = dict(profile)
         new_profile = dict(profile)
-        new_profile["lidarr"] = {
-            "enabled": True, "root_folder_path": root, "quality_profile_id": parts[0],
-            "metadata_profile_id": parts[1], "monitor": "all",
-        }
+        new_profile["lidarr"] = {"enabled": True, **discovered, "monitor": "all"}
         await self.cog.bot.set_shared_api_tokens(
             namespace, lidarr_url=base_url, lidarr_api_key=api_key
         )
         await group.guild_connection.set(new_profile)
-        try:
-            _, client, settings = await self.cog._lidarr_client(interaction.guild)
-            status = await client.validate_configuration(
-                root_folder_path=settings["root_folder_path"],
-                quality_profile_id=settings["quality_profile_id"],
-                metadata_profile_id=settings["metadata_profile_id"],
-            )
-        except LidarrError as exc:
-            if previous_tokens.get("lidarr_url") and previous_tokens.get("lidarr_api_key"):
-                await self.cog.bot.set_shared_api_tokens(
-                    namespace, lidarr_url=previous_tokens["lidarr_url"],
-                    lidarr_api_key=previous_tokens["lidarr_api_key"],
-                )
-            else:
-                await self.cog.bot.remove_shared_api_tokens(
-                    namespace, "lidarr_url", "lidarr_api_key"
-                )
-            await group.guild_connection.set(previous_profile)
-            return await interaction.followup.send(
-                f"Lidarr was not saved: {exc}", ephemeral=True
-            )
         await interaction.followup.send(
-            f"Lidarr {status.get('version', 'unknown')} is enabled. The API key will not be displayed.",
+            f"Lidarr {status.get('version', 'unknown')} is enabled with quality "
+            f"`{discovered['quality_profile_name']}` and metadata "
+            f"`{discovered['metadata_profile_name']}`. The API key will not be displayed.",
             ephemeral=True,
         )
 
