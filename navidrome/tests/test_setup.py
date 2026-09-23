@@ -287,7 +287,8 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
     async def test_request_modal_sends_text_result_without_none_components(self):
         cog, _ = self.make_cog()
         cog.prepare_lidarr_request = AsyncMock(return_value=("Search failed safely.", None, None))
-        modal = LidarrRequestModal(cog, 8, "artist")
+        source_message = SimpleNamespace(delete=AsyncMock())
+        modal = LidarrRequestModal(cog, 8, "artist", source_message)
         modal.query._value = "paul wall"
         interaction = SimpleNamespace(
             guild=SimpleNamespace(id=2), user=SimpleNamespace(id=8),
@@ -297,6 +298,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
 
         await modal.on_submit(interaction)
 
+        source_message.delete.assert_awaited_once()
         interaction.followup.send.assert_awaited_once_with(
             "Search failed safely.", ephemeral=True
         )
