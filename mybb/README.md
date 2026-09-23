@@ -36,6 +36,9 @@ Text-command fallbacks:
 ```text
 [p]mybbset status
 [p]mybbset defaultforum 2
+[p]mybbset forumalias set ideas 120
+[p]mybbset forumalias set support 45
+[p]mybbset forumalias
 [p]mybbset managerrole @Forum Staff
 [p]mybbset enabled true
 [p]mybbset disconnect confirm
@@ -76,11 +79,18 @@ token's normal MyBB visibility rules and replace this fallback.
 
 ## Publishing a Discord message
 
-Reply to a Discord message and run:
+Server managers can map memorable names to approved destination forums. Reply to a Discord message
+and publish using an alias, the explicit `default` destination, or a numeric forum ID:
 
 ```text
-[p]mybb draft <forum_id> <subject>
+[p]mybb draft ideas <subject>
+[p]mybb draft default <subject>
+[p]mybb draft 120 <subject>
 ```
+
+Manage aliases with `[p]mybbset forumalias set <name> <forum_id>` and
+`[p]mybbset forumalias remove <name>`. Publishing requires an explicit destination so a misspelled
+alias cannot silently route a thread to the server default.
 
 A personally connected member publishes through their own token. Without a personal connection,
 only Manage Server or the configured manager role may publish through the guild connector. The bot
@@ -92,7 +102,7 @@ duplicate. Discord attachments are represented by their CDN URLs.
 
 ## Stored data
 
-Guild configuration contains the board URL, enabled state, default forum ID, and manager role ID.
+Guild configuration contains the board URL, enabled state, default forum ID, forum aliases, and manager role ID.
 Member configuration contains only a connection marker. Guild and member bearer tokens are stored
 in separate Red shared-API-token namespaces. Personal tokens are removed when members disconnect,
 when a board changes, when the guild connector is removed, or when Red processes that user's data

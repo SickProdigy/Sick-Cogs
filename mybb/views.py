@@ -181,6 +181,8 @@ class GuildConnectionModal(discord.ui.Modal, title="Connect this Discord server 
         old_url = await self.view.cog.config.guild(guild).board_url()
         if old_url and old_url != client.base_url:
             await self.view.cog.clear_guild_member_connections(guild)
+            await self.view.cog.config.guild(guild).default_forum_id.clear()
+            await self.view.cog.config.guild(guild).forum_aliases.clear()
         await self.view.cog.bot.set_shared_api_tokens(
             self.view.cog.guild_namespace(guild.id), token=str(self.token).strip()
         )
@@ -358,7 +360,10 @@ class EditDraftModal(discord.ui.Modal, title="Edit MyBB draft"):
 
 
 class PublishReview(OwnedView):
-    def __init__(self, cog, owner, forum_id, subject, body, source_url, message_id, channel_id, guild_id):
+    def __init__(
+        self, cog, owner, forum_id, subject, body, source_url, message_id,
+        channel_id, guild_id, *, forum_alias=None
+    ):
         super().__init__(cog, owner, timeout=600)
         self.forum_id = int(forum_id)
         self.subject = subject[:120]
@@ -367,11 +372,17 @@ class PublishReview(OwnedView):
         self.message_id = int(message_id)
         self.channel_id = int(channel_id)
         self.guild_id = int(guild_id)
+        self.forum_alias = forum_alias
 
     def embed(self):
         embed = discord.Embed(title="Review MyBB thread", description=self.body[:4000], color=discord.Color.orange())
         embed.add_field(name="Subject", value=self.subject, inline=False)
-        embed.add_field(name="Destination", value=f"Forum ID `{self.forum_id}`")
+        destination = (
+            f"`{self.forum_alias}` → forum `{self.forum_id}`"
+            if self.forum_alias
+            else f"Forum ID `{self.forum_id}`"
+        )
+        embed.add_field(name="Destination", value=destination)
         embed.add_field(name="Source", value=f"[Discord message]({self.source_url})")
         embed.set_footer(text="Personal access is preferred. Nothing is published until Publish is pressed.")
         return embed

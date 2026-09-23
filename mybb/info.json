@@ -4,7 +4,7 @@
     ],
     "description": "Connect each Discord server to its own MyBB API, let members add personal scoped access, browse and search recent threads, and publish reviewed Discord messages.",
     "disabled": false,
-    "end_user_data_statement": "This cog stores each guild's MyBB board URL, enablement, default forum ID, manager role ID, and a marker for each member who connected personal access. Guild and personal bearer tokens are stored separately in Red shared API tokens and are removed on disconnect or user-data deletion.",
+    "end_user_data_statement": "This cog stores each guild's MyBB board URL, enablement, default forum ID, forum aliases, manager role ID, and a marker for each member who connected personal access. Guild and personal bearer tokens are stored separately in Red shared API tokens and are removed on disconnect or user-data deletion.",
     "hidden": false,
     "install_msg": "Run `[p]mybbset setup` with Manage Server to connect this Discord server to its MyBB board using a restricted API token. Members can optionally run `[p]mybb connect` for personal access.",
     "min_bot_version": "3.5.0",

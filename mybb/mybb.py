@@ -12,6 +12,7 @@ GUILD_DEFAULTS = {
     "enabled": False,
     "board_url": None,
     "default_forum_id": None,
+    "forum_aliases": {},
     "manager_role_id": None,
 }
 MEMBER_DEFAULTS = {"connected": False}
@@ -154,6 +155,37 @@ class MyBB(commands.Cog):
                 break
         return matches
 
+    @staticmethod
+    def normalize_forum_alias(alias):
+        alias = str(alias).strip().casefold()
+        if not alias or len(alias) > 32 or not all(
+            character.isalnum() or character in "-_" for character in alias
+        ):
+            raise ValueError(
+                "Forum aliases must be 1–32 characters using only letters, numbers, hyphens, or underscores."
+            )
+        if alias == "default" or alias.isdecimal():
+            raise ValueError("`default` and numeric names are reserved forum destinations.")
+        return alias
+
+    async def resolve_forum_destination(self, guild, destination):
+        destination = str(destination).strip().casefold()
+        if destination == "default":
+            forum_id = await self.config.guild(guild).default_forum_id()
+            if not forum_id:
+                raise ValueError("This server has no default publishing forum configured.")
+            return int(forum_id), "default"
+        if destination.isdecimal() and int(destination) > 0:
+            return int(destination), None
+        alias = self.normalize_forum_alias(destination)
+        aliases = await self.config.guild(guild).forum_aliases()
+        forum_id = aliases.get(alias)
+        if not forum_id:
+            raise ValueError(
+                f"Unknown forum alias `{alias}`. Use `default`, a forum ID, or a configured alias."
+            )
+        return int(forum_id), alias
+
     @commands.group(name="mybb", aliases=["forum"], invoke_without_command=True)
     @commands.guild_only()
     async def mybb(self, ctx):
@@ -174,7 +206,7 @@ class MyBB(commands.Cog):
         embed.add_field(name="Server access", value="Enabled" if data["enabled"] else "Disabled")
         embed.add_field(name="Your connection", value="Connected" if personal else "Using server access")
         embed.add_field(
-            name="Default forum",
+            name="Default publishing forum",
             value=f"ID {data['default_forum_id']}" if data["default_forum_id"] else "Not set",
         )
         embed.set_footer(text=f"Connect yourself with {ctx.clean_prefix}mybb connect • Server setup: {ctx.clean_prefix}mybbset setup")
@@ -310,7 +342,7 @@ class MyBB(commands.Cog):
         await ctx.send(embed=embed)
 
     @mybb.command(name="draft", aliases=["publish"])
-    async def draft(self, ctx, forum_id: Optional[int] = None, *, subject: str):
+    async def draft(self, ctx, destination: str, *, subject: str):
         """Review a replied-to Discord message before publishing it as a MyBB thread."""
         if not await self.ensure_enabled(ctx, ctx.guild):
             return
@@ -320,9 +352,12 @@ class MyBB(commands.Cog):
                 f"Connect your MyBB account with `{ctx.clean_prefix}mybb connect`, or ask a configured MyBB manager to publish this."
             )
             return
-        forum_id = forum_id or await self.config.guild(ctx.guild).default_forum_id()
-        if not forum_id:
-            await ctx.send("Provide a forum ID or configure a default forum.")
+        try:
+            forum_id, forum_alias = await self.resolve_forum_destination(
+                ctx.guild, destination
+            )
+        except ValueError as error:
+            await ctx.send(str(error))
             return
         reference = ctx.message.reference
         message = reference.resolved if reference and isinstance(reference.resolved, discord.Message) else None
@@ -352,6 +387,7 @@ class MyBB(commands.Cog):
             message.id,
             message.channel.id,
             message.guild.id,
+            forum_alias=forum_alias,
         )
         await ctx.send(embed=view.embed(), view=view)
 
@@ -381,7 +417,21 @@ class MyBB(commands.Cog):
         embed.add_field(name="Board", value=data["board_url"] or "Not connected", inline=False)
         embed.add_field(name="Server connector", value="Stored securely" if shared.get("token") else "Not configured")
         embed.add_field(name="Server access", value="Enabled" if data["enabled"] else "Disabled")
-        embed.add_field(name="Default forum", value=str(data["default_forum_id"] or "Not set"))
+        embed.add_field(
+            name="Default publishing forum", value=str(data["default_forum_id"] or "Not set")
+        )
+        aliases = data.get("forum_aliases", {})
+        embed.add_field(
+            name="Publishing aliases",
+            value=(
+                ", ".join(
+                    f"`{name}` → `{forum_id}`"
+                    for name, forum_id in sorted(aliases.items())
+                )
+                or "Not configured"
+            )[:1024],
+            inline=False,
+        )
         embed.add_field(name="Manager role", value=role.mention if role else "Manage Server only")
         embed.set_footer(text="Tokens are never displayed. RSSPublisher remains the better tool for automatic announcements.")
         return embed
@@ -400,6 +450,58 @@ class MyBB(commands.Cog):
         await self.config.guild(ctx.guild).default_forum_id.set(forum_id)
         await ctx.send(f"Default MyBB forum set to `{forum_id}`." if forum_id else "Default forum cleared.")
 
+    @mybbset.group(name="forumalias", aliases=["forumaliases"], invoke_without_command=True)
+    async def mybbset_forumalias(self, ctx):
+        """List friendly publishing destinations."""
+        aliases = await self.config.guild(ctx.guild).forum_aliases()
+        if not aliases:
+            await ctx.send("No MyBB forum aliases are configured.")
+            return
+        await ctx.send(
+            "MyBB forum aliases:\n"
+            + "\n".join(
+                f"`{name}` → forum `{forum_id}`"
+                for name, forum_id in sorted(aliases.items())
+            )
+        )
+
+    @mybbset_forumalias.command(name="set", aliases=["add"])
+    async def mybbset_forumalias_set(self, ctx, alias: str, forum_id: int):
+        """Map a friendly publishing name to a forum ID."""
+        try:
+            alias = self.normalize_forum_alias(alias)
+        except ValueError as error:
+            await ctx.send(str(error))
+            return
+        if forum_id <= 0:
+            await ctx.send("Enter a positive numeric forum ID.")
+            return
+        try:
+            client = await self.client_for(ctx.guild, ctx.author)
+            await client.threads(forum_id, page=1, per_page=1)
+        except MyBBAPIError as error:
+            await self.send_error(ctx, error)
+            return
+        async with self.config.guild(ctx.guild).forum_aliases() as aliases:
+            aliases[alias] = forum_id
+        await ctx.send(f"MyBB forum alias `{alias}` now targets forum `{forum_id}`.")
+
+    @mybbset_forumalias.command(name="remove", aliases=["delete"])
+    async def mybbset_forumalias_remove(self, ctx, alias: str):
+        """Remove a friendly publishing destination."""
+        try:
+            alias = self.normalize_forum_alias(alias)
+        except ValueError as error:
+            await ctx.send(str(error))
+            return
+        async with self.config.guild(ctx.guild).forum_aliases() as aliases:
+            removed = aliases.pop(alias, None)
+        await ctx.send(
+            f"Removed MyBB forum alias `{alias}`."
+            if removed is not None
+            else f"MyBB forum alias `{alias}` was not configured."
+        )
+
     @mybbset.command(name="managerrole")
     async def mybbset_managerrole(self, ctx, role: Optional[discord.Role] = None):
         await self.config.guild(ctx.guild).manager_role_id.set(role.id if role else None)
@@ -415,5 +517,6 @@ class MyBB(commands.Cog):
         await self.clear_guild_member_connections(ctx.guild)
         await self.config.guild(ctx.guild).board_url.clear()
         await self.config.guild(ctx.guild).default_forum_id.clear()
+        await self.config.guild(ctx.guild).forum_aliases.clear()
         await self.config.guild(ctx.guild).enabled.set(False)
         await ctx.send("This Discord server's MyBB board connector has been removed and the bridge disabled.")
