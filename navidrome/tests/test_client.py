@@ -124,6 +124,18 @@ class NavidromeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("p", params)
         self.assertNotIn("top-secret", params.values())
 
+    async def test_search_returns_artist_and_album_results(self):
+        session = FakeSession([FakeResponse(payload={
+            "subsonic-response": {"status": "ok", "searchResult3": {
+                "artist": [{"id": "a"}], "album": [{"id": "b"}]
+            }}
+        })])
+        client = NavidromeClient(session, "https://music.example.com", "bot", "secret")
+        result = await client.search("example")
+        self.assertEqual(result["artists"][0]["id"], "a")
+        self.assertEqual(result["albums"][0]["id"], "b")
+        self.assertEqual(session.calls[0][2]["params"]["songCount"], "0")
+
     async def test_native_user_list_authenticates_as_admin(self):
         session = FakeSession([
             FakeResponse(payload={"token": "jwt", "isAdmin": True}),

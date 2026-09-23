@@ -6,6 +6,7 @@ import random
 import re
 import secrets
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
@@ -24,7 +25,7 @@ from .setup import NavidromeSetupView
 log = logging.getLogger("red.sick-cogs.Navidrome")
 CONFIG_IDENTIFIER = 9172048261
 TOKEN_PREFIX = "navidrome_"
-USER_AGENT = "Sick-Cogs-Navidrome/1.1.0"
+USER_AGENT = "Sick-Cogs-Navidrome/1.2.0"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -44,6 +45,44 @@ async def navidrome_config_permission(ctx: commands.Context) -> bool:
     )
 
 
+def lidarr_requester_tag(username: str) -> str:
+    normalized = unicodedata.normalize("NFKD", username).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")
+    return f"discord-user-{(slug or 'user')[:40]}"
+
+
+class LidarrConfirmView(discord.ui.View):
+    def __init__(self, cog, author_id: int, media_type: str, candidate: Dict[str, Any]):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.author_id = author_id
+        self.media_type = media_type
+        self.candidate = candidate
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Only the member who made this request can confirm it.", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="Confirm Lidarr request", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        message = await self.cog.execute_lidarr_request(
+            interaction.guild, interaction.user, self.media_type, self.candidate
+        )
+        await interaction.followup.send(message, ephemeral=True)
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="Lidarr request cancelled.", view=self)
+
+
 def safe_profile_name(value: str) -> str:
     name = value.strip().lower()
     if not name or len(name) > 32 or not all(char.isalnum() or char in "_-" for char in name):
@@ -55,7 +94,7 @@ class Navidrome(commands.Cog):
     """Connect each Discord server to its own approved Navidrome library."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.2.0"
 
     default_global = {"connections": {}, "guild_connections_enabled": False}
     default_guild = {
@@ -70,6 +109,11 @@ class Navidrome(commands.Cog):
         "last_success_at": None,
         "accounts": {},
         "manager_role_id": None,
+        "lidarr_identity_policy": "linked_required",
+        "lidarr_requester_role_id": None,
+        "lidarr_cooldown_seconds": 300,
+        "lidarr_daily_limit": 5,
+        "lidarr_audit": [],
     }
 
     def __init__(self, bot: Red):
@@ -81,6 +125,7 @@ class Navidrome(commands.Cog):
         self._poll_semaphore = asyncio.Semaphore(4)
         self._connection_failures: Dict[str, int] = {}
         self._connection_test_times: Dict[int, float] = {}
+        self._lidarr_cooldowns: Dict[Tuple[int, int], float] = {}
         self.poll_loop.start()
 
     async def red_delete_data_for_user(self, **kwargs):
@@ -92,6 +137,17 @@ class Navidrome(commands.Cog):
             accounts = dict(settings.get("accounts", {}))
             if accounts.pop(user_id, None) is not None:
                 await self.config.guild_from_id(guild_id).accounts.set(accounts)
+            audit = list(settings.get("lidarr_audit", []))
+            changed = False
+            for entry in audit:
+                if str(entry.get("discord_user_id")) == user_id:
+                    entry["discord_user_id"] = None
+                    entry["discord_username"] = "deleted-user"
+                    entry["navidrome_user_id"] = None
+                    entry["navidrome_username"] = None
+                    changed = True
+            if changed:
+                await self.config.guild_from_id(guild_id).lidarr_audit.set(audit)
 
     def cog_unload(self):
         self.poll_loop.cancel()
@@ -162,6 +218,119 @@ class Navidrome(commands.Cog):
             public_only=public_only, allow_http=allow_http,
         )
         return name, client, lidarr
+
+    async def _request_identity(
+        self, guild: discord.Guild, member: discord.Member
+    ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        settings = await self.config.guild(guild).all()
+        role_id = settings.get("lidarr_requester_role_id")
+        if role_id and not member.guild_permissions.manage_guild and not any(
+            role.id == role_id for role in member.roles
+        ):
+            return None, "You do not have the configured Lidarr requester role."
+        account = dict((settings.get("accounts") or {}).get(str(member.id)) or {})
+        policy = settings.get("lidarr_identity_policy", "linked_required")
+        if policy == "linked_required" and not account:
+            return None, "A linked Navidrome account is required to make requests here."
+        if account:
+            try:
+                _, navidrome = await self._guild_client(guild)
+                remote = next(
+                    (item for item in await navidrome.users()
+                     if str(item.get("id")) == str(account.get("id"))), None
+                )
+            except NavidromeError as exc:
+                return None, f"Could not revalidate your linked Navidrome account: {exc}"
+            if remote is None:
+                return None, "Your linked Navidrome account is no longer valid; ask an administrator to relink it."
+        return account or None, None
+
+    async def _record_lidarr_audit(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any], outcome: str, account: Optional[Dict[str, Any]],
+    ) -> None:
+        group = self.config.guild(guild)
+        audit = await group.lidarr_audit()
+        foreign_id = candidate.get("foreignArtistId") or candidate.get("foreignAlbumId")
+        title = candidate.get("artistName") or candidate.get("title") or "Unknown"
+        audit.append({
+            "timestamp": utc_now().isoformat(), "discord_user_id": member.id,
+            "discord_username": str(member), "guild_id": guild.id,
+            "navidrome_user_id": account.get("id") if account else None,
+            "navidrome_username": account.get("username") if account else None,
+            "media_type": media_type, "title": str(title)[:200],
+            "lidarr_id": str(foreign_id or "")[:100], "outcome": outcome,
+        })
+        await group.lidarr_audit.set(audit[-500:])
+
+    async def execute_lidarr_request(
+        self, guild: discord.Guild, member: discord.Member, media_type: str,
+        candidate: Dict[str, Any],
+    ) -> str:
+        account, error = await self._request_identity(guild, member)
+        if error:
+            return error
+        settings = await self.config.guild(guild).all()
+        now = time.monotonic()
+        cooldown = int(settings.get("lidarr_cooldown_seconds", 300))
+        previous = self._lidarr_cooldowns.get((guild.id, member.id), 0.0)
+        if now - previous < cooldown:
+            return f"Please wait {int(cooldown - (now - previous)) + 1} seconds before another request."
+        today = utc_now().date().isoformat()
+        used = sum(
+            1 for item in settings.get("lidarr_audit", [])
+            if item.get("discord_user_id") == member.id
+            and str(item.get("timestamp", "")).startswith(today)
+            and item.get("outcome") in {"added", "already-managed", "tagged-existing"}
+        )
+        if used >= int(settings.get("lidarr_daily_limit", 5)):
+            return "You have reached this server's daily Lidarr request limit."
+        try:
+            _, client, lidarr_settings = await self._lidarr_client(guild)
+            source_tag = await client.ensure_tag("discord")
+            requester_tag = await client.ensure_tag(lidarr_requester_tag(member.name))
+            tag_ids = [source_tag, requester_tag]
+            if media_type == "artist":
+                foreign_id = str(candidate.get("foreignArtistId") or "")
+                existing = next(
+                    (item for item in await client.artists()
+                     if str(item.get("foreignArtistId")) == foreign_id), None
+                )
+                if existing:
+                    before = set(existing.get("tags") or [])
+                    await client.update_artist_tags(existing, tag_ids)
+                    outcome = "already-managed" if set(tag_ids).issubset(before) else "tagged-existing"
+                else:
+                    await client.add_artist(candidate, lidarr_settings, tag_ids)
+                    outcome = "added"
+            else:
+                foreign_id = str(candidate.get("foreignAlbumId") or "")
+                existing = (await client.albums(foreign_album_id=foreign_id))
+                if existing:
+                    artist_foreign_id = str((candidate.get("artist") or {}).get("foreignArtistId") or "")
+                    managed_artist = next(
+                        (item for item in await client.artists()
+                         if str(item.get("foreignArtistId")) == artist_foreign_id), None
+                    )
+                    if managed_artist:
+                        before = set(managed_artist.get("tags") or [])
+                        await client.update_artist_tags(managed_artist, tag_ids)
+                        outcome = (
+                            "already-managed" if set(tag_ids).issubset(before)
+                            else "tagged-existing"
+                        )
+                    else:
+                        outcome = "already-managed"
+                else:
+                    await client.add_album(candidate, lidarr_settings, tag_ids)
+                    outcome = "added"
+        except LidarrError as exc:
+            await self._record_lidarr_audit(guild, member, media_type, candidate, "failed", account)
+            return f"Lidarr request failed: {exc}"
+        self._lidarr_cooldowns[(guild.id, member.id)] = now
+        await self._record_lidarr_audit(guild, member, media_type, candidate, outcome, account)
+        labels = "discord, " + lidarr_requester_tag(member.name)
+        return f"Lidarr request {outcome.replace('-', ' ')}. Attribution tags: `{labels}`."
 
     async def _guild_client(self, guild: discord.Guild) -> Tuple[str, NavidromeClient]:
         settings = await self.config.guild(guild).all()
@@ -278,6 +447,8 @@ class Navidrome(commands.Cog):
         guild_profile = settings.get("guild_connection") or {}
         active_name = "Guild managed" if mode == "guild_managed" else selected
         ready = bool(guild_profile.get("base_url")) if mode == "guild_managed" else selected in profiles
+        active_profile = guild_profile if mode == "guild_managed" else (profiles.get(selected) or {})
+        lidarr_ready = bool((active_profile.get("lidarr") or {}).get("enabled"))
         embed = discord.Embed(
             title="Navidrome setup",
             description=(
@@ -299,6 +470,14 @@ class Navidrome(commands.Cog):
         embed.add_field(
             name="Connection status",
             value="Ready to test" if ready else "Setup required",
+            inline=True,
+        )
+        embed.add_field(
+            name="Lidarr requests",
+            value=(
+                f"Enabled · `{settings.get('lidarr_identity_policy', 'linked_required')}`"
+                if lidarr_ready else "Not configured"
+            ),
             inline=True,
         )
         embed.add_field(
@@ -526,6 +705,68 @@ class Navidrome(commands.Cog):
         for album in albums:
             await self.send_album(ctx.channel, album, client)
 
+    @navidrome.command(name="request")
+    @commands.bot_has_permissions(embed_links=True)
+    async def navidrome_request(
+        self, ctx: commands.Context, media_type: str, *, query: str
+    ):
+        """Request an artist or album through the configured Lidarr server."""
+        media_type = media_type.casefold()
+        if media_type not in {"artist", "album"}:
+            return await ctx.send(
+                "Choose `artist` or `album`. Lidarr does not acquire individual tracks directly."
+            )
+        query = query.strip()
+        if len(query) < 2 or len(query) > 200:
+            return await ctx.send("Enter a search between 2 and 200 characters.")
+        account, error = await self._request_identity(ctx.guild, ctx.author)
+        if error:
+            return await ctx.send(error)
+        try:
+            _, navidrome = await self._guild_client(ctx.guild)
+            local = await navidrome.search(
+                query, artist_count=5 if media_type == "artist" else 0,
+                album_count=5 if media_type == "album" else 0,
+            )
+            matches = local["artists" if media_type == "artist" else "albums"]
+            if matches:
+                title = matches[0].get("name") or matches[0].get("album") or query
+                return await ctx.send(
+                    f"`{title}` already appears in this Navidrome library; no Lidarr request was made."
+                )
+            _, lidarr, _ = await self._lidarr_client(ctx.guild)
+            candidates = await lidarr.lookup(media_type, query)
+        except (NavidromeError, LidarrError) as exc:
+            return await ctx.send(str(exc))
+        if not candidates:
+            return await ctx.send(
+                "Lidarr found no matching artist or album. Try a more specific search."
+            )
+        candidate = candidates[0]
+        title = candidate.get("artistName") or candidate.get("title") or "Unknown result"
+        artist = (candidate.get("artist") or {}).get("artistName")
+        description = f"**{title}**" + (f" by **{artist}**" if artist else "")
+        if len(candidates) > 1:
+            description += (
+                f"\n\nLidarr returned {len(candidates)} results. "
+                "Refine the search if this first result is not correct."
+            )
+        tag = lidarr_requester_tag(ctx.author.name)
+        embed = discord.Embed(
+            title=f"Confirm Lidarr {media_type} request", description=description,
+            colour=discord.Colour.orange(),
+        )
+        embed.add_field(name="Attribution tags", value=f"`discord`, `{tag}`", inline=False)
+        embed.add_field(
+            name="Identity",
+            value=(f"Linked Navidrome account: `{account.get('username')}`" if account
+                   else "Discord-only identity"), inline=False,
+        )
+        embed.set_footer(text="Nothing will be changed in Lidarr until you confirm.")
+        await ctx.send(
+            embed=embed, view=LidarrConfirmView(self, ctx.author.id, media_type, candidate)
+        )
+
     @commands.group(name="navidromeowner", invoke_without_command=True)
     @checks.is_owner()
     async def navidromeowner(self, ctx: commands.Context):
@@ -720,7 +961,7 @@ class Navidrome(commands.Cog):
         changed_server = previous_mode != "owner_managed" or previous_name != name
         if previous_mode == "guild_managed":
             await self.bot.remove_shared_api_tokens(
-                self.guild_token_namespace(ctx.guild.id), "username", "password"
+                self.guild_token_namespace(ctx.guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
             )
             await group.guild_connection.set(None)
         await group.connection_mode.set("owner_managed")
@@ -738,12 +979,79 @@ class Navidrome(commands.Cog):
             )
             return
         await self.bot.remove_shared_api_tokens(
-            self.guild_token_namespace(ctx.guild.id), "username", "password"
+            self.guild_token_namespace(ctx.guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
         )
         await self.config.guild(ctx.guild).clear()
         await ctx.send(
             "Disconnected this server from Navidrome, deleted any guild-owned credentials, and cleared its local mappings and announcement history."
         )
+
+    @navidromeset.group(name="lidarr", invoke_without_command=True)
+    async def navidromeset_lidarr(self, ctx: commands.Context):
+        """Configure this server's Lidarr request policy."""
+        settings = await self.config.guild(ctx.guild).all()
+        role_id = settings.get("lidarr_requester_role_id")
+        await ctx.send(
+            f"Identity policy: `{settings.get('lidarr_identity_policy', 'linked_required')}`\n"
+            f"Requester role: {f'<@&{role_id}>' if role_id else 'Any member'}\n"
+            f"Cooldown: {settings.get('lidarr_cooldown_seconds', 300)} seconds\n"
+            f"Daily limit: {settings.get('lidarr_daily_limit', 5)} per member"
+        )
+
+    @navidromeset_lidarr.command(name="identity")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_identity(self, ctx: commands.Context, policy: str):
+        """Set linked_required, linked_optional, or discord_only request identity."""
+        policy = policy.casefold()
+        allowed = {"linked_required", "linked_optional", "discord_only"}
+        if policy not in allowed:
+            return await ctx.send("Choose `linked_required`, `linked_optional`, or `discord_only`.")
+        await self.config.guild(ctx.guild).lidarr_identity_policy.set(policy)
+        await ctx.send(
+            f"New Lidarr requests use `{policy}`. Historical attribution is unchanged."
+        )
+
+    @navidromeset_lidarr.command(name="requesterrole")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_requester_role(
+        self, ctx: commands.Context, role: Optional[discord.Role] = None
+    ):
+        """Set or clear the role allowed to submit Lidarr requests."""
+        await self.config.guild(ctx.guild).lidarr_requester_role_id.set(
+            role.id if role else None
+        )
+        await ctx.send(
+            f"Lidarr requester role set to {role.mention}." if role
+            else "The Lidarr requester role restriction is cleared."
+        )
+
+    @navidromeset_lidarr.command(name="limits")
+    @checks.admin_or_permissions(manage_guild=True)
+    async def guild_lidarr_limits(
+        self, ctx: commands.Context, cooldown_seconds: int, daily_limit: int
+    ):
+        """Set the per-member cooldown (30-86400 seconds) and daily limit (1-50)."""
+        if not 30 <= cooldown_seconds <= 86400 or not 1 <= daily_limit <= 50:
+            return await ctx.send("Cooldown must be 30-86400 seconds and daily limit 1-50.")
+        group = self.config.guild(ctx.guild)
+        await group.lidarr_cooldown_seconds.set(cooldown_seconds)
+        await group.lidarr_daily_limit.set(daily_limit)
+        await ctx.send(
+            f"Lidarr limits set to {cooldown_seconds} seconds and {daily_limit} requests per day."
+        )
+
+    @navidromeset_lidarr.command(name="audit")
+    async def guild_lidarr_audit(self, ctx: commands.Context, count: int = 10):
+        """Show recent request outcomes without credentials."""
+        entries = (await self.config.guild(ctx.guild).lidarr_audit())[-max(1, min(count, 25)):]
+        if not entries:
+            return await ctx.send("No Lidarr requests have been audited yet.")
+        lines = [
+            f"{item.get('timestamp', '')[:16]} — {item.get('discord_username', 'unknown')} — "
+            f"{item.get('media_type')} `{item.get('title')}` — {item.get('outcome')}"
+            for item in reversed(entries)
+        ]
+        await ctx.send("\n".join(lines))
 
     @navidromeset.command(name="managerrole")
     @checks.admin_or_permissions(manage_guild=True)
@@ -763,7 +1071,7 @@ class Navidrome(commands.Cog):
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
         await self.bot.remove_shared_api_tokens(
-            self.guild_token_namespace(guild.id), "username", "password"
+            self.guild_token_namespace(guild.id), "username", "password", "lidarr_url", "lidarr_api_key"
         )
         await self.config.guild(guild).clear()
 

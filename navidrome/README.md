@@ -130,3 +130,47 @@ An optional manager role may use routine settings and account tools, but creatin
 disconnecting a guild-owned connection always requires Manage Server. Red data-deletion requests
 remove the requesting Discord user's local account mapping; they do not delete the remote Navidrome
 account. Removing the bot from a guild clears that guild's configuration and guild-token namespace.
+
+## Optional Lidarr requests
+
+Lidarr integration is optional. Navidrome browsing and announcements continue normally without it.
+Requests always search Navidrome first and stop if the artist or album is already available. Lidarr
+does not acquire individual tracks directly, so members request an artist or album with:
+
+```text
+[p]navidrome request artist <name>
+[p]navidrome request album <title and artist>
+```
+
+The command shows the selected Lidarr result, the exact `discord` and sanitized
+`discord-user-<username>` attribution tags, and an explicit confirmation button before making a
+change. Existing tags are retained. Duplicate requests report the already-managed state and add the
+new requester tag to the managed artist when possible.
+
+For an owner-managed connection, store `lidarr_url` and `lidarr_api_key` in that connection's
+`navidrome_<name>` Red shared-token namespace, then validate the root folder and profiles:
+
+```text
+[p]navidromeowner lidarr configure <name> <root-folder> <quality-profile-id> <metadata-profile-id> [allow-http]
+```
+
+For a guild-managed public HTTPS connection, use **Connect Lidarr** in `[p]navidromeset setup`. Its
+URL and API key stay in the guild's isolated shared-token namespace. The form validates the root
+folder and profiles before saving and restores the previous configuration on failure. Changing the
+active Navidrome backend clears unrelated guild-owned Lidarr credentials.
+
+Administrators configure request policy with:
+
+```text
+[p]navidromeset lidarr identity <linked_required|linked_optional|discord_only>
+[p]navidromeset lidarr requesterrole [role]
+[p]navidromeset lidarr limits <cooldown-seconds> <daily-limit>
+[p]navidromeset lidarr audit [count]
+```
+
+`linked_required` is the default. A linked identity is revalidated against Navidrome at confirmation
+time. All identity modes retain role checks, cooldowns, limits, confirmation, tags, and audit logging.
+The bounded audit stores Discord identity, an optional linked Navidrome identity, requested media,
+Lidarr foreign ID, timestamp, and outcome; it never stores credentials. Red user-data deletion
+anonymizes the user's historical attribution and removes their local Navidrome mapping. Lidarr tags
+are shared provenance metadata rather than authentication and are not renamed when usernames change.
