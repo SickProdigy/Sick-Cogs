@@ -179,16 +179,25 @@ class LidarrResultView(discord.ui.View):
 
 
 class LidarrRequestModal(discord.ui.Modal):
-    def __init__(self, cog, author_id: int, media_type: str):
+    def __init__(
+        self, cog, author_id: int, media_type: str,
+        source_message: Optional[discord.Message] = None,
+    ):
         label = "Artist" if media_type == "artist" else "Release, album, single, or song"
         title = "Search Lidarr artists" if media_type == "artist" else "Search Lidarr releases"
         super().__init__(title=title)
         self.cog, self.author_id, self.media_type = cog, author_id, media_type
+        self.source_message = source_message
         self.query = discord.ui.TextInput(label=label, min_length=2, max_length=200)
         self.add_item(self.query)
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        if self.source_message is not None:
+            try:
+                await self.source_message.delete()
+            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
+                pass
         content, embed, view = await self.cog.prepare_lidarr_request(
             interaction.guild, interaction.user, self.media_type, str(self.query.value)
         )
@@ -224,13 +233,17 @@ class LidarrRequestTypeView(discord.ui.View):
     @discord.ui.button(label="Artist", style=discord.ButtonStyle.primary)
     async def artist(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            LidarrRequestModal(self.cog, interaction.user.id, "artist")
+            LidarrRequestModal(
+                self.cog, interaction.user.id, "artist", interaction.message
+            )
         )
 
     @discord.ui.button(label="Release", style=discord.ButtonStyle.primary)
     async def release(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            LidarrRequestModal(self.cog, interaction.user.id, "album")
+            LidarrRequestModal(
+                self.cog, interaction.user.id, "album", interaction.message
+            )
         )
 
 
