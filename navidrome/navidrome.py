@@ -129,6 +129,17 @@ def musicbrainz_url(media_type: str, candidate: Dict[str, Any]) -> Optional[str]
     return f"https://musicbrainz.org/{entity}/{foreign_id.lower()}"
 
 
+def lidarr_item_url(
+    base_url: str, media_type: str, candidate: Dict[str, Any]
+) -> Optional[str]:
+    mb_url = musicbrainz_url(media_type, candidate)
+    if not mb_url or not base_url:
+        return None
+    foreign_id = mb_url.rsplit("/", 1)[-1]
+    entity = "artist" if media_type == "artist" else "album"
+    return f"{base_url.rstrip('/')}/{entity}/{foreign_id}"
+
+
 def lidarr_confirmation_embed(
     member: discord.Member, account: Optional[Dict[str, Any]], media_type: str,
     candidate: Dict[str, Any],
@@ -462,7 +473,7 @@ class Navidrome(commands.Cog):
 
     async def _notify_lidarr_request(
         self, guild: discord.Guild, member: discord.Member, media_type: str,
-        candidate: Dict[str, Any], outcome: str,
+        candidate: Dict[str, Any], outcome: str, lidarr_base_url: str,
     ) -> None:
         channel_id = await self.config.guild(guild).lidarr_request_channel_id()
         if not channel_id:
@@ -481,6 +492,15 @@ class Navidrome(commands.Cog):
             name="Type", value="Artist" if media_type == "artist" else "Release", inline=True
         )
         embed.add_field(name="Result", value=outcome.replace("-", " ").title(), inline=True)
+        links = []
+        mb_url = musicbrainz_url(media_type, candidate)
+        lidarr_url = lidarr_item_url(lidarr_base_url, media_type, candidate)
+        if mb_url:
+            links.append(f"[MusicBrainz]({mb_url})")
+        if lidarr_url:
+            links.append(f"[Open in Lidarr]({lidarr_url})")
+        if links:
+            embed.add_field(name="Links", value=" · ".join(links), inline=False)
         try:
             await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
@@ -548,7 +568,9 @@ class Navidrome(commands.Cog):
             return f"Lidarr request failed: {exc}"
         self._lidarr_cooldowns[(guild.id, member.id)] = now
         await self._record_lidarr_audit(guild, member, media_type, candidate, outcome, account)
-        await self._notify_lidarr_request(guild, member, media_type, candidate, outcome)
+        await self._notify_lidarr_request(
+            guild, member, media_type, candidate, outcome, getattr(client, "base_url", "")
+        )
         labels = "discord, " + lidarr_requester_tag(member.name)
         return f"Lidarr request {outcome.replace('-', ' ')}. Attribution tags: `{labels}`."
 

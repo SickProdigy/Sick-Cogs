@@ -475,6 +475,7 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         })
         cog._lidarr_cooldowns = {}
         client = SimpleNamespace(
+            base_url="https://lidarr.example.com",
             ensure_tag=AsyncMock(side_effect=[1, 2]), artists=AsyncMock(return_value=[]),
             add_artist=AsyncMock(return_value={"id": 10}),
         )
@@ -491,8 +492,9 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             __str__=lambda self: "Test User",
         )
 
+        mb_id = "12345678-1234-1234-1234-123456789abc"
         await cog.execute_lidarr_request(
-            guild, member, "artist", {"artistName": "Example", "foreignArtistId": "mbid"}
+            guild, member, "artist", {"artistName": "Example", "foreignArtistId": mb_id}
         )
 
         cog._channel.assert_awaited_once_with(guild, 55)
@@ -500,6 +502,9 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         embed = channel.send.await_args.kwargs["embed"]
         self.assertEqual(embed.title, "New Lidarr request")
         self.assertIn("Example", embed.description)
+        links = next(field.value for field in embed.fields if field.name == "Links")
+        self.assertIn(f"musicbrainz.org/artist/{mb_id}", links)
+        self.assertIn(f"lidarr.example.com/artist/{mb_id}", links)
 
     async def test_guild_lidarr_modal_rolls_back_failed_validation(self):
         cog, group = self.make_cog(settings={
