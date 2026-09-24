@@ -120,12 +120,19 @@ class LidarrConfirmView(discord.ui.View):
             interaction.guild, interaction.user, self.media_type, self.candidate
         )
         await interaction.followup.send(message, ephemeral=True)
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-        for item in self.children:
-            item.disabled = True
-        await interaction.response.edit_message(content="Lidarr request cancelled.", view=self)
+        await interaction.response.defer()
+        await interaction.followup.send("Lidarr request cancelled.", ephemeral=True)
+        try:
+            await interaction.delete_original_response()
+        except (discord.NotFound, discord.HTTPException):
+            pass
 
 
 def lidarr_candidate_text(media_type: str, candidate: Dict[str, Any]) -> Tuple[str, str]:

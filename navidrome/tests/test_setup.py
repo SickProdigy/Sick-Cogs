@@ -260,6 +260,44 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             {"Confirm Lidarr request", "Cancel"},
         )
 
+    async def test_lidarr_confirmation_is_deleted_after_confirm(self):
+        cog = SimpleNamespace(
+            execute_lidarr_request=AsyncMock(return_value="Lidarr request added.")
+        )
+        view = LidarrConfirmView(cog, 8, "artist", {"artistName": "Example"})
+        interaction = SimpleNamespace(
+            guild=SimpleNamespace(id=2),
+            user=SimpleNamespace(id=8),
+            response=SimpleNamespace(edit_message=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            delete_original_response=AsyncMock(),
+        )
+
+        button = next(item for item in view.children if item.label == "Confirm Lidarr request")
+        await button.callback(interaction)
+
+        interaction.followup.send.assert_awaited_once_with(
+            "Lidarr request added.", ephemeral=True
+        )
+        interaction.delete_original_response.assert_awaited_once_with()
+
+    async def test_lidarr_confirmation_is_deleted_after_cancel(self):
+        view = LidarrConfirmView(SimpleNamespace(), 8, "artist", {"artistName": "Example"})
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            delete_original_response=AsyncMock(),
+        )
+
+        button = next(item for item in view.children if item.label == "Cancel")
+        await button.callback(interaction)
+
+        interaction.response.defer.assert_awaited_once_with()
+        interaction.followup.send.assert_awaited_once_with(
+            "Lidarr request cancelled.", ephemeral=True
+        )
+        interaction.delete_original_response.assert_awaited_once_with()
+
     def test_requester_tag_is_sanitized_and_bounded(self):
         tag = lidarr_requester_tag("Tést User !!! " + "x" * 100)
         self.assertTrue(tag.startswith("discord-user-test-user-"))
