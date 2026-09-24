@@ -173,6 +173,14 @@ class LidarrClient:
         result = await self.request("GET", "album", params={"foreignAlbumId": foreign_album_id})
         return result if isinstance(result, list) else []
 
+    async def search_album(self, album_id: int) -> Dict[str, Any]:
+        result = await self.request(
+            "POST", "command", payload={"name": "AlbumSearch", "albumIds": [int(album_id)]}
+        )
+        if not isinstance(result, dict) or not result.get("id"):
+            raise LidarrError("Lidarr did not confirm the album search command.")
+        return result
+
     async def tags(self) -> List[Dict[str, Any]]:
         result = await self.request("GET", "tag")
         return result if isinstance(result, list) else []

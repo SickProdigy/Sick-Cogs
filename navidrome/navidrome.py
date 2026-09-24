@@ -550,7 +550,9 @@ class Navidrome(commands.Cog):
             1 for item in settings.get("lidarr_audit", [])
             if item.get("discord_user_id") == member.id
             and str(item.get("timestamp", "")).startswith(today)
-            and item.get("outcome") in {"added", "already-managed", "tagged-existing"}
+            and item.get("outcome") in {
+                "added", "already-managed", "tagged-existing", "search-queued"
+            }
         )
         if used >= int(settings.get("lidarr_daily_limit", 5)):
             return "You have reached this server's daily Lidarr request limit."
@@ -586,6 +588,10 @@ class Navidrome(commands.Cog):
                         )
                     else:
                         outcome = "already-managed"
+                    album_id = existing[0].get("id")
+                    if album_id:
+                        await client.search_album(int(album_id))
+                        outcome = "search-queued"
                 else:
                     await client.add_album(candidate, lidarr_settings, tag_ids)
                     outcome = "added"
