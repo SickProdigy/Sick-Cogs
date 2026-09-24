@@ -61,6 +61,7 @@ class WalletTransactionCommands:
             intent.asset_symbol,
             intent.asset_decimals,
             intent.estimated_gas_fee_wei,
+            intent.max_gas_fee_wei,
             intent.gas_sponsored,
             intent.created_at,
             intent.expires_at,
@@ -228,6 +229,21 @@ class WalletTransactionCommands:
         return embed
 
     @staticmethod
+    def _mainnet_intent_disclosure_error(intent: TransactionIntent, network) -> str | None:
+        """Require a complete, bounded real-value quote before protected approval."""
+        if network.testnet:
+            return None
+        if intent.value_wei <= 0:
+            return "The real-value amount is missing or invalid."
+        if not intent.from_address or not intent.to_address:
+            return "The payer or destination is missing."
+        if intent.estimated_gas_fee_wei < 0 or intent.max_gas_fee_wei <= 0:
+            return "The gas estimate or maximum is unavailable."
+        if intent.estimated_gas_fee_wei > intent.max_gas_fee_wei:
+            return "The gas estimate exceeds the approved maximum."
+        return None
+
+    @staticmethod
     def _intent_embed(intent: TransactionIntent, network, color) -> discord.Embed:
         titles = {
             IntentStatus.UNCERTAIN: "Transaction outcome uncertain",
@@ -261,10 +277,17 @@ class WalletTransactionCommands:
         amount_text = format_atomic_amount(
             intent.value_wei, network, decimals=asset_decimals
         )
+        if not network.testnet:
+            embed.description = (
+                "⚠️ **EXPERIMENTAL REAL-VALUE TRANSACTION**\n"
+                "Discord approval records transaction intent only; protected approval is "
+                "still required. Blockchain transactions are irreversible and funds may "
+                "be permanently lost."
+            )
         embed.add_field(name="Status", value=intent.status.value.title(), inline=True)
         embed.add_field(name="Network", value=f"{network.name} ({network.reference_label} `{network.reference}`)", inline=True)
         embed.add_field(
-            name="Amount",
+            name="Real-value amount" if not network.testnet else "Amount",
             value=f"{amount_text} {asset_symbol}",
             inline=True,
         )
@@ -277,6 +300,17 @@ class WalletTransactionCommands:
             else "Estimated gas fee"
         )
         embed.add_field(name=fee_label, value=gas_value, inline=True)
+        if not network.testnet:
+            maximum_gas = (
+                f"{format_atomic_amount(intent.max_gas_fee_wei, network)} "
+                f"{network.native_symbol}"
+                if intent.max_gas_fee_wei > 0
+                else "Unavailable — submission blocked"
+            )
+            payer = "CDP paymaster" if intent.gas_sponsored else "Wallet owner (native ETH)"
+            embed.add_field(name="Maximum gas fee", value=maximum_gas, inline=True)
+            embed.add_field(name="Gas payer", value=payer, inline=True)
+            embed.add_field(name="Recipients", value="1", inline=True)
         if intent.asset_kind == "erc20":
             total_value = f"{amount_text} {asset_symbol}; gas {gas_value}"
         else:
@@ -294,6 +328,15 @@ class WalletTransactionCommands:
             )
         embed.add_field(name="From", value=f"`{intent.from_address}`", inline=False)
         embed.add_field(name="To", value=f"`{intent.to_address}`", inline=False)
+        if not network.testnet:
+            embed.add_field(
+                name="Protected authorization",
+                value=(
+                    "Required after this Discord intent. Recheck the network, amount, "
+                    "maximum gas, payer, and destination before signing."
+                ),
+                inline=False,
+            )
         embed.add_field(name="Intent ID", value=f"`{intent.intent_id}`", inline=False)
         if intent.status in {IntentStatus.PENDING, IntentStatus.PROCESSING}:
             embed.add_field(
@@ -318,7 +361,11 @@ class WalletTransactionCommands:
                 inline=True,
             )
         if intent.status in {IntentStatus.PENDING, IntentStatus.PROCESSING}:
-            footer = "Unsigned testnet intent — no transaction has been sent"
+            footer = (
+                "EXPERIMENTAL MAINNET INTENT — irreversible; permanent loss possible"
+                if not network.testnet
+                else "Unsigned testnet intent — no transaction has been sent"
+            )
         elif intent.status is IntentStatus.UNCERTAIN:
             footer = "Submission outcome unknown — do not send a replacement"
         elif intent.status is IntentStatus.CONFIRMED:
@@ -330,7 +377,11 @@ class WalletTransactionCommands:
         elif intent.status is IntentStatus.EXPIRED:
             footer = "Expired — no transaction was sent"
         else:
-            footer = f"{network.name} testnet transaction intent"
+            footer = (
+                f"{network.name} experimental mainnet transaction"
+                if not network.testnet
+                else f"{network.name} testnet transaction intent"
+            )
         embed.set_footer(text=footer)
         return embed
 
@@ -425,6 +476,18 @@ class WalletTransactionCommands:
         intent = await self._stored_intent(view.user_id, view.intent_id)
         if intent is None or intent.status is not IntentStatus.PENDING:
             await interaction.followup.send("This transaction is no longer pending.", ephemeral=True)
+            return
+        network = NETWORKS.get(intent.network)
+        if network is None:
+            await interaction.followup.send(
+                "The transaction references an unsupported network.", ephemeral=True
+            )
+            return
+        disclosure_error = self._mainnet_intent_disclosure_error(intent, network)
+        if disclosure_error is not None:
+            await interaction.followup.send(
+                f"Mainnet approval is blocked: {disclosure_error}", ephemeral=True
+            )
             return
         if self._intent_quote(intent) != view.quote:
             network = NETWORKS.get(intent.network)

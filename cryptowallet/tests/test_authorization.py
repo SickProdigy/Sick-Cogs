@@ -1039,6 +1039,46 @@ class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
+    def test_mainnet_intent_discloses_real_value_and_requires_fee_maximum(self):
+        intent = TransactionIntent(
+            intent_id="mainnet-7", profile_id="profile-7",
+            network=BASE_MAINNET.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=10**16, created_at=1, expires_at=2,
+            estimated_gas_fee_wei=10**14, max_gas_fee_wei=2 * 10**14,
+            gas_sponsored=False,
+        )
+        self.assertIsNone(
+            WalletTransactionCommands._mainnet_intent_disclosure_error(
+                intent, BASE_MAINNET
+            )
+        )
+        restored = TransactionIntent.from_dict(intent.to_dict())
+        self.assertEqual(restored.max_gas_fee_wei, 2 * 10**14)
+        embed = WalletTransactionCommands._intent_embed(intent, BASE_MAINNET, None)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("EXPERIMENTAL REAL-VALUE", embed.description)
+        self.assertIn("permanently lost", embed.description)
+        self.assertEqual(fields["Network"], "Base Mainnet (chain ID `8453`)")
+        self.assertEqual(fields["Real-value amount"], "0.01 ETH")
+        self.assertEqual(fields["Estimated gas fee"], "0.0001 ETH")
+        self.assertEqual(fields["Maximum gas fee"], "0.0002 ETH")
+        self.assertEqual(fields["Gas payer"], "Wallet owner (native ETH)")
+        self.assertEqual(fields["Recipients"], "1")
+        self.assertEqual(fields["To"], f"`{intent.to_address}`")
+        self.assertIn("Discord intent", fields["Protected authorization"])
+        self.assertIn("permanent loss", embed.footer.text)
+
+        intent.max_gas_fee_wei = 0
+        error = WalletTransactionCommands._mainnet_intent_disclosure_error(
+            intent, BASE_MAINNET
+        )
+        self.assertIn("maximum", error)
+        blocked = WalletTransactionCommands._intent_embed(intent, BASE_MAINNET, None)
+        blocked_fields = {field.name: field.value for field in blocked.fields}
+        self.assertIn("submission blocked", blocked_fields["Maximum gas fee"])
+
     def test_rejected_intent_has_explicit_final_title_and_footer(self):
         intent = TransactionIntent(
             intent_id="rejected-7", profile_id="profile-7",

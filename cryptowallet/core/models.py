@@ -76,6 +76,7 @@ class TransactionIntent:
     asset_symbol: str | None = None
     asset_decimals: int | None = None
     estimated_gas_fee_wei: int = 0
+    max_gas_fee_wei: int = 0
     gas_sponsored: bool = False
     status: IntentStatus = IntentStatus.PENDING
     provider_status: str | None = None
@@ -110,6 +111,7 @@ class TransactionIntent:
             "expires_at": self.expires_at,
             "estimated_fee_atomic": self.estimated_fee_atomic,
             "estimated_gas_fee_wei": self.estimated_gas_fee_wei,
+            "max_gas_fee_wei": self.max_gas_fee_wei,
             "gas_sponsored": self.gas_sponsored,
             "status": self.status.value,
             "provider_status": self.provider_status,
@@ -143,6 +145,7 @@ class TransactionIntent:
                     data.get("estimated_gas_fee_wei", 0),
                 )
             ),
+            max_gas_fee_wei=int(data.get("max_gas_fee_wei", 0)),
             gas_sponsored=bool(data.get("gas_sponsored", False)),
             status=IntentStatus(data.get("status", IntentStatus.PENDING.value)),
             provider_status=data.get("provider_status"),
