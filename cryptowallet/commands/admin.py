@@ -359,6 +359,59 @@ class WalletAdminCommands:
             "Base mainnet is disabled and emergency-paused. Testnet operation is unchanged."
         )
 
+    @walletset_mainnet.command(name="capability", aliases=("capabilities",))
+    @commands.is_owner()
+    async def walletset_mainnet_capability(
+        self, ctx: commands.Context, capability: str, state: str = None, *,
+        acknowledgement: str = "",
+    ):
+        """Inspect, disable, or guarded-enable one Base mainnet capability."""
+        try:
+            requested = NetworkCapability(capability.strip().lower())
+        except ValueError:
+            choices = ", ".join(item.value for item in NetworkCapability)
+            await ctx.send(f"Unknown capability. Choose one of: `{choices}`.")
+            return
+        policy = await self.config.base_mainnet_policy()
+        configured = bool((policy.get("capabilities") or {}).get(requested.value))
+        if state is None or state.strip().lower() in {"status", "show"}:
+            code_ready = BASE_MAINNET.supports(requested)
+            await ctx.send(
+                f"Base mainnet `{requested.value}`: policy "
+                f"`{'enabled' if configured else 'disabled'}`, code "
+                f"`{'reviewed' if code_ready else 'unavailable'}`."
+            )
+            return
+        requested_state = state.strip().lower()
+        if requested_state in {"disable", "disabled", "off", "false"}:
+            async with self.config.base_mainnet_policy() as stored:
+                stored.setdefault("capabilities", {})[requested.value] = False
+            await ctx.send(
+                f"Base mainnet `{requested.value}` is disabled. No other capability changed."
+            )
+            return
+        if requested_state not in {"enable", "enabled", "on", "true"}:
+            await ctx.send("State must be `status`, `enable`, or `disable`.")
+            return
+        if acknowledgement.strip() != MAINNET_ENABLE_ACKNOWLEDGEMENT:
+            await ctx.send(
+                "No setting changed. Enabling a reviewed mainnet capability requires: "
+                f"`{MAINNET_ENABLE_ACKNOWLEDGEMENT}`"
+            )
+            return
+        if not BASE_MAINNET.supports(requested):
+            await ctx.send(
+                f"No setting changed. Base mainnet `{requested.value}` is not enabled "
+                "at the reviewed code boundary."
+            )
+            return
+        async with self.config.base_mainnet_policy() as stored:
+            stored.setdefault("capabilities", {})[requested.value] = True
+        await ctx.send(
+            f"Base mainnet `{requested.value}` is policy-enabled for the bot-owner-only "
+            "experimental gate. Real funds may be permanently lost."
+        )
+
     @walletset_mainnet.command(name="limits")
     @commands.is_owner()
     async def walletset_mainnet_limits(

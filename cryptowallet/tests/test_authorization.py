@@ -1440,6 +1440,37 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(policy.data["enabled"])
         self.assertTrue(policy.data["paused"])
 
+    async def test_mainnet_capability_controls_cannot_exceed_code_boundary(self):
+        policy = _ApprovalStore()
+        policy.data.update({
+            "enabled": False, "paused": True, "capabilities": {"send": True},
+        })
+        cog = SimpleNamespace(config=SimpleNamespace(base_mainnet_policy=policy))
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletAdminCommands.walletset_mainnet_capability.callback(
+            cog, ctx, "send", "status", acknowledgement=""
+        )
+        self.assertIn("policy `enabled`", ctx.send.await_args.args[0])
+        self.assertIn("code `unavailable`", ctx.send.await_args.args[0])
+
+        await WalletAdminCommands.walletset_mainnet_capability.callback(
+            cog, ctx, "send", "disable", acknowledgement=""
+        )
+        self.assertFalse(policy.data["capabilities"]["send"])
+
+        await WalletAdminCommands.walletset_mainnet_capability.callback(
+            cog, ctx, "send", "enable",
+            acknowledgement=MAINNET_ENABLE_ACKNOWLEDGEMENT,
+        )
+        self.assertFalse(policy.data["capabilities"]["send"])
+        self.assertIn("not enabled", ctx.send.await_args.args[0])
+
+        await WalletAdminCommands.walletset_mainnet_capability.callback(
+            cog, ctx, "not-real", "enable", acknowledgement=""
+        )
+        self.assertIn("Unknown capability", ctx.send.await_args.args[0])
+
     async def test_mainnet_limits_are_atomic_and_keep_gate_closed(self):
         policy = _ApprovalStore()
         policy.data.update({"enabled": False, "paused": True})
