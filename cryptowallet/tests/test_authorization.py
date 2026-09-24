@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import jwt
 from jwt import DecodeError, ExpiredSignatureError, InvalidAudienceError
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
@@ -236,12 +236,17 @@ class _TotpValue:
 
 
 class _TotpHarness(TotpSecurityMixin):
-    def __init__(self, key: bytes):
+    def __init__(self, key: bytes, enrollment_key=None):
         encoded = base64.urlsafe_b64encode(key).rstrip(b"=").decode("ascii")
+        tokens = {"encryption_key": encoded}
+        if enrollment_key is not None:
+            tokens["enrollment_private_key_pem"] = enrollment_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            ).decode("ascii")
         self.bot = SimpleNamespace(
-            get_shared_api_tokens=AsyncMock(
-                return_value={"encryption_key": encoded}
-            )
+            get_shared_api_tokens=AsyncMock(return_value=tokens)
         )
         self.totp_state = _TotpValue()
         user_config = SimpleNamespace(
@@ -3041,6 +3046,55 @@ class TotpSecurityStateTests(unittest.IsolatedAsyncioTestCase):
                 user_id=8,
                 profile_id="profile-7",
             )
+
+    async def test_browser_seed_is_rsa_encrypted_before_activation(self):
+        enrollment_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+        harness = _TotpHarness(self.KEY, enrollment_key)
+        timestamp = 1_700_000_000
+        ciphertext = enrollment_key.public_key().encrypt(
+            self.SECRET.encode("ascii"),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=b"cryptowallet-totp-enrollment-v1",
+            ),
+        )
+        encoded = base64.urlsafe_b64encode(ciphertext).rstrip(b"=").decode("ascii")
+        code = totp_code(self.SECRET, timestamp)
+        self.assertTrue(
+            await harness.activate_encrypted_totp_enrollment(
+                7, encoded, code, now=timestamp
+            )
+        )
+        self.assertTrue(harness.totp_state.value["enabled"])
+        self.assertNotIn(self.SECRET, repr(harness.totp_state.value))
+        self.assertFalse(await harness.verify_user_totp(7, code, now=timestamp))
+        jwk = await harness.totp_enrollment_public_jwk()
+        self.assertEqual(jwk["alg"], "RSA-OAEP-256")
+        self.assertNotIn("d", jwk)
+
+    async def test_encrypted_enrollment_rejects_invalid_code_without_storage(self):
+        enrollment_key = rsa.generate_private_key(
+            public_exponent=65537, key_size=2048
+        )
+        harness = _TotpHarness(self.KEY, enrollment_key)
+        ciphertext = enrollment_key.public_key().encrypt(
+            self.SECRET.encode("ascii"),
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=b"cryptowallet-totp-enrollment-v1",
+            ),
+        )
+        encoded = base64.urlsafe_b64encode(ciphertext).rstrip(b"=").decode("ascii")
+        self.assertFalse(
+            await harness.activate_encrypted_totp_enrollment(
+                7, encoded, "000000", now=1_700_000_000
+            )
+        )
+        self.assertIsNone(harness.totp_state.value)
 
     def test_tampered_ciphertext_fails_authentication(self):
         state = protect_totp_secret(
