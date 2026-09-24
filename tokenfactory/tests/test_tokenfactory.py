@@ -1,8 +1,9 @@
+import discord
 import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ..operations import (
     TokenFactoryOperationError,
@@ -179,6 +180,14 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(view.children[0].label, "Deploy token")
 
+    def test_wallet_route_buttons_describe_the_deployment_action(self):
+        from ..views import TokenFactoryDraftView
+
+        view = TokenFactoryDraftView(SimpleNamespace(), self.user)
+        labels = {item.label for item in view.children if item.label}
+        self.assertIn("Deploy to Discord Wallet", labels)
+        self.assertIn("Deploy with External Wallet", labels)
+
     async def test_mixed_crypto_wallet_version_has_actionable_error(self):
         cog = SimpleNamespace(_cryptowallet=lambda: object())
         with self.assertRaisesRegex(
@@ -189,11 +198,16 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_confirmation_submits_the_frozen_review_terms(self):
-        cog = SimpleNamespace(submit_token_deployment=AsyncMock(return_value={
-            "already_deployed": False, "user_operation_hash": "0x" + "ab" * 32,
-        }))
+        cog = SimpleNamespace(
+            submit_token_deployment=AsyncMock(return_value={
+                "already_deployed": False, "user_operation_hash": "0x" + "ab" * 32,
+            }),
+            command_hint=AsyncMock(return_value="!tokenfactory deployment"),
+        )
         view = TokenDeploymentConfirmView(cog, self.user, self.draft, self.terms)
         interaction = SimpleNamespace(
+            guild=None,
+            guild_id=123,
             response=SimpleNamespace(edit_message=AsyncMock()),
             followup=SimpleNamespace(send=AsyncMock()),
         )
@@ -201,7 +215,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         await view.confirm.callback(interaction)
 
         cog.submit_token_deployment.assert_awaited_once_with(
-            self.user, self.draft, self.terms
+            self.user, self.draft, self.terms, guild_id=123
         )
         sent = interaction.followup.send.await_args.kwargs
         self.assertTrue(sent["ephemeral"])
@@ -285,6 +299,152 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "gas: \"0x\" + terms.gas_limit.toString(16)",
         ):
             self.assertIn(required, source)
+
+
+class AsyncValue:
+    def __init__(self, value=None):
+        self.value = value
+
+    async def __call__(self):
+        return self.value
+
+    async def set(self, value):
+        self.value = value
+
+
+class FakeUserConfig:
+    def __init__(self, pending):
+        self.pending_deployment = AsyncValue(pending)
+        self.deployment_draft = AsyncValue(pending.get("draft") if pending else None)
+
+
+class TokenFactoryWatcherTests(unittest.IsolatedAsyncioTestCase):
+    def make_cog(self, pending, *, prefixes=("!",)):
+        cog = object.__new__(TokenFactory)
+        user_config = FakeUserConfig(pending)
+        user = SimpleNamespace(id=7, send=AsyncMock())
+        cog.bot = SimpleNamespace(
+            get_valid_prefixes=lambda guild: list(prefixes),
+            get_guild=lambda guild_id: SimpleNamespace(id=guild_id),
+            wait_until_red_ready=AsyncMock(),
+        )
+        cog.config = SimpleNamespace(
+            user_from_id=lambda user_id: user_config,
+            all_users=AsyncMock(return_value={7: {"pending_deployment": pending}}),
+        )
+        cog.deployment_locks = {}
+        cog.discord_watchers = {}
+        cog.deployment_tasks = set()
+        cog.DISCORD_WATCH_INTERVAL = 0
+        cog.DISCORD_WATCH_SECONDS = 30
+        cog._user_for_id = AsyncMock(return_value=user)
+        return cog, user, user_config
+
+    async def test_command_hints_use_context_and_configured_text_prefixes(self):
+        for prefix in ("!", "-", "sg!"):
+            cog, _, _ = self.make_cog({}, prefixes=(prefix,))
+            self.assertEqual(
+                await cog.command_hint("tokenfactory tokens"),
+                f"{prefix}tokenfactory tokens",
+            )
+        cog, _, _ = self.make_cog({}, prefixes=("<@123> ", "-"))
+        self.assertEqual(
+            await cog.command_hint("tokenfactory tokens"),
+            "-tokenfactory tokens",
+        )
+        self.assertEqual(
+            await cog.command_hint(
+                "tokenfactory tokens", ctx=SimpleNamespace(clean_prefix="??")
+            ),
+            "??tokenfactory tokens",
+        )
+
+    async def test_restart_restores_only_unclaimed_discord_watchers(self):
+        pending = {
+            "route": "discord", "request_id": "request", "draft": {},
+        }
+        cog, _, _ = self.make_cog(pending)
+        cog.config.all_users = AsyncMock(return_value={
+            7: {"pending_deployment": pending},
+            8: {"pending_deployment": {**pending, "watcher_notice_state": "claimed"}},
+            9: {"pending_deployment": {**pending, "route": "external"}},
+        })
+        cog._schedule_discord_watcher = MagicMock()
+
+        await cog._restore_discord_watchers()
+
+        cog._schedule_discord_watcher.assert_called_once_with(7)
+
+    async def test_notice_claim_is_persistent_and_at_most_once(self):
+        pending = {"route": "discord", "request_id": "request"}
+        cog, _, user_config = self.make_cog(pending)
+
+        first = await cog._claim_watcher_notice(user_config, "request", "success")
+        second = await cog._claim_watcher_notice(user_config, "request", "success")
+
+        self.assertEqual(first["watcher_notice_kind"], "success")
+        self.assertIsNone(second)
+        self.assertEqual(
+            user_config.pending_deployment.value["watcher_notice_state"], "claimed"
+        )
+
+    async def test_successful_watcher_sends_one_private_card_and_clears_pending(self):
+        pending = {
+            "route": "discord",
+            "request_id": "request",
+            "submitted_at": 100,
+            "draft": {"name": "Test"},
+        }
+        cog, user, user_config = self.make_cog(pending)
+        cog.DISCORD_WATCH_SECONDS = 10_000_000_000
+        result = {"deployed": True, "request_id": "request"}
+        cog.verify_token_deployment = AsyncMock(return_value=result)
+        embed = object()
+        cog._deployment_success_embed = AsyncMock(return_value=embed)
+
+        await cog._watch_discord_deployment(7)
+
+        user.send.assert_awaited_once_with(embed=embed)
+        self.assertIsNone(user_config.pending_deployment.value)
+        self.assertIsNone(user_config.deployment_draft.value)
+
+    async def test_terminal_provider_failure_keeps_recoverable_pending_state(self):
+        pending = {
+            "route": "discord",
+            "request_id": "request",
+            "submitted_at": 100,
+            "guild_id": 123,
+        }
+        cog, user, user_config = self.make_cog(pending, prefixes=("-",))
+        cog.DISCORD_WATCH_SECONDS = 10_000_000_000
+        cog.verify_token_deployment = AsyncMock(return_value={
+            "deployed": False, "provider_status": "failed",
+        })
+
+        await cog._watch_discord_deployment(7)
+
+        sent = user.send.await_args.args[0]
+        self.assertIn("-tokenfactory deployment", sent)
+        self.assertEqual(
+            user_config.pending_deployment.value["watcher_notice_kind"], "fallback"
+        )
+
+    async def test_timeout_keeps_pending_and_closed_dms_do_not_raise(self):
+        pending = {
+            "route": "discord",
+            "request_id": "request",
+            "submitted_at": 1,
+        }
+        cog, user, user_config = self.make_cog(pending)
+        cog.DISCORD_WATCH_SECONDS = -1
+        response = MagicMock(status=403, reason="Forbidden")
+        user.send.side_effect = discord.Forbidden(response, "DMs closed")
+
+        await cog._watch_discord_deployment(7)
+
+        self.assertEqual(
+            user_config.pending_deployment.value["watcher_notice_kind"], "fallback"
+        )
 
 
 if __name__ == "__main__":

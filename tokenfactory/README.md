@@ -32,9 +32,9 @@ deployment is valid.
 decimals without provisioning a wallet. After saving the draft, the member chooses one of two
 routes:
 
-- **Use Discord Wallet** resolves the member's Base Sepolia CryptoWallet smart account, uses it to
+- **Deploy to Discord Wallet** resolves the member's Base Sepolia CryptoWallet smart account, uses it to
   sign the deployment, and sends the full supply there.
-- **Use External Wallet** opens a three-minute protected companion-page handoff for an injected
+- **Deploy with External Wallet** opens a three-minute protected companion-page handoff for an injected
   EIP-1193 browser wallet such as MetaMask or Trust Wallet. The external wallet signs the pinned
   factory call and pays Base Sepolia gas. A blank recipient sends the full supply to the signer;
   an explicitly entered valid address receives it instead.
@@ -54,11 +54,18 @@ Sepolia. `pause` immediately blocks both wallet routes without discarding config
 blocks them and disables the feature. Existing on-chain operations are never reversed by a pause.
 
 The Discord Wallet route requires active CryptoWallet authorization and shows the active CDP
-paymaster sponsorship, explicit gas limit, and zero native value before submission. The external
-route does not require a CDP wallet profile or delegation; its review shows that the signer pays
-its own testnet gas, the explicit gas limit, and zero native value. The reviewed terms are bound
-to submission; changed or stale terms require a fresh review. Both routes use retry-safe request
-IDs and the same pinned `createFixedSupplyToken` method.
+paymaster sponsorship, explicit gas limit, and zero native value before submission. After
+submission, a bounded background watcher verifies the deployment, saves it to TokenFactory
+history, registers it with CryptoWallet, and sends one private success card. Pending watcher state
+survives reloads and restarts without submitting the operation again. If automatic confirmation
+cannot finish or DMs are closed, the verified history or pending operation remains recoverable
+through the normal deployment and history commands.
+
+The external route does not require a CDP wallet profile or delegation; its review shows that the
+signer pays its own testnet gas, the explicit gas limit, and zero native value. The reviewed terms
+are bound to submission; changed or stale terms require a fresh review. Both routes use retry-safe
+request IDs and the same pinned `createFixedSupplyToken` method. Live Discord guidance renders the
+installation's configured command prefix; documentation continues to use `[p]`.
 
 No mainnet network, arbitrary Solidity, arbitrary bytecode, arbitrary calldata, later minting
 authority, upgrade path, administrator, or bot ownership is supported. The external route permits
