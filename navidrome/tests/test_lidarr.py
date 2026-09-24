@@ -129,6 +129,19 @@ class LidarrClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(artists[0]["foreignArtistId"], mb_id)
         self.assertEqual(session.calls[0][2]["params"], {"mbId": mb_id})
 
+    async def test_album_search_queues_exact_lidarr_album(self):
+        session = FakeSession([FakeResponse({"id": 77, "name": "AlbumSearch"})])
+        client = LidarrClient(session, "https://lidarr.example.com", "secret")
+
+        command = await client.search_album(42)
+
+        self.assertEqual(command["id"], 77)
+        self.assertEqual(session.calls[0][0], "POST")
+        self.assertTrue(session.calls[0][1].endswith("/api/v1/command"))
+        self.assertEqual(
+            session.calls[0][2]["json"], {"name": "AlbumSearch", "albumIds": [42]}
+        )
+
     async def test_ensure_tag_reuses_case_insensitive_match(self):
         client = LidarrClient(
             FakeSession([FakeResponse([{"id": 8, "label": "Discord"}])]),

@@ -485,6 +485,36 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         client.add_artist.assert_not_awaited()
         self.assertEqual(group.lidarr_audit.value[-1]["outcome"], "tagged-existing")
 
+    async def test_repeat_release_request_queues_fresh_album_search(self):
+        cog, group = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
+        cog._lidarr_cooldowns = {}
+        album = {"id": 42, "foreignAlbumId": "album-mbid"}
+        artist = {"id": 10, "foreignArtistId": "artist-mbid", "tags": [1, 2]}
+        client = SimpleNamespace(
+            ensure_tag=AsyncMock(side_effect=[1, 2]),
+            albums=AsyncMock(return_value=[album]),
+            artists=AsyncMock(return_value=[artist]),
+            update_artist_tags=AsyncMock(return_value=artist),
+            search_album=AsyncMock(return_value={"id": 77}),
+            add_album=AsyncMock(),
+        )
+        cog._lidarr_client = AsyncMock(return_value=("home", client, {}))
+        guild = SimpleNamespace(id=2)
+        member = SimpleNamespace(
+            id=8, name="user", guild_permissions=SimpleNamespace(manage_guild=False), roles=[]
+        )
+        candidate = {
+            "title": "Control Alt Delete", "foreignAlbumId": "album-mbid",
+            "artist": {"artistName": "Turbo Speed", "foreignArtistId": "artist-mbid"},
+        }
+
+        message = await cog.execute_lidarr_request(guild, member, "album", candidate)
+
+        client.search_album.assert_awaited_once_with(42)
+        client.add_album.assert_not_awaited()
+        self.assertIn("search queued", message)
+        self.assertEqual(group.lidarr_audit.value[-1]["outcome"], "search-queued")
+
     async def test_confirmed_artist_request_adds_tags_and_audit(self):
         cog, group = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
         cog._lidarr_cooldowns = {}
