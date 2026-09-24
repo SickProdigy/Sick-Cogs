@@ -21,7 +21,7 @@ from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
 )
-from ..backend.config import WalletConfigMixin
+from ..backend.config import MAINNET_ENABLE_ACKNOWLEDGEMENT, WalletConfigMixin
 from ..backend.usage import ProviderUsageMixin
 from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
@@ -38,6 +38,7 @@ from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
+    BASE_MAINNET,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
@@ -167,6 +168,12 @@ class _ApprovalStore:
 
     def __call__(self):
         return self
+
+    def __await__(self):
+        async def read():
+            return copy.deepcopy(self.data)
+
+        return read().__await__()
 
     async def __aenter__(self):
         return self.data
@@ -1228,9 +1235,21 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             set(KNOWN_NETWORKS) - set(NETWORKS),
-            {POLYGON_MAINNET.key, OPTIMISM_MAINNET.key, BNB_MAINNET.key, ZORA_MAINNET.key},
+            {
+                BASE_MAINNET.key,
+                POLYGON_MAINNET.key,
+                OPTIMISM_MAINNET.key,
+                BNB_MAINNET.key,
+                ZORA_MAINNET.key,
+            },
         )
-        for network in (POLYGON_MAINNET, OPTIMISM_MAINNET, BNB_MAINNET, ZORA_MAINNET):
+        for network in (
+            BASE_MAINNET,
+            POLYGON_MAINNET,
+            OPTIMISM_MAINNET,
+            BNB_MAINNET,
+            ZORA_MAINNET,
+        ):
             with self.subTest(planned_network=network.key):
                 self.assertFalse(network.enabled)
                 self.assertFalse(network.testnet)
@@ -1241,6 +1260,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(POLYGON_MAINNET.chain_id, 137)
         self.assertEqual(POLYGON_MAINNET.native_symbol, "POL")
         self.assertEqual(POLYGON_MAINNET.explorer_url, "https://polygonscan.com")
+        self.assertEqual(BASE_MAINNET.chain_id, 8453)
+        self.assertEqual(BASE_MAINNET.native_symbol, "ETH")
+        self.assertEqual(BASE_MAINNET.explorer_url, "https://basescan.org")
         self.assertTrue(ETHEREUM_SEPOLIA.enabled)
         self.assertEqual(ETHEREUM_SEPOLIA.chain_id, 11155111)
         self.assertEqual(
@@ -1257,6 +1279,8 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(BASE_SEPOLIA.supports(NetworkCapability.SEND))
         provider = CdpWalletProvider(SimpleNamespace())
         self.assertTrue(provider.supports(BASE_SEPOLIA.key, NetworkCapability.SEND))
+        self.assertFalse(provider.supports(BASE_MAINNET.key, NetworkCapability.BALANCE))
+        self.assertFalse(provider.supports(BASE_MAINNET.key, NetworkCapability.SEND))
         self.assertTrue(
             provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.BALANCE)
         )
@@ -1275,6 +1299,40 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             profile["accounts"][0],
         )
 
+    async def test_mainnet_owner_controls_remain_fail_closed(self):
+        policy = _ApprovalStore()
+        policy.data.update({
+            "enabled": False,
+            "paused": True,
+            "owner_only": True,
+            "experimental": True,
+            "capabilities": {},
+        })
+        cog = SimpleNamespace(
+            config=SimpleNamespace(base_mainnet_policy=policy)
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletAdminCommands.walletset_mainnet_status.callback(cog, ctx)
+        status = ctx.send.await_args.args[0]
+        self.assertIn("Gate: `disabled`", status)
+        self.assertIn("Emergency pause: `active`", status)
+        self.assertIn("bot owner only", status)
+        self.assertIn("permanently lost", status)
+
+        await WalletAdminCommands.walletset_mainnet_enable.callback(
+            cog, ctx, acknowledgement=MAINNET_ENABLE_ACKNOWLEDGEMENT
+        )
+        self.assertFalse(policy.data["enabled"])
+        self.assertTrue(policy.data["paused"])
+        self.assertIn("no reviewed code-level capabilities", ctx.send.await_args.args[0])
+
+        policy.data["enabled"] = True
+        policy.data["paused"] = False
+        await WalletAdminCommands.walletset_mainnet_pause.callback(cog, ctx)
+        self.assertFalse(policy.data["enabled"])
+        self.assertTrue(policy.data["paused"])
+
     def test_activity_network_aliases_are_explicit(self):
         self.assertIs(WalletActivityCommands._activity_network("base"), BASE_SEPOLIA)
         self.assertIs(
@@ -1284,6 +1342,8 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(WalletActivityCommands._activity_network("polygon"), POLYGON_AMOY)
         self.assertIs(WalletActivityCommands._activity_network("avax"), AVALANCHE_FUJI)
         self.assertIs(WalletActivityCommands._activity_network("sol"), SOLANA_DEVNET)
+        self.assertIsNone(WalletActivityCommands._activity_network("base-mainnet"))
+        self.assertIsNone(WalletActivityCommands._activity_network("mainnet"))
         self.assertIsNone(WalletActivityCommands._activity_network("unknown"))
 
     def test_send_network_aliases_do_not_silently_change_chains(self):
@@ -1296,6 +1356,8 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(
             WalletTransactionCommands._send_network("sol"), SOLANA_DEVNET
         )
+        self.assertIsNone(WalletTransactionCommands._send_network("base-mainnet"))
+        self.assertIsNone(WalletTransactionCommands._send_network("mainnet"))
         self.assertIsNone(WalletTransactionCommands._send_network("unknown"))
 
     def test_additional_evm_testnets_remain_read_only(self):

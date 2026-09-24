@@ -7,6 +7,25 @@ from ..core.networks import DEFAULT_NETWORK
 
 CONFIG_IDENTIFIER = 9365048217
 MAX_STORED_INTENTS = 25
+MAINNET_ENABLE_ACKNOWLEDGEMENT = "I UNDERSTAND REAL FUNDS MAY BE PERMANENTLY LOST"
+BASE_MAINNET_POLICY_DEFAULT = {
+    "enabled": False,
+    "paused": True,
+    "owner_only": True,
+    "experimental": True,
+    "enabled_by": None,
+    "enabled_at": 0,
+    "capabilities": {
+        "balance": False,
+        "send": False,
+        "history": False,
+        "transaction_lookup": False,
+        "delegation": False,
+        "recovery": False,
+        "export": False,
+        "sponsorship": False,
+    },
+}
 
 
 def create_config(cog) -> Config:
@@ -18,6 +37,7 @@ def create_config(cog) -> Config:
         provider="unconfigured",
         default_network=DEFAULT_NETWORK,
         provider_paused=False,
+        base_mainnet_policy=BASE_MAINNET_POLICY_DEFAULT,
         provider_usage={},
         token_registry={},
         network_emojis={},

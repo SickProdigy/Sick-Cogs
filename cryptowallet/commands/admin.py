@@ -9,13 +9,14 @@ import discord
 from redbot.core import commands
 
 from ..core.models import IntentStatus
-from ..core.networks import BASE_SEPOLIA, NETWORKS, NetworkCapability
+from ..core.networks import BASE_MAINNET, BASE_SEPOLIA, NETWORKS, NetworkCapability
 from ..core.validation import (
     format_atomic_amount,
     normalize_evm_address,
     parse_native_amount,
 )
 from ..providers import WalletProviderError
+from ..backend.config import MAINNET_ENABLE_ACKNOWLEDGEMENT
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
     NODE_SAFETY_TARGET,
@@ -306,6 +307,74 @@ class WalletAdminCommands:
             configured.pop(network_key, None)
         await ctx.send(
             f"{NETWORK_EMOJI_NAMES[network_key].title()} now uses its fallback symbol."
+        )
+
+    @walletset.group(name="mainnet", invoke_without_command=True)
+    @commands.is_owner()
+    async def walletset_mainnet(self, ctx: commands.Context):
+        """Show the fail-closed Base mainnet release gate."""
+        await ctx.invoke(self.walletset_mainnet_status)
+
+    @walletset_mainnet.command(name="status")
+    @commands.is_owner()
+    async def walletset_mainnet_status(self, ctx: commands.Context):
+        """Show non-secret Base mainnet policy state."""
+        policy = await self.config.base_mainnet_policy()
+        capabilities = policy.get("capabilities") or {}
+        enabled_capabilities = sorted(
+            name for name, enabled in capabilities.items() if enabled
+        )
+        gate = "enabled" if policy.get("enabled") else "disabled"
+        pause = "active" if policy.get("paused", True) else "inactive"
+        reviewed = ", ".join(enabled_capabilities) or "none"
+        await ctx.send(
+            "**Base mainnet experimental gate**\n"
+            f"Gate: `{gate}`\n"
+            f"Emergency pause: `{pause}`\n"
+            "Access: `bot owner only`\n"
+            "Release: `experimental — real funds may be permanently lost`\n"
+            f"Reviewed capabilities: `{reviewed}`"
+        )
+
+    @walletset_mainnet.command(name="pause")
+    @commands.is_owner()
+    async def walletset_mainnet_pause(self, ctx: commands.Context):
+        """Disable and pause the Base mainnet experimental gate."""
+        async with self.config.base_mainnet_policy() as policy:
+            policy["enabled"] = False
+            policy["paused"] = True
+        await ctx.send(
+            "Base mainnet is disabled and emergency-paused. Testnet operation is unchanged."
+        )
+
+    @walletset_mainnet.command(name="enable")
+    @commands.is_owner()
+    async def walletset_mainnet_enable(
+        self, ctx: commands.Context, *, acknowledgement: str = ""
+    ):
+        """Arm the owner-only experimental gate after every code-level review."""
+        if acknowledgement.strip() != MAINNET_ENABLE_ACKNOWLEDGEMENT:
+            await ctx.send(
+                "No setting changed. To acknowledge the experimental permanent-loss risk, "
+                f"repeat this command with: `{MAINNET_ENABLE_ACKNOWLEDGEMENT}`"
+            )
+            return
+        if not BASE_MAINNET.enabled or not BASE_MAINNET.capabilities.enabled():
+            await ctx.send(
+                "No setting changed. Base mainnet has no reviewed code-level capabilities "
+                "and remains unavailable until the 2.0 security gates are complete."
+            )
+            return
+        async with self.config.base_mainnet_policy() as policy:
+            policy["enabled"] = True
+            policy["paused"] = False
+            policy["owner_only"] = True
+            policy["experimental"] = True
+            policy["enabled_by"] = ctx.author.id
+            policy["enabled_at"] = int(time.time())
+        await ctx.send(
+            "Base mainnet experimental access is armed for bot-owner use only. "
+            "Real funds may be permanently lost."
         )
 
     @walletset.command(name="pause")

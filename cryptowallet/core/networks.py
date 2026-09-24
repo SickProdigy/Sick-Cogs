@@ -113,6 +113,19 @@ BASE_SEPOLIA = Network(
     ),
 )
 
+BASE_MAINNET = Network(
+    key="base-mainnet",
+    name="Base Mainnet",
+    family=ChainFamily.EVM,
+    chain_id=8453,
+    native_symbol="ETH",
+    native_decimals=18,
+    explorer_url="https://basescan.org",
+    testnet=False,
+    enabled=False,
+    capabilities=NetworkCapabilities(),
+)
+
 ARBITRUM_SEPOLIA = Network(
     key="arbitrum-sepolia",
     name="Arbitrum Sepolia",
@@ -244,6 +257,7 @@ ZORA_MAINNET = Network(
 KNOWN_NETWORKS = {
     network.key: network for network in (
         BASE_SEPOLIA,
+        BASE_MAINNET,
         ETHEREUM_SEPOLIA,
         ARBITRUM_SEPOLIA,
         POLYGON_AMOY,
