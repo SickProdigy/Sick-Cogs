@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 from redbot.core import Config
 
@@ -84,6 +85,12 @@ def create_config(cog) -> Config:
         default_network=DEFAULT_NETWORK,
         provider_paused=False,
         base_mainnet_policy=BASE_MAINNET_POLICY_DEFAULT,
+        base_mainnet_daily_usage={
+            "day": None,
+            "installation_atomic": "0",
+            "users": {},
+            "intents": {},
+        },
         provider_usage={},
         token_registry={},
         network_emojis={},
@@ -108,6 +115,70 @@ def create_config(cog) -> Config:
 
 class WalletConfigMixin:
     """Stored-data helpers shared by wallet command and relay layers."""
+
+    async def reserve_base_mainnet_spend(
+        self, user_id: int, intent_id: str, value_atomic: int, *,
+        actor_is_owner: bool, now: int | None = None,
+    ) -> tuple[bool, str]:
+        """Atomically reserve daily capacity once per immutable transaction intent."""
+        try:
+            user_id = int(user_id)
+            value_atomic = int(value_atomic)
+        except (TypeError, ValueError):
+            return False, "Base mainnet reservation identifiers are invalid."
+        intent_id = str(intent_id or "").strip()
+        if user_id <= 0 or not intent_id or value_atomic <= 0:
+            return False, "Base mainnet reservation identifiers are invalid."
+        timestamp = int(time.time() if now is None else now)
+        day = datetime.fromtimestamp(timestamp, timezone.utc).date().isoformat()
+        policy = await self.config.base_mainnet_policy()
+        async with self.config.base_mainnet_daily_usage() as usage:
+            if not isinstance(usage, dict):
+                return False, "Base mainnet daily accounting is invalid."
+            if usage.get("day") != day:
+                usage.clear()
+                usage.update({
+                    "day": day,
+                    "installation_atomic": "0",
+                    "users": {},
+                    "intents": {},
+                })
+            users = usage.get("users")
+            intents = usage.get("intents")
+            if not isinstance(users, dict) or not isinstance(intents, dict):
+                return False, "Base mainnet daily accounting is invalid."
+            existing = intents.get(intent_id)
+            if existing is not None:
+                if (
+                    isinstance(existing, dict)
+                    and str(existing.get("user_id")) == str(user_id)
+                    and str(existing.get("value_atomic")) == str(value_atomic)
+                ):
+                    return True, "Base mainnet spend was already reserved."
+                return False, "Base mainnet intent reservation does not match."
+            try:
+                user_total = int(users.get(str(user_id), 0))
+                installation_total = int(usage.get("installation_atomic", 0))
+            except (TypeError, ValueError):
+                return False, "Base mainnet daily accounting is invalid."
+            allowed, reason = base_mainnet_operation_allowed(
+                policy,
+                "send",
+                actor_is_owner=actor_is_owner,
+                value_atomic=value_atomic,
+                user_daily_atomic=user_total,
+                installation_daily_atomic=installation_total,
+            )
+            if not allowed:
+                return False, reason
+            users[str(user_id)] = str(user_total + value_atomic)
+            usage["installation_atomic"] = str(installation_total + value_atomic)
+            intents[intent_id] = {
+                "user_id": str(user_id),
+                "value_atomic": str(value_atomic),
+                "reserved_at": timestamp,
+            }
+            return True, "Base mainnet spend capacity reserved."
 
     async def expire_and_trim_intents(self, user) -> dict:
         now = int(time.time())

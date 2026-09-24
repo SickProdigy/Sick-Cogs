@@ -1347,6 +1347,65 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(allowed)
         self.assertIn("passed", reason)
 
+    async def test_mainnet_daily_reservations_are_durable_and_idempotent(self):
+        policy = copy.deepcopy(BASE_MAINNET_POLICY_DEFAULT)
+        policy.update(enabled=True, paused=False)
+        policy["capabilities"]["send"] = True
+        policy["limits_atomic"] = {
+            "per_transaction": "10",
+            "per_user_day": "15",
+            "installation_day": "20",
+        }
+        usage = _ApprovalStore()
+        usage.data.update({
+            "day": None, "installation_atomic": "0", "users": {}, "intents": {},
+        })
+        cog = SimpleNamespace(config=SimpleNamespace(
+            base_mainnet_policy=_Value(policy),
+            base_mainnet_daily_usage=usage,
+        ))
+
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 7, "intent-1", 10, actor_is_owner=True, now=0
+        )
+        self.assertTrue(allowed, reason)
+        snapshot = copy.deepcopy(usage.data)
+        restarted_cog = SimpleNamespace(config=cog.config)
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            restarted_cog, 7, "intent-1", 10, actor_is_owner=True, now=0
+        )
+        self.assertTrue(allowed, reason)
+        self.assertEqual(usage.data, snapshot)
+
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 7, "intent-1", 9, actor_is_owner=True, now=0
+        )
+        self.assertFalse(allowed)
+        self.assertIn("does not match", reason)
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 7, "intent-2", 6, actor_is_owner=True, now=0
+        )
+        self.assertFalse(allowed)
+        self.assertIn("per-user", reason)
+
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 8, "intent-3", 10, actor_is_owner=True, now=0
+        )
+        self.assertTrue(allowed, reason)
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 9, "intent-4", 1, actor_is_owner=True, now=0
+        )
+        self.assertFalse(allowed)
+        self.assertIn("installation-wide", reason)
+        self.assertEqual(usage.data["installation_atomic"], "20")
+
+        allowed, reason = await WalletConfigMixin.reserve_base_mainnet_spend(
+            cog, 9, "intent-next-day", 1, actor_is_owner=True, now=86400
+        )
+        self.assertTrue(allowed, reason)
+        self.assertEqual(usage.data["installation_atomic"], "1")
+        self.assertEqual(set(usage.data["intents"]), {"intent-next-day"})
+
     async def test_mainnet_owner_controls_remain_fail_closed(self):
         policy = _ApprovalStore()
         policy.data.update({
