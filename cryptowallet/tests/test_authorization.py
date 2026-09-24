@@ -737,6 +737,47 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
 
+    async def test_mainnet_approval_handoff_binds_exact_quote_and_identity(self):
+        harness = _JwtHarness(self.configuration)
+        now = int(time.time())
+        intent = TransactionIntent(
+            intent_id="mainnet-approval-7", profile_id="profile-7",
+            network=BASE_MAINNET.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=10**16, created_at=now, expires_at=now + 120,
+            estimated_gas_fee_wei=10**14, max_gas_fee_wei=2 * 10**14,
+            gas_sponsored=False,
+        )
+        expected_fingerprint = intent.approval_fingerprint()
+        token, expires_at = await harness.create_mainnet_approval_handoff(
+            7, _profile(), intent
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        approval = claims["sickwallet_mainnet_approval"]
+        self.assertEqual(claims["sub"], "profile-7")
+        self.assertEqual(claims["sickwallet_discord_user"], "7")
+        self.assertEqual(claims["sickwallet_application"], "42")
+        self.assertEqual(claims["sickwallet_deployment"], "deployment")
+        self.assertEqual(claims["sickwallet_purpose"], "mainnet_transaction_approval")
+        self.assertEqual(approval["chain_id"], 8453)
+        self.assertEqual(approval["network"], BASE_MAINNET.key)
+        self.assertEqual(approval["intent_id"], intent.intent_id)
+        self.assertEqual(approval["fingerprint"], expected_fingerprint)
+        self.assertEqual(approval["max_gas_fee_wei"], str(2 * 10**14))
+        self.assertEqual(expires_at, intent.expires_at)
+        serialized = str(claims).lower()
+        self.assertNotIn("private_key", serialized)
+        self.assertNotIn("credential", serialized)
+
+        intent.value_wei += 1
+        self.assertNotEqual(intent.approval_fingerprint(), expected_fingerprint)
+        with self.assertRaisesRegex(ValueError, "binding"):
+            await harness.create_mainnet_approval_handoff(8, _profile(), intent)
+
     async def test_clanker_external_handoff_is_signed_but_has_no_signer_authority(self):
         harness = _JwtHarness(self.configuration)
         handoff = {

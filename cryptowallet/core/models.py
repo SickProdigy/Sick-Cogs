@@ -1,4 +1,6 @@
 from dataclasses import dataclass, field
+import hashlib
+import json
 from enum import Enum
 from typing import Any
 
@@ -93,6 +95,33 @@ class TransactionIntent:
     @property
     def estimated_fee_atomic(self) -> int:
         return self.estimated_gas_fee_wei
+
+    def approval_payload(self) -> dict[str, Any]:
+        """Return the immutable public quote bound to protected approval."""
+        return {
+            "version": 1,
+            "intent_id": self.intent_id,
+            "profile_id": self.profile_id,
+            "network": self.network,
+            "from_address": self.from_address,
+            "to_address": self.to_address,
+            "value_atomic": str(self.value_atomic),
+            "asset_kind": self.asset_kind,
+            "asset_contract": self.asset_contract,
+            "asset_symbol": self.asset_symbol,
+            "asset_decimals": self.asset_decimals,
+            "estimated_fee_atomic": str(self.estimated_fee_atomic),
+            "max_gas_fee_wei": str(self.max_gas_fee_wei),
+            "gas_sponsored": self.gas_sponsored,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+
+    def approval_fingerprint(self) -> str:
+        encoded = json.dumps(
+            self.approval_payload(), separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return {
