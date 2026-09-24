@@ -340,8 +340,12 @@ class Navidrome(commands.Cog):
         "lidarr_identity_policy": "linked_required",
         "lidarr_requester_role_id": None,
         "lidarr_request_channel_id": None,
-        "lidarr_cooldown_seconds": 300,
+        "lidarr_cooldown_seconds": 30,
         "lidarr_daily_limit": 5,
+        "lidarr_artist_hourly_limit": 10,
+        "lidarr_artist_weekly_limit": 50,
+        "lidarr_release_hourly_limit": 30,
+        "lidarr_release_weekly_limit": 100,
         "lidarr_audit": [],
     }
 
@@ -548,21 +552,53 @@ class Navidrome(commands.Cog):
             return error
         settings = await self.config.guild(guild).all()
         now = time.monotonic()
-        cooldown = int(settings.get("lidarr_cooldown_seconds", 300))
-        previous = self._lidarr_cooldowns.get((guild.id, member.id), 0.0)
-        if now - previous < cooldown:
-            return f"Please wait {int(cooldown - (now - previous)) + 1} seconds before another request."
-        today = utc_now().date().isoformat()
-        used = sum(
-            1 for item in settings.get("lidarr_audit", [])
-            if item.get("discord_user_id") == member.id
-            and str(item.get("timestamp", "")).startswith(today)
-            and item.get("outcome") in {
-                "added", "already-managed", "tagged-existing", "search-queued"
-            }
+        privileged = (
+            member.id == getattr(guild, "owner_id", None)
+            or member.guild_permissions.manage_guild
         )
-        if used >= int(settings.get("lidarr_daily_limit", 5)):
-            return "You have reached this server's daily Lidarr request limit."
+        if not privileged:
+            cooldown = int(settings.get("lidarr_cooldown_seconds", 30))
+            previous = self._lidarr_cooldowns.get((guild.id, member.id), 0.0)
+            if cooldown and now - previous < cooldown:
+                return f"Please wait {int(cooldown - (now - previous)) + 1} seconds before another request."
+
+            successful = {"added", "already-managed", "tagged-existing", "search-queued"}
+            requested_type = "artist" if media_type == "artist" else "album"
+            now_utc = utc_now()
+            recent = []
+            for item in settings.get("lidarr_audit", []):
+                if (
+                    item.get("discord_user_id") != member.id
+                    or item.get("media_type") != requested_type
+                    or item.get("outcome") not in successful
+                ):
+                    continue
+                try:
+                    timestamp = datetime.datetime.fromisoformat(str(item.get("timestamp", "")))
+                    if timestamp.tzinfo is None:
+                        timestamp = timestamp.replace(tzinfo=datetime.timezone.utc)
+                except ValueError:
+                    continue
+                recent.append(timestamp)
+
+            prefix = "lidarr_artist" if requested_type == "artist" else "lidarr_release"
+            label = "artist" if requested_type == "artist" else "release"
+            hourly_limit = int(
+                settings.get(f"{prefix}_hourly_limit", 10 if label == "artist" else 30)
+            )
+            weekly_limit = int(
+                settings.get(f"{prefix}_weekly_limit", 50 if label == "artist" else 100)
+            )
+            hourly_used = sum(
+                now_utc - stamp < datetime.timedelta(hours=1) for stamp in recent
+            )
+            weekly_used = sum(
+                now_utc - stamp < datetime.timedelta(days=7) for stamp in recent
+            )
+            if hourly_limit and hourly_used >= hourly_limit:
+                return f"You have reached this server's hourly {label} request limit."
+            if weekly_limit and weekly_used >= weekly_limit:
+                return f"You have reached this server's weekly {label} request limit."
         try:
             _, client, lidarr_settings = await self._lidarr_client(guild)
             source_tag = await client.ensure_tag("discord")
@@ -1314,8 +1350,12 @@ class Navidrome(commands.Cog):
             f"Identity policy: `{settings.get('lidarr_identity_policy', 'linked_required')}`\n"
             f"Requester role: {f'<@&{role_id}>' if role_id else 'Any member'}\n"
             f"Request channel: {request_channel}\n"
-            f"Cooldown: {settings.get('lidarr_cooldown_seconds', 300)} seconds\n"
-            f"Daily limit: {settings.get('lidarr_daily_limit', 5)} per member"
+            f"Cooldown: {settings.get('lidarr_cooldown_seconds', 30)} seconds\n"
+            f"Artist limits: {settings.get('lidarr_artist_hourly_limit', 10)}/hour, "
+            f"{settings.get('lidarr_artist_weekly_limit', 50)}/week\n"
+            f"Release limits: {settings.get('lidarr_release_hourly_limit', 30)}/hour, "
+            f"{settings.get('lidarr_release_weekly_limit', 100)}/week\n"
+            "A limit of 0 is unlimited. Administrators and the server owner bypass limits."
         )
 
     @navidromeset_lidarr.command(name="identity")
@@ -1365,16 +1405,28 @@ class Navidrome(commands.Cog):
     @navidromeset_lidarr.command(name="limits")
     @checks.admin_or_permissions(manage_guild=True)
     async def guild_lidarr_limits(
-        self, ctx: commands.Context, cooldown_seconds: int, daily_limit: int
+        self, ctx: commands.Context, cooldown_seconds: int, artist_hourly: int,
+        artist_weekly: int, release_hourly: int, release_weekly: int,
     ):
-        """Set the per-member cooldown (30-86400 seconds) and daily limit (1-50)."""
-        if not 30 <= cooldown_seconds <= 86400 or not 1 <= daily_limit <= 50:
-            return await ctx.send("Cooldown must be 30-86400 seconds and daily limit 1-50.")
+        """Set cooldown and hourly/weekly artist and release limits; 0 is unlimited."""
+        values = (artist_hourly, artist_weekly, release_hourly, release_weekly)
+        if not 0 <= cooldown_seconds <= 86400 or any(
+            value < 0 or value > 10000 for value in values
+        ):
+            return await ctx.send(
+                "Cooldown must be 0-86400 seconds and request limits must be 0-10000. "
+                "Use 0 to disable a limit."
+            )
         group = self.config.guild(ctx.guild)
         await group.lidarr_cooldown_seconds.set(cooldown_seconds)
-        await group.lidarr_daily_limit.set(daily_limit)
+        await group.lidarr_artist_hourly_limit.set(artist_hourly)
+        await group.lidarr_artist_weekly_limit.set(artist_weekly)
+        await group.lidarr_release_hourly_limit.set(release_hourly)
+        await group.lidarr_release_weekly_limit.set(release_weekly)
         await ctx.send(
-            f"Lidarr limits set to {cooldown_seconds} seconds and {daily_limit} requests per day."
+            f"Lidarr limits set: {cooldown_seconds}-second cooldown; artists "
+            f"{artist_hourly}/hour and {artist_weekly}/week; releases "
+            f"{release_hourly}/hour and {release_weekly}/week. 0 means unlimited."
         )
 
     @navidromeset_lidarr.command(name="audit")

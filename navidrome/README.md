@@ -170,12 +170,12 @@ Administrators configure request policy with:
 ```text
 [p]navidromeset lidarr identity <linked_required|linked_optional|discord_only>
 [p]navidromeset lidarr requesterrole [role]
-[p]navidromeset lidarr limits <cooldown-seconds> <daily-limit>
+[p]navidromeset lidarr limits <cooldown-seconds> <artist-hourly> <artist-weekly> <release-hourly> <release-weekly>
 [p]navidromeset lidarr audit [count]
 ```
 
 `linked_required` is the default. A linked identity is revalidated against Navidrome at confirmation
-time. All identity modes retain role checks, cooldowns, limits, confirmation, tags, and audit logging.
+time. All identity modes retain role checks, cooldowns, limits, confirmation, tags, and audit logging. A value of 0 disables an individual limit. Administrators and the server owner bypass cooldowns and request limits. New servers default to a 30-second cooldown, 10 artists per hour and 50 per week, and 30 releases per hour and 100 per week.
 The bounded audit stores Discord identity, an optional linked Navidrome identity, requested media,
 Lidarr foreign ID, timestamp, and outcome; it never stores credentials. Red user-data deletion
 anonymizes the user's historical attribution and removes their local Navidrome mapping. Lidarr tags

@@ -1,3 +1,5 @@
+import datetime
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -6,7 +8,7 @@ from navidrome.client import NavidromeError
 from navidrome.navidrome import (
     LidarrConfirmView, LidarrRequestModal, LidarrRequestTypeView, LidarrResultView, Navidrome,
     exact_local_match, lidarr_confirmation_embed, lidarr_requester_tag,
-    navidrome_config_permission, normalize_musicbrainz_query,
+    navidrome_config_permission, normalize_musicbrainz_query, utc_now,
 )
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
@@ -62,8 +64,12 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
             "lidarr_identity_policy": "linked_required",
             "lidarr_requester_role_id": None,
             "lidarr_request_channel_id": None,
-            "lidarr_cooldown_seconds": 300,
+            "lidarr_cooldown_seconds": 30,
             "lidarr_daily_limit": 5,
+            "lidarr_artist_hourly_limit": 10,
+            "lidarr_artist_weekly_limit": 50,
+            "lidarr_release_hourly_limit": 30,
+            "lidarr_release_weekly_limit": 100,
             "lidarr_audit": [],
         }
         settings = defaults | (settings or {})
@@ -501,6 +507,76 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
         await Navidrome.navidrome_request.callback(cog, ctx, "artist", query="Example")
         cog._lidarr_client.assert_not_awaited()
         self.assertIn("already appears", ctx.send.await_args.args[0])
+
+    async def test_artist_weekly_limit_uses_successful_type_specific_audit(self):
+        now = (utc_now() - datetime.timedelta(hours=2)).isoformat()
+        audit = [
+            {
+                "timestamp": now, "discord_user_id": 8, "media_type": "artist",
+                "outcome": "added",
+            }
+            for _ in range(50)
+        ]
+        cog, _ = self.make_cog(settings={
+            "lidarr_identity_policy": "discord_only",
+            "lidarr_cooldown_seconds": 0,
+            "lidarr_audit": audit,
+        })
+        cog._lidarr_cooldowns = {}
+        cog._lidarr_client = AsyncMock()
+        guild = SimpleNamespace(id=2, owner_id=9)
+        member = SimpleNamespace(
+            id=8, name="user", guild_permissions=SimpleNamespace(manage_guild=False), roles=[]
+        )
+
+        message = await cog.execute_lidarr_request(
+            guild, member, "artist", {"artistName": "Example", "foreignArtistId": "mbid"}
+        )
+
+        self.assertIn("weekly artist request limit", message)
+        cog._lidarr_client.assert_not_awaited()
+
+    async def test_admin_bypasses_lidarr_request_limits(self):
+        cog, group = self.make_cog(settings={
+            "lidarr_identity_policy": "discord_only",
+            "lidarr_artist_hourly_limit": 1,
+            "lidarr_artist_weekly_limit": 1,
+            "lidarr_audit": [{
+                "timestamp": utc_now().isoformat(), "discord_user_id": 8,
+                "media_type": "artist", "outcome": "added",
+            }],
+        })
+        cog._lidarr_cooldowns = {(2, 8): time.monotonic()}
+        client = SimpleNamespace(
+            ensure_tag=AsyncMock(side_effect=[1, 2]), artists=AsyncMock(return_value=[]),
+            add_artist=AsyncMock(return_value={"id": 10}),
+        )
+        cog._lidarr_client = AsyncMock(return_value=("home", client, {}))
+        guild = SimpleNamespace(id=2, owner_id=9)
+        member = SimpleNamespace(
+            id=8, name="admin", guild_permissions=SimpleNamespace(manage_guild=True), roles=[]
+        )
+
+        message = await cog.execute_lidarr_request(
+            guild, member, "artist", {"artistName": "Example", "foreignArtistId": "mbid"}
+        )
+
+        self.assertIn("added", message)
+        client.add_artist.assert_awaited_once()
+        self.assertEqual(group.lidarr_audit.value[-1]["outcome"], "added")
+
+    async def test_lidarr_limits_command_sets_type_specific_limits(self):
+        cog, group = self.make_cog()
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=2), send=AsyncMock())
+
+        await Navidrome.guild_lidarr_limits.callback(cog, ctx, 30, 10, 50, 30, 100)
+
+        self.assertEqual(group.lidarr_cooldown_seconds.value, 30)
+        self.assertEqual(group.lidarr_artist_hourly_limit.value, 10)
+        self.assertEqual(group.lidarr_artist_weekly_limit.value, 50)
+        self.assertEqual(group.lidarr_release_hourly_limit.value, 30)
+        self.assertEqual(group.lidarr_release_weekly_limit.value, 100)
+        self.assertIn("artists 10/hour", ctx.send.await_args.args[0])
 
     async def test_duplicate_artist_request_adds_requester_tag_without_readding(self):
         cog, group = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
