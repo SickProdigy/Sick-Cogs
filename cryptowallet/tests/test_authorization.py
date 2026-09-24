@@ -15,11 +15,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
-from ..backend.recovery_relay import (
-    RecoveryRelayMixin,
-    _relay_signature,
-    _validated_mainnet_approval_result,
-)
+from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
 from ..backend.clanker_lifecycle import ClankerLifecycleMixin
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
@@ -43,7 +39,7 @@ from ..commands.admin import WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
-from ..core.models import IntentStatus, ProtectedMainnetApproval, TransactionIntent
+from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
@@ -603,31 +599,6 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
 
-    def test_mainnet_approval_relay_result_validation_is_strict(self):
-        result = _validated_mainnet_approval_result({
-            "status": "approved",
-            "fingerprint": "a" * 64,
-            "intent_id": "intent_7-safe",
-            "requester_id": "7",
-            "approved_at": "100",
-        })
-        self.assertEqual(result, {
-            "fingerprint": "a" * 64,
-            "intent_id": "intent_7-safe",
-            "requester_id": 7,
-            "approved_at": 100,
-        })
-        invalid_results = (
-            {"status": "pending"},
-            {"status": "approved", "fingerprint": "A" * 64, "intent_id": "x", "requester_id": 7, "approved_at": 100},
-            {"status": "approved", "fingerprint": "a" * 64, "intent_id": "bad space", "requester_id": 7, "approved_at": 100},
-            {"status": "approved", "fingerprint": "a" * 64, "intent_id": "x", "requester_id": 0, "approved_at": 100},
-        )
-        for candidate in invalid_results:
-            with self.subTest(candidate=candidate):
-                with self.assertRaisesRegex(RuntimeError, "invalid result"):
-                    _validated_mainnet_approval_result(candidate)
-
     def test_recovery_relay_signature_is_stable_and_body_bound(self):
         signature = _relay_signature(
             "s" * 32, 123, "nonce_value_123456789012", b'{"a":1}'
@@ -765,47 +736,6 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertGreaterEqual(expires_at, before + CLAIM_HANDOFF_LIFETIME_SECONDS)
         self.assertLessEqual(expires_at, int(time.time()) + CLAIM_HANDOFF_LIFETIME_SECONDS)
-
-    async def test_mainnet_approval_handoff_binds_exact_quote_and_identity(self):
-        harness = _JwtHarness(self.configuration)
-        now = int(time.time())
-        intent = TransactionIntent(
-            intent_id="mainnet-approval-7", profile_id="profile-7",
-            network=BASE_MAINNET.key,
-            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
-            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
-            value_wei=10**16, created_at=now, expires_at=now + 120,
-            estimated_gas_fee_wei=10**14, max_gas_fee_wei=2 * 10**14,
-            gas_sponsored=False,
-        )
-        expected_fingerprint = intent.approval_fingerprint()
-        token, expires_at = await harness.create_mainnet_approval_handoff(
-            7, _profile(), intent
-        )
-        claims = jwt.decode(
-            token, self.key.public_key(), algorithms=["ES256"],
-            audience="project-id", issuer="https://wallet.example.test",
-        )
-        approval = claims["sickwallet_mainnet_approval"]
-        self.assertEqual(claims["sub"], "profile-7")
-        self.assertEqual(claims["sickwallet_discord_user"], "7")
-        self.assertEqual(claims["sickwallet_application"], "42")
-        self.assertEqual(claims["sickwallet_deployment"], "deployment")
-        self.assertEqual(claims["sickwallet_purpose"], "mainnet_transaction_approval")
-        self.assertEqual(approval["chain_id"], 8453)
-        self.assertEqual(approval["network"], BASE_MAINNET.key)
-        self.assertEqual(approval["intent_id"], intent.intent_id)
-        self.assertEqual(approval["fingerprint"], expected_fingerprint)
-        self.assertEqual(approval["max_gas_fee_wei"], str(2 * 10**14))
-        self.assertEqual(expires_at, intent.expires_at)
-        serialized = str(claims).lower()
-        self.assertNotIn("private_key", serialized)
-        self.assertNotIn("credential", serialized)
-
-        intent.value_wei += 1
-        self.assertNotEqual(intent.approval_fingerprint(), expected_fingerprint)
-        with self.assertRaisesRegex(ValueError, "binding"):
-            await harness.create_mainnet_approval_handoff(8, _profile(), intent)
 
     async def test_clanker_external_handoff_is_signed_but_has_no_signer_authority(self):
         harness = _JwtHarness(self.configuration)
@@ -1109,31 +1039,6 @@ class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
-    def test_protected_mainnet_approval_rejects_mutation_expiry_and_replay(self):
-        approval = ProtectedMainnetApproval(
-            intent_id="intent-7", fingerprint="a" * 64, requester_id=7,
-            profile_id="profile-7", expires_at=200,
-        )
-        with self.assertRaisesRegex(ValueError, "does not match"):
-            approval.approve(fingerprint="b" * 64, requester_id=7, now=100)
-        with self.assertRaisesRegex(ValueError, "does not match"):
-            approval.approve(fingerprint="a" * 64, requester_id=8, now=100)
-        approved = approval.approve(
-            fingerprint="a" * 64, requester_id=7, now=100
-        )
-        restored = ProtectedMainnetApproval.from_dict(approved.to_dict())
-        self.assertEqual(restored, approved)
-        with self.assertRaisesRegex(ValueError, "unavailable"):
-            approved.approve(fingerprint="a" * 64, requester_id=7, now=101)
-        consumed = approved.consume(
-            fingerprint="a" * 64, requester_id=7, now=101
-        )
-        self.assertEqual(consumed.consumed_at, 101)
-        with self.assertRaisesRegex(ValueError, "unavailable"):
-            consumed.consume(fingerprint="a" * 64, requester_id=7, now=102)
-        with self.assertRaisesRegex(ValueError, "unavailable"):
-            approval.approve(fingerprint="a" * 64, requester_id=7, now=200)
-
     def test_mainnet_intent_discloses_real_value_and_requires_fee_maximum(self):
         intent = TransactionIntent(
             intent_id="mainnet-7", profile_id="profile-7",
@@ -1151,6 +1056,10 @@ class FailClosedTransactionTests(unittest.TestCase):
         )
         restored = TransactionIntent.from_dict(intent.to_dict())
         self.assertEqual(restored.max_gas_fee_wei, 2 * 10**14)
+        fingerprint = intent.approval_fingerprint()
+        intent.to_address = "0x1111111111111111111111111111111111111111"
+        self.assertNotEqual(intent.approval_fingerprint(), fingerprint)
+        intent.to_address = restored.to_address
         embed = WalletTransactionCommands._intent_embed(intent, BASE_MAINNET, None)
         fields = {field.name: field.value for field in embed.fields}
         self.assertIn("EXPERIMENTAL REAL-VALUE", embed.description)
@@ -1162,7 +1071,7 @@ class FailClosedTransactionTests(unittest.TestCase):
         self.assertEqual(fields["Gas payer"], "Wallet owner (native ETH)")
         self.assertEqual(fields["Recipients"], "1")
         self.assertEqual(fields["To"], f"`{intent.to_address}`")
-        self.assertIn("Discord intent", fields["Protected authorization"])
+        self.assertIn("existing protected wallet authorization", fields["Authorization"])
         self.assertIn("permanent loss", embed.footer.text)
 
         intent.max_gas_fee_wei = 0

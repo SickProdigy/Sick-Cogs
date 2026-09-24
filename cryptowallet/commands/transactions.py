@@ -330,10 +330,11 @@ class WalletTransactionCommands:
         embed.add_field(name="To", value=f"`{intent.to_address}`", inline=False)
         if not network.testnet:
             embed.add_field(
-                name="Protected authorization",
+                name="Authorization",
                 value=(
-                    "Required after this Discord intent. Recheck the network, amount, "
-                    "maximum gas, payer, and destination before signing."
+                    "The existing protected wallet authorization must remain active. "
+                    "This Discord confirmation applies only to the displayed network, "
+                    "amount, maximum gas, payer, and destination."
                 ),
                 inline=False,
             )

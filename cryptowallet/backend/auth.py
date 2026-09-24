@@ -8,8 +8,6 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-from ..core.models import IntentStatus, TransactionIntent
-from ..core.networks import BASE_MAINNET
 from ..core.validation import normalize_evm_address, normalize_solana_address
 
 
@@ -209,63 +207,6 @@ class JwtAuthMixin:
             claims,
             configuration["private_key"],
             algorithm="ES256",
-            headers={"kid": configuration["kid"], "typ": "JWT"},
-        )
-        return token, expires_at
-
-    async def create_mainnet_approval_handoff(
-        self, discord_user_id: int, profile: dict, intent: TransactionIntent
-    ) -> tuple[str, int]:
-        """Sign one immutable real-value quote for one-time companion review."""
-        configuration = await self.jwt_configuration()
-        if configuration is None:
-            raise RuntimeError("The protected companion signing key is not configured")
-        deployment_id = str(await self.config.deployment_id() or "")
-        application_id = getattr(self.bot.user, "id", None)
-        profile_id = str(profile.get("profile_id") or "")
-        stored_user_id = int(profile.get("discord_user_id", 0) or 0)
-        now = int(time.time())
-        if (
-            discord_user_id <= 0
-            or stored_user_id != discord_user_id
-            or not profile_id
-            or intent.profile_id != profile_id
-            or intent.network != BASE_MAINNET.key
-            or intent.status is not IntentStatus.PENDING
-            or intent.expires_at <= now
-            or intent.value_wei <= 0
-            or intent.max_gas_fee_wei <= 0
-            or intent.estimated_gas_fee_wei < 0
-            or intent.estimated_gas_fee_wei > intent.max_gas_fee_wei
-            or not deployment_id
-            or application_id is None
-        ):
-            raise ValueError("The mainnet approval binding is invalid")
-        payload = intent.approval_payload()
-        try:
-            payload["from_address"] = normalize_evm_address(intent.from_address)
-            payload["to_address"] = normalize_evm_address(intent.to_address)
-        except ValueError as exc:
-            raise ValueError("The mainnet approval address binding is invalid") from exc
-        payload["chain_id"] = BASE_MAINNET.chain_id
-        payload["fingerprint"] = intent.approval_fingerprint()
-        expires_at = min(intent.expires_at, now + CLAIM_HANDOFF_LIFETIME_SECONDS)
-        claims = {
-            "iss": configuration["issuer"],
-            "aud": configuration["audience"],
-            "sub": profile_id,
-            "iat": now,
-            "nbf": now,
-            "exp": expires_at,
-            "jti": secrets.token_urlsafe(18),
-            "sickwallet_purpose": "mainnet_transaction_approval",
-            "sickwallet_deployment": deployment_id,
-            "sickwallet_application": str(application_id),
-            "sickwallet_discord_user": str(discord_user_id),
-            "sickwallet_mainnet_approval": payload,
-        }
-        token = jwt.encode(
-            claims, configuration["private_key"], algorithm="ES256",
             headers={"kid": configuration["kid"], "typ": "JWT"},
         )
         return token, expires_at
