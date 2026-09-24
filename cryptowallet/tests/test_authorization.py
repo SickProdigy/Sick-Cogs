@@ -16,6 +16,11 @@ from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
+from ..backend.totp_security import (
+    TotpSecurityMixin,
+    protect_totp_secret,
+    reveal_totp_secret,
+)
 from ..backend.clanker_lifecycle import ClankerLifecycleMixin
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
@@ -197,6 +202,51 @@ class _ApprovalStore:
         for key in keys[:-1]:
             target = target.setdefault(key, {})
         target[keys[-1]] = value
+
+
+class _TotpValue:
+    def __init__(self, value=None):
+        self.value = value
+
+    def __call__(self):
+        return self
+
+    def __await__(self):
+        async def read():
+            return copy.deepcopy(self.value)
+
+        return read().__await__()
+
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    async def set(self, value):
+        self.value = copy.deepcopy(value)
+
+    async def clear(self):
+        self.value = None
+
+
+class _TotpHarness(TotpSecurityMixin):
+    def __init__(self, key: bytes):
+        encoded = base64.urlsafe_b64encode(key).rstrip(b"=").decode("ascii")
+        self.bot = SimpleNamespace(
+            get_shared_api_tokens=AsyncMock(
+                return_value={"encryption_key": encoded}
+            )
+        )
+        self.totp_state = _TotpValue()
+        user_config = SimpleNamespace(
+            profile=_Value(_profile()),
+            totp_security=self.totp_state,
+        )
+        self.config = SimpleNamespace(
+            deployment_id=_Value("deployment"),
+            user_from_id=lambda user_id: user_config,
+        )
 
 
 class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
@@ -2901,6 +2951,88 @@ class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(harness.usage_pending["cdp_writes"], 1)
         self.assertEqual(harness.usage_pending["wallet_operations_estimated"], 3)
+
+
+class TotpSecurityStateTests(unittest.IsolatedAsyncioTestCase):
+    SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+    KEY = bytes(range(32))
+
+    def test_ciphertext_is_bound_to_deployment_user_and_profile(self):
+        state = protect_totp_secret(
+            self.KEY,
+            self.SECRET,
+            deployment_id="deployment",
+            user_id=7,
+            profile_id="profile-7",
+            enrolled_at=1_700_000_000,
+        )
+        self.assertFalse(state["enabled"])
+        self.assertNotIn(self.SECRET, repr(state))
+        self.assertEqual(
+            reveal_totp_secret(
+                self.KEY,
+                state,
+                deployment_id="deployment",
+                user_id=7,
+                profile_id="profile-7",
+            ),
+            self.SECRET,
+        )
+        with self.assertRaises(ValueError):
+            reveal_totp_secret(
+                self.KEY,
+                state,
+                deployment_id="deployment",
+                user_id=8,
+                profile_id="profile-7",
+            )
+
+    def test_tampered_ciphertext_fails_authentication(self):
+        state = protect_totp_secret(
+            self.KEY,
+            self.SECRET,
+            deployment_id="deployment",
+            user_id=7,
+            profile_id="profile-7",
+            enrolled_at=1_700_000_000,
+        )
+        state["ciphertext"] = state["ciphertext"][:-1] + (
+            "A" if state["ciphertext"][-1] != "A" else "B"
+        )
+        with self.assertRaises(ValueError):
+            reveal_totp_secret(
+                self.KEY,
+                state,
+                deployment_id="deployment",
+                user_id=7,
+                profile_id="profile-7",
+            )
+
+    async def test_enrollment_requires_proof_and_consumes_each_counter_once(self):
+        harness = _TotpHarness(self.KEY)
+        timestamp = 1_700_000_000
+        await harness.stage_totp_enrollment(
+            7, "profile-7", self.SECRET, now=timestamp
+        )
+        self.assertFalse(harness.totp_state.value["enabled"])
+        code = totp_code(self.SECRET, timestamp)
+        self.assertTrue(
+            await harness.activate_totp_enrollment(7, code, now=timestamp)
+        )
+        self.assertTrue(harness.totp_state.value["enabled"])
+        self.assertFalse(await harness.verify_user_totp(7, code, now=timestamp))
+        next_code = totp_code(self.SECRET, timestamp + 30)
+        self.assertTrue(
+            await harness.verify_user_totp(7, next_code, now=timestamp + 30)
+        )
+
+    async def test_disable_removes_all_enrollment_state(self):
+        harness = _TotpHarness(self.KEY)
+        await harness.stage_totp_enrollment(
+            7, "profile-7", self.SECRET, now=1_700_000_000
+        )
+        await harness.disable_user_totp(7)
+        self.assertIsNone(harness.totp_state.value)
 
 
 class TotpValidationTests(unittest.TestCase):

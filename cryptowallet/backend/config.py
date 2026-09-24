@@ -109,6 +109,7 @@ def create_config(cog) -> Config:
         security_locked=False,
         security_locked_at=0,
         security_lock_source=None,
+        totp_security=None,
     )
     return config
 

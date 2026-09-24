@@ -6,7 +6,7 @@ import discord
 
 from redbot.core import commands
 
-from .backend import JwtAuthMixin, RecoveryRelayMixin
+from .backend import JwtAuthMixin, RecoveryRelayMixin, TotpSecurityMixin
 from .backend.clanker_lifecycle import ClankerLifecycleMixin
 from .backend.confirmation import ConfirmationProcessorMixin
 from .backend.config import WalletConfigMixin, create_config
@@ -31,6 +31,7 @@ class CryptoWallet(
     WalletAdminCommands,
     WalletConfigMixin,
     WalletProvisioningMixin,
+    TotpSecurityMixin,
     JwtAuthMixin,
     RecoveryRelayMixin,
     commands.Cog,
@@ -58,6 +59,10 @@ class CryptoWallet(
             await self.initialize_jwt_auth()
         except Exception:
             log.exception("The CryptoWallet custom-auth signing key could not be initialized")
+        try:
+            await self.initialize_totp_security()
+        except Exception:
+            log.exception("The CryptoWallet TOTP encryption key could not be initialized")
 
     def cog_unload(self):
         self.confirmation_processor_task.cancel()
