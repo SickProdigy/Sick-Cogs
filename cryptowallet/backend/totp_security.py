@@ -198,6 +198,12 @@ class TotpSecurityMixin:
                 state["enabled"] = True
             return True
 
+    async def user_totp_enabled(self, user_id: int) -> bool:
+        """Return whether valid-looking state requires step-up verification."""
+
+        state = await self.config.user_from_id(user_id).totp_security()
+        return bool(isinstance(state, dict) and state.get("enabled") is True)
+
     async def disable_user_totp(self, user_id: int) -> None:
         """Remove encrypted TOTP material and replay state."""
 

@@ -39,6 +39,39 @@ class WalletHistoryView(discord.ui.View):
         )
 
 
+class WalletTotpModal(discord.ui.Modal, title="Verify wallet send"):
+    """Private authenticator challenge bound to one displayed transaction."""
+
+    code = discord.ui.TextInput(
+        label="6-digit authenticator code",
+        placeholder="123456",
+        min_length=6,
+        max_length=6,
+    )
+
+    def __init__(self, view, fingerprint: str):
+        super().__init__(timeout=120)
+        self.view = view
+        self.fingerprint = fingerprint
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if self.view.processing:
+            await interaction.response.send_message(
+                "This transaction is already being checked.", ephemeral=True
+            )
+            return
+        self.view.processing = True
+        try:
+            await self.view.cog.approve_intent_interaction(
+                interaction,
+                self.view,
+                totp_code=str(self.code.value),
+                totp_fingerprint=self.fingerprint,
+            )
+        finally:
+            self.view.processing = False
+
+
 class WalletIntentView(discord.ui.View):
     """Owner-bound approval controls for one pending transaction intent."""
 
@@ -87,7 +120,7 @@ class WalletIntentView(discord.ui.View):
             return
         self.processing = True
         try:
-            await self.cog.approve_intent_interaction(interaction, self)
+            await self.cog.begin_approve_intent_interaction(interaction, self)
         finally:
             self.processing = False
 

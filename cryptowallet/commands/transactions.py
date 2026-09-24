@@ -18,7 +18,7 @@ from ..core.validation import (
 )
 from .constants import INTENT_LIFETIME_SECONDS, WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
-from .views import WalletIntentView
+from .views import WalletIntentView, WalletTotpModal
 
 
 class WalletTransactionCommands:
@@ -456,8 +456,22 @@ class WalletTransactionCommands:
         )
         await interaction.followup.send("Transaction rejected. No funds were moved.", ephemeral=True)
 
-    async def approve_intent_interaction(
+    async def begin_approve_intent_interaction(
         self, interaction: discord.Interaction, view: WalletIntentView
+    ) -> None:
+        """Open a private step-up modal only when this wallet opted in."""
+
+        intent = await self._stored_intent(view.user_id, view.intent_id)
+        if intent is not None and await self.user_totp_enabled(view.user_id):
+            await interaction.response.send_modal(
+                WalletTotpModal(view, intent.approval_fingerprint())
+            )
+            return
+        await self.approve_intent_interaction(interaction, view)
+
+    async def approve_intent_interaction(
+        self, interaction: discord.Interaction, view: WalletIntentView, *,
+        totp_code: str | None = None, totp_fingerprint: str | None = None,
     ) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
         if await self.config.user_from_id(view.user_id).security_locked():
@@ -638,6 +652,38 @@ class WalletTransactionCommands:
                 ephemeral=True,
             )
             return
+        totp_enabled = await self.user_totp_enabled(view.user_id)
+        if totp_enabled:
+            if (
+                not totp_code
+                or not totp_fingerprint
+                or not secrets.compare_digest(
+                    totp_fingerprint, intent.approval_fingerprint()
+                )
+            ):
+                await interaction.followup.send(
+                    "Authenticator verification is required for this exact transaction. "
+                    "Press Approve and enter a new code.",
+                    ephemeral=True,
+                )
+                return
+            if not await self.verify_user_totp(
+                view.user_id, totp_code, now=int(time.time())
+            ):
+                await interaction.followup.send(
+                    "That authenticator code is invalid, expired, or already used. "
+                    "Nothing was submitted.",
+                    ephemeral=True,
+                )
+                return
+        elif totp_code is not None or totp_fingerprint is not None:
+            await interaction.followup.send(
+                "Your authenticator settings changed. Nothing was submitted; review "
+                "the transaction and press Approve again.",
+                ephemeral=True,
+            )
+            return
+
         async with self.config.user_from_id(view.user_id).intents() as intents:
             current_data = intents.get(intent.intent_id)
             try:

@@ -37,7 +37,12 @@ from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
 from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
-from ..commands.views import WalletAuthorizationView, WalletIntentView, WalletRevocationView
+from ..commands.views import (
+    WalletAuthorizationView,
+    WalletIntentView,
+    WalletRevocationView,
+    WalletTotpModal,
+)
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
 from ..commands.admin import WalletAdminCommands
@@ -1055,6 +1060,56 @@ class UserDataDeletionTests(unittest.IsolatedAsyncioTestCase):
         output = "\n".join(logs.output)
         self.assertIn("error_class=RuntimeError", output)
         self.assertNotIn("secret provider detail", output)
+
+
+class TotpApprovalRoutingTests(unittest.IsolatedAsyncioTestCase):
+    def _intent(self):
+        return TransactionIntent(
+            intent_id="totp-intent",
+            profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1,
+            created_at=1_700_000_000,
+            expires_at=1_800_000_000,
+        )
+
+    async def test_opted_in_approval_opens_private_fingerprint_bound_modal(self):
+        intent = self._intent()
+        view = SimpleNamespace(user_id=7, intent_id=intent.intent_id)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_modal=AsyncMock())
+        )
+        cog = SimpleNamespace(
+            _stored_intent=AsyncMock(return_value=intent),
+            user_totp_enabled=AsyncMock(return_value=True),
+            approve_intent_interaction=AsyncMock(),
+        )
+        await WalletTransactionCommands.begin_approve_intent_interaction(
+            cog, interaction, view
+        )
+        modal = interaction.response.send_modal.await_args.args[0]
+        self.assertIsInstance(modal, WalletTotpModal)
+        self.assertEqual(modal.fingerprint, intent.approval_fingerprint())
+        cog.approve_intent_interaction.assert_not_awaited()
+
+    async def test_non_opted_in_approval_preserves_existing_flow(self):
+        intent = self._intent()
+        view = SimpleNamespace(user_id=7, intent_id=intent.intent_id)
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(send_modal=AsyncMock())
+        )
+        cog = SimpleNamespace(
+            _stored_intent=AsyncMock(return_value=intent),
+            user_totp_enabled=AsyncMock(return_value=False),
+            approve_intent_interaction=AsyncMock(),
+        )
+        await WalletTransactionCommands.begin_approve_intent_interaction(
+            cog, interaction, view
+        )
+        interaction.response.send_modal.assert_not_awaited()
+        cog.approve_intent_interaction.assert_awaited_once_with(interaction, view)
 
 
 class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
@@ -3024,6 +3079,19 @@ class TotpSecurityStateTests(unittest.IsolatedAsyncioTestCase):
         next_code = totp_code(self.SECRET, timestamp + 30)
         self.assertTrue(
             await harness.verify_user_totp(7, next_code, now=timestamp + 30)
+        )
+
+    async def test_enabled_but_profile_mismatched_state_cannot_bypass_step_up(self):
+        harness = _TotpHarness(self.KEY)
+        await harness.stage_totp_enrollment(
+            7, "profile-7", self.SECRET, now=1_700_000_000
+        )
+        harness.totp_state.value["enabled"] = True
+        harness.totp_state.value["profile_id"] = "different-profile"
+        self.assertTrue(await harness.user_totp_enabled(7))
+        code = totp_code(self.SECRET, 1_700_000_000)
+        self.assertFalse(
+            await harness.verify_user_totp(7, code, now=1_700_000_000)
         )
 
     async def test_disable_removes_all_enrollment_state(self):
