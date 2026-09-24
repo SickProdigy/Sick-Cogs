@@ -6,7 +6,7 @@ from navidrome.client import NavidromeError
 from navidrome.navidrome import (
     LidarrConfirmView, LidarrRequestModal, LidarrRequestTypeView, LidarrResultView, Navidrome,
     exact_local_match, lidarr_confirmation_embed, lidarr_requester_tag,
-    navidrome_config_permission,
+    navidrome_config_permission, normalize_musicbrainz_query,
 )
 from navidrome.setup import (
     AccountCreateModal, AccountManagerView, ConnectionModal, DirectAccountCreateModal,
@@ -337,6 +337,47 @@ class NavidromeSetupTests(unittest.IsolatedAsyncioTestCase):
 
         view = ctx.send.await_args.kwargs["view"]
         self.assertEqual([item.label for item in view.children], ["Release"])
+
+    def test_musicbrainz_ids_and_links_are_normalized_for_lidarr(self):
+        mb_id = "D97C418F-0002-4465-B1EF-4081A828A4F7"
+        expected = "lidarr:d97c418f-0002-4465-b1ef-4081a828a4f7"
+
+        self.assertEqual(normalize_musicbrainz_query("artist", mb_id), (expected, None))
+        self.assertEqual(
+            normalize_musicbrainz_query(
+                "artist", f"https://musicbrainz.org/artist/{mb_id}"
+            ),
+            (expected, None),
+        )
+        self.assertEqual(
+            normalize_musicbrainz_query(
+                "album", f"https://musicbrainz.org/release-group/{mb_id}"
+            ),
+            (expected, None),
+        )
+
+    def test_musicbrainz_link_type_must_match_request_type(self):
+        mb_id = "d97c418f-0002-4465-b1ef-4081a828a4f7"
+        _, error = normalize_musicbrainz_query(
+            "album", f"https://musicbrainz.org/artist/{mb_id}"
+        )
+        self.assertIn("release-group", error)
+
+    async def test_raw_musicbrainz_id_is_sent_as_lidarr_lookup(self):
+        cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})
+        navidrome = SimpleNamespace(search=AsyncMock(return_value={"artists": [], "albums": []}))
+        candidate = {"artistName": "Example", "foreignArtistId": "mbid"}
+        lidarr = SimpleNamespace(lookup=AsyncMock(return_value=[candidate]))
+        cog._guild_client = AsyncMock(return_value=("home", navidrome))
+        cog._lidarr_client = AsyncMock(return_value=("home", lidarr, {}))
+        member = SimpleNamespace(
+            id=8, name="user", guild_permissions=SimpleNamespace(manage_guild=False), roles=[]
+        )
+        mb_id = "d97c418f-0002-4465-b1ef-4081a828a4f7"
+
+        await cog.prepare_lidarr_request(SimpleNamespace(id=2), member, "artist", mb_id)
+
+        lidarr.lookup.assert_awaited_once_with("artist", f"lidarr:{mb_id}")
 
     async def test_song_alias_searches_releases_and_returns_result_picker(self):
         cog, _ = self.make_cog(settings={"lidarr_identity_policy": "discord_only"})

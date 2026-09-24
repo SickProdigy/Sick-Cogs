@@ -45,6 +45,32 @@ async def navidrome_config_permission(ctx: commands.Context) -> bool:
     )
 
 
+MUSICBRAINZ_ID_PATTERN = (
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def normalize_musicbrainz_query(media_type: str, query: str) -> Tuple[str, Optional[str]]:
+    value = query.strip().strip("<>")
+    match = re.fullmatch(
+        rf"https?://(?:www\.)?musicbrainz\.org/(artist|release-group)/"
+        rf"({MUSICBRAINZ_ID_PATTERN})(?:[/?#].*)?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        entity, mb_id = match.groups()
+        expected = "artist" if media_type == "artist" else "release-group"
+        if entity.casefold() != expected:
+            label = "artist" if media_type == "artist" else "release-group"
+            return value, f"Use a MusicBrainz {label} ID for this request type."
+        return f"lidarr:{mb_id.lower()}", None
+    if re.fullmatch(MUSICBRAINZ_ID_PATTERN, value):
+        return f"lidarr:{value.lower()}", None
+    return value, None
+
+
 def normalized_music_name(value: Any) -> str:
     normalized = unicodedata.normalize("NFKD", str(value or ""))
     ascii_value = normalized.encode("ascii", "ignore").decode().casefold()
@@ -121,7 +147,7 @@ def musicbrainz_url(media_type: str, candidate: Dict[str, Any]) -> Optional[str]
         or ""
     )
     if not re.fullmatch(
-        r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+        MUSICBRAINZ_ID_PATTERN,
         foreign_id,
     ):
         return None
@@ -957,6 +983,10 @@ class Navidrome(commands.Cog):
         query = query.strip()
         if len(query) < 2 or len(query) > 200:
             return "Enter a search between 2 and 200 characters.", None, None
+        display_query = query
+        query, query_error = normalize_musicbrainz_query(media_type, query)
+        if query_error:
+            return query_error, None, None
         account, error = await self._request_identity(guild, member)
         if error:
             return error, None, None
@@ -985,7 +1015,7 @@ class Navidrome(commands.Cog):
             return None, lidarr_confirmation_embed(member, account, media_type, candidate), LidarrConfirmView(
                 self, member.id, media_type, candidate
             )
-        safe_query = discord.utils.escape_markdown(discord.utils.escape_mentions(query))
+        safe_query = discord.utils.escape_markdown(discord.utils.escape_mentions(display_query))
         return (
             f'Lidarr found {len(candidates)} results for "{safe_query}". '
             "Choose the correct one.", None,
@@ -1000,7 +1030,8 @@ class Navidrome(commands.Cog):
         """Search Navidrome, then request an artist or release through Lidarr.
 
         Use `artist` for an artist, or `release` for an album, EP, or single.
-        `album`, `single`, and `song` are accepted as release aliases.
+        `album`, `single`, and `song` are accepted as release aliases. Raw MusicBrainz
+        IDs and MusicBrainz artist/release-group links are recognized automatically.
 
         Examples:
         `!navi req artist Willie Nelson`
