@@ -61,11 +61,14 @@ from ..core.networks import (
 )
 from ..core.validation import (
     format_atomic_amount,
+    generate_totp_secret,
     normalize_address_for_network,
     normalize_solana_address,
     normalize_solana_signature,
     parse_asset_amount,
     parse_native_amount,
+    totp_code,
+    verify_totp_code,
 )
 from ..core.polymarket import (
     POLYMARKET_CHAIN_ID,
@@ -2898,6 +2901,43 @@ class ProviderUsageTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(harness.usage_pending["cdp_writes"], 1)
         self.assertEqual(harness.usage_pending["wallet_operations_estimated"], 3)
+
+
+class TotpValidationTests(unittest.TestCase):
+    RFC_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+
+    def test_rfc_6238_sha1_vector_uses_six_digit_authenticator_code(self):
+        self.assertEqual(totp_code(self.RFC_SECRET, 59), "287082")
+
+    def test_generated_secret_has_160_bits_of_entropy(self):
+        secret = generate_totp_secret()
+        self.assertRegex(secret, r"^[A-Z2-7]{32}$")
+        self.assertEqual(len(base64.b32decode(secret)), 20)
+
+    def test_verification_accepts_bounded_skew_and_returns_counter(self):
+        timestamp = 1_700_000_000
+        previous_code = totp_code(self.RFC_SECRET, timestamp - 30)
+        matched_counter = verify_totp_code(self.RFC_SECRET, previous_code, timestamp)
+        self.assertEqual(matched_counter, timestamp // 30 - 1)
+        old_code = totp_code(self.RFC_SECRET, timestamp - 60)
+        self.assertIsNone(verify_totp_code(self.RFC_SECRET, old_code, timestamp))
+
+    def test_verification_rejects_replayed_counter(self):
+        timestamp = 1_700_000_000
+        code = totp_code(self.RFC_SECRET, timestamp)
+        counter = verify_totp_code(self.RFC_SECRET, code, timestamp)
+        self.assertIsNotNone(counter)
+        self.assertIsNone(
+            verify_totp_code(self.RFC_SECRET, code, timestamp, last_counter=counter)
+        )
+
+    def test_verification_rejects_malformed_codes_and_secrets(self):
+        self.assertIsNone(verify_totp_code(self.RFC_SECRET, "12345", 59))
+        with self.assertRaises(ValueError):
+            totp_code("not-base32", 59)
+        self.assertIsNone(verify_totp_code("not-base32", "287082", 59))
+        with self.assertRaises(ValueError):
+            verify_totp_code(self.RFC_SECRET, "287082", 59, window=2)
 
 
 class ProviderCooldownTests(unittest.IsolatedAsyncioTestCase):

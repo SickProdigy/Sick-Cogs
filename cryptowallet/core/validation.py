@@ -1,4 +1,9 @@
+import base64
+import hashlib
+import hmac
 import re
+import secrets
+import struct
 
 from .networks import ChainFamily, Network
 
@@ -10,10 +15,79 @@ BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 ETH_AMOUNT_RE = re.compile(r"^(?P<whole>[0-9]+)(?:\.(?P<fraction>[0-9]+))?$")
 WEI_PER_ETH = 10**18
 MAX_UINT256 = 2**256 - 1
+TOTP_SECRET_RE = re.compile(r"^[A-Z2-7]{32,}$")
+TOTP_PERIOD_SECONDS = 30
+TOTP_DIGITS = 6
 
 
 class InvalidAmount(ValueError):
     """Raised when a native-token amount cannot be represented safely."""
+
+
+def generate_totp_secret() -> str:
+    """Generate a 160-bit Base32 secret compatible with standard authenticator apps."""
+
+    return base64.b32encode(secrets.token_bytes(20)).decode("ascii").rstrip("=")
+
+
+def _decode_totp_secret(secret: str) -> bytes:
+    """Decode a canonical Base32 TOTP secret without accepting weak secrets."""
+
+    normalized = secret.strip().upper()
+    if not TOTP_SECRET_RE.fullmatch(normalized):
+        raise ValueError("TOTP secrets must be canonical Base32 with at least 160 bits.")
+    padding = "=" * (-len(normalized) % 8)
+    try:
+        decoded = base64.b32decode(normalized + padding, casefold=False)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise ValueError("The TOTP secret is not valid Base32.") from exc
+    if len(decoded) < 20:
+        raise ValueError("TOTP secrets must contain at least 160 bits of entropy.")
+    return decoded
+
+
+def totp_code(secret: str, timestamp: int | float) -> str:
+    """Return the six-digit RFC 6238 SHA-1 code for a Unix timestamp."""
+
+    if isinstance(timestamp, bool) or timestamp < 0:
+        raise ValueError("The TOTP timestamp must be non-negative.")
+    counter = int(timestamp) // TOTP_PERIOD_SECONDS
+    digest = hmac.new(
+        _decode_totp_secret(secret), struct.pack(">Q", counter), hashlib.sha1
+    ).digest()
+    offset = digest[-1] & 0x0F
+    truncated = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return f"{truncated % (10**TOTP_DIGITS):0{TOTP_DIGITS}d}"
+
+
+def verify_totp_code(
+    secret: str,
+    code: str,
+    timestamp: int | float,
+    *,
+    last_counter: int | None = None,
+    window: int = 1,
+) -> int | None:
+    """Verify a TOTP code and return its counter, rejecting reused counters."""
+
+    if window not in (0, 1):
+        raise ValueError("The TOTP verification window must be zero or one step.")
+    if not isinstance(code, str) or not re.fullmatch(r"[0-9]{6}", code):
+        return None
+    if isinstance(timestamp, bool) or timestamp < 0:
+        return None
+    current_counter = int(timestamp) // TOTP_PERIOD_SECONDS
+    for offset in (0, -1, 1) if window else (0,):
+        counter = current_counter + offset
+        if counter < 0 or (last_counter is not None and counter <= last_counter):
+            continue
+        try:
+            candidate = totp_code(secret, counter * TOTP_PERIOD_SECONDS)
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if hmac.compare_digest(candidate, code):
+            return counter
+    return None
 
 
 def normalize_evm_address(value: str) -> str:
