@@ -123,7 +123,7 @@ class TokenFactoryDraftView(discord.ui.View):
     async def edit_details(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(TokenDetailsModal(self))
 
-    @discord.ui.button(label="Use Discord Wallet", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Deploy to Discord Wallet", style=discord.ButtonStyle.success)
     async def discord_deploy(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
@@ -145,7 +145,7 @@ class TokenFactoryDraftView(discord.ui.View):
             embed=confirmation.embed(), view=confirmation, ephemeral=True
         )
 
-    @discord.ui.button(label="Use External Wallet", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Deploy with External Wallet", style=discord.ButtonStyle.primary)
     async def external_deploy(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):

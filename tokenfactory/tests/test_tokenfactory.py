@@ -180,6 +180,14 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(view.children[0].label, "Deploy token")
 
+    def test_wallet_route_buttons_describe_the_deployment_action(self):
+        from ..views import TokenFactoryDraftView
+
+        view = TokenFactoryDraftView(SimpleNamespace(), self.user)
+        labels = {item.label for item in view.children if item.label}
+        self.assertIn("Deploy to Discord Wallet", labels)
+        self.assertIn("Deploy with External Wallet", labels)
+
     async def test_mixed_crypto_wallet_version_has_actionable_error(self):
         cog = SimpleNamespace(_cryptowallet=lambda: object())
         with self.assertRaisesRegex(

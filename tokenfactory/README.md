@@ -32,9 +32,9 @@ deployment is valid.
 decimals without provisioning a wallet. After saving the draft, the member chooses one of two
 routes:
 
-- **Use Discord Wallet** resolves the member's Base Sepolia CryptoWallet smart account, uses it to
+- **Deploy to Discord Wallet** resolves the member's Base Sepolia CryptoWallet smart account, uses it to
   sign the deployment, and sends the full supply there.
-- **Use External Wallet** opens a three-minute protected companion-page handoff for an injected
+- **Deploy with External Wallet** opens a three-minute protected companion-page handoff for an injected
   EIP-1193 browser wallet such as MetaMask or Trust Wallet. The external wallet signs the pinned
   factory call and pays Base Sepolia gas. A blank recipient sends the full supply to the signer;
   an explicitly entered valid address receives it instead.

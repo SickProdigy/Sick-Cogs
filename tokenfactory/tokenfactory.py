@@ -30,7 +30,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.5.1"
+    __version__ = "0.5.2"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
