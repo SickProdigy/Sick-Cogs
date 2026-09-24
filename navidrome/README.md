@@ -17,6 +17,13 @@ connection name, the Navidrome URL, and a dedicated Navidrome administrator user
 The form tests both library access and native user management before saving anything, then selects
 that connection for the Discord server.
 
+An owner-managed profile is more than a nickname for a Navidrome URL. It is the bot owner's complete
+backend choice for a guild: one Navidrome server plus its optional Lidarr connection and Lidarr
+defaults. Different profiles may therefore use different Lidarr servers, root folders, quality
+profiles, and metadata profiles. For example, a `sicknavi` profile can use a Lossless quality
+profile while a `family` profile uses Standard. Multiple Discord guilds may select the same owner
+profile, or each guild may select a different one.
+
 The equivalent text-command fallback is:
 
 ```text
@@ -158,7 +165,9 @@ namespace so credentials cannot cross profiles. Then validate the root folder an
 When only one Navidrome profile exists, omit every argument: the command selects that profile,
 polls Lidarr, uses its first accessible root folder and configured default profiles, and infers HTTP
 from the stored URL. With multiple profiles, provide the Navidrome profile name. Optional explicit
-values override discovery.
+values override discovery. Those root, quality, and metadata choices are saved on that
+specific Navidrome profile; configuring `sicknavi` does not change the Lidarr defaults attached to
+`family`.
 
 For a guild-managed public HTTPS connection, use **Connect Lidarr** in `[p]navidromeset setup`. Its
 URL and API key stay in the guild's isolated shared-token namespace. The form validates the root
