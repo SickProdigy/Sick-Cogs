@@ -233,16 +233,24 @@ class TokenDeploymentConfirmView(discord.ui.View):
             item.disabled = True
         await interaction.response.edit_message(view=self)
         try:
-            result = await self.cog.submit_token_deployment(self.user, self.draft, self.execution_terms)
+            result = await self.cog.submit_token_deployment(
+                self.user,
+                self.draft,
+                self.execution_terms,
+                guild_id=getattr(interaction, "guild_id", None),
+            )
         except Exception as exc:
             await interaction.followup.send(f"Token deployment failed: {exc}", ephemeral=True)
             return
+        deployment = await self.cog.command_hint(
+            "tokenfactory deployment", guild=getattr(interaction, "guild", None)
+        )
         if result.get("already_deployed"):
             embed = discord.Embed(
                 title="Token already deployed",
                 description=(
                     "The reviewed token already exists on Base Sepolia. "
-                    "Verify it to save it in your TokenFactory history."
+                    "Automatic verification will save it in your TokenFactory history."
                 ),
                 color=discord.Color.blurple(),
             )
@@ -253,7 +261,10 @@ class TokenDeploymentConfirmView(discord.ui.View):
             )
             embed.add_field(
                 name="Next step",
-                value="Run `tokenfactory deployment` to verify and record it.",
+                value=(
+                    "Automatic verification is running. If it cannot finish, "
+                    f"you can recover with `{deployment}`."
+                ),
                 inline=False,
             )
         else:
@@ -278,9 +289,9 @@ class TokenDeploymentConfirmView(discord.ui.View):
             embed.add_field(
                 name="Next step",
                 value=(
-                    "Wait a few seconds, then run `tokenfactory deployment`. "
-                    "That command verifies this pending deployment and saves it to "
-                    "your token history."
+                    "Automatic verification is running. You will receive one private "
+                    "success card after confirmation. If it cannot finish, use "
+                    f"`{deployment}`."
                 ),
                 inline=False,
             )
@@ -346,5 +357,9 @@ class FactoryDeploymentView(discord.ui.View):
             )
             if result.get("transaction_hash"):
                 message += f"\nTransaction: `{result['transaction_hash']}`"
-            message += "\nRun `tokenfactoryset verifyfactory` after confirmation."
+            verify = await self.cog.command_hint(
+                "tokenfactoryset verifyfactory",
+                guild=getattr(interaction, "guild", None),
+            )
+            message += f"\nRun `{verify}` after confirmation."
         await interaction.followup.send(message, ephemeral=True)

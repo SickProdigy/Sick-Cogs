@@ -1,6 +1,8 @@
 import asyncio
-import discord
+import inspect
 import json
+
+import discord
 import secrets
 import time
 import uuid
@@ -28,7 +30,11 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.5.0"
+    __version__ = "0.5.1"
+
+    DISCORD_WATCH_INTERVAL = 4
+    DISCORD_WATCH_SECONDS = 15 * 60
+    TERMINAL_PROVIDER_STATES = {"complete", "dropped", "failed", "ambiguous"}
 
     def execution_terms(self, *, route: str, operation: str = "token") -> dict:
         if route not in {"discord", "external"} or operation not in {"token", "factory"}:
@@ -58,7 +64,9 @@ class TokenFactory(commands.Cog):
             pending_deployment=None,
             deployed_tokens=[],
         )
-        self.external_result_tasks = set()
+        self.deployment_tasks = set()
+        self.discord_watchers = {}
+        self.deployment_locks = {}
         self.config.register_global(
             deployment_enabled=False,
             factory_address=None,
@@ -69,8 +77,71 @@ class TokenFactory(commands.Cog):
         )
 
     def cog_unload(self):
-        for task in self.external_result_tasks:
+        for task in self.deployment_tasks:
             task.cancel()
+
+    async def cog_load(self):
+        task = asyncio.create_task(self._restore_discord_watchers())
+        self._track_task(task)
+
+    def _track_task(self, task: asyncio.Task) -> None:
+        self.deployment_tasks.add(task)
+        task.add_done_callback(self.deployment_tasks.discard)
+
+    async def command_hint(self, command: str, *, ctx=None, guild=None) -> str:
+        """Render a live command with a configured text prefix."""
+        prefix = str(getattr(ctx, "clean_prefix", "") or "")
+        if not prefix:
+            prefixes = self.bot.get_valid_prefixes(guild)
+            if inspect.isawaitable(prefixes):
+                prefixes = await prefixes
+            prefix = next(
+                (str(item) for item in prefixes
+                 if item and not str(item).lstrip().startswith("<@")),
+                "!",
+            )
+        return f"{prefix}{command}"
+
+    def _guild_for_id(self, guild_id):
+        if not guild_id:
+            return None
+        getter = getattr(self.bot, "get_guild", None)
+        return getter(int(guild_id)) if callable(getter) else None
+
+    async def _user_for_id(self, user_id: int):
+        user = self.bot.get_user(user_id)
+        if user is not None:
+            return user
+        try:
+            return await self.bot.fetch_user(user_id)
+        except Exception:
+            return None
+
+    async def _restore_discord_watchers(self) -> None:
+        await self.bot.wait_until_red_ready()
+        for user_id, data in (await self.config.all_users()).items():
+            pending = data.get("pending_deployment")
+            if (
+                isinstance(pending, dict)
+                and pending.get("route") == "discord"
+                and pending.get("request_id")
+                and pending.get("watcher_notice_state") != "claimed"
+            ):
+                self._schedule_discord_watcher(int(user_id))
+
+    def _schedule_discord_watcher(self, user_id: int) -> None:
+        current = self.discord_watchers.get(user_id)
+        if current is not None and not current.done():
+            return
+        task = asyncio.create_task(self._watch_discord_deployment(user_id))
+        self.discord_watchers[user_id] = task
+        self._track_task(task)
+
+        def discard(completed):
+            if self.discord_watchers.get(user_id) is completed:
+                self.discord_watchers.pop(user_id, None)
+
+        task.add_done_callback(discard)
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
         await self.config.user_from_id(user_id).clear()
@@ -145,8 +216,7 @@ class TokenFactory(commands.Cog):
         task = asyncio.create_task(
             self._watch_external_deployment(user, handle, expires_at)
         )
-        self.external_result_tasks.add(task)
-        task.add_done_callback(self.external_result_tasks.discard)
+        self._track_task(task)
         base = str(await wallet.config.approval_base_url()).rstrip("/")
         return f"{base}/tokenfactory.html#handoff={quote(handle, safe='')}"
 
@@ -191,7 +261,7 @@ class TokenFactory(commands.Cog):
                         "A factory deployment operation is already "
                         f"{status['provider_status']}: "
                         f"`{status['user_operation_hash']}`. Run "
-                        "`tokenfactoryset verifyfactory` instead."
+                        f"`{await self.command_hint('tokenfactoryset verifyfactory')}` instead."
                     )
             attempt_id = str(uuid.uuid4())
             operation = factory_operation(creation_code)
@@ -225,7 +295,7 @@ class TokenFactory(commands.Cog):
         )
 
     async def submit_token_deployment(
-        self, user, draft: TokenDraft, execution_terms: dict
+        self, user, draft: TokenDraft, execution_terms: dict, *, guild_id=None
     ) -> dict:
         if not await self.deployment_available():
             raise RuntimeError("Token deployment is disabled or emergency-paused.")
@@ -262,6 +332,7 @@ class TokenFactory(commands.Cog):
                     draft, str(pending["request_id"]), draft.owner_address
                 )
                 if verified.get("deployed"):
+                    self._schedule_discord_watcher(user.id)
                     return {**verified, "already_deployed": True}
                 status = await wallet.tokenfactory_operation_status(
                     user, str(pending["user_operation_hash"])
@@ -269,9 +340,10 @@ class TokenFactory(commands.Cog):
                 pending.update(status)
                 await user_config.pending_deployment.set(pending)
                 if status["provider_status"] not in {"complete", "dropped", "failed"}:
+                    deployment = await self.command_hint("tokenfactory deployment")
                     raise RuntimeError(
                         f"Your existing token deployment is {status['provider_status']}. "
-                        "Run `tokenfactory deployment` to refresh it."
+                        f"Run `{deployment}` to refresh it."
                     )
             elif pending.get("provider_status") not in {"complete", "dropped", "failed"}:
                 raise RuntimeError(
@@ -295,8 +367,153 @@ class TokenFactory(commands.Cog):
             "user_operation_hash": result["user_operation_hash"],
             "transaction_hash": result.get("transaction_hash"),
             "submitted_at": int(time.time()),
+            "guild_id": guild_id,
         })
+        self._schedule_discord_watcher(user.id)
         return result
+
+    async def _claim_watcher_notice(self, user_config, request_id: str, kind: str):
+        pending = await user_config.pending_deployment()
+        if (
+            not isinstance(pending, dict)
+            or str(pending.get("request_id")) != request_id
+            or pending.get("watcher_notice_state") == "claimed"
+        ):
+            return None
+        pending["watcher_notice_state"] = "claimed"
+        pending["watcher_notice_kind"] = kind
+        await user_config.pending_deployment.set(pending)
+        return pending
+
+    async def _watch_discord_deployment(self, user_id: int) -> None:
+        user = await self._user_for_id(user_id)
+        if user is None:
+            return
+        user_config = self.config.user_from_id(user_id)
+        pending = await user_config.pending_deployment()
+        if not isinstance(pending, dict) or pending.get("route") != "discord":
+            return
+        request_id = str(pending.get("request_id") or "")
+        if not request_id:
+            return
+        submitted_at = int(pending.get("submitted_at", 0) or time.time())
+        deadline = submitted_at + self.DISCORD_WATCH_SECONDS
+        last_error = None
+        while int(time.time()) <= deadline:
+            await asyncio.sleep(self.DISCORD_WATCH_INTERVAL)
+            lock = self.deployment_locks.setdefault(user_id, asyncio.Lock())
+            async with lock:
+                current = await user_config.pending_deployment()
+                if (
+                    not isinstance(current, dict)
+                    or str(current.get("request_id")) != request_id
+                    or current.get("watcher_notice_state") == "claimed"
+                ):
+                    return
+                try:
+                    result = await self.verify_token_deployment(
+                        user, preserve_pending=True
+                    )
+                    last_error = None
+                except Exception as exc:
+                    last_error = exc
+                    continue
+                if result.get("deployed"):
+                    claimed = await self._claim_watcher_notice(
+                        user_config, request_id, "success"
+                    )
+                    if claimed is None:
+                        return
+                    try:
+                        await user.send(
+                            embed=await self._deployment_success_embed(result, claimed)
+                        )
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+                    await user_config.pending_deployment.set(None)
+                    await user_config.deployment_draft.set(None)
+                    return
+                status = str(result.get("provider_status") or "pending").lower()
+                if status in self.TERMINAL_PROVIDER_STATES:
+                    await self._send_watcher_fallback(
+                        user, user_config, request_id, current, status
+                    )
+                    return
+        reason = "verification-failed" if last_error is not None else "timed-out"
+        async with self.deployment_locks.setdefault(user_id, asyncio.Lock()):
+            current = await user_config.pending_deployment()
+            await self._send_watcher_fallback(
+                user, user_config, request_id, current, reason
+            )
+
+    async def _send_watcher_fallback(
+        self, user, user_config, request_id: str, pending, reason: str
+    ) -> None:
+        if not isinstance(pending, dict):
+            return
+        claimed = await self._claim_watcher_notice(
+            user_config, request_id, "fallback"
+        )
+        if claimed is None:
+            return
+        guild = self._guild_for_id(claimed.get("guild_id"))
+        command = await self.command_hint("tokenfactory deployment", guild=guild)
+        try:
+            await user.send(
+                "Automatic token confirmation could not finish "
+                f"(**{reason}**). Your pending deployment is still recoverable; "
+                f"run `{command}` to check it safely."
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    async def _deployment_success_embed(self, result: dict, pending: dict):
+        guild = self._guild_for_id(pending.get("guild_id"))
+        history = await self.command_hint("tokenfactory tokens", guild=guild)
+        scale = 10 ** int(result["decimals"])
+        whole, remainder = divmod(int(result["supply_atomic"]), scale)
+        supply = str(whole)
+        if remainder:
+            supply += f".{remainder:0{result['decimals']}d}".rstrip("0")
+        contract = str(result["contract_address"])
+        operation = str(result.get("user_operation_hash") or "")
+        transaction = str(result.get("transaction_hash") or "")
+        embed = discord.Embed(
+            title="Token deployment confirmed",
+            description=(
+                "Your token was independently verified and added to TokenFactory "
+                "history and CryptoWallet's community registry."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Token", value=f"{result['name']} ({result['symbol']})", inline=False
+        )
+        embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        embed.add_field(name="Fixed supply", value=supply, inline=True)
+        embed.add_field(name="Decimals", value=str(result["decimals"]), inline=True)
+        embed.add_field(
+            name="Recipient / owner", value=f"`{result['owner_address']}`", inline=False
+        )
+        embed.add_field(
+            name="Token contract",
+            value=f"[`{contract}`](https://sepolia.basescan.org/address/{contract})",
+            inline=False,
+        )
+        if transaction:
+            embed.add_field(
+                name="Deployment transaction",
+                value=f"[`{transaction}`](https://sepolia.basescan.org/tx/{transaction})",
+                inline=False,
+            )
+        elif operation:
+            embed.add_field(name="User operation", value=f"`{operation}`", inline=False)
+        embed.add_field(
+            name="History", value=f"Run `{history}` to view verified deployments.",
+            inline=False,
+        )
+        embed.set_footer(text="Base Sepolia testnet · automatic confirmation")
+        return embed
 
     async def _watch_external_deployment(
         self, user, handle: str, expires_at: int
@@ -323,7 +540,11 @@ class TokenFactory(commands.Cog):
                     "to the community token registry."
                 )
             except Exception as exc:
-                await user.send(f"Token deployment verification failed: {exc}")
+                deployment = await self.command_hint("tokenfactory deployment")
+                await user.send(
+                    f"Token deployment verification failed: {exc} "
+                    f"Run `{deployment}` to recover it."
+                )
             return
 
     async def verify_external_deployment(
@@ -376,7 +597,9 @@ class TokenFactory(commands.Cog):
         await user_config.deployment_draft.set(None)
         return {"deployed": True, **record}
 
-    async def verify_token_deployment(self, user) -> dict:
+    async def verify_token_deployment(
+        self, user, *, preserve_pending: bool = False
+    ) -> dict:
         user_config = self.config.user(user)
         pending = await user_config.pending_deployment()
         if not isinstance(pending, dict) or not pending.get("request_id"):
@@ -401,6 +624,8 @@ class TokenFactory(commands.Cog):
             "contract_address": verified["token_address"],
             "parameters_hash": verified["parameters_hash"],
             "transaction_hash": pending.get("transaction_hash"),
+            "user_operation_hash": pending.get("user_operation_hash"),
+            "deployment_route": "discord",
             "deployed_at": int(time.time()),
         }
         async with user_config.deployed_tokens() as deployments:
@@ -412,8 +637,16 @@ class TokenFactory(commands.Cog):
             "name": draft.name,
             "decimals": draft.decimals,
         })
-        await user_config.pending_deployment.set(None)
-        await user_config.deployment_draft.set(None)
+        if preserve_pending:
+            pending.update({
+                "provider_status": "complete",
+                "transaction_hash": record.get("transaction_hash"),
+                "verified_at": record["deployed_at"],
+            })
+            await user_config.pending_deployment.set(pending)
+        else:
+            await user_config.pending_deployment.set(None)
+            await user_config.deployment_draft.set(None)
         return {"deployed": True, **record}
 
     async def _wallet_context_for_user(self, user) -> dict:
@@ -464,9 +697,12 @@ class TokenFactory(commands.Cog):
             pending = await self.config.user(ctx.author).pending_deployment()
             if isinstance(pending, dict) and pending.get("route") == "external":
                 if not transaction_hash or not recipient:
+                    command = await self.command_hint(
+                        "tokenfactory deployment <transaction_hash> <recipient_address>",
+                        ctx=ctx,
+                    )
                     await ctx.send(
-                        "After the external wallet submits, use "
-                        "`tokenfactory deployment <transaction_hash> <recipient_address>`. "
+                        f"After the external wallet submits, use `{command}`. "
                         "The protected page provides the exact command."
                     )
                     return
@@ -474,15 +710,18 @@ class TokenFactory(commands.Cog):
                     ctx.author, transaction_hash, recipient
                 )
             else:
-                result = await self.verify_token_deployment(ctx.author)
+                lock = self.deployment_locks.setdefault(ctx.author.id, asyncio.Lock())
+                async with lock:
+                    result = await self.verify_token_deployment(ctx.author)
         except Exception as exc:
             await ctx.send(f"Token deployment verification failed: {exc}")
             return
         if result.get("deployed"):
+            history = await self.command_hint("tokenfactory tokens", ctx=ctx)
             await ctx.send(
                 f"Verified **{result['name']} ({result['symbol']})** at "
                 f"`{result['contract_address']}` on Base Sepolia. It was added to the "
-                "community token registry. Run `tokenfactory tokens` to view all of "
+                f"community token registry. Run `{history}` to view all of "
                 "your verified deployments."
             )
             return
@@ -492,7 +731,8 @@ class TokenFactory(commands.Cog):
         if transaction:
             message += f" Transaction: `{transaction}`"
         if status in {"complete", "dropped", "failed"}:
-            message += " No matching token is on-chain; reopen `tokenfactory create` to retry."
+            create = await self.command_hint("tokenfactory create", ctx=ctx)
+            message += f" No matching token is on-chain; reopen `{create}` to retry."
         else:
             message += " No matching token is confirmed yet; check again shortly."
         await ctx.send(message)
@@ -505,9 +745,9 @@ class TokenFactory(commands.Cog):
 
         deployments = await self.config.user(ctx.author).deployed_tokens()
         if not deployments:
+            create = await self.command_hint("tokenfactory create", ctx=ctx)
             await ctx.send(
-                "You have no verified TokenFactory tokens yet. Start with "
-                "`tokenfactory create`."
+                f"You have no verified TokenFactory tokens yet. Start with `{create}`."
             )
             return
         valid = [item for item in deployments if isinstance(item, dict)]
@@ -663,9 +903,10 @@ class TokenFactory(commands.Cog):
         if not state.get("deployed"):
             pending = await self.config.pending_factory_operation()
             if not isinstance(pending, dict) or not pending.get("user_operation_hash"):
+                deploy = await self.command_hint("tokenfactoryset deployfactory", ctx=ctx)
                 await ctx.send(
                     "The pinned factory is not confirmed and no tracked deployment "
-                    "operation exists. Run `tokenfactoryset deployfactory` to start one."
+                    f"operation exists. Run `{deploy}` to start one."
                 )
                 return
             if pending.get("discord_user_id") != ctx.author.id:
