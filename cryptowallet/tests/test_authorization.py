@@ -39,7 +39,7 @@ from ..commands.admin import WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
-from ..core.models import IntentStatus, TransactionIntent
+from ..core.models import IntentStatus, ProtectedMainnetApproval, TransactionIntent
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
@@ -1080,6 +1080,31 @@ class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
+    def test_protected_mainnet_approval_rejects_mutation_expiry_and_replay(self):
+        approval = ProtectedMainnetApproval(
+            intent_id="intent-7", fingerprint="a" * 64, requester_id=7,
+            profile_id="profile-7", expires_at=200,
+        )
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            approval.approve(fingerprint="b" * 64, requester_id=7, now=100)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            approval.approve(fingerprint="a" * 64, requester_id=8, now=100)
+        approved = approval.approve(
+            fingerprint="a" * 64, requester_id=7, now=100
+        )
+        restored = ProtectedMainnetApproval.from_dict(approved.to_dict())
+        self.assertEqual(restored, approved)
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            approved.approve(fingerprint="a" * 64, requester_id=7, now=101)
+        consumed = approved.consume(
+            fingerprint="a" * 64, requester_id=7, now=101
+        )
+        self.assertEqual(consumed.consumed_at, 101)
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            consumed.consume(fingerprint="a" * 64, requester_id=7, now=102)
+        with self.assertRaisesRegex(ValueError, "unavailable"):
+            approval.approve(fingerprint="a" * 64, requester_id=7, now=200)
+
     def test_mainnet_intent_discloses_real_value_and_requires_fee_maximum(self):
         intent = TransactionIntent(
             intent_id="mainnet-7", profile_id="profile-7",

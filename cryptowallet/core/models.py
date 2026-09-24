@@ -1,6 +1,7 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
+import secrets
 from enum import Enum
 from typing import Any
 
@@ -181,4 +182,78 @@ class TransactionIntent:
             user_operation_hash=data.get("user_operation_hash"),
             transaction_hash=data.get("transaction_hash"),
             block_number=data.get("block_number"),
+        )
+
+@dataclass(frozen=True, slots=True)
+class ProtectedMainnetApproval:
+    """Durable one-time approval evidence; never signer authority."""
+
+    intent_id: str
+    fingerprint: str
+    requester_id: int
+    profile_id: str
+    expires_at: int
+    approved_at: int | None = None
+    consumed_at: int | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not self.intent_id
+            or len(self.fingerprint) != 64
+            or any(character not in "0123456789abcdef" for character in self.fingerprint)
+            or self.requester_id <= 0
+            or not self.profile_id
+            or self.expires_at <= 0
+        ):
+            raise ValueError("Protected mainnet approval binding is invalid.")
+
+    def approve(
+        self, *, fingerprint: str, requester_id: int, now: int
+    ) -> "ProtectedMainnetApproval":
+        if self.approved_at is not None or self.consumed_at is not None or now >= self.expires_at:
+            raise ValueError("Protected mainnet approval is unavailable.")
+        if requester_id != self.requester_id or not secrets.compare_digest(
+            fingerprint, self.fingerprint
+        ):
+            raise ValueError("Protected mainnet approval binding does not match.")
+        return replace(self, approved_at=now)
+
+    def consume(
+        self, *, fingerprint: str, requester_id: int, now: int
+    ) -> "ProtectedMainnetApproval":
+        if (
+            self.approved_at is None
+            or self.consumed_at is not None
+            or now >= self.expires_at
+            or requester_id != self.requester_id
+            or not secrets.compare_digest(fingerprint, self.fingerprint)
+        ):
+            raise ValueError("Protected mainnet approval is unavailable or mismatched.")
+        return replace(self, consumed_at=now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "intent_id": self.intent_id,
+            "fingerprint": self.fingerprint,
+            "requester_id": self.requester_id,
+            "profile_id": self.profile_id,
+            "expires_at": self.expires_at,
+            "approved_at": self.approved_at,
+            "consumed_at": self.consumed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ProtectedMainnetApproval":
+        return cls(
+            intent_id=str(data["intent_id"]),
+            fingerprint=str(data["fingerprint"]),
+            requester_id=int(data["requester_id"]),
+            profile_id=str(data["profile_id"]),
+            expires_at=int(data["expires_at"]),
+            approved_at=(
+                int(data["approved_at"]) if data.get("approved_at") is not None else None
+            ),
+            consumed_at=(
+                int(data["consumed_at"]) if data.get("consumed_at") is not None else None
+            ),
         )
