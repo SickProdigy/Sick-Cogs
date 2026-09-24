@@ -15,7 +15,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from redbot.core import commands
 
 from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
-from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
+from ..backend.recovery_relay import (
+    RecoveryRelayMixin,
+    _relay_signature,
+    _validated_mainnet_approval_result,
+)
 from ..backend.clanker_lifecycle import ClankerLifecycleMixin
 from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
@@ -598,6 +602,31 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             sent["embed"].description,
         )
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
+
+    def test_mainnet_approval_relay_result_validation_is_strict(self):
+        result = _validated_mainnet_approval_result({
+            "status": "approved",
+            "fingerprint": "a" * 64,
+            "intent_id": "intent_7-safe",
+            "requester_id": "7",
+            "approved_at": "100",
+        })
+        self.assertEqual(result, {
+            "fingerprint": "a" * 64,
+            "intent_id": "intent_7-safe",
+            "requester_id": 7,
+            "approved_at": 100,
+        })
+        invalid_results = (
+            {"status": "pending"},
+            {"status": "approved", "fingerprint": "A" * 64, "intent_id": "x", "requester_id": 7, "approved_at": 100},
+            {"status": "approved", "fingerprint": "a" * 64, "intent_id": "bad space", "requester_id": 7, "approved_at": 100},
+            {"status": "approved", "fingerprint": "a" * 64, "intent_id": "x", "requester_id": 0, "approved_at": 100},
+        )
+        for candidate in invalid_results:
+            with self.subTest(candidate=candidate):
+                with self.assertRaisesRegex(RuntimeError, "invalid result"):
+                    _validated_mainnet_approval_result(candidate)
 
     def test_recovery_relay_signature_is_stable_and_body_bound(self):
         signature = _relay_signature(
