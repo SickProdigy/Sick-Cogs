@@ -327,13 +327,25 @@ class WalletAdminCommands:
         gate = "enabled" if policy.get("enabled") else "disabled"
         pause = "active" if policy.get("paused", True) else "inactive"
         reviewed = ", ".join(enabled_capabilities) or "none"
+        limits = policy.get("limits_atomic") or {}
+        limit_values = []
+        for key in ("per_transaction", "per_user_day", "installation_day"):
+            try:
+                value = int(limits.get(key, 0))
+            except (TypeError, ValueError):
+                value = 0
+            limit_values.append(
+                format_atomic_amount(value, BASE_MAINNET) if value > 0 else "blocked"
+            )
         await ctx.send(
             "**Base mainnet experimental gate**\n"
             f"Gate: `{gate}`\n"
             f"Emergency pause: `{pause}`\n"
             "Access: `bot owner only`\n"
             "Release: `experimental — real funds may be permanently lost`\n"
-            f"Reviewed capabilities: `{reviewed}`"
+            f"Reviewed capabilities: `{reviewed}`\n"
+            f"Limits (transaction / user-day / installation-day): "
+            f"`{limit_values[0]} / {limit_values[1]} / {limit_values[2]} ETH`"
         )
 
     @walletset_mainnet.command(name="pause")
@@ -345,6 +357,45 @@ class WalletAdminCommands:
             policy["paused"] = True
         await ctx.send(
             "Base mainnet is disabled and emergency-paused. Testnet operation is unchanged."
+        )
+
+    @walletset_mainnet.command(name="limits")
+    @commands.is_owner()
+    async def walletset_mainnet_limits(
+        self, ctx: commands.Context, per_transaction: str = None,
+        per_user_day: str = None, installation_day: str = None,
+    ):
+        """Show or atomically set all experimental Base mainnet limits."""
+        values = (per_transaction, per_user_day, installation_day)
+        if all(value is None for value in values):
+            await WalletAdminCommands.walletset_mainnet_status.callback(self, ctx)
+            return
+        if any(value is None for value in values):
+            await ctx.send(
+                "Provide all three limits: per-transaction, per-user daily, and "
+                "installation-wide daily amounts in ETH."
+            )
+            return
+        try:
+            parsed = tuple(parse_native_amount(value, BASE_MAINNET) for value in values)
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
+        if not parsed[0] <= parsed[1] <= parsed[2]:
+            await ctx.send(
+                "Limits must satisfy per-transaction ≤ per-user daily ≤ "
+                "installation-wide daily."
+            )
+            return
+        async with self.config.base_mainnet_policy() as policy:
+            policy["limits_atomic"] = {
+                "per_transaction": str(parsed[0]),
+                "per_user_day": str(parsed[1]),
+                "installation_day": str(parsed[2]),
+            }
+        await ctx.send(
+            "Saved fail-closed Base mainnet limits. This does not enable any "
+            "mainnet capability or remove the emergency pause."
         )
 
     @walletset_mainnet.command(name="enable")

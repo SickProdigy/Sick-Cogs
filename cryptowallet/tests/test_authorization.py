@@ -21,7 +21,12 @@ from ..backend.confirmation import (
     CONFIRMATION_STALE_SECONDS,
     ConfirmationProcessorMixin,
 )
-from ..backend.config import MAINNET_ENABLE_ACKNOWLEDGEMENT, WalletConfigMixin
+from ..backend.config import (
+    BASE_MAINNET_POLICY_DEFAULT,
+    MAINNET_ENABLE_ACKNOWLEDGEMENT,
+    WalletConfigMixin,
+    base_mainnet_operation_allowed,
+)
 from ..backend.usage import ProviderUsageMixin
 from ..cryptowallet import CryptoWallet
 from ..commands.account import WalletAccountCommands
@@ -1299,6 +1304,49 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             profile["accounts"][0],
         )
 
+    def test_mainnet_policy_requires_every_gate_and_limit(self):
+        policy = copy.deepcopy(BASE_MAINNET_POLICY_DEFAULT)
+
+        allowed, reason = base_mainnet_operation_allowed(
+            policy, "send", actor_is_owner=True, value_atomic=1
+        )
+        self.assertFalse(allowed)
+        self.assertIn("disabled", reason)
+
+        policy.update(enabled=True, paused=False)
+        policy["capabilities"]["send"] = True
+        allowed, reason = base_mainnet_operation_allowed(
+            policy, "send", actor_is_owner=True, value_atomic=1
+        )
+        self.assertFalse(allowed)
+        self.assertIn("positive", reason)
+
+        policy["limits_atomic"] = {
+            "per_transaction": "10",
+            "per_user_day": "20",
+            "installation_day": "30",
+        }
+        cases = (
+            ({"actor_is_owner": False, "value_atomic": 1}, "bot-owner-only"),
+            ({"actor_is_owner": True, "value_atomic": 11}, "per-transaction"),
+            ({"actor_is_owner": True, "value_atomic": 5, "user_daily_atomic": 16}, "per-user"),
+            ({"actor_is_owner": True, "value_atomic": 5, "installation_daily_atomic": 26}, "installation-wide"),
+        )
+        for arguments, expected in cases:
+            with self.subTest(expected=expected):
+                allowed, reason = base_mainnet_operation_allowed(
+                    policy, "send", **arguments
+                )
+                self.assertFalse(allowed)
+                self.assertIn(expected, reason)
+
+        allowed, reason = base_mainnet_operation_allowed(
+            policy, "send", actor_is_owner=True, value_atomic=5,
+            user_daily_atomic=10, installation_daily_atomic=20,
+        )
+        self.assertTrue(allowed)
+        self.assertIn("passed", reason)
+
     async def test_mainnet_owner_controls_remain_fail_closed(self):
         policy = _ApprovalStore()
         policy.data.update({
@@ -1330,6 +1378,29 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         policy.data["enabled"] = True
         policy.data["paused"] = False
         await WalletAdminCommands.walletset_mainnet_pause.callback(cog, ctx)
+        self.assertFalse(policy.data["enabled"])
+        self.assertTrue(policy.data["paused"])
+
+    async def test_mainnet_limits_are_atomic_and_keep_gate_closed(self):
+        policy = _ApprovalStore()
+        policy.data.update({"enabled": False, "paused": True})
+        cog = SimpleNamespace(config=SimpleNamespace(base_mainnet_policy=policy))
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletAdminCommands.walletset_mainnet_limits.callback(
+            cog, ctx, "0.01", "0.005", "0.02"
+        )
+        self.assertNotIn("limits_atomic", policy.data)
+        self.assertIn("must satisfy", ctx.send.await_args.args[0])
+
+        await WalletAdminCommands.walletset_mainnet_limits.callback(
+            cog, ctx, "0.001", "0.005", "0.01"
+        )
+        self.assertEqual(policy.data["limits_atomic"], {
+            "per_transaction": "1000000000000000",
+            "per_user_day": "5000000000000000",
+            "installation_day": "10000000000000000",
+        })
         self.assertFalse(policy.data["enabled"])
         self.assertTrue(policy.data["paused"])
 

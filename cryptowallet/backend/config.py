@@ -15,6 +15,11 @@ BASE_MAINNET_POLICY_DEFAULT = {
     "experimental": True,
     "enabled_by": None,
     "enabled_at": 0,
+    "limits_atomic": {
+        "per_transaction": "0",
+        "per_user_day": "0",
+        "installation_day": "0",
+    },
     "capabilities": {
         "balance": False,
         "send": False,
@@ -26,6 +31,47 @@ BASE_MAINNET_POLICY_DEFAULT = {
         "sponsorship": False,
     },
 }
+
+
+def base_mainnet_operation_allowed(
+    policy: dict, capability: str, *, actor_is_owner: bool, value_atomic: int,
+    user_daily_atomic: int = 0, installation_daily_atomic: int = 0,
+) -> tuple[bool, str]:
+    """Evaluate every production gate; missing or malformed state denies access."""
+    if not isinstance(policy, dict) or not policy.get("enabled"):
+        return False, "Base mainnet is disabled."
+    if policy.get("paused", True):
+        return False, "Base mainnet is emergency-paused."
+    if not policy.get("owner_only", True) or not actor_is_owner:
+        return False, "Base mainnet experimental access is bot-owner-only."
+    if not policy.get("experimental", False):
+        return False, "Base mainnet experimental labeling is invalid."
+    capabilities = policy.get("capabilities")
+    if not isinstance(capabilities, dict) or not capabilities.get(capability, False):
+        return False, f"Base mainnet {capability} capability is disabled."
+    limits = policy.get("limits_atomic")
+    if not isinstance(limits, dict):
+        return False, "Base mainnet limits are not configured."
+    try:
+        per_transaction = int(limits.get("per_transaction", 0))
+        per_user_day = int(limits.get("per_user_day", 0))
+        installation_day = int(limits.get("installation_day", 0))
+        value_atomic = int(value_atomic)
+        user_daily_atomic = int(user_daily_atomic)
+        installation_daily_atomic = int(installation_daily_atomic)
+    except (TypeError, ValueError):
+        return False, "Base mainnet limits are invalid."
+    if min(per_transaction, per_user_day, installation_day) <= 0:
+        return False, "Base mainnet limits must all be positive."
+    if value_atomic <= 0 or min(user_daily_atomic, installation_daily_atomic) < 0:
+        return False, "Base mainnet accounting values are invalid."
+    if value_atomic > per_transaction:
+        return False, "Base mainnet per-transaction limit exceeded."
+    if user_daily_atomic + value_atomic > per_user_day:
+        return False, "Base mainnet per-user daily limit exceeded."
+    if installation_daily_atomic + value_atomic > installation_day:
+        return False, "Base mainnet installation-wide daily limit exceeded."
+    return True, "Base mainnet policy checks passed."
 
 
 def create_config(cog) -> Config:
