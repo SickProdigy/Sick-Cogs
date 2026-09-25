@@ -296,9 +296,27 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         )
         embed = RocketLeague._blast_embed([tournament])
         lines = embed.fields[0].value.splitlines()
-        self.assertEqual(lines[0], "📍 Paris La Défense Arena, France")
-        self.assertTrue(lines[1].startswith("📅 "))
+        self.assertEqual(lines[0], "**Location:** Paris La Défense Arena, France")
+        self.assertTrue(lines[1].startswith("**Dates:** "))
         self.assertIn("View on BLAST", lines[2])
+
+    def test_recent_results_footer_uses_configured_prefix(self):
+        async def scenario():
+            from rocketleague.blast import BlastTournament
+
+            cog = RocketLeague.__new__(RocketLeague)
+            cog.bot = SimpleNamespace()
+            cog._recent_blast_tournaments = AsyncMock(
+                return_value=[BlastTournament("open", "RLCS Open", 100, 200, None)]
+            )
+            cog._cached_result_sources = AsyncMock(return_value=[])
+            ctx = SimpleNamespace(clean_prefix="!", guild=object(), send=AsyncMock())
+            await cog._send_recent_events(ctx, 5)
+            return ctx.send.await_args.kwargs["embed"].footer.text
+
+        footer = asyncio.run(scenario())
+        self.assertIn("!rlcs results <ID>", footer)
+        self.assertIn("!rlcs events", footer)
 
     def test_cached_event_resolution_accepts_slug_and_short_id(self):
         async def scenario():
