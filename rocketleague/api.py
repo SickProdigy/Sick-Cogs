@@ -29,6 +29,8 @@ class RLCSEvent:
     start_at: Optional[int]
     entrants: Optional[int]
     entrant_size_min: Optional[int]
+    state: Optional[int]
+    slug: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,9 @@ class RLCSTournament:
     city: Optional[str]
     state: Optional[str]
     country: Optional[str]
+    tournament_state: Optional[int]
+    registration_closes_at: Optional[int]
+    registration_open: Optional[bool]
     events: tuple[RLCSEvent, ...]
 
     @property
@@ -156,9 +161,10 @@ class StartGGClient:
                 filter: {upcoming: true, videogameIds: [$gameId]}
               }) {
                 nodes {
-                  id name slug startAt endAt isOnline city addrState countryCode
+                  id name slug startAt endAt isOnline city addrState countryCode state
+                  registrationClosesAt eventRegistrationClosesAt isRegistrationOpen
                   events(filter: {videogameId: [$gameId]}) {
-                    id name startAt numEntrants entrantSizeMin
+                    id name slug startAt state numEntrants entrantSizeMin
                   }
                 }
               }
@@ -176,9 +182,10 @@ class StartGGClient:
             """
             query RocketLeagueTournament($slug: String!, $gameId: [ID]!) {
               tournament(slug: $slug) {
-                id name slug startAt endAt isOnline city addrState countryCode
+                id name slug startAt endAt isOnline city addrState countryCode state
+                registrationClosesAt eventRegistrationClosesAt isRegistrationOpen
                 events(filter: {videogameId: $gameId}) {
-                  id name startAt numEntrants entrantSizeMin
+                  id name slug startAt state numEntrants entrantSizeMin
                 }
               }
             }
@@ -208,6 +215,8 @@ class StartGGClient:
                 start_at=_optional_int(event.get("startAt")),
                 entrants=_optional_int(event.get("numEntrants")),
                 entrant_size_min=_optional_int(event.get("entrantSizeMin")),
+                state=_optional_int(event.get("state")),
+                slug=_optional_str(event.get("slug")),
             )
             for event in (node.get("events") or [])
             if event.get("id") is not None
@@ -222,6 +231,16 @@ class StartGGClient:
             city=_optional_str(node.get("city")),
             state=_optional_str(node.get("addrState")),
             country=_optional_str(node.get("countryCode")),
+            tournament_state=_optional_int(node.get("state")),
+            registration_closes_at=(
+                _optional_int(node.get("eventRegistrationClosesAt"))
+                or _optional_int(node.get("registrationClosesAt"))
+            ),
+            registration_open=(
+                bool(node.get("isRegistrationOpen"))
+                if node.get("isRegistrationOpen") is not None
+                else None
+            ),
             events=events,
         )
 
