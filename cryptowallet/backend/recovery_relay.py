@@ -94,6 +94,64 @@ class RecoveryRelayMixin:
             raise RuntimeError("The recovery relay could not be reached") from exc
         return handle
 
+    async def poll_totp_enrollment_result(self, handle: str) -> str | None:
+        """Consume one browser-submitted RSA ciphertext through authenticated HTTPS."""
+
+        status = await self.recovery_relay_status()
+        if not status["configured"]:
+            raise RuntimeError("The one-time relay is not configured")
+        if not handle or len(handle) > 128:
+            raise RuntimeError("The TOTP enrollment result handle is invalid")
+        tokens = await self.bot.get_shared_api_tokens(RECOVERY_RELAY_TOKEN_NAMESPACE)
+        secret = str(tokens.get("secret") or "").strip()
+        payload = {
+            "operation": "poll",
+            "handoff_digest": hashlib.sha256(handle.encode("utf-8")).hexdigest(),
+        }
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        timestamp = int(time.time())
+        nonce = secrets.token_urlsafe(24)
+        path = "/api/totp-enrollment.php"
+        canonical = "\n".join((
+            "v1", str(timestamp), nonce, "POST", path, hashlib.sha256(body).hexdigest(),
+        ))
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-SickWallet-Timestamp": str(timestamp),
+            "X-SickWallet-Nonce": nonce,
+            "X-SickWallet-Signature": hmac.new(
+                secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+            ).hexdigest(),
+        }
+        timeout = aiohttp.ClientTimeout(total=RECOVERY_RELAY_TIMEOUT_SECONDS)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{status['approval_base_url']}{path}", data=body, headers=headers
+                ) as response:
+                    raw = await response.content.read(
+                        RECOVERY_RELAY_MAX_RESPONSE_BYTES + 1
+                    )
+                    if len(raw) > RECOVERY_RELAY_MAX_RESPONSE_BYTES:
+                        raise RuntimeError("The TOTP enrollment relay returned too much data")
+                    if response.status == 204:
+                        return None
+                    result = json.loads(raw.decode("utf-8"))
+                    ciphertext = str(result.get("ciphertext") or "")
+                    if (
+                        response.status != 200
+                        or result.get("status") != "submitted"
+                        or not ciphertext
+                        or len(ciphertext) > 1024
+                    ):
+                        raise RuntimeError("The TOTP enrollment relay rejected the poll")
+                    return ciphertext
+        except (
+            aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError
+        ) as exc:
+            raise RuntimeError("The TOTP enrollment relay could not be reached") from exc
+
     async def poll_tokenfactory_result(self, handle: str) -> dict | None:
         """Poll one external TokenFactory handoff result through authenticated HTTPS."""
 

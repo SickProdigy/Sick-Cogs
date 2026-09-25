@@ -176,6 +176,7 @@ class JwtAuthMixin:
 
         claim_names = {
             "tokenfactory_external": "sickwallet_tokenfactory",
+            "totp_enroll": "sickwallet_totp",
         }
         claim_name = claim_names.get(purpose)
         if claim_name is None or not isinstance(payload, dict):

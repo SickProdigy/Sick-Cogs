@@ -832,6 +832,28 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "binding"):
             await harness.create_clanker_external_handoff(7, handoff)
 
+    async def test_totp_enrollment_handoff_contains_only_public_metadata(self):
+        harness = _JwtHarness(self.configuration)
+        payload = {
+            "version": 1,
+            "profile_id": "profile-7",
+            "result_handle": "opaque-result-handle",
+            "public_jwk": {
+                "kty": "RSA", "alg": "RSA-OAEP-256", "n": "public", "e": "AQAB"
+            },
+        }
+        token, _ = await harness.create_external_companion_handoff(
+            7, "totp_enroll", payload
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "totp_enroll")
+        self.assertEqual(claims["sickwallet_totp"], payload)
+        self.assertNotIn("secret", repr(claims).lower())
+        self.assertNotIn("sickwallet_accounts", claims)
+
     async def test_authorization_handoff_accepts_requested_default_days(self):
         harness = _JwtHarness(self.configuration)
         token, _ = await harness.create_authorization_handoff(
