@@ -821,7 +821,15 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @commands.bot_has_permissions(embed_links=True)
     async def rlcs_results(self, ctx: commands.Context, *, reference: str):
-        """Show cached final placements for a retained event or start.gg tournament."""
+        """Show detailed cached results for a completed Rocket League event.
+
+        ``reference`` accepts an event ID from ``[p]rlcs events``, a BLAST tournament
+        slug or URL, or a configured start.gg tournament URL. Official BLAST results
+        may include final standings, championship-day scores, player ratings, power
+        rankings, and event details. Matched start.gg events show cached standings.
+
+        Use ``[p]rlcs events`` to find retained event IDs and slugs.
+        """
         await self._send_results(ctx, reference)
 
     @rlcs.command(name="events", aliases=["list"])
@@ -1458,7 +1466,15 @@ class RocketLeague(commands.Cog):
     @commands.guild_only()
     @commands.bot_has_permissions(embed_links=True)
     async def rocketleague_rlcs_results(self, ctx: commands.Context, *, reference: str):
-        """Show cached final placements for a retained event or start.gg tournament."""
+        """Show detailed cached results for a completed Rocket League event.
+
+        ``reference`` accepts an event ID from ``[p]rlcs events``, a BLAST tournament
+        slug or URL, or a configured start.gg tournament URL. Official BLAST results
+        may include final standings, championship-day scores, player ratings, power
+        rankings, and event details. Matched start.gg events show cached standings.
+
+        Use ``[p]rlcs events`` to find retained event IDs and slugs.
+        """
         await self._send_results(ctx, reference)
 
     @rocketleague_rlcs.command(name="events", aliases=["list"])
