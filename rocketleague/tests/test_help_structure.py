@@ -251,6 +251,12 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
                 {"round_name": "Grand Final", "team_a": "Spacestation", "team_a_score": 0, "team_b": "Team Falcons", "team_b_score": 4},
                 {"round_name": "Semi Final 1", "team_a": "FUT Esports", "team_a_score": 2, "team_b": "Spacestation", "team_b_score": 4},
             ],
+            "top_players": [
+                {"player_name": "Vatira", "games_played": 25, "rating": 7.386}
+            ],
+            "power_rankings": [
+                {"team_name": "Team Falcons", "points": 1948.88}
+            ],
             "cached_at": 1_800_000_000,
         }
         embed = RocketLeague._blast_results_embed(tournament, result)
@@ -260,6 +266,11 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIn("Grand Final", fields["Championship day matchups"])
         self.assertIn("Fort Worth, Texas", fields["Tournament details"])
         self.assertIn("$1,200,000", fields["Tournament details"])
+        self.assertIn("Vatira", fields["Top rated players"])
+        self.assertIn("7.39 rating", fields["Top rated players"])
+        self.assertIn("Team Falcons", fields["Post-tournament power rankings"])
+        self.assertIn("1949 pts", fields["Post-tournament power rankings"])
+        self.assertIn("/tournament/worlds?", embed.thumbnail.url)
 
     def test_failed_league_refresh_preserves_last_good_snapshot(self):
         cached = [{"id": 4, "key": "league/rlcs", "enabled": False, "tournaments": [{"fingerprint": "old"}]}]

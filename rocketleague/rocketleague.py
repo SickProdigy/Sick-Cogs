@@ -38,7 +38,7 @@ BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
 BLAST_RESULT_DETAIL_LIMIT = 10
-BLAST_RESULT_SCHEMA = 2
+BLAST_RESULT_SCHEMA = 3
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
 CHALLONGE_DAILY_TOURNAMENT_LIMIT = 7
@@ -976,6 +976,22 @@ class RocketLeague(commands.Cog):
                     f"{int(match.get('team_b_score') or 0)} {team_b}"
                 )
             embed.add_field(name="Championship day matchups", value="\n".join(lines), inline=False)
+        top_players = result.get("top_players") or []
+        if top_players:
+            lines = [
+                f"**#{index} {discord.utils.escape_markdown(str(item.get('player_name') or 'Unknown'))}**"
+                f" • {int(item.get('games_played') or 0)} games • {float(item.get('rating') or 0):.2f} rating"
+                for index, item in enumerate(top_players[:3], start=1)
+            ]
+            embed.add_field(name="Top rated players", value="\n".join(lines), inline=False)
+        power_rankings = result.get("power_rankings") or []
+        if power_rankings:
+            lines = [
+                f"**#{index}** {discord.utils.escape_markdown(str(item.get('team_name') or 'Unknown'))}"
+                f" • {float(item.get('points') or 0):.0f} pts"
+                for index, item in enumerate(power_rankings[:5], start=1)
+            ]
+            embed.add_field(name="Post-tournament power rankings", value="\n".join(lines), inline=False)
         details = [f"**Dates:** <t:{tournament.start_at}:D> – <t:{tournament.end_at}:D>"]
         if tournament.location:
             details.append(f"**Location:** {tournament.location}")
@@ -984,6 +1000,7 @@ class RocketLeague(commands.Cog):
         if tournament.team_count is not None:
             details.append(f"**Teams:** {tournament.team_count}")
         embed.add_field(name="Tournament details", value="\n".join(details), inline=False)
+        embed.set_thumbnail(url=tournament.image_url)
         cached_at = int(result.get("cached_at") or 0)
         embed.set_footer(text="Source: BLAST official tournament results")
         if cached_at:

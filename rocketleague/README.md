@@ -44,8 +44,10 @@ reference, including the separate `[p]rlcsset` administrator commands:
   start.gg lookup. With no argument it lists cached official events; a listed cache ID or
   BLAST slug opens that official event without a network request.
 - `[p]rocketleague rlcs results <reference>` - show official cached BLAST final standings,
-  semifinal and Grand Final scores, and tournament details when available; otherwise show
-  verified placements from a confidently matched start.gg tournament.
+  semifinal and Grand Final scores, top-rated players, post-tournament power rankings,
+  tournament artwork, and event details when available; otherwise show verified placements
+  from a confidently matched start.gg tournament. Ratings and power-ranking points retain
+  BLAST's labels and are not presented as in-game score.
 
 `[p]rl` is an alias for the complete `[p]rocketleague` group, so commands such as
 `[p]rl tourney` and `[p]rl rlcs` follow the canonical structure. `[p]rlcs` remains a

@@ -7,6 +7,8 @@ from rocketleague.blast import (
     BlastClient,
     BlastError,
     BlastMatch,
+    BlastPlayerStat,
+    BlastPowerRanking,
     BlastResult,
     BlastTournament,
     parse_blast_result,
@@ -71,6 +73,14 @@ class BlastParserTests(unittest.TestCase):
     def _result_root(final_score=(0, 4)):
         return {
             "loaderData": {
+                "routes/$gameId.tournaments.$tournamentId_.$view": {
+                    "playerStatsPromise": [
+                        {"playerName": "Vatira", "gamesPlayed": 25, "rating": 7.386}
+                    ],
+                    "powerRankingsPromise": {
+                        "teams": [{"teamName": "Team Falcons", "rating": 1948.88}]
+                    },
+                },
                 "routes/$gameId.tournaments": {
                     "tournamentTimelineData": {
                         "past": [{
@@ -102,6 +112,8 @@ class BlastParserTests(unittest.TestCase):
                     BlastMatch("Semi Final 1", "FUT Esports", 2, "Spacestation", 4),
                     BlastMatch("Semi Final 2", "Karmine Corp", 2, "Team Falcons", 4),
                 ),
+                (BlastPlayerStat("Vatira", 25, 7.386),),
+                (BlastPowerRanking("Team Falcons", 1948.88),),
             ),
         )
 
