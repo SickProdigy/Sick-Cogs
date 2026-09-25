@@ -43,9 +43,9 @@ reference, including the separate `[p]rlcsset` administrator commands:
 - `[p]rocketleague rlcs event <start.gg URL or slug>` - optional detailed
   start.gg lookup. With no argument it lists cached official events; a listed cache ID or
   BLAST slug opens that official event without a network request.
-- `[p]rocketleague rlcs results <reference>` - show an official cached BLAST grand-final
-  score and semifinalists when available, otherwise verified placements from a confidently
-  matched start.gg tournament.
+- `[p]rocketleague rlcs results <reference>` - show official cached BLAST final standings,
+  semifinal and Grand Final scores, and tournament details when available; otherwise show
+  verified placements from a confidently matched start.gg tournament.
 
 `[p]rl` is an alias for the complete `[p]rocketleague` group, so commands such as
 `[p]rl tourney` and `[p]rl rlcs` follow the canonical structure. `[p]rlcs` remains a
@@ -56,8 +56,8 @@ slug>`, and `[p]rlcs results <reference>` remain available, alongside `[p]rlcs r
 Completed official-event history is built prospectively from the permitted weekly BLAST
 refresh; commands never make an extra BLAST request. Retention is bounded to 100 records and
 one year. A weekly refresh checks at most ten newly completed retained events for structured
-BLAST grand-final and semifinal data, preserves the last good results, and rejects tied or
-incomplete finals. When official detail data is unavailable, a confidently matched cached
+BLAST final-day matchup data, preserves the last good results, and rejects tied or incomplete
+finals. When official detail data is unavailable, a confidently matched cached
 start.gg tournament may supply verified placements with explicit attribution. Events lacking
 either source retain a results-unavailable state.
 

@@ -6,6 +6,7 @@ from rocketleague.blast import (
     MAX_BLAST_RESPONSE_BYTES,
     BlastClient,
     BlastError,
+    BlastMatch,
     BlastResult,
     BlastTournament,
     parse_blast_result,
@@ -93,7 +94,15 @@ class BlastParserTests(unittest.TestCase):
             result = parse_blast_result("page", "worlds")
         self.assertEqual(
             result,
-            BlastResult("worlds", "RLCS Worlds", "Team Falcons", "Spacestation", 4, 0, ("FUT Esports", "Karmine Corp")),
+            BlastResult(
+                "worlds", "RLCS Worlds", "Team Falcons", "Spacestation", 4, 0,
+                ("FUT Esports", "Karmine Corp"),
+                (
+                    BlastMatch("Grand Final", "Spacestation", 0, "Team Falcons", 4),
+                    BlastMatch("Semi Final 1", "FUT Esports", 2, "Spacestation", 4),
+                    BlastMatch("Semi Final 2", "Karmine Corp", 2, "Team Falcons", 4),
+                ),
+            ),
         )
 
     def test_ignores_incomplete_or_tied_final(self):

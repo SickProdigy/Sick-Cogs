@@ -82,6 +82,7 @@ class BlastResult:
     champion_score: int
     runner_up_score: int
     semifinalists: Tuple[str, ...] = ()
+    matches: Tuple["BlastMatch", ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -93,6 +94,30 @@ class BlastResult:
             champion=str(value["champion"]), runner_up=str(value["runner_up"]),
             champion_score=int(value["champion_score"]), runner_up_score=int(value["runner_up_score"]),
             semifinalists=tuple(str(item) for item in value.get("semifinalists") or ()),
+            matches=tuple(
+                BlastMatch.from_dict(item)
+                for item in value.get("matches") or ()
+                if isinstance(item, dict)
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class BlastMatch:
+    round_name: str
+    team_a: str
+    team_a_score: int
+    team_b: str
+    team_b_score: int
+
+    @classmethod
+    def from_dict(cls, value: Dict[str, Any]) -> "BlastMatch":
+        return cls(
+            round_name=str(value["round_name"]),
+            team_a=str(value["team_a"]),
+            team_a_score=int(value["team_a_score"]),
+            team_b=str(value["team_b"]),
+            team_b_score=int(value["team_b_score"]),
         )
 
 
@@ -204,18 +229,25 @@ def parse_blast_result(page: str, slug: str) -> Optional[BlastResult]:
         champion, runner_up = (team_a, team_b) if score_a > score_b else (team_b, team_a)
         champion_score, runner_up_score = (score_a, score_b) if score_a > score_b else (score_b, score_a)
         semifinalists = []
+        completed_matches = []
         for match in matches:
-            if "semi final" not in str(match.get("name") or "").casefold():
+            round_name = str(match.get("name") or "")
+            if not any(label in round_name.casefold() for label in ("semi final", "grand final")):
                 continue
             first_name, second_name = _team_name(match.get("teamA")), _team_name(match.get("teamB"))
             first_score, second_score = _optional_int(match.get("teamAScore")), _optional_int(match.get("teamBScore"))
             if first_name and second_name and first_score is not None and second_score is not None and first_score != second_score:
-                semifinalists.append(first_name if first_score < second_score else second_name)
+                completed_matches.append(
+                    BlastMatch(round_name, first_name, first_score, second_name, second_score)
+                )
+                if "semi final" in round_name.casefold():
+                    semifinalists.append(first_name if first_score < second_score else second_name)
         return BlastResult(
             slug=slug, tournament_name=str(record.get("name") or slug),
             champion=champion, runner_up=runner_up,
             champion_score=champion_score, runner_up_score=runner_up_score,
             semifinalists=tuple(semifinalists[:2]),
+            matches=tuple(completed_matches),
         )
     return None
 
