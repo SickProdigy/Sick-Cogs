@@ -1,4 +1,6 @@
+import secrets
 import time
+from urllib.parse import quote
 
 import discord
 from redbot.core import commands
@@ -14,6 +16,7 @@ from ..core.networks import (
 from ..providers import WalletProviderError
 from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
+from .views import WalletTotpEnrollmentView
 
 
 class WalletCoreCommands:
@@ -608,11 +611,96 @@ class WalletCoreCommands:
                 "available. Only the bot owner can unlock this wallet."
             )
             return
+        totp_enabled = await self.user_totp_enabled(ctx.author.id)
+        totp_status = "enabled" if totp_enabled else "available but not enabled"
         await ctx.send(
-            "**Wallet security: standard**\n"
+            f"**Wallet security: standard; authenticator {totp_status}**\n"
             f"Use `{ctx.clean_prefix}wallet security lock` if your Discord account or "
             "wallet access may be compromised. The lock takes effect immediately and "
-            "only the bot owner can remove it. Optional independent 2FA is not configured yet."
+            "only the bot owner can remove it. Use the wallet security 2fa subcommands to manage optional authenticator protection."
+        )
+
+    @wallet_security.group(name="2fa", aliases=("totp",), invoke_without_command=True)
+    async def wallet_security_2fa(self, ctx: commands.Context):
+        """Show optional authenticator protection status."""
+
+        enabled = await self.user_totp_enabled(ctx.author.id)
+        state = "enabled" if enabled else "not enabled"
+        await ctx.send(
+            f"Authenticator protection is **{state}**. "
+            f"Use `{ctx.clean_prefix}wallet security 2fa setup` to start protected setup."
+        )
+
+    @wallet_security_2fa.command(name="setup", aliases=("enroll",))
+    async def wallet_security_2fa_setup(self, ctx: commands.Context):
+        """Start protected Authy-compatible TOTP enrollment."""
+
+        if not await self._wallet_sensitive_allowed(ctx):
+            return
+        if await self.user_totp_enabled(ctx.author.id):
+            await ctx.send(
+                "Authenticator protection is already enabled. Replacement and recovery "
+                "require a separate protected flow; setup will not overwrite it."
+            )
+            return
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        status = await self.recovery_relay_status()
+        if not status["configured"]:
+            await ctx.send(
+                "Authenticator setup is unavailable because the protected website relay "
+                "is not configured."
+            )
+            return
+        result_handle = secrets.token_urlsafe(32)
+        payload = {
+            "version": 1,
+            "profile_id": str(profile["profile_id"]),
+            "result_handle": result_handle,
+            "public_jwk": await self.totp_enrollment_public_jwk(),
+        }
+        try:
+            token, expires_at = await self.create_external_companion_handoff(
+                ctx.author.id, "totp_enroll", payload
+            )
+            handoff = await self.register_recovery_handoff(token, expires_at)
+            base_url = status["approval_base_url"]
+            encoded_handoff = quote(handoff, safe="")
+            link = f"{base_url}/security.html#handoff={encoded_handoff}"
+            embed = discord.Embed(
+                title="Set Up Wallet Authenticator",
+                description=(
+                    "Open the protected page, add the displayed key to Authy or another "
+                    "authenticator, then return here and press **Confirm enrollment**.\n\n"
+                    f"🔐 **[Open protected authenticator setup]({link})**"
+                ),
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="Privacy",
+                value=(
+                    "The setup page generates the seed locally and sends the bot only RSA-OAEP "
+                    "ciphertext. Enter the six-digit proof only in the private Discord modal."
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="Link expires", value=f"<t:{expires_at}:R>", inline=True
+            )
+            view = WalletTotpEnrollmentView(
+                self, ctx.author.id, result_handle, expires_at
+            )
+            message = await ctx.author.send(embed=embed, view=view)
+            view.message = message
+        except (discord.HTTPException, KeyError, RuntimeError, ValueError):
+            await ctx.send(
+                "Authenticator setup could not be started. Enable DMs and verify the "
+                "protected website configuration."
+            )
+            return
+        await ctx.send(
+            f"I sent your protected authenticator setup by DM; it expires <t:{expires_at}:R>."
         )
 
     @wallet_security.command(name="lock", aliases=("freeze",))

@@ -39,6 +39,99 @@ class WalletHistoryView(discord.ui.View):
         )
 
 
+class WalletTotpEnrollmentModal(discord.ui.Modal, title="Confirm authenticator setup"):
+    code = discord.ui.TextInput(
+        label="6-digit authenticator code",
+        placeholder="123456",
+        min_length=6,
+        max_length=6,
+    )
+
+    def __init__(self, view):
+        super().__init__(timeout=120)
+        self.view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if int(time.time()) >= self.view.expires_at:
+            await interaction.followup.send(
+                "This enrollment expired. Start setup again from Discord.",
+                ephemeral=True,
+            )
+            return
+        try:
+            if self.view.ciphertext is None:
+                self.view.ciphertext = await self.view.cog.poll_totp_enrollment_result(
+                    self.view.result_handle
+                )
+            if self.view.ciphertext is None:
+                await interaction.followup.send(
+                    "Open the protected setup page first, then submit this modal again.",
+                    ephemeral=True,
+                )
+                return
+            activated = await self.view.cog.activate_encrypted_totp_enrollment(
+                self.view.user_id, self.view.ciphertext, str(self.code.value)
+            )
+        except (RuntimeError, ValueError):
+            await interaction.followup.send(
+                "Authenticator enrollment could not be verified. Nothing was enabled.",
+                ephemeral=True,
+            )
+            return
+        if not activated:
+            await interaction.followup.send(
+                "That code is invalid, expired, or the wallet already has authenticator protection. Nothing was changed.",
+                ephemeral=True,
+            )
+            return
+        self.view.ciphertext = None
+        self.view.disable_controls()
+        self.view.stop()
+        if self.view.message is not None:
+            await self.view.message.edit(view=self.view)
+        await interaction.followup.send(
+            "Authenticator protection is enabled for future wallet sends.",
+            ephemeral=True,
+        )
+
+
+class WalletTotpEnrollmentView(discord.ui.View):
+    """Owner-bound confirmation for one browser-generated encrypted seed."""
+
+    def __init__(self, cog, user_id: int, result_handle: str, expires_at: int):
+        super().__init__(timeout=max(1.0, expires_at - time.time()))
+        self.cog = cog
+        self.user_id = user_id
+        self.result_handle = result_handle
+        self.expires_at = expires_at
+        self.ciphertext = None
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can confirm this enrollment.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.ciphertext = None
+        self.disable_controls()
+        if self.message is not None:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(
+        label="Confirm enrollment", emoji="🔐", style=discord.ButtonStyle.primary
+    )
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(WalletTotpEnrollmentModal(self))
+
 class WalletTotpModal(discord.ui.Modal, title="Verify wallet send"):
     """Private authenticator challenge bound to one displayed transaction."""
 

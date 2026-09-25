@@ -42,6 +42,7 @@ from ..commands.views import (
     WalletIntentView,
     WalletRevocationView,
     WalletTotpModal,
+    WalletTotpEnrollmentView,
 )
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
@@ -631,6 +632,45 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             await WalletAuthorizationCommands.send_authorization_link(
                 cog, user, _profile(), requested_days=91
             )
+
+    async def test_totp_setup_sends_only_opaque_handles_and_public_key(self):
+        token = "signed-public-metadata-token"
+        handoff = "opaque_setup_handoff_abcdefghijklmnopqrstuvwxyz"
+        author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
+        public_jwk = {
+            "kty": "RSA", "alg": "RSA-OAEP-256", "use": "enc",
+            "n": "public-modulus", "e": "AQAB",
+        }
+        cog = SimpleNamespace(
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            user_totp_enabled=AsyncMock(return_value=False),
+            _wallet_profile_or_error=AsyncMock(return_value=_profile()),
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True,
+                "approval_base_url": "https://wallet.example.test/cryptowallet",
+            }),
+            totp_enrollment_public_jwk=AsyncMock(return_value=public_jwk),
+            create_external_companion_handoff=AsyncMock(
+                return_value=(token, 1_800_000_000)
+            ),
+            register_recovery_handoff=AsyncMock(return_value=handoff),
+        )
+        await WalletCoreCommands.wallet_security_2fa_setup.callback(cog, ctx)
+        purpose_call = cog.create_external_companion_handoff.await_args.args
+        self.assertEqual(purpose_call[:2], (7, "totp_enroll"))
+        payload = purpose_call[2]
+        self.assertEqual(payload["profile_id"], "profile-7")
+        self.assertEqual(payload["public_jwk"], public_jwk)
+        self.assertNotIn("secret", repr(payload).lower())
+        sent = author.send.await_args.kwargs
+        self.assertNotIn(token, sent["embed"].description)
+        self.assertIn(f"#handoff={handoff}", sent["embed"].description)
+        self.assertIsInstance(sent["view"], WalletTotpEnrollmentView)
+        self.assertEqual(
+            [item.label for item in sent["view"].children],
+            ["Confirm enrollment"],
+        )
 
     async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
