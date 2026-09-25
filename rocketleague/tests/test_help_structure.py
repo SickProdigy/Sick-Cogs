@@ -131,6 +131,66 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         )
         self.assertIn("8 entrants", " ".join(details))
 
+    def test_startgg_mixed_phase_card_is_bounded_and_explicit(self):
+        source = {
+            "provider": "startgg",
+            "start_at": 100,
+            "end_at": 500,
+            "registration_open": True,
+            "registration_closes_at": 450,
+            "registration_url": "https://www.start.gg/tournament/mixed",
+            "cached_at": 200,
+            "events": [
+                {"name": "Finished qualifier", "state": 3, "start_at": 100, "registered_entrants": 8, "team_size": 3},
+                {"name": "Live qualifier", "state": 2, "start_at": 200, "registered_entrants": 12, "team_size": 3},
+                {"name": "Open qualifier", "state": 1, "start_at": 400, "registered_entrants": 4, "team_size": 3},
+                {"name": "Fourth", "state": 1, "start_at": 450},
+                {"name": "Overflow", "state": 1, "start_at": 500},
+            ],
+        }
+        rendered = " ".join(RocketLeague._community_source_details(source, past=False))
+        self.assertIn("Registration open", rendered)
+        self.assertIn("Register on start.gg", rendered)
+        self.assertIn("Mixed lifecycle states", rendered)
+        self.assertIn("Active", rendered)
+        self.assertIn("Completed", rendered)
+        self.assertIn("And 1 more", rendered)
+        self.assertIn("Last refreshed", rendered)
+
+    def test_startgg_missing_fields_do_not_fabricate_registration(self):
+        source = {
+            "provider": "startgg",
+            "events": [{"name": "Unknown", "state": None, "start_at": None}],
+        }
+        rendered = " ".join(RocketLeague._community_source_details(source, past=False))
+        self.assertNotIn("Registration open", rendered)
+        self.assertNotIn("Register on start.gg", rendered)
+        self.assertIn("Status unavailable", rendered)
+
+    def test_failed_refresh_preserves_last_good_cached_record(self):
+        cached = [{"id": 7, "provider": "startgg", "key": "tournament/example", "name": "Last good"}]
+        self.assertEqual(RocketLeague._merge_tournament_refreshes(cached, {}), cached)
+
+        refreshed = {
+            ("startgg", "tournament/example"): {
+                "provider": "startgg",
+                "key": "tournament/example",
+                "name": "Updated",
+            }
+        }
+        merged = RocketLeague._merge_tournament_refreshes(cached, refreshed)
+        self.assertEqual(merged[0]["name"], "Updated")
+        self.assertEqual(merged[0]["id"], 7)
+
+    def test_startgg_lifecycle_labels_cover_upcoming_active_and_completed(self):
+        self.assertEqual(RocketLeague._startgg_event_status({"state": 1}, now=100)[0], "Upcoming")
+        self.assertEqual(RocketLeague._startgg_event_status({"state": 2}, now=100)[0], "Active")
+        self.assertEqual(RocketLeague._startgg_event_status({"state": 3}, now=100)[0], "Completed")
+        self.assertEqual(
+            RocketLeague._startgg_event_status({"state": None, "start_at": 200}, now=100)[0],
+            "Scheduled",
+        )
+
     def test_missing_provider_credentials_carry_command_metadata(self):
         async def scenario():
             bot = SimpleNamespace(get_shared_api_tokens=AsyncMock(return_value={}))

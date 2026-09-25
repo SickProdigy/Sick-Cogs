@@ -25,7 +25,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.2.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.3.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
@@ -49,7 +49,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.1"
+    __version__ = "1.3.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -297,10 +297,11 @@ class RocketLeague(commands.Cog):
                 key = str(source.get("key") or "")
                 if not provider or not key:
                     continue
-                state = str(source.get("state") or "").casefold()
+                state_value = source.get("state")
+                state = str(state_value or "").casefold()
                 end_at = int(source.get("end_at") or 0)
                 start_at = int(source.get("start_at") or 0)
-                complete = state in {"complete", "completed"} or (end_at > 0 and end_at < now)
+                complete = state in {"complete", "completed"} or state_value == 3 or (end_at > 0 and end_at < now)
                 if not state and not end_at and start_at > 0 and start_at < now:
                     complete = True
                 cached_at = int(source.get("cached_at") or 0)
@@ -330,14 +331,24 @@ class RocketLeague(commands.Cog):
             return
         for guild in self.bot.guilds:
             async with self.config.guild(guild).tournament_sources() as stored:
-                for index, source in enumerate(stored):
-                    identity = (str(source.get("provider") or ""), str(source.get("key") or ""))
-                    updated = refreshed.get(identity)
-                    if updated is None:
-                        continue
-                    replacement = dict(updated)
-                    replacement["id"] = source.get("id")
-                    stored[index] = replacement
+                stored[:] = self._merge_tournament_refreshes(stored, refreshed)
+
+    @staticmethod
+    def _merge_tournament_refreshes(
+        stored: list[dict], refreshed: dict[tuple[str, str], dict]
+    ) -> list[dict]:
+        """Replace successful refreshes while preserving every last-good failure."""
+        merged = []
+        for source in stored:
+            identity = (str(source.get("provider") or ""), str(source.get("key") or ""))
+            updated = refreshed.get(identity)
+            if updated is None:
+                merged.append(dict(source))
+                continue
+            replacement = dict(updated)
+            replacement["id"] = source.get("id")
+            merged.append(replacement)
+        return merged
 
     @community_refresh_loop.before_loop
     async def before_community_refresh_loop(self) -> None:
@@ -641,10 +652,11 @@ class RocketLeague(commands.Cog):
         now = int(time.time())
         matching = []
         for source in sources:
-            state = str(source.get("state") or "").casefold()
+            state_value = source.get("state")
+            state = str(state_value or "").casefold()
             end_at = int(source.get("end_at") or 0)
             start_at = int(source.get("start_at") or 0)
-            is_past = state in {"complete", "completed"} or (end_at > 0 and end_at < now)
+            is_past = state in {"complete", "completed"} or state_value == 3 or (end_at > 0 and end_at < now)
             if not state and not end_at and start_at > 0 and start_at < now:
                 is_past = True
             if past == is_past:
@@ -673,7 +685,59 @@ class RocketLeague(commands.Cog):
         await ctx.send(embed=embed)
 
     @staticmethod
-    def _community_source_details(source: dict, *, past: bool) -> list[str]:
+    def _startgg_event_status(event: dict, *, now: int) -> tuple[str, int]:
+        """Return a conservative label and display priority for a start.gg event."""
+        state = event.get("state")
+        if state == 3:
+            return "Completed", 3
+        if state == 2:
+            return "Active", 0
+        if state == 1:
+            return "Upcoming", 1
+        start_at = int(event.get("start_at") or 0)
+        if start_at > now:
+            return "Scheduled", 2
+        return "Status unavailable", 2
+
+    @classmethod
+    def _startgg_event_details(cls, source: dict, *, now: int) -> list[str]:
+        events = [item for item in (source.get("events") or []) if isinstance(item, dict)]
+        ranked = []
+        statuses = set()
+        for event in events:
+            status, priority = cls._startgg_event_status(event, now=now)
+            statuses.add(status)
+            ranked.append((priority, int(event.get("start_at") or 0), event, status))
+        ranked.sort(key=lambda item: (item[0], item[1]))
+        lines = []
+        if len({item for item in statuses if item != "Status unavailable"}) > 1:
+            lines.append("Phases: Mixed lifecycle states")
+        for _, _, event, status in ranked[:4]:
+            name = discord.utils.escape_markdown(str(event.get("name") or "Rocket League event"))
+            facts = [status]
+            start_at = int(event.get("start_at") or 0)
+            if start_at:
+                facts.append(f"<t:{start_at}:F>")
+            entrants = event.get("registered_entrants")
+            team_size = event.get("team_size")
+            if entrants is not None:
+                label = "teams" if team_size and int(team_size) > 1 else "players"
+                facts.append(f"{entrants} {label}")
+            if team_size:
+                facts.append(f"{team_size}v{team_size}")
+            lines.append(f"**{name[:120]}** — {chr(32).join(facts)}"[:300])
+        if len(ranked) > 4:
+            omitted = {}
+            for _, _, _, status in ranked[4:]:
+                omitted[status] = omitted.get(status, 0) + 1
+            summary = ", ".join(f"{status}: {count}" for status, count in sorted(omitted.items()))
+            lines.append(
+                f"And {len(ranked) - 4} more Rocket League phase(s) ({summary})."
+            )
+        return lines
+
+    @classmethod
+    def _community_source_details(cls, source: dict, *, past: bool) -> list[str]:
         start_at = int(source.get("start_at") or 0)
         end_at = int(source.get("end_at") or 0)
         if start_at and end_at and end_at != start_at:
@@ -702,12 +766,20 @@ class RocketLeague(commands.Cog):
         elif capacity:
             facts.append(f"Up to {capacity} {entrant_label}")
         registration_open = source.get("registration_open")
+        registration_closes_at = int(source.get("registration_closes_at") or 0)
         if registration_open is True:
             facts.append("Registration open")
+            if registration_closes_at:
+                facts.append(f"Closes <t:{registration_closes_at}:R>")
         elif registration_open is False and not past:
             facts.append("Registration closed")
         if facts:
             details.append(" • ".join(facts))
+        registration_url = str(source.get("registration_url") or "").strip()
+        if registration_open is True and registration_url:
+            details.append(f"[Register on start.gg]({registration_url})")
+        if source.get("provider") == "startgg":
+            details.extend(cls._startgg_event_details(source, now=int(time.time())))
         location = str(source.get("location") or "").strip()
         if location:
             details.append(location)
@@ -717,6 +789,9 @@ class RocketLeague(commands.Cog):
         description = str(source.get("description") or "").strip()
         if description:
             details.append(description[:300])
+        cached_at = int(source.get("cached_at") or 0)
+        if cached_at:
+            details.append(f"Last refreshed <t:{cached_at}:R>")
         return details
 
     @rocketleague.group(name="rlcs", invoke_without_command=True)
@@ -760,19 +835,37 @@ class RocketLeague(commands.Cog):
             await ctx.send("That start.gg tournament was not found or has no Rocket League events.")
             return
 
+        description = self._tournament_summary(tournament, include_name=False)
+        if tournament.registration_open is True:
+            description += "\nRegistration is open"
+            if tournament.registration_closes_at:
+                description += f" until <t:{tournament.registration_closes_at}:F>"
+            description += f" • [Register on start.gg]({tournament.url})"
+        elif tournament.registration_open is False:
+            description += "\nRegistration is closed"
         embed = discord.Embed(
             title=tournament.name,
             url=tournament.url,
-            description=self._tournament_summary(tournament, include_name=False),
+            description=description,
             color=discord.Color.blue(),
         )
+        now = int(time.time())
         for event in tournament.events[:10]:
-            details = []
+            status, _ = self._startgg_event_status(
+                {"state": event.state, "start_at": event.start_at}, now=now
+            )
+            details = [status]
             if event.start_at:
                 details.append(f"Starts <t:{event.start_at}:F> (<t:{event.start_at}:R>)")
             if event.entrants is not None:
-                details.append(f"{event.entrants:,} entrants")
-            embed.add_field(name=event.name[:256], value=" • ".join(details) or "Details pending", inline=False)
+                label = "teams" if event.entrant_size_min and event.entrant_size_min > 1 else "players"
+                details.append(f"{event.entrants:,} {label}")
+            if event.entrant_size_min:
+                details.append(f"{event.entrant_size_min}v{event.entrant_size_min}")
+            event_url = f"https://www.start.gg/{event.slug}" if event.slug else None
+            if event_url:
+                details.append(f"[View phase]({event_url})")
+            embed.add_field(name=event.name[:256], value=" • ".join(details), inline=False)
         if len(tournament.events) > 10:
             embed.set_footer(text=f"Source: start.gg • {len(tournament.events) - 10} additional events not shown")
         else:
@@ -1013,12 +1106,27 @@ class RocketLeague(commands.Cog):
         return {
             "provider": "startgg", "key": key, "url": tournament.url,
             "name": tournament.name, "start_at": tournament.start_at,
-            "end_at": tournament.end_at, "state": None,
+            "end_at": tournament.end_at, "state": tournament.tournament_state,
+            "registration_closes_at": tournament.registration_closes_at,
             "description": None, "format": " / ".join(formats[:3]) or None,
             "team_size": next(iter(team_sizes)) if len(team_sizes) == 1 else None,
             "registered_entrants": sum(entrants) if entrants else None,
             "entrant_label": "teams" if team_sizes and max(team_sizes) > 1 else "players",
-            "entrant_capacity": None, "registration_open": None,
+            "entrant_capacity": None,
+            "registration_open": tournament.registration_open,
+            "registration_url": tournament.url if tournament.registration_open else None,
+            "events": [
+                {
+                    "id": event.id,
+                    "name": event.name,
+                    "slug": event.slug,
+                    "start_at": event.start_at,
+                    "state": event.state,
+                    "registered_entrants": event.entrants,
+                    "team_size": event.entrant_size_min,
+                }
+                for event in tournament.events
+            ],
             "prize": None, "location": location or ("Online" if tournament.is_online else None),
             "cached_at": int(time.time()),
         }

@@ -57,8 +57,8 @@ URL:
 Direct start.gg and Challonge tournament URLs are supported. start.gg uses a shared
 developer token; Challonge uses a shared OAuth client ID and client secret to obtain a
 short-lived API v2.1 access token in memory. Adding a URL validates it and caches its public
-details, including available format, entrant counts, capacity, registration status, location,
-and prize information. Normal tournament views read only the cache and make no provider
+details, including available format, entrant counts, capacity, registration status and closing time, location,
+and prize information. start.gg cards also preserve tournament and per-event lifecycle state, phase schedules, team sizes, direct phase links, and the last successful refresh time without guessing missing provider fields. Normal tournament views read only the cache and make no provider
 requests. Active records are refreshed automatically about once per day and duplicate provider
 URLs shared across servers are fetched only once per cycle. Failed refreshes retain the previous
 good cache. Completed tournaments stop refreshing.

@@ -31,5 +31,55 @@ class StartGGAPITests(unittest.TestCase):
         )
 
 
+    def test_parse_tournament_preserves_registration_and_event_lifecycle(self):
+        tournament = StartGGClient._parse_tournament(
+            {
+                "id": 10,
+                "name": "Mixed Rocket League Series",
+                "slug": "tournament/mixed",
+                "startAt": 100,
+                "endAt": 400,
+                "isOnline": True,
+                "registrationClosesAt": 260,
+                "eventRegistrationClosesAt": 250,
+                "state": 2,
+                "isRegistrationOpen": True,
+                "events": [
+                    {
+                        "id": 11,
+                        "name": "Qualifier",
+                        "slug": "tournament/mixed/event/qualifier",
+                        "startAt": 100,
+                        "state": 3,
+                        "numEntrants": 8,
+                        "entrantSizeMin": 3,
+                    },
+                    {
+                        "id": 12,
+                        "name": "Open qualifier",
+                        "startAt": 300,
+                        "state": 1,
+                        "numEntrants": None,
+                        "entrantSizeMin": 3,
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(tournament.tournament_state, 2)
+        self.assertTrue(tournament.registration_open)
+        self.assertEqual(tournament.registration_closes_at, 250)
+        self.assertEqual(tournament.events[0].state, 3)
+        self.assertEqual(tournament.events[0].slug, "tournament/mixed/event/qualifier")
+        self.assertIsNone(tournament.events[1].entrants)
+
+    def test_parse_tournament_keeps_missing_registration_fields_unknown(self):
+        tournament = StartGGClient._parse_tournament(
+            {"id": 10, "name": "Event", "slug": "tournament/event", "events": []}
+        )
+        self.assertIsNone(tournament.registration_open)
+        self.assertIsNone(tournament.registration_closes_at)
+
+
 if __name__ == "__main__":
     unittest.main()
