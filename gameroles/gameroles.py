@@ -62,7 +62,7 @@ class GameRoles(commands.Cog):
         view = AssignmentDashboard(self, ctx.author, eligible)
         await ctx.send(embed=view.embed(), view=view)
 
-    @commands.group(name="gameroles", aliases=["clanroles"], invoke_without_command=True)
+    @commands.group(name="gameroles", aliases=["gamerole", "clanroles", "clanrole"], invoke_without_command=True)
     @commands.guild_only()
     async def gameroles(self, ctx):
         """Assign approved game roles through a dashboard or fallback commands."""
@@ -217,7 +217,7 @@ class GameRoles(commands.Cog):
         if parsed:
             await self._change_role(ctx, *parsed, add=True)
 
-    @gameroles.command(name="remove", aliases=["unassign"])
+    @gameroles.command(name="remove", aliases=["rem", "unassign"])
     async def gameroles_remove(self, ctx, *arguments: str):
         """Remove an approved game role; the optional game keeps legacy syntax working."""
         parsed = await self._parse_assignment(ctx, arguments)

@@ -29,6 +29,8 @@ The shorter assignment form automatically finds an authorized profile containing
 [p]gameroles remove @member @Rust-Officer
 ```
 
+The root command also accepts `gamerole`, `clanroles`, and `clanrole`. The remove command accepts `remove`, `rem`, and `unassign`.
+
 The original explicit-profile form remains supported:
 
 ```text

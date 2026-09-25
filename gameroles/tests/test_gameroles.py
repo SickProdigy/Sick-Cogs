@@ -5,6 +5,15 @@ from gameroles.gameroles import GameRoles
 
 
 class GameRolesTests(unittest.TestCase):
+    def test_public_command_aliases_include_singular_and_short_remove(self):
+        self.assertEqual(
+            set(GameRoles.gameroles.aliases),
+            {"gamerole", "clanroles", "clanrole"},
+        )
+        self.assertEqual(
+            set(GameRoles.gameroles_remove.aliases), {"rem", "unassign"}
+        )
+
     def test_game_keys_are_normalized_and_bounded(self):
         self.assertEqual(GameRoles.normalize_game(" Rust "), "rust")
         self.assertEqual(GameRoles.normalize_game("ARK-SE"), "ark-se")
