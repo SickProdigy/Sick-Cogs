@@ -348,11 +348,14 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
             cog._cached_blast_results = AsyncMock(return_value={})
             ctx = SimpleNamespace(clean_prefix="!", guild=object(), send=AsyncMock())
             await cog._send_recent_events(ctx, 5)
-            return ctx.send.await_args.kwargs["embed"].footer.text
+            embed = ctx.send.await_args.kwargs["embed"]
+            return embed.footer.text, embed.fields[0].value
 
-        footer = asyncio.run(scenario())
+        footer, event_card = asyncio.run(scenario())
         self.assertIn("!rlcs results <ID>", footer)
         self.assertIn("!rlcs events", footer)
+        self.assertNotIn("More:", event_card)
+        self.assertNotIn("!rlcs results", event_card)
 
     def test_cached_event_resolution_accepts_slug_and_short_id(self):
         async def scenario():
