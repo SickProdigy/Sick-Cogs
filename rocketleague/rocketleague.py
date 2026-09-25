@@ -1073,10 +1073,7 @@ class RocketLeague(commands.Cog):
                     ))
             else:
                 details = self._placement_summary(source) if source else []
-            reference = self._blast_short_id(tournament)
-            if details:
-                details.append(f"More: `{prefix}rlcs results {reference}`")
-            else:
+            if not details:
                 details.append("Final results unavailable from the cached providers.")
             embed.set_field_at(
                 index,
@@ -1086,8 +1083,8 @@ class RocketLeague(commands.Cog):
             )
         embed.set_footer(
             text=(
-                f"Use {prefix}rlcs results <ID> for detailed standings • "
-                f"{prefix}rlcs events lists retained IDs"
+                f"Use {prefix}rlcs events to find event IDs • "
+                f"{prefix}rlcs results <ID> shows more details"
             )
         )
         await ctx.send(embed=embed)
