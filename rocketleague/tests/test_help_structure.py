@@ -47,6 +47,8 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIsNotNone(settings.get_command("tournamentrefresh"))
         self.assertIsNotNone(settings.get_command("tournaments"))
         self.assertIsNone(settings.get_command("startgg"))
+        for command in ("leagueadd", "leagues", "leaguerefresh", "leaguedisable", "leagueremove"):
+            self.assertIsNotNone(settings.get_command(command))
 
     def test_tournament_provider_is_detected_from_url(self):
         provider, key = RocketLeague._tournament_source_from_url(
@@ -55,6 +57,16 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
 
         self.assertEqual(provider, "startgg")
         self.assertEqual(key, "tournament/example")
+
+    def test_startgg_league_url_is_strictly_detected(self):
+        self.assertEqual(
+            RocketLeague._league_source_from_url("https://www.start.gg/league/rlcs-2026/events"),
+            "league/rlcs-2026",
+        )
+        with self.assertRaises(ValueError):
+            RocketLeague._league_source_from_url("http://www.start.gg/league/rlcs-2026")
+        with self.assertRaises(ValueError):
+            RocketLeague._league_source_from_url("https://www.start.gg/tournament/rlcs-2026")
 
     def test_challonge_url_is_detected(self):
         provider, key = RocketLeague._tournament_source_from_url(
@@ -171,6 +183,30 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertNotIn("Registration open", rendered)
         self.assertNotIn("Register on start.gg", rendered)
         self.assertIn("Status unavailable", rendered)
+
+    def test_cross_provider_key_deduplicates_same_name_and_day(self):
+        first = {"name": "RLCS Open 1", "start_at": 1_800_000_000}
+        same = {"name": "rlcs-open-1", "start_at": 1_800_000_100}
+        later = {"name": "RLCS Open 1", "start_at": 1_800_086_400}
+        self.assertEqual(
+            RocketLeague._cross_provider_event_key(first),
+            RocketLeague._cross_provider_event_key(same),
+        )
+        self.assertNotEqual(
+            RocketLeague._cross_provider_event_key(first),
+            RocketLeague._cross_provider_event_key(later),
+        )
+
+    def test_failed_league_refresh_preserves_last_good_snapshot(self):
+        cached = [{"id": 4, "key": "league/rlcs", "enabled": False, "tournaments": [{"fingerprint": "old"}]}]
+        self.assertEqual(RocketLeague._merge_league_refreshes(cached, {}), cached)
+        merged = RocketLeague._merge_league_refreshes(
+            cached,
+            {"league/rlcs": {"key": "league/rlcs", "enabled": True, "tournaments": [{"fingerprint": "new"}]}},
+        )
+        self.assertEqual(merged[0]["id"], 4)
+        self.assertFalse(merged[0]["enabled"])
+        self.assertEqual(merged[0]["tournaments"][0]["fingerprint"], "new")
 
     def test_failed_refresh_preserves_last_good_cached_record(self):
         cached = [{"id": 7, "provider": "startgg", "key": "tournament/example", "name": "Last good"}]

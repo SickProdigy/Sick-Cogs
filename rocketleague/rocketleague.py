@@ -16,7 +16,13 @@ from discord.ext import tasks
 from redbot.core import Config, checks, commands
 from redbot.core.bot import Red
 
-from .api import RLCSTournament, StartGGClient, StartGGError, normalize_tournament_slug
+from .api import (
+    RLCSTournament,
+    StartGGClient,
+    StartGGError,
+    normalize_league_slug,
+    normalize_tournament_slug,
+)
 from .blast import BlastClient, BlastError, BlastTournament, upcoming_tournaments
 from .clips import ClipProviders, ClipSourceError, clip_identity, detect_clip_source
 
@@ -26,7 +32,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.4.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.5.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -52,7 +58,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.4.0"
+    __version__ = "1.5.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -73,6 +79,7 @@ class RocketLeague(commands.Cog):
             enabled=False,
             announced={},
             tournament_sources=[],
+            league_sources=[],
             clip_channel_id=None,
             clip_enabled=False,
             clip_sources=[],
@@ -475,11 +482,47 @@ class RocketLeague(commands.Cog):
                 refreshed[(provider, key)] = await self._fetch_tournament_source(provider, key)
             except StartGGError as exc:
                 log.warning("Automatic %s tournament refresh failed for %s: %s", provider, key, exc)
+        await self._refresh_due_leagues(now)
+        if refreshed:
+            for guild in self.bot.guilds:
+                async with self.config.guild(guild).tournament_sources() as stored:
+                    stored[:] = self._merge_tournament_refreshes(stored, refreshed)
+
+    async def _refresh_due_leagues(self, now: int) -> None:
+        due = {}
+        for guild in self.bot.guilds:
+            for source in await self.config.guild(guild).league_sources():
+                key = str(source.get("key") or "")
+                if source.get("enabled", True) and key and now - int(source.get("cached_at") or 0) >= COMMUNITY_REFRESH_INTERVAL:
+                    due[key] = source
+        refreshed = {}
+        for key in sorted(due):
+            try:
+                refreshed[key] = await self._fetch_league_source(key)
+            except StartGGError as exc:
+                log.warning("Automatic start.gg league refresh failed for %s: %s", key, exc)
         if not refreshed:
             return
         for guild in self.bot.guilds:
-            async with self.config.guild(guild).tournament_sources() as stored:
-                stored[:] = self._merge_tournament_refreshes(stored, refreshed)
+            async with self.config.guild(guild).league_sources() as stored:
+                stored[:] = self._merge_league_refreshes(stored, refreshed)
+
+    @staticmethod
+    def _merge_league_refreshes(
+        stored: list[dict], refreshed: dict[str, dict]
+    ) -> list[dict]:
+        """Replace successful league snapshots while preserving last-good failures."""
+        merged = []
+        for source in stored:
+            updated = refreshed.get(str(source.get("key") or ""))
+            if updated is None:
+                merged.append(dict(source))
+                continue
+            replacement = dict(updated)
+            replacement["id"] = source.get("id")
+            replacement["enabled"] = source.get("enabled", True)
+            merged.append(replacement)
+        return merged
 
     @staticmethod
     def _merge_tournament_refreshes(
@@ -836,8 +879,42 @@ class RocketLeague(commands.Cog):
         """Show recently completed configured Rocket League tournaments."""
         await self._send_configured_tournaments(ctx, past=True)
 
+    @staticmethod
+    def _cross_provider_event_key(source: dict) -> tuple[str, int]:
+        name = "".join(character for character in str(source.get("name") or "").casefold() if character.isalnum())
+        start_day = int(source.get("start_at") or 0) // 86400
+        return name, start_day
+
+    async def _configured_tournament_sources(self, guild) -> list[dict]:
+        merged = {}
+        for tournament in await self._cached_blast():
+            value = {
+                "provider": "blast",
+                "key": tournament.slug,
+                "url": tournament.url,
+                "name": tournament.name,
+                "start_at": tournament.start_at,
+                "end_at": tournament.end_at,
+                "location": tournament.location,
+                "image_url": tournament.image_url,
+                "source_origin": "BLAST",
+            }
+            merged[self._cross_provider_event_key(value)] = value
+        for item in await self._number_tournament_sources(guild):
+            merged.setdefault(self._cross_provider_event_key(item), item)
+        for league in await self.config.guild(guild).league_sources():
+            if not league.get("enabled", True):
+                continue
+            for item in league.get("tournaments") or []:
+                if not isinstance(item, dict):
+                    continue
+                value = dict(item)
+                value["league_name"] = league.get("name")
+                merged.setdefault(self._cross_provider_event_key(value), value)
+        return list(merged.values())
+
     async def _send_configured_tournaments(self, ctx: commands.Context, *, past: bool) -> None:
-        sources = await self._number_tournament_sources(ctx.guild)
+        sources = await self._configured_tournament_sources(ctx.guild)
         if not sources:
             await ctx.send(
                 "This server has no tournament URLs configured. A server administrator can add "
@@ -865,18 +942,24 @@ class RocketLeague(commands.Cog):
         description = "Community events selected by this server."
         embed = discord.Embed(title=title, description=description, color=discord.Color.blue())
         for source in ordered:
-            provider = "start.gg" if source.get("provider") == "startgg" else "Challonge"
+            provider = {
+                "startgg": "start.gg",
+                "challonge": "Challonge",
+                "blast": "BLAST",
+            }.get(source.get("provider"), "provider")
             name = str(source.get("name") or source.get("key"))
             url = str(source.get("url") or "")
             details = self._community_source_details(source, past=past)
-            details.append(f"Source: {provider}")
+            details.append(f"Source: {source.get('source_origin') or provider}")
+            if source.get("league_name"):
+                details.append(f"Series: {discord.utils.escape_markdown(str(source.get('league_name')))}")
             provider_link = f"[View on {provider}]({url})"
             embed.add_field(
                 name=discord.utils.escape_markdown(name)[:256],
                 value="\n".join([provider_link, *details])[:1024],
                 inline=False,
             )
-        embed.set_footer(text="Community tournament listings • Refreshed daily")
+        embed.set_footer(text="BLAST and server-selected tournament listings • Provider refresh schedules vary")
         await ctx.send(embed=embed)
 
     @staticmethod
@@ -1294,22 +1377,27 @@ class RocketLeague(commands.Cog):
                 used.add(next_id)
             return [dict(item) for item in sources]
 
-    async def _fetch_startgg_source(self, key: str) -> dict:
-        client = await self.get_client()
-        if client is None:
-            raise StartGGError(
-                "A start.gg developer token is not configured.",
-                setup_command="set api startgg token,YOUR_TOKEN",
-            )
-        tournament = await client.tournament(key)
-        if tournament is None:
-            raise StartGGError("That start.gg URL does not contain a visible Rocket League tournament.")
+    @staticmethod
+    def _startgg_source(tournament: RLCSTournament) -> dict:
         entrants = [event.entrants for event in tournament.events if event.entrants is not None]
         team_sizes = {event.entrant_size_min for event in tournament.events if event.entrant_size_min}
         formats = [event.name for event in tournament.events if event.name]
         location = ", ".join(filter(None, (tournament.city, tournament.state, tournament.country)))
+        fingerprint_data = "|".join(
+            [
+                str(tournament.id),
+                tournament.slug,
+                str(tournament.start_at),
+                str(tournament.end_at),
+                *(f"{event.id}:{event.start_at}:{event.state}:{event.entrants}" for event in tournament.events),
+            ]
+        )
+        cached_at = int(time.time())
         return {
-            "provider": "startgg", "key": key, "url": tournament.url,
+            "provider": "startgg", "key": tournament.slug, "url": tournament.url,
+            "source_origin": "direct start.gg tournament",
+            "provider_id": tournament.id, "fingerprint": hashlib.sha256(fingerprint_data.encode()).hexdigest(),
+            "last_seen": cached_at, "image_url": tournament.image_url,
             "name": tournament.name, "start_at": tournament.start_at,
             "end_at": tournament.end_at, "state": tournament.tournament_state,
             "registration_closes_at": tournament.registration_closes_at,
@@ -1333,7 +1421,41 @@ class RocketLeague(commands.Cog):
                 for event in tournament.events
             ],
             "prize": None, "location": location or ("Online" if tournament.is_online else None),
+            "cached_at": cached_at,
+        }
+
+    async def _fetch_startgg_source(self, key: str) -> dict:
+        client = await self.get_client()
+        if client is None:
+            raise StartGGError(
+                "A start.gg developer token is not configured.",
+                setup_command="set api startgg token,YOUR_TOKEN",
+            )
+        tournament = await client.tournament(key)
+        if tournament is None:
+            raise StartGGError("That start.gg URL does not contain a visible Rocket League tournament.")
+        return self._startgg_source(tournament)
+
+    async def _fetch_league_source(self, key: str) -> dict:
+        client = await self.get_client()
+        if client is None:
+            raise StartGGError(
+                "A start.gg developer token is not configured.",
+                setup_command="set api startgg token,YOUR_TOKEN",
+            )
+        league = await client.league(key)
+        if league is None:
+            raise StartGGError("That start.gg league could not be found through the supported API.")
+        return {
+            "key": key,
+            "name": league.name,
+            "url": league.url,
+            "enabled": True,
             "cached_at": int(time.time()),
+            "tournaments": [
+                {**self._startgg_source(item), "source_origin": "start.gg league"}
+                for item in league.tournaments
+            ],
         }
 
     async def _challonge_access_token_for_request(self) -> str:
@@ -1480,6 +1602,105 @@ class RocketLeague(commands.Cog):
         except ValueError:
             return None
 
+    async def _number_league_sources(self, guild) -> list[dict]:
+        async with self.config.guild(guild).league_sources() as sources:
+            used = {int(item["id"]) for item in sources if str(item.get("id") or "").isdigit()}
+            next_id = 1
+            for item in sources:
+                if str(item.get("id") or "").isdigit():
+                    continue
+                while next_id in used:
+                    next_id += 1
+                item["id"] = next_id
+                used.add(next_id)
+            return [dict(item) for item in sources]
+
+    @rocketleagueset.command(name="leagueadd")
+    async def rocketleagueset_leagueadd(self, ctx: commands.Context, *, url: str):
+        """Subscribe this server to a complete start.gg league URL."""
+        try:
+            key = self._league_source_from_url(url)
+            source = await self._fetch_league_source(key)
+        except (ValueError, StartGGError) as exc:
+            await ctx.send(await self._provider_error_message(ctx, exc))
+            return
+        await self._number_league_sources(ctx.guild)
+        async with self.config.guild(ctx.guild).league_sources() as sources:
+            if any(item.get("key") == key for item in sources):
+                await ctx.send(f"**{source['name']}** is already subscribed for this server.")
+                return
+            if len(sources) >= 10:
+                await ctx.send("A server can subscribe to at most 10 start.gg leagues.")
+                return
+            source["id"] = max((int(item.get("id") or 0) for item in sources), default=0) + 1
+            sources.append(source)
+        count = len(source.get("tournaments") or [])
+        await ctx.send(
+            f"Subscribed to **{source['name']}** as league ID `{source['id']}`; "
+            f"cached {count} Rocket League tournament{'s' if count != 1 else ''}."
+        )
+
+    @rocketleagueset.command(name="leagues")
+    async def rocketleagueset_leagues(self, ctx: commands.Context):
+        """List this server's start.gg league subscriptions."""
+        sources = await self._number_league_sources(ctx.guild)
+        if not sources:
+            await ctx.send("This server has no start.gg league subscriptions.")
+            return
+        lines = []
+        for item in sources:
+            state = "enabled" if item.get("enabled", True) else "disabled"
+            count = len(item.get("tournaments") or [])
+            lines.append(f"- ID `{item['id']}` • **{item.get('name') or item.get('key')}** • {state} • {count} cached • <{item.get('url')}>")
+        await ctx.send("**start.gg league subscriptions**\n" + "\n".join(lines))
+
+    @rocketleagueset.command(name="leaguerefresh")
+    async def rocketleagueset_leaguerefresh(self, ctx: commands.Context, league_id: Optional[int] = None):
+        """Refresh one league subscription by ID, or every subscription."""
+        sources = await self._number_league_sources(ctx.guild)
+        selected = [item for item in sources if league_id is None or int(item.get("id") or 0) == league_id]
+        if not selected:
+            await ctx.send("That league ID is not configured for this server.")
+            return
+        replacements = {}
+        try:
+            for item in selected:
+                updated = await self._fetch_league_source(str(item.get("key")))
+                updated["id"] = item.get("id")
+                updated["enabled"] = item.get("enabled", True)
+                replacements[int(item["id"])] = updated
+        except StartGGError as exc:
+            await ctx.send(await self._provider_error_message(ctx, exc))
+            return
+        async with self.config.guild(ctx.guild).league_sources() as stored:
+            stored[:] = [replacements.get(int(item.get("id") or 0), item) for item in stored]
+        await ctx.send(f"Refreshed {len(replacements)} start.gg league subscription{'s' if len(replacements) != 1 else ''}.")
+
+    @rocketleagueset.command(name="leaguedisable")
+    async def rocketleagueset_leaguedisable(self, ctx: commands.Context, league_id: int):
+        """Disable automatic refresh and display for a league subscription."""
+        sources = await self._number_league_sources(ctx.guild)
+        if not any(int(item.get("id") or 0) == league_id for item in sources):
+            await ctx.send("That league ID is not configured for this server.")
+            return
+        async with self.config.guild(ctx.guild).league_sources() as stored:
+            for item in stored:
+                if int(item.get("id") or 0) == league_id:
+                    item["enabled"] = False
+        await ctx.send(f"Disabled start.gg league subscription `{league_id}`.")
+
+    @rocketleagueset.command(name="leagueremove")
+    async def rocketleagueset_leagueremove(self, ctx: commands.Context, league_id: int):
+        """Remove a start.gg league subscription and its cached tournaments."""
+        sources = await self._number_league_sources(ctx.guild)
+        matched = next((item for item in sources if int(item.get("id") or 0) == league_id), None)
+        if matched is None:
+            await ctx.send("That league ID is not configured for this server.")
+            return
+        async with self.config.guild(ctx.guild).league_sources() as stored:
+            stored[:] = [item for item in stored if int(item.get("id") or 0) != league_id]
+        await ctx.send(f"Removed league `{league_id}`: **{matched.get('name') or matched.get('key')}**.")
+
     @rocketleagueset.command(name="tournamentadd")
     async def rocketleagueset_tournamentadd(self, ctx: commands.Context, *, url: str):
         """Validate, cache, and add a start.gg or Challonge tournament URL."""
@@ -1574,6 +1795,17 @@ class RocketLeague(commands.Cog):
             f"Refresh cached details with `{ctx.clean_prefix}rocketleagueset tournamentrefresh [id]`."
         )
         await ctx.send("**Configured Rocket League tournaments**\n" + "\n".join(lines))
+
+    @staticmethod
+    def _league_source_from_url(value: str) -> str:
+        value = value.strip().strip("<>")
+        parsed = urlparse(value)
+        if parsed.scheme != "https" or (parsed.hostname or "").casefold() not in {"start.gg", "www.start.gg"}:
+            raise ValueError("Enter a complete https start.gg league URL.")
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) < 2 or parts[0].casefold() != "league" or not parts[1]:
+            raise ValueError("Use a direct URL in the form https://www.start.gg/league/name.")
+        return normalize_league_slug(value)
 
     @staticmethod
     def _tournament_source_from_url(value: str) -> tuple[str, str]:

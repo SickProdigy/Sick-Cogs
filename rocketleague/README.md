@@ -141,9 +141,22 @@ The separate `[p]rlcsset` group is server-administrator configuration:
 - `[p]rlcsset postnow` - post a cache-only preview without contacting BLAST.
 - `[p]rlcsset refresh` - bot-owner-only refresh that enforces the seven-day minimum.
 
-Manual commands and restarts cannot bypass the BLAST limit. A failed request records the
-attempt and retains the previous good cache. Announcements persist fingerprints per guild,
-so unchanged events are not posted twice.
+Server administrators can also subscribe to a start.gg tournament series with a complete
+league URL. League discovery uses start.gg's documented paginated league-event connection,
+keeps only Rocket League events, de-duplicates their parent tournaments, and retains the last
+good daily snapshot when refreshes fail:
+
+- `[p]rocketleagueset leagueadd <https://www.start.gg/league/...>` - validate and subscribe.
+- `[p]rocketleagueset leagues` - list subscription IDs, state, and cached tournament counts.
+- `[p]rocketleagueset leaguerefresh [id]` - refresh one or all subscriptions now.
+- `[p]rocketleagueset leaguedisable <id>` - pause refresh and hide its cached tournaments.
+- `[p]rocketleagueset leagueremove <id>` - remove the subscription and its cached snapshot.
+
+The combined tournament view also includes cached BLAST events. Exact same-name, same-day
+matches are shown once with BLAST attribution; otherwise direct tournament URLs take precedence
+when the same start.gg tournament is also discovered through a league. Manual commands and restarts cannot bypass the BLAST limit. A failed request
+records the attempt and retains the previous good cache. Announcements persist fingerprints per
+guild, so unchanged events are not posted twice.
 
 ## Scope
 
