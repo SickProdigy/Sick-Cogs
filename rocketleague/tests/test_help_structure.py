@@ -1,4 +1,10 @@
+import asyncio
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+from rocketleague.api import StartGGError
+from rocketleague.clips import ClipProviders, ClipSourceError
 
 from rocketleague.rocketleague import RocketLeague
 
@@ -124,6 +130,78 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
             past=True,
         )
         self.assertIn("8 entrants", " ".join(details))
+
+    def test_missing_provider_credentials_carry_command_metadata(self):
+        async def scenario():
+            bot = SimpleNamespace(get_shared_api_tokens=AsyncMock(return_value={}))
+            cog = RocketLeague.__new__(RocketLeague)
+            cog.bot = bot
+            cog._challonge_access_token = None
+            cog._challonge_token_expires_at = 0.0
+            cog._challonge_token_lock = asyncio.Lock()
+
+            with self.assertRaises(StartGGError) as startgg:
+                await cog._fetch_startgg_source("tournament/example")
+            with self.assertRaises(StartGGError) as challonge:
+                await cog._challonge_access_token_for_request()
+
+            providers = ClipProviders(bot, None)
+            with self.assertRaises(ClipSourceError) as twitch:
+                await providers._twitch_access_token()
+            with self.assertRaises(ClipSourceError) as youtube:
+                await providers._youtube_key()
+
+            return [
+                startgg.exception.setup_command,
+                challonge.exception.setup_command,
+                twitch.exception.setup_command,
+                youtube.exception.setup_command,
+            ]
+
+        commands = asyncio.run(scenario())
+        self.assertEqual(
+            commands,
+            [
+                "set api startgg token,YOUR_TOKEN",
+                "set api challonge client_id,YOUR_ID client_secret,YOUR_SECRET",
+                "set api twitch client_id,YOUR_ID client_secret,YOUR_SECRET",
+                "set api youtube api_key,YOUR_API_KEY",
+            ],
+        )
+
+    def test_provider_guidance_uses_invoking_text_prefix(self):
+        async def scenario(prefix):
+            cog = RocketLeague.__new__(RocketLeague)
+            cog.bot = SimpleNamespace()
+            ctx = SimpleNamespace(clean_prefix=prefix)
+            error = StartGGError(
+                "Credentials are missing.",
+                setup_command="set api startgg token,YOUR_TOKEN",
+            )
+            return await cog._provider_error_message(ctx, error)
+
+        for prefix in ("!", "-", "sick!"):
+            with self.subTest(prefix=prefix):
+                rendered = asyncio.run(scenario(prefix))
+                self.assertIn(f"`{prefix}set api startgg token,YOUR_TOKEN`", rendered)
+
+    def test_mention_invocation_prefers_configured_text_prefix(self):
+        async def scenario():
+            bot = SimpleNamespace(
+                get_valid_prefixes=AsyncMock(return_value=["<@123> ", "!!"])
+            )
+            cog = RocketLeague.__new__(RocketLeague)
+            cog.bot = bot
+            ctx = SimpleNamespace(clean_prefix="@RocketBot ", guild=object())
+            error = StartGGError(
+                "Credentials are missing.",
+                setup_command="set api startgg token,YOUR_TOKEN",
+            )
+            return await cog._provider_error_message(ctx, error)
+
+        rendered = asyncio.run(scenario())
+        self.assertIn("`!!set api startgg token,YOUR_TOKEN`", rendered)
+        self.assertNotIn("@RocketBot", rendered)
 
 
 if __name__ == "__main__":
