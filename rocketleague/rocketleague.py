@@ -24,7 +24,7 @@ from .api import (
     normalize_league_slug,
     normalize_tournament_slug,
 )
-from .blast import BlastClient, BlastError, BlastTournament, upcoming_tournaments
+from .blast import BlastClient, BlastError, BlastResult, BlastTournament, upcoming_tournaments
 from .clips import ClipProviders, ClipSourceError, clip_identity, detect_clip_source
 
 
@@ -37,6 +37,7 @@ USER_AGENT = "Sick-Cogs-RocketLeague/1.6.0 (+https://github.com/SickProdigy/Sick
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
+BLAST_RESULT_DETAIL_LIMIT = 10
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
 CHALLONGE_DAILY_TOURNAMENT_LIMIT = 7
@@ -70,6 +71,7 @@ class RocketLeague(commands.Cog):
             blast_last_success=0,
             blast_tournaments=[],
             blast_history=[],
+            blast_results={},
             blast_last_error=None,
             challonge_refresh_day=0,
             challonge_refresh_count=0,
@@ -185,6 +187,37 @@ class RocketLeague(commands.Cog):
             records.append(record)
         return records
 
+    async def _cached_blast_results(self) -> dict[str, dict]:
+        results = {}
+        values = await self.config.blast_results()
+        if not isinstance(values, dict):
+            return results
+        for slug, value in values.items():
+            if not isinstance(value, dict):
+                continue
+            try:
+                result = BlastResult.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+            results[str(slug)] = {**result.to_dict(), "cached_at": int(value.get("cached_at") or 0)}
+        return results
+
+    async def _refresh_blast_results(
+        self, client: BlastClient, tournaments: list[BlastTournament], *, now: int
+    ) -> None:
+        cached = await self._cached_blast_results()
+        candidates = [item for item in tournaments if item.end_at < now and item.slug not in cached]
+        candidates.sort(key=lambda item: item.end_at, reverse=True)
+        for tournament in candidates[:BLAST_RESULT_DETAIL_LIMIT]:
+            try:
+                result = await client.tournament_result(tournament)
+            except BlastError as exc:
+                log.warning("BLAST result detail failed for %s: %s", tournament.slug, exc)
+                continue
+            if result is not None:
+                cached[tournament.slug] = {**result.to_dict(), "cached_at": now}
+        await self.config.blast_results.set(cached)
+
 
     @staticmethod
     def _merge_blast_history(
@@ -230,14 +263,22 @@ class RocketLeague(commands.Cog):
             previous = await self._cached_blast()
             history = await self._cached_blast_history()
             try:
-                tournaments = await BlastClient(await self.get_session()).tournaments()
+                client = BlastClient(await self.get_session())
+                tournaments = await client.tournaments()
             except BlastError as exc:
                 await self.config.blast_last_error.set(str(exc))
                 raise
             await self.config.blast_tournaments.set([item.to_dict() for item in tournaments])
-            await self.config.blast_history.set(
-                self._merge_blast_history(history, previous, tournaments, now=now)
-            )
+            merged_history = self._merge_blast_history(history, previous, tournaments, now=now)
+            await self.config.blast_history.set(merged_history)
+            known = {item.slug: item for item in [*previous, *tournaments]}
+            for value in merged_history:
+                try:
+                    item = BlastTournament.from_dict(value)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                known[item.slug] = item
+            await self._refresh_blast_results(client, list(known.values()), now=now)
             await self.config.blast_last_success.set(now)
             await self.config.blast_last_error.set(None)
             return tournaments, True
@@ -864,7 +905,35 @@ class RocketLeague(commands.Cog):
             embed.add_field(name="Cache", value=f"Updated <t:{cached_at}:R>", inline=False)
         return embed
 
+    @staticmethod
+    def _blast_results_embed(tournament: BlastTournament, result: dict) -> discord.Embed:
+        champion = discord.utils.escape_markdown(str(result["champion"]))
+        runner_up = discord.utils.escape_markdown(str(result["runner_up"]))
+        score = f"{int(result['champion_score'])}–{int(result['runner_up_score'])}"
+        embed = discord.Embed(
+            title=f"{tournament.name} results"[:256], url=tournament.url,
+            color=discord.Color.blue(),
+        )
+        embed.add_field(
+            name="Grand Final", value=f"**{champion}** defeated **{runner_up}** {score}", inline=False
+        )
+        semifinalists = result.get("semifinalists") or []
+        if semifinalists:
+            names = ", ".join(discord.utils.escape_markdown(str(item)) for item in semifinalists[:2])
+            embed.add_field(name="Semifinalists", value=names, inline=False)
+        cached_at = int(result.get("cached_at") or 0)
+        embed.set_footer(text="Source: BLAST official tournament results")
+        if cached_at:
+            embed.add_field(name="Cache", value=f"Updated <t:{cached_at}:R>", inline=False)
+        return embed
+
     async def _send_results(self, ctx: commands.Context, reference: str) -> None:
+        blast = await self._resolve_cached_blast(reference)
+        if blast is not None:
+            blast_result = (await self._cached_blast_results()).get(blast.slug)
+            if blast_result is not None:
+                await ctx.send(embed=self._blast_results_embed(blast, blast_result))
+                return
         source = await self._match_cached_result_source(ctx.guild, reference)
         if source is None and ("start.gg" in reference or reference.startswith("tournament/")):
             client = await self.require_client(ctx)
@@ -879,8 +948,7 @@ class RocketLeague(commands.Cog):
                 source = self._startgg_source(tournament)
         if source is None:
             await ctx.send(
-                "No confidently matched start.gg results are cached for that event. "
-                "BLAST supplies its schedule, but this cog does not infer winners from schedule data."
+                "No final results are cached for that event from BLAST or a confidently matched start.gg tournament."
             )
             return
         if not self._placement_summary(source):
@@ -898,9 +966,11 @@ class RocketLeague(commands.Cog):
             )
             return
         sources = await self._cached_result_sources(ctx.guild) if ctx.guild else []
+        blast_results = await self._cached_blast_results()
         prefix = await self._configured_text_prefix(ctx)
         embed = self._blast_embed(tournaments, title="Recent official RLCS events")
         for index, (field, tournament) in enumerate(zip(embed.fields, tournaments)):
+            official = blast_results.get(tournament.slug)
             target = {
                 "name": tournament.name,
                 "start_at": tournament.start_at,
@@ -910,7 +980,19 @@ class RocketLeague(commands.Cog):
                 (item for item in sources if self._confident_event_match(item, target)),
                 None,
             )
-            details = self._placement_summary(source) if source else []
+            if official:
+                details = [
+                    f"Champion: **{discord.utils.escape_markdown(str(official['champion']))}**",
+                    f"Runner-up: **{discord.utils.escape_markdown(str(official['runner_up']))}**",
+                    f"Grand Final: {int(official['champion_score'])}–{int(official['runner_up_score'])}",
+                ]
+                semifinalists = official.get("semifinalists") or []
+                if semifinalists:
+                    details.append("Semifinalists: " + ", ".join(
+                        discord.utils.escape_markdown(str(item)) for item in semifinalists[:2]
+                    ))
+            else:
+                details = self._placement_summary(source) if source else []
             reference = self._blast_short_id(tournament)
             if details:
                 details.append(f"More: `{prefix}rlcs results {reference}`")

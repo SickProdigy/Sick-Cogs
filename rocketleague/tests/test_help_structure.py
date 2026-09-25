@@ -310,6 +310,7 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
                 return_value=[BlastTournament("open", "RLCS Open", 100, 200, None)]
             )
             cog._cached_result_sources = AsyncMock(return_value=[])
+            cog._cached_blast_results = AsyncMock(return_value={})
             ctx = SimpleNamespace(clean_prefix="!", guild=object(), send=AsyncMock())
             await cog._send_recent_events(ctx, 5)
             return ctx.send.await_args.kwargs["embed"].footer.text

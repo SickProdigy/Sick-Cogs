@@ -1,9 +1,10 @@
 # RocketLeague
 
-RocketLeague posts Rocket League Championship Series schedule updates. It makes at most
-one permitted request to the public BLAST tournament catalog every seven days, stores a
-server-side snapshot in Red Config, and serves commands and guild announcements from
-that cache. The documented start.gg GraphQL API remains an optional supplemental source.
+RocketLeague posts Rocket League Championship Series schedule updates. Once every seven
+days it requests the public BLAST tournament catalog and, for at most ten newly completed
+events, their official detail pages. It stores server-side snapshots in Red Config and
+serves commands and guild announcements from that cache. The documented start.gg GraphQL
+API remains an optional supplemental source.
 
 ## Setup
 
@@ -42,8 +43,9 @@ reference, including the separate `[p]rlcsset` administrator commands:
 - `[p]rocketleague rlcs event <start.gg URL or slug>` - optional detailed
   start.gg lookup. With no argument it lists cached official events; a listed cache ID or
   BLAST slug opens that official event without a network request.
-- `[p]rocketleague rlcs results <reference>` - show verified top placements cached from
-  a matched start.gg tournament. BLAST-only events report that results are unavailable.
+- `[p]rocketleague rlcs results <reference>` - show an official cached BLAST grand-final
+  score and semifinalists when available, otherwise verified placements from a confidently
+  matched start.gg tournament.
 
 `[p]rl` is an alias for the complete `[p]rocketleague` group, so commands such as
 `[p]rl tourney` and `[p]rl rlcs` follow the canonical structure. `[p]rlcs` remains a
@@ -51,12 +53,13 @@ direct shortcut to the official schedule; `[p]rlcs upcoming`, `[p]rlcs event <UR
 slug>`, and `[p]rlcs results <reference>` remain available, alongside `[p]rlcs recent` and
 `[p]rlcs events`.
 
-Completed official-event history is built prospectively from the same permitted weekly BLAST
-snapshots; history commands never make an extra BLAST request. Retention is bounded to 100 records
-and one year. The cache stores first/last-seen timestamps and the final observed fingerprint, but
-does not invent winners or completion details that BLAST did not provide. When a BLAST event
-confidently matches a cached start.gg tournament, verified start.gg placements may be shown with
-explicit attribution; unmatched BLAST events retain a results-unavailable state.
+Completed official-event history is built prospectively from the permitted weekly BLAST
+refresh; commands never make an extra BLAST request. Retention is bounded to 100 records and
+one year. A weekly refresh checks at most ten newly completed retained events for structured
+BLAST grand-final and semifinal data, preserves the last good results, and rejects tied or
+incomplete finals. When official detail data is unavailable, a confidently matched cached
+start.gg tournament may supply verified placements with explicit attribution. Events lacking
+either source retain a results-unavailable state.
 
 Tournament URLs are configured independently for each Discord server. Administrators do
 not need to choose a provider-specific command; the cog identifies the provider from the
@@ -159,9 +162,11 @@ good daily snapshot when refreshes fail:
 
 The combined tournament view also includes cached BLAST events. Exact same-name, same-day
 matches are shown once with BLAST attribution; otherwise direct tournament URLs take precedence
-when the same start.gg tournament is also discovered through a league. Manual commands and restarts cannot bypass the BLAST limit. A failed request
-records the attempt and retains the previous good cache. Announcements persist fingerprints per
-guild, so unchanged events are not posted twice.
+when the same start.gg tournament is also discovered through a league. Manual commands and
+restarts cannot bypass the weekly BLAST refresh window or the ten-detail-page cap. A failed
+catalog request records the attempt and retains the previous good schedule; individual detail
+failures do not discard cached results. Announcements persist fingerprints per guild, so
+unchanged events are not posted twice.
 
 ## Scope
 
