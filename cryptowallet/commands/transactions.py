@@ -67,6 +67,38 @@ class WalletTransactionCommands:
             intent.expires_at,
         )
 
+    def _final_intent_binding_error(
+        self, intent: TransactionIntent, profile: dict, network
+    ) -> str | None:
+        """Fail closed if the final intent no longer matches reviewed capabilities or account."""
+        if (
+            intent.network != network.key
+            or not network.supports(NetworkCapability.SEND)
+            or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)
+        ):
+            return "Sending is no longer enabled for this exact network."
+        if intent.profile_id != str(profile.get("profile_id") or ""):
+            return "The wallet profile no longer matches this intent."
+        account = next(
+            (
+                item
+                for item in profile.get("accounts") or []
+                if item.get("network") == network.key
+            ),
+            None,
+        )
+        try:
+            account_address = normalize_address_for_network(
+                str((account or {}).get("address") or ""), network
+            )
+            intent_sender = normalize_address_for_network(intent.from_address, network)
+            normalize_address_for_network(intent.to_address, network)
+        except ValueError:
+            return "The wallet account or transaction address is invalid."
+        if account_address != intent_sender:
+            return "The transaction sender no longer matches the wallet profile."
+        return None
+
     async def _send_recipient_address(self, ctx, value: str, network) -> str | None:
         """Resolve a direct address or lazily provision a mentioned server member."""
         mention = re.fullmatch(r"<@!?(\d+)>", value.strip())
@@ -604,6 +636,13 @@ class WalletTransactionCommands:
             )
             return
         intent = refreshed_intent
+        binding_error = self._final_intent_binding_error(intent, profile, network)
+        if binding_error is not None:
+            await interaction.followup.send(
+                f"Final transaction validation failed: {binding_error}",
+                ephemeral=True,
+            )
+            return
         try:
             if intent.asset_kind == "erc20":
                 registry = await self.config.token_registry()

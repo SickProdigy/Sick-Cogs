@@ -1260,6 +1260,41 @@ class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
+    def test_final_binding_requires_reviewed_network_provider_and_exact_account(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        intent = TransactionIntent(
+            intent_id="binding-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key, from_address=sender,
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+        )
+        profile = {
+            "profile_id": "profile-7",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}],
+        }
+        provider = SimpleNamespace(supports=lambda network, capability: True)
+        harness = SimpleNamespace(wallet_provider=provider)
+
+        self.assertIsNone(WalletTransactionCommands._final_intent_binding_error(
+            harness, intent, profile, BASE_SEPOLIA
+        ))
+        profile["accounts"][0]["address"] = (
+            "0x1111111111111111111111111111111111111111"
+        )
+        self.assertIn(
+            "sender", WalletTransactionCommands._final_intent_binding_error(
+                harness, intent, profile, BASE_SEPOLIA
+            )
+        )
+        profile["accounts"][0]["address"] = sender
+        provider.supports = lambda network, capability: False
+        self.assertIn(
+            "no longer enabled",
+            WalletTransactionCommands._final_intent_binding_error(
+                harness, intent, profile, BASE_SEPOLIA
+            ),
+        )
+
     def test_mainnet_intent_discloses_real_value_and_requires_fee_maximum(self):
         intent = TransactionIntent(
             intent_id="mainnet-7", profile_id="profile-7",
