@@ -3,8 +3,9 @@ from .cryptowallet import CryptoWallet
 
 __red_end_user_data_statement__ = (
     "This cog stores wallet profile identifiers, linked platform identifiers, public wallet "
-    "addresses, and public transaction status metadata. It never stores private keys, recovery "
-    "phrases, wallet passwords, or one-time authentication codes."
+    "addresses, public transaction status metadata, notification preferences, emergency-lock "
+    "status, and optional encrypted authenticator enrollment state. It never stores private "
+    "keys, recovery phrases, wallet passwords, or one-time authentication codes."
 )
 
 

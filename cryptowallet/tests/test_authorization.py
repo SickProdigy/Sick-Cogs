@@ -2611,6 +2611,25 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sickwallet_apply_migrations", setup)
         self.assertNotIn("file_get_contents($schemaPath)", setup)
 
+    def test_security_documents_and_data_statement_are_packaged(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        threat = (root / "docs" / "threat-model.md").read_text(encoding="utf-8")
+        runbook = (root / "docs" / "operations-runbook.md").read_text(
+            encoding="utf-8"
+        )
+        package = (root / "__init__.py").read_text(encoding="utf-8")
+
+        self.assertIn("docs/threat-model.md", readme)
+        self.assertIn("docs/operations-runbook.md", readme)
+        self.assertIn("Base mainnet remains unavailable", threat)
+        self.assertIn("Discord compromise", threat)
+        self.assertIn("Provider, RPC, and chain disagreement", threat)
+        self.assertIn("migrate.php", runbook)
+        self.assertIn("Do not resubmit uncertain operations", runbook)
+        self.assertIn("emergency lock", runbook)
+        self.assertIn("encrypted authenticator enrollment state", package)
+
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
     async def test_prepares_exact_call_without_provider_submission(self):
         launch = ClankerIntentFixtures.clanker_intent()

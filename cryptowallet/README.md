@@ -19,6 +19,7 @@ Bot owners can inspect this boundary with `[p]walletset mainnet status` and forc
 Ethereum Sepolia smart-account operations cannot assume Base gas sponsorship. CDP's built-in Paymaster supports Base networks; Ethereum Sepolia must use user-funded test ETH or a separately reviewed compatible paymaster.
 
 See [Polygon / Polymarket handoff boundary](docs/polygon-polymarket-handoff.md) for the develop-only provider-neutral execution decision record.
+Release reviewers and operators must also read the [CryptoWallet threat model](docs/threat-model.md) and [operations and incident runbook](docs/operations-runbook.md). These documents describe current trust boundaries and containment procedures; they do not enable mainnet.
 
 ## Intended experience
 
@@ -133,6 +134,11 @@ User commands:
 [p]wallet notifications [true|false]
 [p]wallet security              # Show emergency-lock status
 [p]wallet security lock         # Alias: freeze; only bot owner can unlock
+[p]wallet security 2fa          # Show optional authenticator status
+[p]wallet security 2fa setup    # Protected Authy-compatible enrollment
+[p]wallet security 2fa disable  # Requires the current authenticator code
+[p]wallet security 2fa replace  # Verify current factor, then enroll again
+[p]wallet security 2fa lost     # Lock immediately and contact the bot owner
 [p]wallet authorize
 [p]wallet auth [days]           # Short alias; optional days prefill
 [p]wallet authorization
@@ -153,6 +159,7 @@ Owner commands:
 [p]walletset usage
 [p]walletset lock <mention-or-user-id>      # Alias: freeze
 [p]walletset unlock <mention-or-user-id>    # Alias: unfreeze
+[p]walletset 2fareset <user-id> I CONFIRM IDENTITY REVIEW AND RESET 2FA
 [p]walletset pause
 [p]walletset resume
 [p]walletset reconcile <mention-or-user-id> <bot-reference>
