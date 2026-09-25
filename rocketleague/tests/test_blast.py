@@ -8,6 +8,11 @@ from rocketleague.blast import (
     parse_blast_tournaments,
     upcoming_tournaments,
 )
+from rocketleague.rocketleague import (
+    BLAST_HISTORY_MAX_AGE,
+    BLAST_HISTORY_LIMIT,
+    RocketLeague,
+)
 
 
 CATALOG = """
@@ -98,6 +103,42 @@ class BlastParserTests(unittest.TestCase):
     def test_round_trip_preserves_cached_fields(self):
         tournament = BlastTournament("worlds", "Worlds", 100, 200, "Texas")
         self.assertEqual(BlastTournament.from_dict(tournament.to_dict()), tournament)
+
+    def test_history_merge_is_prospective_stable_and_bounded(self):
+        now = BLAST_HISTORY_MAX_AGE + 10_000
+        previous = BlastTournament("previous", "Previous", now - 200, now - 100, None)
+        current = BlastTournament("current", "Current", now + 100, now + 200, None)
+        expired = BlastTournament("expired", "Expired", 1, 2, None)
+        history = [
+            {
+                **expired.to_dict(),
+                "first_seen": 1,
+                "last_seen": 2,
+                "final_fingerprint": expired.fingerprint,
+            }
+        ]
+
+        merged = RocketLeague._merge_blast_history(
+            history, [previous], [current], now=now
+        )
+        self.assertEqual({item["slug"] for item in merged}, {"previous", "current"})
+        self.assertTrue(all(item["first_seen"] == now for item in merged))
+        self.assertLessEqual(len(merged), BLAST_HISTORY_LIMIT)
+
+        repeated = RocketLeague._merge_blast_history(merged, [], [current], now=now + 60)
+        current_record = next(item for item in repeated if item["slug"] == "current")
+        self.assertEqual(current_record["first_seen"], now)
+        self.assertEqual(current_record["last_seen"], now + 60)
+
+    def test_short_event_id_is_stable_and_slug_scoped(self):
+        first = BlastTournament("one", "One", 1, 2, None)
+        second = BlastTournament("two", "Two", 1, 2, None)
+        self.assertEqual(
+            RocketLeague._blast_short_id(first), RocketLeague._blast_short_id(first)
+        )
+        self.assertNotEqual(
+            RocketLeague._blast_short_id(first), RocketLeague._blast_short_id(second)
+        )
 
 
 if __name__ == "__main__":
