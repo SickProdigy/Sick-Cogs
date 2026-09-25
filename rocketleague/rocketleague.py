@@ -38,6 +38,7 @@ BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
 BLAST_RESULT_DETAIL_LIMIT = 10
+BLAST_RESULT_SCHEMA = 2
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
 CHALLONGE_DAILY_TOURNAMENT_LIMIT = 7
@@ -73,6 +74,7 @@ class RocketLeague(commands.Cog):
             blast_history=[],
             blast_results={},
             blast_results_last_attempt=0,
+            blast_results_schema=0,
             blast_last_error=None,
             challonge_refresh_day=0,
             challonge_refresh_count=0,
@@ -200,14 +202,24 @@ class RocketLeague(commands.Cog):
                 result = BlastResult.from_dict(value)
             except (KeyError, TypeError, ValueError):
                 continue
-            results[str(slug)] = {**result.to_dict(), "cached_at": int(value.get("cached_at") or 0)}
+            results[str(slug)] = {
+                **result.to_dict(),
+                "cached_at": int(value.get("cached_at") or 0),
+                "detail_version": int(value.get("detail_version") or 1),
+            }
         return results
 
     async def _refresh_blast_results(
         self, client: BlastClient, tournaments: list[BlastTournament], *, now: int
     ) -> None:
         cached = await self._cached_blast_results()
-        candidates = [item for item in tournaments if item.end_at < now and item.slug not in cached]
+        candidates = [
+            item for item in tournaments
+            if item.end_at < now and (
+                item.slug not in cached
+                or int(cached[item.slug].get("detail_version") or 1) < BLAST_RESULT_SCHEMA
+            )
+        ]
         candidates.sort(key=lambda item: item.end_at, reverse=True)
         for tournament in candidates[:BLAST_RESULT_DETAIL_LIMIT]:
             try:
@@ -216,18 +228,23 @@ class RocketLeague(commands.Cog):
                 log.warning("BLAST result detail failed for %s: %s", tournament.slug, exc)
                 continue
             if result is not None:
-                cached[tournament.slug] = {**result.to_dict(), "cached_at": now}
+                cached[tournament.slug] = {
+                    **result.to_dict(), "cached_at": now,
+                    "detail_version": BLAST_RESULT_SCHEMA,
+                }
         await self.config.blast_results.set(cached)
 
     async def _maybe_refresh_blast_results(
         self, tournaments: list[BlastTournament], *, now: int
     ) -> bool:
         last_attempt = int(await self.config.blast_results_last_attempt())
-        if last_attempt and now - last_attempt < BLAST_FETCH_INTERVAL:
+        schema = int(await self.config.blast_results_schema())
+        if schema >= BLAST_RESULT_SCHEMA and last_attempt and now - last_attempt < BLAST_FETCH_INTERVAL:
             return False
         await self.config.blast_results_last_attempt.set(now)
         client = BlastClient(await self.get_session())
         await self._refresh_blast_results(client, tournaments, now=now)
+        await self.config.blast_results_schema.set(BLAST_RESULT_SCHEMA)
         return True
 
 
@@ -301,6 +318,7 @@ class RocketLeague(commands.Cog):
                 known[item.slug] = item
             await self.config.blast_results_last_attempt.set(now)
             await self._refresh_blast_results(client, list(known.values()), now=now)
+            await self.config.blast_results_schema.set(BLAST_RESULT_SCHEMA)
             await self.config.blast_last_success.set(now)
             await self.config.blast_last_error.set(None)
             return tournaments, True
@@ -914,7 +932,7 @@ class RocketLeague(commands.Cog):
                         record_text = f" • match record {wins}-{losses}"
                 lines.append(f"**#{placement}** {name}{record_text}")
             embed.add_field(
-                name=str(event.get("name") or "Rocket League event")[:256],
+                name=f"Final standings — {str(event.get('name') or 'Rocket League event')}"[:256],
                 value="\n".join(lines)[:1024],
                 inline=False,
             )
@@ -931,18 +949,41 @@ class RocketLeague(commands.Cog):
     def _blast_results_embed(tournament: BlastTournament, result: dict) -> discord.Embed:
         champion = discord.utils.escape_markdown(str(result["champion"]))
         runner_up = discord.utils.escape_markdown(str(result["runner_up"]))
-        score = f"{int(result['champion_score'])}–{int(result['runner_up_score'])}"
         embed = discord.Embed(
             title=f"{tournament.name} results"[:256], url=tournament.url,
             color=discord.Color.blue(),
         )
-        embed.add_field(
-            name="Grand Final", value=f"**{champion}** defeated **{runner_up}** {score}", inline=False
-        )
+        standings = [f"**#1** {champion}", f"**#2** {runner_up}"]
         semifinalists = result.get("semifinalists") or []
-        if semifinalists:
-            names = ", ".join(discord.utils.escape_markdown(str(item)) for item in semifinalists[:2])
-            embed.add_field(name="Semifinalists", value=names, inline=False)
+        for index, name in enumerate(semifinalists[:2], start=3):
+            standings.append(f"**#{index}** {discord.utils.escape_markdown(str(name))}")
+        embed.add_field(
+            name="Final standings", value="\n".join(standings), inline=False
+        )
+        matches = result.get("matches") or []
+        if matches:
+            matches = sorted(
+                matches,
+                key=lambda item: ("grand final" in str(item.get("round_name") or "").casefold(), str(item.get("round_name") or "")),
+            )
+            lines = []
+            for match in matches[:3]:
+                round_name = discord.utils.escape_markdown(str(match.get("round_name") or "Match"))
+                team_a = discord.utils.escape_markdown(str(match.get("team_a") or "TBD"))
+                team_b = discord.utils.escape_markdown(str(match.get("team_b") or "TBD"))
+                lines.append(
+                    f"**{round_name}:** {team_a} {int(match.get('team_a_score') or 0)}–"
+                    f"{int(match.get('team_b_score') or 0)} {team_b}"
+                )
+            embed.add_field(name="Championship day matchups", value="\n".join(lines), inline=False)
+        details = [f"**Dates:** <t:{tournament.start_at}:D> – <t:{tournament.end_at}:D>"]
+        if tournament.location:
+            details.append(f"**Location:** {tournament.location}")
+        if tournament.prize_pool:
+            details.append(f"**Prize pool:** {tournament.prize_pool}")
+        if tournament.team_count is not None:
+            details.append(f"**Teams:** {tournament.team_count}")
+        embed.add_field(name="Tournament details", value="\n".join(details), inline=False)
         cached_at = int(result.get("cached_at") or 0)
         embed.set_footer(text="Source: BLAST official tournament results")
         if cached_at:
@@ -2212,6 +2253,7 @@ class RocketLeague(commands.Cog):
     async def rlcsset_refresh(self, ctx: commands.Context):
         """Refresh BLAST when the seven-day request window permits."""
         previous_attempt = int(await self.config.blast_last_attempt())
+        results_before = await self._cached_blast_results()
         try:
             tournaments, refreshed = await self._refresh_blast()
         except BlastError as exc:
@@ -2219,9 +2261,18 @@ class RocketLeague(commands.Cog):
             return
         if not refreshed:
             next_at = previous_attempt + BLAST_FETCH_INTERVAL
+            results_after = await self._cached_blast_results()
+            updated = sum(
+                1 for slug, value in results_after.items()
+                if results_before.get(slug) != value
+            )
+            result_note = (
+                f" Official results updated for {updated} event(s)."
+                if updated else " No new official results were available."
+            )
             await ctx.send(
                 f"The BLAST schedule was already requested this week. Next allowed refresh: "
-                f"<t:{next_at}:F> (<t:{next_at}:R>)."
+                f"<t:{next_at}:F> (<t:{next_at}:R>).{result_note}"
             )
             return
         await self._announce_updates(tournaments)

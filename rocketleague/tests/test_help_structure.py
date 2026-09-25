@@ -237,6 +237,30 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIn("Updated <t:1800000000:R>", rendered)
         self.assertNotIn("<t:", embed.footer.text)
 
+    def test_blast_results_embed_shows_standings_matchups_and_event_details(self):
+        from rocketleague.blast import BlastTournament
+
+        tournament = BlastTournament(
+            "worlds", "RLCS Worlds", 100, 200, "Fort Worth, Texas", "$1,200,000", 20
+        )
+        result = {
+            "champion": "Team Falcons", "runner_up": "Spacestation",
+            "champion_score": 4, "runner_up_score": 0,
+            "semifinalists": ["FUT Esports", "Karmine Corp"],
+            "matches": [
+                {"round_name": "Grand Final", "team_a": "Spacestation", "team_a_score": 0, "team_b": "Team Falcons", "team_b_score": 4},
+                {"round_name": "Semi Final 1", "team_a": "FUT Esports", "team_a_score": 2, "team_b": "Spacestation", "team_b_score": 4},
+            ],
+            "cached_at": 1_800_000_000,
+        }
+        embed = RocketLeague._blast_results_embed(tournament, result)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("**#1** Team Falcons", fields["Final standings"])
+        self.assertIn("FUT Esports 2–4 Spacestation", fields["Championship day matchups"])
+        self.assertIn("Grand Final", fields["Championship day matchups"])
+        self.assertIn("Fort Worth, Texas", fields["Tournament details"])
+        self.assertIn("$1,200,000", fields["Tournament details"])
+
     def test_failed_league_refresh_preserves_last_good_snapshot(self):
         cached = [{"id": 4, "key": "league/rlcs", "enabled": False, "tournaments": [{"fingerprint": "old"}]}]
         self.assertEqual(RocketLeague._merge_league_refreshes(cached, {}), cached)
