@@ -18,6 +18,7 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertIsNotNone(rlcs)
         self.assertIsNotNone(rlcs.get_command("upcoming"))
         self.assertIsNotNone(rlcs.get_command("recent"))
+        self.assertIsNotNone(rlcs.get_command("results"))
         self.assertIsNotNone(rlcs.get_command("events"))
         self.assertIn("list", rlcs.get_command("events").aliases)
         self.assertIsNotNone(rlcs.get_command("event"))
@@ -90,6 +91,7 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertNotIn("rl", rlcs.aliases)
         self.assertIsNotNone(rlcs.get_command("upcoming"))
         self.assertIsNotNone(rlcs.get_command("recent"))
+        self.assertIsNotNone(rlcs.get_command("results"))
         self.assertIsNotNone(rlcs.get_command("events"))
         self.assertIsNotNone(rlcs.get_command("event"))
 
@@ -184,18 +186,56 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
         self.assertNotIn("Register on start.gg", rendered)
         self.assertIn("Status unavailable", rendered)
 
-    def test_cross_provider_key_deduplicates_same_name_and_day(self):
-        first = {"name": "RLCS Open 1", "start_at": 1_800_000_000}
-        same = {"name": "rlcs-open-1", "start_at": 1_800_000_100}
-        later = {"name": "RLCS Open 1", "start_at": 1_800_086_400}
-        self.assertEqual(
-            RocketLeague._cross_provider_event_key(first),
-            RocketLeague._cross_provider_event_key(same),
+    def test_cross_provider_match_handles_reordered_region_name_and_phase_dates(self):
+        blast = {"name": "RLCS Open 6 APAC 2026", "start_at": 1_776_998_400, "end_at": 1_777_171_200}
+        startgg = {"name": "RLCS 2026 - APAC Open 6", "start_at": 1_776_480_000, "end_at": 1_777_171_200}
+        unrelated = {"name": "RLCS Open 6 EU 2026", "start_at": 1_776_998_400}
+        self.assertTrue(RocketLeague._confident_event_match(blast, startgg))
+        self.assertFalse(RocketLeague._confident_event_match(blast, unrelated))
+
+    def test_cross_provider_match_normalizes_region_aliases_without_changing_records(self):
+        cases = (
+            ("RLCS Open 6 EU 2026", "RLCS 2026 - Europe Open 6"),
+            ("RLCS Open 6 SAM 2026", "RLCS 2026 - South America Open 6"),
+            ("RLCS Open 6 NA 2026", "RLCS 2026 - North America Open 6"),
+            ("RLCS Open 6 OCE 2026", "RLCS 2026 - Oceania Open 6"),
+            ("RLCS Open 6 APAC 2026", "RLCS 2026 - Asia-Pacific Open 6"),
         )
-        self.assertNotEqual(
-            RocketLeague._cross_provider_event_key(first),
-            RocketLeague._cross_provider_event_key(later),
-        )
+        for abbreviated, expanded in cases:
+            with self.subTest(region=abbreviated):
+                first = {"name": abbreviated, "start_at": 1_800_000_000}
+                second = {"name": expanded, "start_at": 1_800_086_400}
+                self.assertTrue(RocketLeague._confident_event_match(first, second))
+                self.assertEqual(first["name"], abbreviated)
+                self.assertEqual(second["name"], expanded)
+
+    def test_placement_summary_handles_tied_semifinalists(self):
+        source = {"events": [{"name": "3v3", "standings": [
+            {"placement": 1, "entrant_name": "Champions"},
+            {"placement": 2, "entrant_name": "Runners-up"},
+            {"placement": 3, "entrant_name": "Semi One"},
+            {"placement": 3, "entrant_name": "Semi Two"},
+        ]}]}
+        rendered = " ".join(RocketLeague._placement_summary(source))
+        self.assertIn("Champion: **Champions**", rendered)
+        self.assertIn("Runner-up: **Runners-up**", rendered)
+        self.assertIn("Semifinalists: Semi One, Semi Two", rendered)
+
+    def test_placement_summary_does_not_infer_missing_standings(self):
+        self.assertEqual(RocketLeague._placement_summary({"events": [{"name": "3v3"}]}), [])
+
+    def test_results_embed_labels_provider_points_only_by_omission(self):
+        source = {"name": "RLCS Test", "url": "https://www.start.gg/tournament/test", "cached_at": 1_800_000_000, "events": [{
+            "name": "3v3", "standings": [{"placement": 1, "entrant_name": "Champions", "provider_points": 42, "record": {"wins": 8, "losses": 0}}]
+        }]}
+        embed = RocketLeague._results_embed(source)
+        rendered = " ".join(field.value for field in embed.fields)
+        self.assertIn("#1", rendered)
+        self.assertNotIn("42", rendered)
+        self.assertNotIn("goals", rendered.casefold())
+        self.assertIn("match record 8-0", rendered)
+        self.assertIn("Updated <t:1800000000:R>", rendered)
+        self.assertNotIn("<t:", embed.footer.text)
 
     def test_failed_league_refresh_preserves_last_good_snapshot(self):
         cached = [{"id": 4, "key": "league/rlcs", "enabled": False, "tournaments": [{"fingerprint": "old"}]}]
@@ -243,6 +283,22 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
 
         rendered = asyncio.run(scenario())
         self.assertIn("`sick!rlcs events`", rendered)
+
+    def test_rlcs_card_places_location_directly_below_title(self):
+        from rocketleague.blast import BlastTournament
+
+        tournament = BlastTournament(
+            "paris-major",
+            "RLCS Paris Major",
+            100,
+            200,
+            "Paris La Défense Arena, France",
+        )
+        embed = RocketLeague._blast_embed([tournament])
+        lines = embed.fields[0].value.splitlines()
+        self.assertEqual(lines[0], "📍 Paris La Défense Arena, France")
+        self.assertTrue(lines[1].startswith("📅 "))
+        self.assertIn("View on BLAST", lines[2])
 
     def test_cached_event_resolution_accepts_slug_and_short_id(self):
         async def scenario():

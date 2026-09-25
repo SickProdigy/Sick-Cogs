@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import logging
 import random
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -32,7 +33,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.5.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.6.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
 BLAST_HISTORY_LIMIT = 100
@@ -58,7 +59,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.5.0"
+    __version__ = "1.6.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -366,13 +367,13 @@ class RocketLeague(commands.Cog):
             color=discord.Color.blue(),
         )
         for tournament in tournaments[:10]:
-            dates = f"<t:{tournament.start_at}:D>-<t:{tournament.end_at}:D>"
-            details = [dates]
+            details = []
             if tournament.location:
-                details.append(tournament.location)
+                details.append(f"📍 {tournament.location}")
+            details.append(f"📅 <t:{tournament.start_at}:D> – <t:{tournament.end_at}:D>")
             details.append(f"[View on BLAST]({tournament.url})")
             embed.add_field(
-                name=tournament.name[:256], value=" - ".join(details), inline=False
+                name=tournament.name[:256], value="\n".join(details), inline=False
             )
         embed.set_footer(text="RLCS Events")
         return embed
@@ -735,6 +736,13 @@ class RocketLeague(commands.Cog):
         """Show recently completed official events from retained weekly snapshots."""
         await self._send_recent_events(ctx, limit)
 
+    @rlcs.command(name="results")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def rlcs_results(self, ctx: commands.Context, *, reference: str):
+        """Show cached final placements for a retained event or start.gg tournament."""
+        await self._send_results(ctx, reference)
+
     @rlcs.command(name="events", aliases=["list"])
     @commands.bot_has_permissions(embed_links=True)
     async def rlcs_events(self, ctx: commands.Context):
@@ -747,6 +755,139 @@ class RocketLeague(commands.Cog):
         """Show a cached official event or an explicit start.gg tournament."""
         await self._send_cached_or_startgg_event(ctx, reference)
 
+    async def _cached_result_sources(self, guild) -> list[dict]:
+        sources = await self._number_tournament_sources(guild)
+        for league in await self.config.guild(guild).league_sources():
+            if not league.get("enabled", True):
+                continue
+            sources.extend(
+                dict(item)
+                for item in (league.get("tournaments") or [])
+                if isinstance(item, dict)
+            )
+        return [item for item in sources if item.get("provider") == "startgg"]
+
+    @staticmethod
+    def _placement_summary(source: dict) -> list[str]:
+        candidates = []
+        for event in source.get("events") or []:
+            standings = [item for item in (event.get("standings") or []) if isinstance(item, dict)]
+            if standings:
+                candidates.append((len(standings), event, standings))
+        if not candidates:
+            return []
+        _, event, standings = max(candidates, key=lambda item: item[0])
+        by_place = {}
+        for standing in standings:
+            placement = int(standing.get("placement") or 0)
+            name = str(standing.get("entrant_name") or "").strip()
+            if placement > 0 and name:
+                by_place.setdefault(placement, []).append(name)
+        lines = []
+        if by_place.get(1):
+            lines.append(f"Champion: **{discord.utils.escape_markdown(by_place[1][0])}**")
+        if by_place.get(2):
+            lines.append(f"Runner-up: **{discord.utils.escape_markdown(by_place[2][0])}**")
+        semifinalists = by_place.get(3, []) + by_place.get(4, [])
+        if semifinalists:
+            names = ", ".join(discord.utils.escape_markdown(name) for name in semifinalists[:2])
+            lines.append(f"Semifinalists: {names}")
+        if len([item for item in (source.get("events") or []) if item.get("standings")]) > 1:
+            lines.insert(0, f"Results shown for: **{discord.utils.escape_markdown(str(event.get('name') or 'Rocket League event'))}**")
+        return lines
+
+    async def _match_cached_result_source(self, guild, reference: str) -> Optional[dict]:
+        sources = await self._cached_result_sources(guild)
+        cleaned = reference.strip().strip("<>").rstrip("/")
+        if "start.gg" in cleaned or cleaned.startswith("tournament/"):
+            key = normalize_tournament_slug(cleaned)
+            return next((item for item in sources if item.get("key") == key), None)
+        direct = next(
+            (
+                item
+                for item in sources
+                if cleaned in {str(item.get("provider_id") or ""), str(item.get("key") or "")}
+            ),
+            None,
+        )
+        if direct is not None:
+            return direct
+        blast = await self._resolve_cached_blast(cleaned)
+        if blast is None:
+            return None
+        target = {
+            "name": blast.name,
+            "start_at": blast.start_at,
+            "end_at": blast.end_at,
+        }
+        return next(
+            (item for item in sources if self._confident_event_match(item, target)),
+            None,
+        )
+
+    @classmethod
+    def _results_embed(cls, source: dict) -> discord.Embed:
+        embed = discord.Embed(
+            title=f"{str(source.get('name') or 'Rocket League tournament')} results"[:256],
+            url=str(source.get("url") or "") or None,
+            color=discord.Color.blue(),
+        )
+        shown = 0
+        for event in source.get("events") or []:
+            standings = [item for item in (event.get("standings") or []) if isinstance(item, dict)]
+            if not standings:
+                continue
+            standings.sort(key=lambda item: int(item.get("placement") or 999))
+            lines = []
+            for standing in standings[:4]:
+                placement = int(standing.get("placement") or 0)
+                name = discord.utils.escape_markdown(str(standing.get("entrant_name") or "Unknown entrant"))
+                record = standing.get("record") or {}
+                record_text = ""
+                if isinstance(record, dict):
+                    wins = record.get("wins")
+                    losses = record.get("losses")
+                    if wins is not None and losses is not None:
+                        record_text = f" • match record {wins}-{losses}"
+                lines.append(f"**#{placement}** {name}{record_text}")
+            embed.add_field(
+                name=str(event.get("name") or "Rocket League event")[:256],
+                value="\n".join(lines)[:1024],
+                inline=False,
+            )
+            shown += 1
+            if shown >= 4:
+                break
+        cached_at = int(source.get("cached_at") or 0)
+        embed.set_footer(text="Source: start.gg standings")
+        if cached_at:
+            embed.add_field(name="Cache", value=f"Updated <t:{cached_at}:R>", inline=False)
+        return embed
+
+    async def _send_results(self, ctx: commands.Context, reference: str) -> None:
+        source = await self._match_cached_result_source(ctx.guild, reference)
+        if source is None and ("start.gg" in reference or reference.startswith("tournament/")):
+            client = await self.require_client(ctx)
+            if client is None:
+                return
+            try:
+                tournament = await client.tournament(reference)
+            except StartGGError as exc:
+                await ctx.send(await self._provider_error_message(ctx, exc))
+                return
+            if tournament is not None:
+                source = self._startgg_source(tournament)
+        if source is None:
+            await ctx.send(
+                "No confidently matched start.gg results are cached for that event. "
+                "BLAST supplies its schedule, but this cog does not infer winners from schedule data."
+            )
+            return
+        if not self._placement_summary(source):
+            await ctx.send("start.gg has not published final standings for that Rocket League tournament yet.")
+            return
+        await ctx.send(embed=self._results_embed(source))
+
     async def _send_recent_events(self, ctx: commands.Context, limit: int = 5) -> None:
         tournaments = await self._recent_blast_tournaments(limit)
         if not tournaments:
@@ -756,7 +897,32 @@ class RocketLeague(commands.Cog):
                 f"Browse known events with `{prefix}rlcs events`."
             )
             return
-        await ctx.send(embed=self._blast_embed(tournaments, title="Recent official RLCS events"))
+        sources = await self._cached_result_sources(ctx.guild) if ctx.guild else []
+        prefix = await self._configured_text_prefix(ctx)
+        embed = self._blast_embed(tournaments, title="Recent official RLCS events")
+        for index, (field, tournament) in enumerate(zip(embed.fields, tournaments)):
+            target = {
+                "name": tournament.name,
+                "start_at": tournament.start_at,
+                "end_at": tournament.end_at,
+            }
+            source = next(
+                (item for item in sources if self._confident_event_match(item, target)),
+                None,
+            )
+            details = self._placement_summary(source) if source else []
+            reference = self._blast_short_id(tournament)
+            if details:
+                details.append(f"More: `{prefix}rlcs results {reference}`")
+            else:
+                details.append("Final results unavailable from the cached providers.")
+            embed.set_field_at(
+                index,
+                name=field.name,
+                value=(field.value + "\n" + "\n".join(details))[:1024],
+                inline=field.inline,
+            )
+        await ctx.send(embed=embed)
 
     @commands.group(name="rocketleague", aliases=["rl"], invoke_without_command=True)
     @commands.bot_has_permissions(embed_links=True)
@@ -880,15 +1046,45 @@ class RocketLeague(commands.Cog):
         await self._send_configured_tournaments(ctx, past=True)
 
     @staticmethod
-    def _cross_provider_event_key(source: dict) -> tuple[str, int]:
-        name = "".join(character for character in str(source.get("name") or "").casefold() if character.isalnum())
+    def _cross_provider_event_key(source: dict) -> tuple[tuple[str, ...], int]:
+        name = str(source.get("name") or "").casefold()
+        region_aliases = (
+            (r"\bnorth[ -]america\b", " na "),
+            (r"\bsouth[ -]america\b", " sam "),
+            (r"\bmiddle[ -]east(?:[ -]and)?[ -]north[ -]africa\b", " mena "),
+            (r"\bsub[ -]saharan[ -]africa\b", " ssa "),
+            (r"\basia[ -]pacific\b", " apac "),
+            (r"\beurope\b", " eu "),
+            (r"\boceania\b", " oce "),
+        )
+        for pattern, replacement in region_aliases:
+            name = re.sub(pattern, replacement, name)
+        tokens = tuple(sorted(re.findall(r"[a-z0-9]+", name)))
         start_day = int(source.get("start_at") or 0) // 86400
-        return name, start_day
+        return tokens, start_day
+
+    @classmethod
+    def _confident_event_match(cls, first: dict, second: dict) -> bool:
+        first_tokens, first_day = cls._cross_provider_event_key(first)
+        second_tokens, second_day = cls._cross_provider_event_key(second)
+        if not first_tokens or first_tokens != second_tokens:
+            return False
+        first_end = int(first.get("end_at") or first.get("start_at") or 0)
+        second_end = int(second.get("end_at") or second.get("start_at") or 0)
+        first_start = int(first.get("start_at") or 0)
+        second_start = int(second.get("start_at") or 0)
+        overlaps = first_start <= second_end and second_start <= first_end
+        return overlaps or abs(first_day - second_day) <= 14
 
     async def _configured_tournament_sources(self, guild) -> list[dict]:
-        merged = {}
+        merged = []
+
+        def add_if_new(value: dict) -> None:
+            if not any(self._confident_event_match(existing, value) for existing in merged):
+                merged.append(value)
+
         for tournament in await self._cached_blast():
-            value = {
+            add_if_new({
                 "provider": "blast",
                 "key": tournament.slug,
                 "url": tournament.url,
@@ -898,10 +1094,9 @@ class RocketLeague(commands.Cog):
                 "location": tournament.location,
                 "image_url": tournament.image_url,
                 "source_origin": "BLAST",
-            }
-            merged[self._cross_provider_event_key(value)] = value
+            })
         for item in await self._number_tournament_sources(guild):
-            merged.setdefault(self._cross_provider_event_key(item), item)
+            add_if_new(item)
         for league in await self.config.guild(guild).league_sources():
             if not league.get("enabled", True):
                 continue
@@ -910,8 +1105,8 @@ class RocketLeague(commands.Cog):
                     continue
                 value = dict(item)
                 value["league_name"] = league.get("name")
-                merged.setdefault(self._cross_provider_event_key(value), value)
-        return list(merged.values())
+                add_if_new(value)
+        return merged
 
     async def _send_configured_tournaments(self, ctx: commands.Context, *, past: bool) -> None:
         sources = await self._configured_tournament_sources(ctx.guild)
@@ -1093,6 +1288,13 @@ class RocketLeague(commands.Cog):
     ):
         """Show recently completed official events from retained weekly snapshots."""
         await self._send_recent_events(ctx, limit)
+
+    @rocketleague_rlcs.command(name="results")
+    @commands.guild_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_rlcs_results(self, ctx: commands.Context, *, reference: str):
+        """Show cached final placements for a retained event or start.gg tournament."""
+        await self._send_results(ctx, reference)
 
     @rocketleague_rlcs.command(name="events", aliases=["list"])
     @commands.bot_has_permissions(embed_links=True)
@@ -1389,7 +1591,14 @@ class RocketLeague(commands.Cog):
                 tournament.slug,
                 str(tournament.start_at),
                 str(tournament.end_at),
-                *(f"{event.id}:{event.start_at}:{event.state}:{event.entrants}" for event in tournament.events),
+                *(
+                    f"{event.id}:{event.start_at}:{event.state}:{event.entrants}:"
+                    + ",".join(
+                        f"{standing.placement}:{standing.entrant_id}:{standing.entrant_name}"
+                        for standing in event.standings
+                    )
+                    for event in tournament.events
+                ),
             ]
         )
         cached_at = int(time.time())
@@ -1417,6 +1626,17 @@ class RocketLeague(commands.Cog):
                     "state": event.state,
                     "registered_entrants": event.entrants,
                     "team_size": event.entrant_size_min,
+                    "standings": [
+                        {
+                            "placement": standing.placement,
+                            "entrant_id": standing.entrant_id,
+                            "entrant_name": standing.entrant_name,
+                            "is_final": standing.is_final,
+                            "record": standing.record,
+                            "provider_points": standing.provider_points,
+                        }
+                        for standing in event.standings
+                    ],
                 }
                 for event in tournament.events
             ],
