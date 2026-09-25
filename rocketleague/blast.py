@@ -6,7 +6,7 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote, urlparse
 
 import aiohttp
@@ -73,6 +73,29 @@ class BlastTournament:
         )
 
 
+@dataclass(frozen=True)
+class BlastResult:
+    slug: str
+    tournament_name: str
+    champion: str
+    runner_up: str
+    champion_score: int
+    runner_up_score: int
+    semifinalists: Tuple[str, ...] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: Dict[str, Any]) -> "BlastResult":
+        return cls(
+            slug=str(value["slug"]), tournament_name=str(value["tournament_name"]),
+            champion=str(value["champion"]), runner_up=str(value["runner_up"]),
+            champion_score=int(value["champion_score"]), runner_up_score=int(value["runner_up_score"]),
+            semifinalists=tuple(str(item) for item in value.get("semifinalists") or ()),
+        )
+
+
 class _StructuredDataParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -103,37 +126,7 @@ class BlastClient:
         self.session = session
 
     async def tournaments(self) -> List[BlastTournament]:
-        try:
-            async with self.session.get(
-                BLAST_TOURNAMENTS_URL,
-                allow_redirects=False,
-                headers=BLAST_REQUEST_HEADERS,
-            ) as response:
-                if response.status == 429:
-                    raise BlastError("BLAST is rate limiting the weekly schedule request.")
-                if response.status != 200:
-                    raise BlastError("BLAST could not provide the RLCS schedule.")
-                declared_size = response.content_length
-                if declared_size is not None and declared_size > MAX_BLAST_RESPONSE_BYTES:
-                    raise BlastError("BLAST returned a schedule page larger than the safety limit.")
-                chunks = []
-                received = 0
-                async for chunk in response.content.iter_chunked(64 * 1024):
-                    received += len(chunk)
-                    if received > MAX_BLAST_RESPONSE_BYTES:
-                        raise BlastError(
-                            "BLAST returned a schedule page larger than the safety limit."
-                        )
-                    chunks.append(chunk)
-                payload = b"".join(chunks)
-        except BlastError:
-            raise
-        except (aiohttp.ClientError, TimeoutError) as exc:
-            raise BlastError("The weekly BLAST schedule request could not be reached.") from exc
-        try:
-            page = payload.decode(response.charset or "utf-8")
-        except (LookupError, UnicodeDecodeError) as exc:
-            raise BlastError("BLAST returned an unreadable schedule page.") from exc
+        page = await self._page(BLAST_TOURNAMENTS_URL, "schedule")
         tournaments = parse_blast_tournaments(page)
         if not tournaments:
             details = _blast_page_diagnostics(page)
@@ -142,6 +135,109 @@ class BlastClient:
                 f"Diagnostic: {details}."
             )
         return tournaments
+
+    async def tournament_result(self, tournament: BlastTournament) -> Optional[BlastResult]:
+        page = await self._page(tournament.url, "tournament details")
+        return parse_blast_result(page, tournament.slug)
+
+    async def _page(self, url: str, label: str) -> str:
+        try:
+            async with self.session.get(
+                url,
+                allow_redirects=False,
+                headers=BLAST_REQUEST_HEADERS,
+            ) as response:
+                if response.status == 429:
+                    raise BlastError(f"BLAST is rate limiting the weekly {label} request.")
+                if response.status != 200:
+                    raise BlastError(f"BLAST could not provide the RLCS {label}.")
+                declared_size = response.content_length
+                if declared_size is not None and declared_size > MAX_BLAST_RESPONSE_BYTES:
+                    raise BlastError(f"BLAST returned a {label} page larger than the safety limit.")
+                chunks = []
+                received = 0
+                async for chunk in response.content.iter_chunked(64 * 1024):
+                    received += len(chunk)
+                    if received > MAX_BLAST_RESPONSE_BYTES:
+                        raise BlastError(
+                            f"BLAST returned a {label} page larger than the safety limit."
+                        )
+                    chunks.append(chunk)
+                payload = b"".join(chunks)
+        except BlastError:
+            raise
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise BlastError(f"The weekly BLAST {label} request could not be reached.") from exc
+        try:
+            page = payload.decode(response.charset or "utf-8")
+        except (LookupError, UnicodeDecodeError) as exc:
+            raise BlastError(f"BLAST returned an unreadable {label} page.") from exc
+        return page
+
+
+def parse_blast_result(page: str, slug: str) -> Optional[BlastResult]:
+    for values in _hydration_payloads(page):
+        try:
+            root = _unflatten_devalue(values)
+        except (KeyError, TypeError, ValueError, RecursionError):
+            continue
+        loader_data = root.get("loaderData") if isinstance(root, dict) else None
+        route = loader_data.get("routes/$gameId.tournaments") if isinstance(loader_data, dict) else None
+        timeline = route.get("tournamentTimelineData") if isinstance(route, dict) else None
+        if not isinstance(timeline, dict):
+            continue
+        records = []
+        for group in timeline.values():
+            if isinstance(group, list):
+                records.extend(item for item in group if isinstance(item, dict))
+        record = next((item for item in records if item.get("id") == slug), None)
+        if not record:
+            continue
+        matches = [item for item in record.get("keyMatches") or [] if isinstance(item, dict)]
+        final = next((item for item in matches if "grand final" in str(item.get("name") or "").casefold()), None)
+        if not final:
+            continue
+        team_a, team_b = _team_name(final.get("teamA")), _team_name(final.get("teamB"))
+        score_a, score_b = _optional_int(final.get("teamAScore")), _optional_int(final.get("teamBScore"))
+        if not team_a or not team_b or score_a is None or score_b is None or score_a == score_b:
+            continue
+        champion, runner_up = (team_a, team_b) if score_a > score_b else (team_b, team_a)
+        champion_score, runner_up_score = (score_a, score_b) if score_a > score_b else (score_b, score_a)
+        semifinalists = []
+        for match in matches:
+            if "semi final" not in str(match.get("name") or "").casefold():
+                continue
+            first_name, second_name = _team_name(match.get("teamA")), _team_name(match.get("teamB"))
+            first_score, second_score = _optional_int(match.get("teamAScore")), _optional_int(match.get("teamBScore"))
+            if first_name and second_name and first_score is not None and second_score is not None and first_score != second_score:
+                semifinalists.append(first_name if first_score < second_score else second_name)
+        return BlastResult(
+            slug=slug, tournament_name=str(record.get("name") or slug),
+            champion=champion, runner_up=runner_up,
+            champion_score=champion_score, runner_up_score=runner_up_score,
+            semifinalists=tuple(semifinalists[:2]),
+        )
+    return None
+
+
+def _team_name(value: Any) -> Optional[str]:
+    return _optional_text(value.get("name")) if isinstance(value, dict) else None
+
+
+def _hydration_payloads(page: str) -> List[Any]:
+    payloads = []
+    pattern = re.compile(
+        r'window\.__reactRouterContext\.streamController\.enqueue\('
+        r'(?P<value>"(?:\\.|[^"\\])*")\);'
+    )
+    for match in pattern.finditer(page):
+        try:
+            chunk = json.loads(match.group("value"))
+            value = json.loads(html_module.unescape(chunk).replace('\\"', '"'))
+        except (TypeError, ValueError):
+            continue
+        payloads.append(value)
+    return payloads
 
 
 def parse_blast_tournaments(page: str) -> List[BlastTournament]:

@@ -1,10 +1,14 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from rocketleague.blast import (
     MAX_BLAST_RESPONSE_BYTES,
     BlastClient,
     BlastError,
+    BlastResult,
     BlastTournament,
+    parse_blast_result,
     parse_blast_tournaments,
     upcoming_tournaments,
 )
@@ -61,6 +65,67 @@ class _Session:
 
 
 class BlastParserTests(unittest.TestCase):
+
+    @staticmethod
+    def _result_root(final_score=(0, 4)):
+        return {
+            "loaderData": {
+                "routes/$gameId.tournaments": {
+                    "tournamentTimelineData": {
+                        "past": [{
+                            "id": "worlds",
+                            "name": "RLCS Worlds",
+                            "keyMatches": [
+                                {"name": "Grand Final", "teamA": {"name": "Spacestation"}, "teamAScore": final_score[0], "teamB": {"name": "Team Falcons"}, "teamBScore": final_score[1]},
+                                {"name": "Semi Final 1", "teamA": {"name": "FUT Esports"}, "teamAScore": 2, "teamB": {"name": "Spacestation"}, "teamBScore": 4},
+                                {"name": "Semi Final 2", "teamA": {"name": "Karmine Corp"}, "teamAScore": 2, "teamB": {"name": "Team Falcons"}, "teamBScore": 4},
+                            ],
+                        }]
+                    }
+                }
+            }
+        }
+
+    def test_parses_official_final_and_semifinalists(self):
+        with patch("rocketleague.blast._hydration_payloads", return_value=[[0]]), patch(
+            "rocketleague.blast._unflatten_devalue", return_value=self._result_root()
+        ):
+            result = parse_blast_result("page", "worlds")
+        self.assertEqual(
+            result,
+            BlastResult("worlds", "RLCS Worlds", "Team Falcons", "Spacestation", 4, 0, ("FUT Esports", "Karmine Corp")),
+        )
+
+    def test_ignores_incomplete_or_tied_final(self):
+        with patch("rocketleague.blast._hydration_payloads", return_value=[[0]]), patch(
+            "rocketleague.blast._unflatten_devalue", return_value=self._result_root((0, 0))
+        ):
+            self.assertIsNone(parse_blast_result("page", "worlds"))
+
+    def test_result_round_trip_preserves_fields(self):
+        result = BlastResult("worlds", "Worlds", "Falcons", "SSG", 4, 0, ("FUT", "KC"))
+        self.assertEqual(BlastResult.from_dict(result.to_dict()), result)
+
+    def test_weekly_result_detail_requests_are_bounded_and_keep_cache(self):
+        async def scenario():
+            cog = RocketLeague.__new__(RocketLeague)
+            existing = BlastResult("saved", "Saved", "One", "Two", 4, 2)
+            setting = AsyncMock(return_value={"saved": {**existing.to_dict(), "cached_at": 50}})
+            setting.set = AsyncMock()
+            cog.config = SimpleNamespace(blast_results=setting)
+            client = SimpleNamespace(tournament_result=AsyncMock(return_value=None))
+            tournaments = [
+                BlastTournament(f"event-{index}", f"Event {index}", index, index + 1, None)
+                for index in range(11)
+            ]
+            await cog._refresh_blast_results(client, tournaments, now=100)
+            return client, setting
+
+        client, setting = self.run_async(scenario())
+        self.assertEqual(client.tournament_result.await_count, 10)
+        saved = setting.set.await_args.args[0]["saved"]
+        self.assertEqual(saved["champion"], "One")
+        self.assertEqual(saved["cached_at"], 50)
 
     def test_client_reads_every_response_chunk(self):
         page = CATALOG.encode("utf-8")
