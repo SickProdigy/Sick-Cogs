@@ -15,7 +15,21 @@ log = logging.getLogger("red.sick-cogs.RocketLeague.startgg")
 
 
 class StartGGError(RuntimeError):
-    """A safe, user-facing start.gg provider error."""
+    """A safe provider error with optional command-layer setup guidance."""
+
+    def __init__(self, message: str, *, setup_command: Optional[str] = None):
+        super().__init__(message)
+        self.setup_command = setup_command
+
+
+@dataclass(frozen=True)
+class RLCSStanding:
+    placement: int
+    entrant_id: Optional[int]
+    entrant_name: str
+    is_final: Optional[bool]
+    record: Optional[dict]
+    provider_points: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -25,6 +39,9 @@ class RLCSEvent:
     start_at: Optional[int]
     entrants: Optional[int]
     entrant_size_min: Optional[int]
+    state: Optional[int]
+    slug: Optional[str]
+    standings: tuple[RLCSStanding, ...]
 
 
 @dataclass(frozen=True)
@@ -38,7 +55,23 @@ class RLCSTournament:
     city: Optional[str]
     state: Optional[str]
     country: Optional[str]
+    tournament_state: Optional[int]
+    registration_closes_at: Optional[int]
+    registration_open: Optional[bool]
+    image_url: Optional[str]
     events: tuple[RLCSEvent, ...]
+
+    @property
+    def url(self) -> str:
+        return f"{STARTGG_WEB_URL}/{self.slug.lstrip('/')}"
+
+
+@dataclass(frozen=True)
+class RocketLeagueLeague:
+    id: int
+    name: str
+    slug: str
+    tournaments: tuple[RLCSTournament, ...]
 
     @property
     def url(self) -> str:
@@ -152,9 +185,14 @@ class StartGGClient:
                 filter: {upcoming: true, videogameIds: [$gameId]}
               }) {
                 nodes {
-                  id name slug startAt endAt isOnline city addrState countryCode
+                  id name slug startAt endAt isOnline city addrState countryCode state
+                  registrationClosesAt eventRegistrationClosesAt isRegistrationOpen
+                  images { url type }
                   events(filter: {videogameId: [$gameId]}) {
-                    id name startAt numEntrants entrantSizeMin
+                    id name slug startAt state numEntrants entrantSizeMin
+                    standings(query: {page: 1, perPage: 4}) {
+                      nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                    }
                   }
                 }
               }
@@ -172,9 +210,14 @@ class StartGGClient:
             """
             query RocketLeagueTournament($slug: String!, $gameId: [ID]!) {
               tournament(slug: $slug) {
-                id name slug startAt endAt isOnline city addrState countryCode
+                id name slug startAt endAt isOnline city addrState countryCode state
+                registrationClosesAt eventRegistrationClosesAt isRegistrationOpen
+                images { url type }
                 events(filter: {videogameId: $gameId}) {
-                  id name startAt numEntrants entrantSizeMin
+                  id name slug startAt state numEntrants entrantSizeMin
+                  standings(query: {page: 1, perPage: 4}) {
+                    nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                  }
                 }
               }
             }
@@ -188,6 +231,72 @@ class StartGGClient:
         if not events:
             return None
         return self._parse_tournament(node)
+
+    async def league(self, slug: str, *, max_pages: int = 40) -> Optional[RocketLeagueLeague]:
+        """Return Rocket League tournaments linked to a start.gg league."""
+        game_id = await self.rocket_league_game_id()
+        normalized = normalize_league_slug(slug)
+        tournaments: Dict[int, RLCSTournament] = {}
+        league_id = None
+        league_name = None
+        league_slug = normalized
+        for page in range(1, max_pages + 1):
+            data = await self._query(
+                """
+                query RocketLeagueLeague($slug: String!, $page: Int!, $gameId: [ID]!) {
+                  league(slug: $slug) {
+                    id name slug
+                    events(query: {page: $page, perPage: 25}) {
+                      pageInfo { totalPages }
+                      nodes {
+                        videogame { id name }
+                        tournament {
+                          id name slug startAt endAt isOnline city addrState countryCode state
+                          registrationClosesAt eventRegistrationClosesAt isRegistrationOpen
+                          images { url type }
+                          events(filter: {videogameId: $gameId}) {
+                            id name slug startAt state numEntrants entrantSizeMin
+                            standings(query: {page: 1, perPage: 4}) {
+                              nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                """,
+                {"slug": normalized, "page": page, "gameId": [game_id]},
+            )
+            node = data.get("league")
+            if not isinstance(node, dict):
+                return None
+            league_id = int(node["id"])
+            league_name = str(node.get("name") or "start.gg league")
+            league_slug = str(node.get("slug") or normalized)
+            connection = node.get("events") or {}
+            for event in connection.get("nodes") or []:
+                videogame = event.get("videogame") or {}
+                if str(videogame.get("id")) != str(game_id):
+                    continue
+                tournament_node = event.get("tournament")
+                if not isinstance(tournament_node, dict) or tournament_node.get("id") is None:
+                    continue
+                tournament = self._parse_tournament(tournament_node)
+                tournaments[tournament.id] = tournament
+            total_pages = int((connection.get("pageInfo") or {}).get("totalPages") or 1)
+            if total_pages > max_pages and page == max_pages:
+                raise StartGGError(
+                    f"That league has more than the supported {max_pages * 25} event records."
+                )
+            if page >= total_pages:
+                break
+        if league_id is None:
+            return None
+        ordered = tuple(
+            sorted(tournaments.values(), key=lambda item: (item.start_at or 0, item.id))
+        )
+        return RocketLeagueLeague(league_id, league_name or "start.gg league", league_slug, ordered)
 
     @staticmethod
     def _is_rlcs(node: Dict[str, Any]) -> bool:
@@ -204,6 +313,28 @@ class StartGGClient:
                 start_at=_optional_int(event.get("startAt")),
                 entrants=_optional_int(event.get("numEntrants")),
                 entrant_size_min=_optional_int(event.get("entrantSizeMin")),
+                state=_optional_int(event.get("state")),
+                slug=_optional_str(event.get("slug")),
+                standings=tuple(
+                    RLCSStanding(
+                        placement=int(standing["placement"]),
+                        entrant_id=_optional_int((standing.get("entrant") or {}).get("id")),
+                        entrant_name=str((standing.get("entrant") or {}).get("name") or "Unknown entrant"),
+                        is_final=(
+                            bool(standing.get("isFinal"))
+                            if standing.get("isFinal") is not None
+                            else None
+                        ),
+                        record=(
+                            standing.get("setRecordWithoutByes")
+                            if isinstance(standing.get("setRecordWithoutByes"), dict)
+                            else None
+                        ),
+                        provider_points=_optional_float(standing.get("totalPoints")),
+                    )
+                    for standing in ((event.get("standings") or {}).get("nodes") or [])
+                    if standing.get("placement") is not None
+                ),
             )
             for event in (node.get("events") or [])
             if event.get("id") is not None
@@ -218,6 +349,20 @@ class StartGGClient:
             city=_optional_str(node.get("city")),
             state=_optional_str(node.get("addrState")),
             country=_optional_str(node.get("countryCode")),
+            tournament_state=_optional_int(node.get("state")),
+            registration_closes_at=(
+                _optional_int(node.get("eventRegistrationClosesAt"))
+                or _optional_int(node.get("registrationClosesAt"))
+            ),
+            registration_open=(
+                bool(node.get("isRegistrationOpen"))
+                if node.get("isRegistrationOpen") is not None
+                else None
+            ),
+            image_url=next(
+                (str(image.get("url")) for image in (node.get("images") or []) if image.get("url")),
+                None,
+            ),
             events=events,
         )
 
@@ -235,9 +380,28 @@ def normalize_tournament_slug(value: str) -> str:
     return "/".join(parts[:2])
 
 
+def normalize_league_slug(value: str) -> str:
+    value = value.strip().strip("<>")
+    for prefix in ("https://www.start.gg/", "https://start.gg/"):
+        if value.casefold().startswith(prefix.casefold()):
+            value = value[len(prefix) :]
+            break
+    value = value.split("?", 1)[0].split("#", 1)[0].strip("/")
+    if not value.startswith("league/"):
+        value = f"league/{value}"
+    return "/".join(value.split("/")[:2])
+
+
 def _optional_int(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 

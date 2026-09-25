@@ -1,9 +1,10 @@
 # RocketLeague
 
-RocketLeague posts Rocket League Championship Series schedule updates. It makes at most
-one permitted request to the public BLAST tournament catalog every seven days, stores a
-server-side snapshot in Red Config, and serves commands and guild announcements from
-that cache. The documented start.gg GraphQL API remains an optional supplemental source.
+RocketLeague posts Rocket League Championship Series schedule updates. Once every seven
+days it requests the public BLAST tournament catalog and, for at most ten newly completed
+events, their official detail pages. It stores server-side snapshots in Red Config and
+serves commands and guild announcements from that cache. The documented start.gg GraphQL
+API remains an optional supplemental source.
 
 ## Setup
 
@@ -35,13 +36,32 @@ reference, including the separate `[p]rlcsset` administrator commands:
 
 - `[p]rocketleague rlcs` - show the next event from the weekly BLAST cache.
 - `[p]rocketleague rlcs upcoming [1-10]` - show later scheduled events.
+- `[p]rocketleague rlcs recent [1-10]` - show recently completed official events retained
+  prospectively from verified weekly BLAST snapshots.
+- `[p]rocketleague rlcs events` (alias `list`) - list known official events with stable
+  cache IDs and BLAST slugs.
 - `[p]rocketleague rlcs event <start.gg URL or slug>` - optional detailed
-  start.gg tournament lookup.
+  start.gg lookup. With no argument it lists cached official events; a listed cache ID or
+  BLAST slug opens that official event without a network request.
+- `[p]rocketleague rlcs results <reference>` - show official cached BLAST final standings,
+  semifinal and Grand Final scores, top-rated players, post-tournament power rankings,
+  tournament artwork, and event details when available; otherwise show verified placements
+  from a confidently matched start.gg tournament. Ratings and power-ranking points retain
+  BLAST's labels and are not presented as in-game score.
 
 `[p]rl` is an alias for the complete `[p]rocketleague` group, so commands such as
 `[p]rl tourney` and `[p]rl rlcs` follow the canonical structure. `[p]rlcs` remains a
-direct shortcut to the official schedule; `[p]rlcs upcoming` and `[p]rlcs event <URL or
-slug>` remain available.
+direct shortcut to the official schedule; `[p]rlcs upcoming`, `[p]rlcs event <URL or
+slug>`, and `[p]rlcs results <reference>` remain available, alongside `[p]rlcs recent` and
+`[p]rlcs events`.
+
+Completed official-event history is built prospectively from the permitted weekly BLAST
+refresh; commands never make an extra BLAST request. Retention is bounded to 100 records and
+one year. A weekly refresh checks at most ten newly completed retained events for structured
+BLAST final-day matchup data, preserves the last good results, and rejects tied or incomplete
+finals. When official detail data is unavailable, a confidently matched cached
+start.gg tournament may supply verified placements with explicit attribution. Events lacking
+either source retain a results-unavailable state.
 
 Tournament URLs are configured independently for each Discord server. Administrators do
 not need to choose a provider-specific command; the cog identifies the provider from the
@@ -57,8 +77,8 @@ URL:
 Direct start.gg and Challonge tournament URLs are supported. start.gg uses a shared
 developer token; Challonge uses a shared OAuth client ID and client secret to obtain a
 short-lived API v2.1 access token in memory. Adding a URL validates it and caches its public
-details, including available format, entrant counts, capacity, registration status, location,
-and prize information. Normal tournament views read only the cache and make no provider
+details, including available format, entrant counts, capacity, registration status and closing time, location,
+and prize information. start.gg cards also preserve tournament and per-event lifecycle state, phase schedules, team sizes, direct phase links, and the last successful refresh time without guessing missing provider fields. Normal tournament views read only the cache and make no provider
 requests. Active records are refreshed automatically about once per day and duplicate provider
 URLs shared across servers are fetched only once per cycle. Failed refreshes retain the previous
 good cache. Completed tournaments stop refreshing.
@@ -131,9 +151,24 @@ The separate `[p]rlcsset` group is server-administrator configuration:
 - `[p]rlcsset postnow` - post a cache-only preview without contacting BLAST.
 - `[p]rlcsset refresh` - bot-owner-only refresh that enforces the seven-day minimum.
 
-Manual commands and restarts cannot bypass the BLAST limit. A failed request records the
-attempt and retains the previous good cache. Announcements persist fingerprints per guild,
-so unchanged events are not posted twice.
+Server administrators can also subscribe to a start.gg tournament series with a complete
+league URL. League discovery uses start.gg's documented paginated league-event connection,
+keeps only Rocket League events, de-duplicates their parent tournaments, and retains the last
+good daily snapshot when refreshes fail:
+
+- `[p]rocketleagueset leagueadd <https://www.start.gg/league/...>` - validate and subscribe.
+- `[p]rocketleagueset leagues` - list subscription IDs, state, and cached tournament counts.
+- `[p]rocketleagueset leaguerefresh [id]` - refresh one or all subscriptions now.
+- `[p]rocketleagueset leaguedisable <id>` - pause refresh and hide its cached tournaments.
+- `[p]rocketleagueset leagueremove <id>` - remove the subscription and its cached snapshot.
+
+The combined tournament view also includes cached BLAST events. Exact same-name, same-day
+matches are shown once with BLAST attribution; otherwise direct tournament URLs take precedence
+when the same start.gg tournament is also discovered through a league. Manual commands and
+restarts cannot bypass the weekly BLAST refresh window or the ten-detail-page cap. A failed
+catalog request records the attempt and retains the previous good schedule; individual detail
+failures do not discard cached results. Announcements persist fingerprints per guild, so
+unchanged events are not posted twice.
 
 ## Scope
 
