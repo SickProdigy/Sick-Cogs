@@ -1420,6 +1420,84 @@ class FailClosedTransactionTests(unittest.TestCase):
         )
 
 
+class ApprovalSubmissionBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_error_becomes_uncertain_and_second_click_cannot_resubmit(self):
+        intent = TransactionIntent(
+            intent_id="double-click-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=int(time.time()),
+            expires_at=int(time.time()) + 300, gas_sponsored=True,
+        )
+        store = _ApprovalStore()
+        store.data[intent.intent_id] = intent.to_dict()
+        profile = _profile()
+        user_config = SimpleNamespace(
+            security_locked=_Value(False), profile=_Value(profile), intents=store
+        )
+        provider = SimpleNamespace(
+            supports=lambda network, capability: True,
+            get_delegation_status=AsyncMock(return_value={"active": True}),
+            prepare_transaction=AsyncMock(side_effect=lambda current: current),
+            get_native_balance=AsyncMock(return_value=10),
+            submit_transaction=AsyncMock(
+                side_effect=WalletProviderError("ambiguous provider timeout")
+            ),
+        )
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                user_from_id=lambda user_id: user_config,
+                provider_paused=_Value(False),
+            ),
+            wallet_provider=provider,
+            _stored_intent=lambda user_id, intent_id: (
+                WalletTransactionCommands._stored_intent(cog, user_id, intent_id)
+            ),
+            _intent_quote=WalletTransactionCommands._intent_quote,
+            _mainnet_intent_disclosure_error=(
+                WalletTransactionCommands._mainnet_intent_disclosure_error
+            ),
+            _final_intent_binding_error=lambda current, stored_profile, network: (
+                WalletTransactionCommands._final_intent_binding_error(
+                    cog, current, stored_profile, network
+                )
+            ),
+            _intent_embed=WalletTransactionCommands._intent_embed,
+            _intent_result_view=WalletTransactionCommands._intent_result_view,
+            user_totp_enabled=AsyncMock(return_value=False),
+            send_authorization_link=AsyncMock(),
+            schedule_confirmation=AsyncMock(),
+        )
+        view = SimpleNamespace(
+            user_id=7, intent_id=intent.intent_id,
+            quote=WalletTransactionCommands._intent_quote(intent),
+            disable_controls=lambda: None,
+        )
+        first = _interaction()
+        first.message.embeds = []
+        second = _interaction()
+        second.message.embeds = []
+
+        await WalletTransactionCommands.approve_intent_interaction(cog, first, view)
+        await WalletTransactionCommands.approve_intent_interaction(cog, second, view)
+
+        self.assertEqual(
+            store.data[intent.intent_id]["status"], IntentStatus.UNCERTAIN.value
+        )
+        self.assertEqual(
+            store.data[intent.intent_id]["provider_status"], "unknown"
+        )
+        provider.submit_transaction.assert_awaited_once()
+        self.assertIn(
+            "Do not create a replacement transfer",
+            first.followup.send.await_args.args[0],
+        )
+        self.assertIn(
+            "no longer pending", second.followup.send.await_args.args[0]
+        )
+
+
 class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
     async def test_uncertain_intent_with_txid_reconciles_without_resubmission(self):
         signature = "1" * 64

@@ -447,7 +447,7 @@ Protected assets are user testnet funds, signer ownership, the immutable Discord
 
 ### Adversarial acceptance checklist
 
-Automated coverage verifies malformed and expired JWTs, wrong project audience, unsupported purpose creation, mismatched profile, provider, and Discord identity, missing or invalid accounts, expired handoffs, wrong-user relay consumption, replay rejection, foreign deployment and application rejection, emergency-lock authorization blocking, and uncertain-submission persistence. The combined Base Sepolia test must still verify:
+Automated coverage verifies duplicate approval after an ambiguous provider failure cannot resubmit, malformed and expired JWTs, wrong project audience, unsupported purpose creation, mismatched profile, provider, and Discord identity, missing or invalid accounts, expired handoffs, wrong-user relay consumption, replay rejection, foreign deployment and application rejection, emergency-lock authorization blocking, and uncertain-submission persistence. The combined Base Sepolia test must still verify:
 
 - lock immediately after creating a pending intent, then confirm its old approval button cannot submit;
 - lock with active delegation, verify revocation, and confirm only a bot owner can unlock;
