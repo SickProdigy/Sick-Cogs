@@ -43,10 +43,11 @@ from ..commands.views import (
     WalletRevocationView,
     WalletTotpModal,
     WalletTotpEnrollmentView,
+    WalletTotpManagementView,
 )
 from ..commands.transactions import WalletTransactionCommands
 from ..commands.core import WalletCoreCommands
-from ..commands.admin import WalletAdminCommands
+from ..commands.admin import TOTP_RESET_ACKNOWLEDGEMENT, WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
@@ -1012,6 +1013,7 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
             security_lock_source=_MutableValue(None),
             intents=intents,
             profile=_Value(None),
+            totp_security=_MutableValue({"enabled": True}),
         )
 
     async def test_user_lock_persists_before_provider_and_rejects_pending_intents(self):
@@ -1051,6 +1053,50 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(user_config.security_locked_at.value, 0)
         self.assertIsNone(user_config.security_lock_source.value)
         self.assertIn("No signing authorization was created", ctx.send.await_args.args[0])
+
+
+    async def test_owner_totp_reset_requires_lock_and_exact_acknowledgement(self):
+        user_config = self._user_config(locked=False)
+        ctx = SimpleNamespace(send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda user_id: user_config),
+            _wallet_user_id=lambda reference: int(reference),
+            disable_user_totp=AsyncMock(),
+        )
+        await WalletAdminCommands.walletset_2fa_reset.callback(
+            cog, ctx, "7", acknowledgement=TOTP_RESET_ACKNOWLEDGEMENT
+        )
+        cog.disable_user_totp.assert_not_awaited()
+        self.assertIn("emergency-locked", ctx.send.await_args.args[0])
+
+        user_config.security_locked.value = True
+        await WalletAdminCommands.walletset_2fa_reset.callback(
+            cog, ctx, "7", acknowledgement="wrong"
+        )
+        cog.disable_user_totp.assert_not_awaited()
+        self.assertIn(TOTP_RESET_ACKNOWLEDGEMENT, ctx.send.await_args.args[0])
+
+        await WalletAdminCommands.walletset_2fa_reset.callback(
+            cog, ctx, "7", acknowledgement=TOTP_RESET_ACKNOWLEDGEMENT
+        )
+        cog.disable_user_totp.assert_awaited_once_with(7)
+        self.assertTrue(user_config.security_locked.value)
+        self.assertIn("remains emergency-locked", ctx.send.await_args.args[0])
+
+    async def test_management_controls_are_dm_only_and_action_specific(self):
+        author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        cog = SimpleNamespace(
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            user_totp_enabled=AsyncMock(return_value=True),
+        )
+        await WalletCoreCommands._send_totp_management(cog, ctx, "replace")
+        sent = author.send.await_args.kwargs
+        self.assertIsInstance(sent["view"], WalletTotpManagementView)
+        self.assertEqual(sent["view"].action, "replace")
+        self.assertEqual(sent["view"].children[0].label, "Verify and replace")
+        self.assertIn("private modal", sent["embed"].description)
+        self.assertNotIn("code", str(ctx.send.await_args.args).lower())
 
 
 class ClankerIntentFixtures:

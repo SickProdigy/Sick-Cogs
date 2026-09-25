@@ -16,7 +16,7 @@ from ..core.networks import (
 from ..providers import WalletProviderError
 from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
-from .views import WalletTotpEnrollmentView
+from .views import WalletTotpEnrollmentView, WalletTotpManagementView
 
 
 class WalletCoreCommands:
@@ -701,6 +701,58 @@ class WalletCoreCommands:
             return
         await ctx.send(
             f"I sent your protected authenticator setup by DM; it expires <t:{expires_at}:R>."
+        )
+
+    async def _send_totp_management(self, ctx: commands.Context, action: str) -> None:
+        if not await self._wallet_sensitive_allowed(ctx):
+            return
+        if not await self.user_totp_enabled(ctx.author.id):
+            await ctx.send("Authenticator protection is not enabled for this wallet.")
+            return
+        title = "Replace Wallet Authenticator" if action == "replace" else "Disable Wallet Authenticator"
+        warning = (
+            "After verification, the old factor is removed and you must immediately run "
+            "`wallet security 2fa setup` to enroll the replacement."
+            if action == "replace"
+            else "After verification, future sends will no longer require an authenticator code."
+        )
+        embed = discord.Embed(
+            title=title,
+            description=(
+                warning + "\n\nPress the button and enter the current code in the private modal. "
+                "No code belongs in Discord chat."
+            ),
+            color=discord.Color.orange(),
+        )
+        view = WalletTotpManagementView(self, ctx.author.id, action)
+        try:
+            message = await ctx.author.send(embed=embed, view=view)
+            view.message = message
+        except discord.HTTPException:
+            await ctx.send("Enable direct messages and try again.")
+            return
+        await ctx.send("I sent the protected authenticator change controls by DM.")
+
+    @wallet_security_2fa.command(name="disable", aliases=("remove",))
+    async def wallet_security_2fa_disable(self, ctx: commands.Context):
+        """Disable TOTP after current-factor verification."""
+
+        await self._send_totp_management(ctx, "disable")
+
+    @wallet_security_2fa.command(name="replace", aliases=("rotate",))
+    async def wallet_security_2fa_replace(self, ctx: commands.Context):
+        """Verify the current factor before replacement enrollment."""
+
+        await self._send_totp_management(ctx, "replace")
+
+    @wallet_security_2fa.command(name="lost", aliases=("recovery",))
+    async def wallet_security_2fa_lost(self, ctx: commands.Context):
+        """Explain lost-authenticator recovery without bypassing identity review."""
+
+        await ctx.send(
+            f"Immediately run `{ctx.clean_prefix}wallet security lock`, then contact the bot owner. "
+            "The owner may reset authenticator state only while the wallet remains emergency-locked "
+            "and after an independent identity review. Unlocking does not restore authorization."
         )
 
     @wallet_security.command(name="lock", aliases=("freeze",))

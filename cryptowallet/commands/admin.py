@@ -28,6 +28,9 @@ from ..backend.usage import (
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
+TOTP_RESET_ACKNOWLEDGEMENT = "I CONFIRM IDENTITY REVIEW AND RESET 2FA"
+
+
 NETWORK_EMOJI_NAMES = {
     "base-sepolia": "base",
     "ethereum-sepolia": "ethereum",
@@ -107,6 +110,39 @@ class WalletAdminCommands:
         await ctx.send(
             f"{mention}’s wallet {state} emergency-locked. {revocation} "
             "Only a bot owner can unlock it."
+        )
+
+    @walletset.command(name="2fareset", aliases=("totpreset",))
+    @commands.is_owner()
+    async def walletset_2fa_reset(
+        self, ctx: commands.Context, target: str, *, acknowledgement: str = ""
+    ):
+        """Reset lost authenticator state after locked-wallet identity review."""
+
+        user_id = self._wallet_user_id(target)
+        if user_id is None:
+            await ctx.send("Provide a Discord user mention or numeric Discord user ID.")
+            return
+        user_config = self.config.user_from_id(user_id)
+        mention = f"<{chr(64)}{user_id}>"
+        if not await user_config.security_locked():
+            await ctx.send(
+                f"{mention} must remain emergency-locked before authenticator recovery."
+            )
+            return
+        if acknowledgement != TOTP_RESET_ACKNOWLEDGEMENT:
+            await ctx.send(
+                "After independent identity review, repeat the command with this exact "
+                f"acknowledgement: `{TOTP_RESET_ACKNOWLEDGEMENT}`"
+            )
+            return
+        if await user_config.totp_security() is None:
+            await ctx.send(f"{mention} has no stored authenticator enrollment.")
+            return
+        await self.disable_user_totp(user_id)
+        await ctx.send(
+            f"{mention} authenticator state was reset after owner identity review. "
+            "The wallet remains emergency-locked; separately review authorization before unlocking."
         )
 
     @walletset.command(name="unlock", aliases=("unfreeze",))
