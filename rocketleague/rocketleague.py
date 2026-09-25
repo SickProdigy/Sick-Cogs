@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import random
 import time
@@ -24,7 +25,7 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.2.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.2.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
@@ -48,7 +49,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -98,6 +99,30 @@ class RocketLeague(commands.Cog):
         if self.session and not self.session.closed:
             self.bot.loop.create_task(self.session.close())
 
+    async def _configured_text_prefix(self, ctx: commands.Context) -> str:
+        """Prefer the invoking text prefix and avoid rendering a mention prefix."""
+        current = str(getattr(ctx, "clean_prefix", "") or "")
+        if current and not current.lstrip().startswith(("<@", "@")):
+            return current
+        getter = getattr(self.bot, "get_valid_prefixes", None)
+        if getter is not None:
+            prefixes = getter(getattr(ctx, "guild", None))
+            if inspect.isawaitable(prefixes):
+                prefixes = await prefixes
+            for prefix in prefixes or ():
+                candidate = str(prefix or "")
+                if candidate and not candidate.lstrip().startswith(("<@", "@")):
+                    return candidate
+        return current or "[p]"
+
+    async def _provider_error_message(self, ctx: commands.Context, exc: Exception) -> str:
+        message = str(exc)
+        command = str(getattr(exc, "setup_command", "") or "").strip()
+        if not command:
+            return message
+        prefix = await self._configured_text_prefix(ctx)
+        return f"{message} Configure it privately with `{prefix}{command}`."
+
     async def get_session(self) -> aiohttp.ClientSession:
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession(
@@ -118,7 +143,7 @@ class RocketLeague(commands.Cog):
         if client is None:
             await ctx.send(
                 "The bot owner must configure a start.gg developer token privately with "
-                f"`{ctx.clean_prefix}set api startgg token,YOUR_TOKEN`."
+                f"`{await self._configured_text_prefix(ctx)}set api startgg token,YOUR_TOKEN`."
             )
         return client
 
@@ -394,7 +419,7 @@ class RocketLeague(commands.Cog):
             try:
                 clips = await self._cached_clips(source, force=force_refresh)
             except ClipSourceError as exc:
-                errors.append(str(exc))
+                errors.append(exc)
                 continue
             eligible = [
                 clip for clip in clips
@@ -405,7 +430,7 @@ class RocketLeague(commands.Cog):
                 candidates.append((source, eligible))
         if not candidates:
             if errors and len(errors) == len(sources):
-                raise ClipSourceError(errors[0])
+                raise errors[0]
             raise ClipSourceError("No unseen clips within this server’s length limit are available yet.")
         last_source = int(settings.get("clip_last_source_id") or 0)
         ordered = sorted(candidates, key=lambda item: int(item[0].get("id") or 0))
@@ -467,7 +492,7 @@ class RocketLeague(commands.Cog):
             try:
                 tournaments = await self._blast_for_display()
             except BlastError as exc:
-                await ctx.send(str(exc))
+                await ctx.send(await self._provider_error_message(ctx, exc))
                 return
         if not tournaments:
             await ctx.send(
@@ -487,7 +512,7 @@ class RocketLeague(commands.Cog):
             try:
                 tournaments = (await self._blast_for_display())[1 : limit + 1]
             except BlastError as exc:
-                await ctx.send(str(exc))
+                await ctx.send(await self._provider_error_message(ctx, exc))
                 return
 
         if not tournaments:
@@ -728,7 +753,7 @@ class RocketLeague(commands.Cog):
             try:
                 tournament = await client.tournament(slug_or_url)
             except StartGGError as exc:
-                await ctx.send(str(exc))
+                await ctx.send(await self._provider_error_message(ctx, exc))
                 return
 
         if tournament is None:
@@ -797,7 +822,7 @@ class RocketLeague(commands.Cog):
             async with ctx.typing():
                 source, clips = await (await self.get_clip_providers()).resolve(provider, value)
         except ClipSourceError as exc:
-            await ctx.send(str(exc))
+            await ctx.send(await self._provider_error_message(ctx, exc))
             return
         sources = await self._number_clip_sources(ctx.guild)
         identity = (source.get("provider"), source.get("kind"), source.get("key"))
@@ -935,7 +960,10 @@ class RocketLeague(commands.Cog):
                     await self._cached_clips(source, force=True)
                     refreshed += 1
                 except ClipSourceError as exc:
-                    failures.append(f"{source.get('name')}: {exc}")
+                    failures.append(
+                        f"{source.get('name')}: "
+                        f"{await self._provider_error_message(ctx, exc)}"
+                    )
         message = f"Refreshed **{refreshed}/{len(sources)}** clip sources."
         if failures:
             message += "\n" + "\n".join(f"- {item}" for item in failures[:5])
@@ -948,7 +976,10 @@ class RocketLeague(commands.Cog):
             async with ctx.typing():
                 clip = await self._post_clip_for_guild(ctx.guild)
         except (ClipSourceError, discord.Forbidden, discord.HTTPException) as exc:
-            await ctx.send(f"A clip could not be posted: {exc}")
+            await ctx.send(
+                "A clip could not be posted: "
+                + await self._provider_error_message(ctx, exc)
+            )
             return
         await ctx.send(f"Posted **{discord.utils.escape_markdown(str(clip.get('title') or 'Rocket League clip'))}**.")
 
@@ -968,7 +999,10 @@ class RocketLeague(commands.Cog):
     async def _fetch_startgg_source(self, key: str) -> dict:
         client = await self.get_client()
         if client is None:
-            raise StartGGError("Configure start.gg with `set api startgg token,YOUR_TOKEN`.")
+            raise StartGGError(
+                "A start.gg developer token is not configured.",
+                setup_command="set api startgg token,YOUR_TOKEN",
+            )
         tournament = await client.tournament(key)
         if tournament is None:
             raise StartGGError("That start.gg URL does not contain a visible Rocket League tournament.")
@@ -1002,8 +1036,10 @@ class RocketLeague(commands.Cog):
             client_secret = str(credentials.get("client_secret") or "").strip()
             if not client_id or not client_secret:
                 raise StartGGError(
-                    "Configure Challonge with `set api challonge client_id,YOUR_ID "
-                    "client_secret,YOUR_SECRET`."
+                    "Challonge credentials are not configured.",
+                    setup_command=(
+                        "set api challonge client_id,YOUR_ID client_secret,YOUR_SECRET"
+                    ),
                 )
             try:
                 async with (await self.get_session()).post(
@@ -1138,7 +1174,7 @@ class RocketLeague(commands.Cog):
             provider, key = self._tournament_source_from_url(url)
             source = await self._fetch_tournament_source(provider, key)
         except (ValueError, StartGGError) as exc:
-            await ctx.send(str(exc))
+            await ctx.send(await self._provider_error_message(ctx, exc))
             return
         await self._number_tournament_sources(ctx.guild)
         async with self.config.guild(ctx.guild).tournament_sources() as sources:
@@ -1169,7 +1205,7 @@ class RocketLeague(commands.Cog):
             try:
                 provider, key = self._tournament_source_from_url(reference)
             except ValueError as exc:
-                await ctx.send(str(exc))
+                await ctx.send(await self._provider_error_message(ctx, exc))
                 return
         matched = next((item for item in sources if
             (reference.isdigit() and int(item.get("id") or 0) == int(reference)) or
@@ -1198,7 +1234,7 @@ class RocketLeague(commands.Cog):
                 updated["id"] = item.get("id")
                 refreshed.append(updated)
         except StartGGError as exc:
-            await ctx.send(str(exc))
+            await ctx.send(await self._provider_error_message(ctx, exc))
             return
         replacements = {int(item.get("id")): item for item in refreshed}
         async with self.config.guild(ctx.guild).tournament_sources() as stored:
@@ -1304,7 +1340,7 @@ class RocketLeague(commands.Cog):
         try:
             tournaments, refreshed = await self._refresh_blast()
         except BlastError as exc:
-            await ctx.send(str(exc))
+            await ctx.send(await self._provider_error_message(ctx, exc))
             return
         if not refreshed:
             next_at = previous_attempt + BLAST_FETCH_INTERVAL

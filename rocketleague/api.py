@@ -15,7 +15,11 @@ log = logging.getLogger("red.sick-cogs.RocketLeague.startgg")
 
 
 class StartGGError(RuntimeError):
-    """A safe, user-facing start.gg provider error."""
+    """A safe provider error with optional command-layer setup guidance."""
+
+    def __init__(self, message: str, *, setup_command: Optional[str] = None):
+        super().__init__(message)
+        self.setup_command = setup_command
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,11 @@ ISO_DURATION_RE = re.compile(
 
 
 class ClipSourceError(RuntimeError):
-    """A safe, user-facing clip provider error."""
+    """A safe provider error with optional command-layer setup guidance."""
+
+    def __init__(self, message: str, *, setup_command: Optional[str] = None):
+        super().__init__(message)
+        self.setup_command = setup_command
 
 
 class _MetaParser(HTMLParser):
@@ -271,7 +275,8 @@ class ClipProviders:
         client_secret = str(credentials.get("client_secret") or "").strip()
         if not client_id or not client_secret:
             raise ClipSourceError(
-                "Configure Twitch with `set api twitch client_id,YOUR_ID client_secret,YOUR_SECRET`."
+                "Twitch credentials are not configured.",
+                setup_command="set api twitch client_id,YOUR_ID client_secret,YOUR_SECRET",
             )
         if self._twitch_token and time.monotonic() < self._twitch_token_expires_at:
             return client_id, self._twitch_token
@@ -422,7 +427,8 @@ class ClipProviders:
         key = str(tokens.get("api_key") or "").strip()
         if not key:
             raise ClipSourceError(
-                "Configure YouTube with `set api youtube api_key,YOUR_API_KEY`."
+                "A YouTube API key is not configured.",
+                setup_command="set api youtube api_key,YOUR_API_KEY",
             )
         return key
 
