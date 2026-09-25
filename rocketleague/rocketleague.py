@@ -72,6 +72,7 @@ class RocketLeague(commands.Cog):
             blast_tournaments=[],
             blast_history=[],
             blast_results={},
+            blast_results_last_attempt=0,
             blast_last_error=None,
             challonge_refresh_day=0,
             challonge_refresh_count=0,
@@ -218,6 +219,17 @@ class RocketLeague(commands.Cog):
                 cached[tournament.slug] = {**result.to_dict(), "cached_at": now}
         await self.config.blast_results.set(cached)
 
+    async def _maybe_refresh_blast_results(
+        self, tournaments: list[BlastTournament], *, now: int
+    ) -> bool:
+        last_attempt = int(await self.config.blast_results_last_attempt())
+        if last_attempt and now - last_attempt < BLAST_FETCH_INTERVAL:
+            return False
+        await self.config.blast_results_last_attempt.set(now)
+        client = BlastClient(await self.get_session())
+        await self._refresh_blast_results(client, tournaments, now=now)
+        return True
+
 
     @staticmethod
     def _merge_blast_history(
@@ -258,7 +270,16 @@ class RocketLeague(commands.Cog):
             now = int(time.time())
             last_attempt = int(await self.config.blast_last_attempt())
             if last_attempt and now - last_attempt < BLAST_FETCH_INTERVAL:
-                return await self._cached_blast(), False
+                cached = await self._cached_blast()
+                known = {item.slug: item for item in cached}
+                for value in await self._cached_blast_history():
+                    try:
+                        item = BlastTournament.from_dict(value)
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    known[item.slug] = item
+                await self._maybe_refresh_blast_results(list(known.values()), now=now)
+                return cached, False
             await self.config.blast_last_attempt.set(now)
             previous = await self._cached_blast()
             history = await self._cached_blast_history()
@@ -278,6 +299,7 @@ class RocketLeague(commands.Cog):
                 except (KeyError, TypeError, ValueError):
                     continue
                 known[item.slug] = item
+            await self.config.blast_results_last_attempt.set(now)
             await self._refresh_blast_results(client, list(known.values()), now=now)
             await self.config.blast_last_success.set(now)
             await self.config.blast_last_error.set(None)
