@@ -17,6 +17,9 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
 
         self.assertIsNotNone(rlcs)
         self.assertIsNotNone(rlcs.get_command("upcoming"))
+        self.assertIsNotNone(rlcs.get_command("recent"))
+        self.assertIsNotNone(rlcs.get_command("events"))
+        self.assertIn("list", rlcs.get_command("events").aliases)
         self.assertIsNotNone(rlcs.get_command("event"))
         self.assertIsNotNone(RocketLeague.rocketleague.get_command("clips"))
 
@@ -74,6 +77,8 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
 
         self.assertNotIn("rl", rlcs.aliases)
         self.assertIsNotNone(rlcs.get_command("upcoming"))
+        self.assertIsNotNone(rlcs.get_command("recent"))
+        self.assertIsNotNone(rlcs.get_command("events"))
         self.assertIsNotNone(rlcs.get_command("event"))
 
     def test_configuration_help_is_labeled_for_administrators(self):
@@ -190,6 +195,33 @@ class RocketLeagueHelpStructureTests(unittest.TestCase):
             RocketLeague._startgg_event_status({"state": None, "start_at": 200}, now=100)[0],
             "Scheduled",
         )
+
+    def test_recent_empty_state_uses_configured_prefix(self):
+        async def scenario():
+            cog = RocketLeague.__new__(RocketLeague)
+            cog.bot = SimpleNamespace()
+            cog._recent_blast_tournaments = AsyncMock(return_value=[])
+            ctx = SimpleNamespace(clean_prefix="sick!", send=AsyncMock())
+            await cog._send_recent_events(ctx)
+            return ctx.send.await_args.args[0]
+
+        rendered = asyncio.run(scenario())
+        self.assertIn("`sick!rlcs events`", rendered)
+
+    def test_cached_event_resolution_accepts_slug_and_short_id(self):
+        async def scenario():
+            from rocketleague.blast import BlastTournament
+
+            tournament = BlastTournament("known-event", "Known", 100, 200, None)
+            cog = RocketLeague.__new__(RocketLeague)
+            cog._known_blast_tournaments = AsyncMock(return_value=[tournament])
+            by_slug = await cog._resolve_cached_blast("known-event")
+            by_id = await cog._resolve_cached_blast(cog._blast_short_id(tournament))
+            return tournament, by_slug, by_id
+
+        tournament, by_slug, by_id = asyncio.run(scenario())
+        self.assertEqual(by_slug, tournament)
+        self.assertEqual(by_id, tournament)
 
     def test_missing_provider_credentials_carry_command_metadata(self):
         async def scenario():

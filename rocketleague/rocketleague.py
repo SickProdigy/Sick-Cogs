@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import random
@@ -25,8 +26,10 @@ STARTGG_TOKEN_NAMESPACE = "startgg"
 CHALLONGE_TOKEN_NAMESPACE = "challonge"
 CHALLONGE_API_URL = "https://api.challonge.com/v2.1/tournaments"
 CHALLONGE_TOKEN_URL = "https://api.challonge.com/oauth/token"
-USER_AGENT = "Sick-Cogs-RocketLeague/1.3.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-RocketLeague/1.4.0 (+https://github.com/SickProdigy/Sick-Cogs)"
 BLAST_FETCH_INTERVAL = 7 * 24 * 60 * 60
+BLAST_HISTORY_MAX_AGE = 365 * 24 * 60 * 60
+BLAST_HISTORY_LIMIT = 100
 ANNOUNCEMENT_LOOKAHEAD = 45 * 24 * 60 * 60
 COMMUNITY_REFRESH_INTERVAL = 24 * 60 * 60
 CHALLONGE_DAILY_TOURNAMENT_LIMIT = 7
@@ -49,7 +52,7 @@ class RocketLeague(commands.Cog):
     """
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.3.0"
+    __version__ = "1.4.0"
 
     def __init__(self, bot: Red):
         self.bot = bot
@@ -59,6 +62,7 @@ class RocketLeague(commands.Cog):
             blast_last_attempt=0,
             blast_last_success=0,
             blast_tournaments=[],
+            blast_history=[],
             blast_last_error=None,
             challonge_refresh_day=0,
             challonge_refresh_count=0,
@@ -157,6 +161,57 @@ class RocketLeague(commands.Cog):
                 continue
         return tournaments
 
+    async def _cached_blast_history(self) -> list[dict]:
+        records = []
+        for value in await self.config.blast_history():
+            if not isinstance(value, dict):
+                continue
+            try:
+                tournament = BlastTournament.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+            record = tournament.to_dict()
+            record["first_seen"] = int(value.get("first_seen") or 0)
+            record["last_seen"] = int(value.get("last_seen") or 0)
+            record["final_fingerprint"] = str(value.get("final_fingerprint") or tournament.fingerprint)
+            records.append(record)
+        return records
+
+
+    @staticmethod
+    def _merge_blast_history(
+        history: list[dict],
+        previous: list[BlastTournament],
+        current: list[BlastTournament],
+        *,
+        now: int,
+    ) -> list[dict]:
+        merged = {}
+        for value in history:
+            try:
+                tournament = BlastTournament.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+            merged[tournament.slug] = {
+                **tournament.to_dict(),
+                "first_seen": int(value.get("first_seen") or now),
+                "last_seen": int(value.get("last_seen") or now),
+                "final_fingerprint": str(value.get("final_fingerprint") or tournament.fingerprint),
+            }
+        for tournament in [*previous, *current]:
+            existing = merged.get(tournament.slug)
+            first_seen = int((existing or {}).get("first_seen") or now)
+            merged[tournament.slug] = {
+                **tournament.to_dict(),
+                "first_seen": first_seen,
+                "last_seen": now,
+                "final_fingerprint": tournament.fingerprint,
+            }
+        cutoff = now - BLAST_HISTORY_MAX_AGE
+        retained = [value for value in merged.values() if int(value.get("end_at") or 0) >= cutoff]
+        retained.sort(key=lambda value: (int(value.get("end_at") or 0), str(value.get("slug") or "")), reverse=True)
+        return retained[:BLAST_HISTORY_LIMIT]
+
     async def _refresh_blast(self) -> tuple[list[BlastTournament], bool]:
         async with self._blast_lock:
             now = int(time.time())
@@ -164,12 +219,17 @@ class RocketLeague(commands.Cog):
             if last_attempt and now - last_attempt < BLAST_FETCH_INTERVAL:
                 return await self._cached_blast(), False
             await self.config.blast_last_attempt.set(now)
+            previous = await self._cached_blast()
+            history = await self._cached_blast_history()
             try:
                 tournaments = await BlastClient(await self.get_session()).tournaments()
             except BlastError as exc:
                 await self.config.blast_last_error.set(str(exc))
                 raise
             await self.config.blast_tournaments.set([item.to_dict() for item in tournaments])
+            await self.config.blast_history.set(
+                self._merge_blast_history(history, previous, tournaments, now=now)
+            )
             await self.config.blast_last_success.set(now)
             await self.config.blast_last_error.set(None)
             return tournaments, True
@@ -179,6 +239,94 @@ class RocketLeague(commands.Cog):
         if not cached:
             cached, _ = await self._refresh_blast()
         return upcoming_tournaments(cached)
+
+    async def _known_blast_tournaments(self) -> list[BlastTournament]:
+        known = {item.slug: item for item in await self._cached_blast()}
+        for value in await self._cached_blast_history():
+            try:
+                tournament = BlastTournament.from_dict(value)
+            except (KeyError, TypeError, ValueError):
+                continue
+            known[tournament.slug] = tournament
+        return sorted(known.values(), key=lambda item: (item.start_at, item.slug))
+
+    @staticmethod
+    def _blast_short_id(tournament: BlastTournament) -> str:
+        return hashlib.sha256(tournament.slug.encode("utf-8")).hexdigest()[:8]
+
+    async def _recent_blast_tournaments(self, limit: int = 5) -> list[BlastTournament]:
+        now = int(time.time())
+        recent = [item for item in await self._known_blast_tournaments() if item.end_at < now]
+        recent.sort(key=lambda item: (item.end_at, item.name.casefold()), reverse=True)
+        return recent[:limit]
+
+    async def _resolve_cached_blast(self, reference: str) -> Optional[BlastTournament]:
+        normalized = reference.strip().strip("<>").rstrip("/")
+        if "/rl/tournaments/" in normalized:
+            normalized = normalized.rsplit("/", 1)[-1]
+        matches = [
+            item
+            for item in await self._known_blast_tournaments()
+            if normalized == item.slug or normalized == self._blast_short_id(item)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    async def _send_blast_event_list(self, ctx: commands.Context) -> None:
+        now = int(time.time())
+        known = await self._known_blast_tournaments()
+        known.sort(key=lambda item: (item.end_at < now, item.start_at))
+        if not known:
+            await ctx.send("No official RLCS events have been retained in the weekly cache yet.")
+            return
+        embed = discord.Embed(
+            title="Known official RLCS events",
+            description="Cache-only BLAST event references accepted by `rlcs event`.",
+            color=discord.Color.blue(),
+        )
+        for item in known[:10]:
+            status = "Completed" if item.end_at < now else (
+                "Active" if item.start_at <= now else "Upcoming"
+            )
+            embed.add_field(
+                name=item.name[:256],
+                value=(
+                    f"`{self._blast_short_id(item)}` • `{item.slug}`\n"
+                    f"{status} • <t:{item.start_at}:D>–<t:{item.end_at}:D> • "
+                    f"[BLAST]({item.url})"
+                )[:1024],
+                inline=False,
+            )
+        hidden = len(known) - 10
+        embed.set_footer(
+            text=(
+                f"{hidden} additional retained event(s) not shown"
+                if hidden > 0
+                else "Source: retained weekly BLAST snapshots"
+            )
+        )
+        await ctx.send(embed=embed)
+
+    async def _send_cached_or_startgg_event(
+        self, ctx: commands.Context, reference: Optional[str]
+    ) -> None:
+        if not reference:
+            await self._send_blast_event_list(ctx)
+            return
+        tournament = await self._resolve_cached_blast(reference)
+        if tournament is not None:
+            await ctx.send(embed=self._blast_feature_embed(tournament))
+            return
+        normalized = reference.strip().strip("<>")
+        if "/rl/tournaments/" in normalized or (
+            len(normalized) == 8 and all(character in "0123456789abcdef" for character in normalized.casefold())
+        ):
+            prefix = await self._configured_text_prefix(ctx)
+            await ctx.send(
+                "That cached BLAST event reference is unknown or expired. "
+                f"Run `{prefix}rlcs events` to view current references."
+            )
+            return
+        await self._send_startgg_event(ctx, reference)
 
     @staticmethod
     def _blast_feature_embed(tournament: BlastTournament) -> discord.Embed:
@@ -506,8 +654,11 @@ class RocketLeague(commands.Cog):
                 await ctx.send(await self._provider_error_message(ctx, exc))
                 return
         if not tournaments:
+            prefix = await self._configured_text_prefix(ctx)
             await ctx.send(
-                "The weekly BLAST cache does not currently contain any upcoming RLCS events."
+                "No upcoming RLCS events are currently scheduled. View recently completed "
+                f"official events with `{prefix}rlcs recent`, or browse this server's community "
+                f"tournaments with `{prefix}rocketleague tournaments`."
             )
             return
         await ctx.send(embed=self._blast_feature_embed(tournaments[0]))
@@ -527,9 +678,42 @@ class RocketLeague(commands.Cog):
                 return
 
         if not tournaments:
-            await ctx.send("No additional upcoming RLCS events are currently scheduled.")
+            prefix = await self._configured_text_prefix(ctx)
+            await ctx.send(
+                "No additional upcoming RLCS events are currently scheduled. "
+                f"View `{prefix}rlcs recent` or `{prefix}rlcs events`."
+            )
             return
         await ctx.send(embed=self._blast_embed(tournaments, title="Later RLCS events"))
+
+    @rlcs.command(name="recent")
+    @commands.bot_has_permissions(embed_links=True)
+    async def rlcs_recent(self, ctx: commands.Context, limit: commands.Range[int, 1, 10] = 5):
+        """Show recently completed official events from retained weekly snapshots."""
+        await self._send_recent_events(ctx, limit)
+
+    @rlcs.command(name="events", aliases=["list"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def rlcs_events(self, ctx: commands.Context):
+        """List discoverable official event IDs and slugs from the local cache."""
+        await self._send_blast_event_list(ctx)
+
+    @rlcs.command(name="event")
+    @commands.bot_has_permissions(embed_links=True)
+    async def rlcs_event(self, ctx: commands.Context, *, reference: Optional[str] = None):
+        """Show a cached official event or an explicit start.gg tournament."""
+        await self._send_cached_or_startgg_event(ctx, reference)
+
+    async def _send_recent_events(self, ctx: commands.Context, limit: int = 5) -> None:
+        tournaments = await self._recent_blast_tournaments(limit)
+        if not tournaments:
+            prefix = await self._configured_text_prefix(ctx)
+            await ctx.send(
+                "No completed official RLCS events have been retained yet. "
+                f"Browse known events with `{prefix}rlcs events`."
+            )
+            return
+        await ctx.send(embed=self._blast_embed(tournaments, title="Recent official RLCS events"))
 
     @commands.group(name="rocketleague", aliases=["rl"], invoke_without_command=True)
     @commands.bot_has_permissions(embed_links=True)
@@ -559,8 +743,19 @@ class RocketLeague(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="Recent and known events",
+            value=(
+                f"`{prefix}rocketleague rlcs recent [1-10]` • "
+                f"`{prefix}rocketleague rlcs events`"
+            ),
+            inline=False,
+        )
+        embed.add_field(
             name="Tournament lookup",
-            value=f"`{prefix}rocketleague rlcs event <start.gg URL or slug>`",
+            value=(
+                f"`{prefix}rocketleague rlcs event [cached-id, BLAST slug, "
+                "or start.gg URL]`"
+            ),
             inline=False,
         )
         embed.add_field(
@@ -808,17 +1003,27 @@ class RocketLeague(commands.Cog):
         """Show RLCS tournaments scheduled after the next event."""
         await self._send_upcoming_events(ctx, limit)
 
+    @rocketleague_rlcs.command(name="recent")
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_rlcs_recent(
+        self, ctx: commands.Context, limit: commands.Range[int, 1, 10] = 5
+    ):
+        """Show recently completed official events from retained weekly snapshots."""
+        await self._send_recent_events(ctx, limit)
+
+    @rocketleague_rlcs.command(name="events", aliases=["list"])
+    @commands.bot_has_permissions(embed_links=True)
+    async def rocketleague_rlcs_events(self, ctx: commands.Context):
+        """List discoverable official event IDs and slugs from the local cache."""
+        await self._send_blast_event_list(ctx)
+
     @rocketleague_rlcs.command(name="event")
     @commands.bot_has_permissions(embed_links=True)
-    async def rocketleague_rlcs_event(self, ctx: commands.Context, *, slug_or_url: str):
-        """Show a Rocket League tournament from its start.gg URL or slug."""
-        await self._send_startgg_event(ctx, slug_or_url)
-
-    @rlcs.command(name="event")
-    @commands.bot_has_permissions(embed_links=True)
-    async def rlcs_event(self, ctx: commands.Context, *, slug_or_url: str):
-        """Look up an event (short form of rocketleague rlcs event)."""
-        await self._send_startgg_event(ctx, slug_or_url)
+    async def rocketleague_rlcs_event(
+        self, ctx: commands.Context, *, reference: Optional[str] = None
+    ):
+        """Show a cached official event or an explicit start.gg tournament."""
+        await self._send_cached_or_startgg_event(ctx, reference)
 
     async def _send_startgg_event(self, ctx: commands.Context, slug_or_url: str) -> None:
         client = await self.require_client(ctx)
