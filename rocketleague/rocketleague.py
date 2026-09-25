@@ -369,8 +369,8 @@ class RocketLeague(commands.Cog):
         for tournament in tournaments[:10]:
             details = []
             if tournament.location:
-                details.append(f"📍 {tournament.location}")
-            details.append(f"📅 <t:{tournament.start_at}:D> – <t:{tournament.end_at}:D>")
+                details.append(f"**Location:** {tournament.location}")
+            details.append(f"**Dates:** <t:{tournament.start_at}:D> – <t:{tournament.end_at}:D>")
             details.append(f"[View on BLAST]({tournament.url})")
             embed.add_field(
                 name=tournament.name[:256], value="\n".join(details), inline=False
@@ -922,6 +922,12 @@ class RocketLeague(commands.Cog):
                 value=(field.value + "\n" + "\n".join(details))[:1024],
                 inline=field.inline,
             )
+        embed.set_footer(
+            text=(
+                f"Use {prefix}rlcs results <ID> for detailed standings • "
+                f"{prefix}rlcs events lists retained IDs"
+            )
+        )
         await ctx.send(embed=embed)
 
     @commands.group(name="rocketleague", aliases=["rl"], invoke_without_command=True)
