@@ -23,6 +23,16 @@ class StartGGError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class RLCSStanding:
+    placement: int
+    entrant_id: Optional[int]
+    entrant_name: str
+    is_final: Optional[bool]
+    record: Optional[dict]
+    provider_points: Optional[float]
+
+
+@dataclass(frozen=True)
 class RLCSEvent:
     id: int
     name: str
@@ -31,6 +41,7 @@ class RLCSEvent:
     entrant_size_min: Optional[int]
     state: Optional[int]
     slug: Optional[str]
+    standings: tuple[RLCSStanding, ...]
 
 
 @dataclass(frozen=True)
@@ -179,6 +190,9 @@ class StartGGClient:
                   images { url type }
                   events(filter: {videogameId: [$gameId]}) {
                     id name slug startAt state numEntrants entrantSizeMin
+                    standings(query: {page: 1, perPage: 4}) {
+                      nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                    }
                   }
                 }
               }
@@ -201,6 +215,9 @@ class StartGGClient:
                 images { url type }
                 events(filter: {videogameId: $gameId}) {
                   id name slug startAt state numEntrants entrantSizeMin
+                  standings(query: {page: 1, perPage: 4}) {
+                    nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                  }
                 }
               }
             }
@@ -215,7 +232,7 @@ class StartGGClient:
             return None
         return self._parse_tournament(node)
 
-    async def league(self, slug: str, *, max_pages: int = 10) -> Optional[RocketLeagueLeague]:
+    async def league(self, slug: str, *, max_pages: int = 40) -> Optional[RocketLeagueLeague]:
         """Return Rocket League tournaments linked to a start.gg league."""
         game_id = await self.rocket_league_game_id()
         normalized = normalize_league_slug(slug)
@@ -229,7 +246,7 @@ class StartGGClient:
                 query RocketLeagueLeague($slug: String!, $page: Int!, $gameId: [ID]!) {
                   league(slug: $slug) {
                     id name slug
-                    events(query: {page: $page, perPage: 100}) {
+                    events(query: {page: $page, perPage: 25}) {
                       pageInfo { totalPages }
                       nodes {
                         videogame { id name }
@@ -239,6 +256,9 @@ class StartGGClient:
                           images { url type }
                           events(filter: {videogameId: $gameId}) {
                             id name slug startAt state numEntrants entrantSizeMin
+                            standings(query: {page: 1, perPage: 4}) {
+                              nodes { placement isFinal setRecordWithoutByes totalPoints entrant { id name } }
+                            }
                           }
                         }
                       }
@@ -267,7 +287,7 @@ class StartGGClient:
             total_pages = int((connection.get("pageInfo") or {}).get("totalPages") or 1)
             if total_pages > max_pages and page == max_pages:
                 raise StartGGError(
-                    f"That league has more than the supported {max_pages * 100} event records."
+                    f"That league has more than the supported {max_pages * 25} event records."
                 )
             if page >= total_pages:
                 break
@@ -295,6 +315,26 @@ class StartGGClient:
                 entrant_size_min=_optional_int(event.get("entrantSizeMin")),
                 state=_optional_int(event.get("state")),
                 slug=_optional_str(event.get("slug")),
+                standings=tuple(
+                    RLCSStanding(
+                        placement=int(standing["placement"]),
+                        entrant_id=_optional_int((standing.get("entrant") or {}).get("id")),
+                        entrant_name=str((standing.get("entrant") or {}).get("name") or "Unknown entrant"),
+                        is_final=(
+                            bool(standing.get("isFinal"))
+                            if standing.get("isFinal") is not None
+                            else None
+                        ),
+                        record=(
+                            standing.get("setRecordWithoutByes")
+                            if isinstance(standing.get("setRecordWithoutByes"), dict)
+                            else None
+                        ),
+                        provider_points=_optional_float(standing.get("totalPoints")),
+                    )
+                    for standing in ((event.get("standings") or {}).get("nodes") or [])
+                    if standing.get("placement") is not None
+                ),
             )
             for event in (node.get("events") or [])
             if event.get("id") is not None
@@ -355,6 +395,13 @@ def normalize_league_slug(value: str) -> str:
 def _optional_int(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: Any) -> Optional[float]:
+    try:
+        return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
 

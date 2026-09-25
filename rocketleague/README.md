@@ -42,16 +42,21 @@ reference, including the separate `[p]rlcsset` administrator commands:
 - `[p]rocketleague rlcs event <start.gg URL or slug>` - optional detailed
   start.gg lookup. With no argument it lists cached official events; a listed cache ID or
   BLAST slug opens that official event without a network request.
+- `[p]rocketleague rlcs results <reference>` - show verified top placements cached from
+  a matched start.gg tournament. BLAST-only events report that results are unavailable.
 
 `[p]rl` is an alias for the complete `[p]rocketleague` group, so commands such as
 `[p]rl tourney` and `[p]rl rlcs` follow the canonical structure. `[p]rlcs` remains a
-direct shortcut to the official schedule; `[p]rlcs upcoming` and `[p]rlcs event <URL or
-slug>` remain available, alongside `[p]rlcs recent` and `[p]rlcs events`.
+direct shortcut to the official schedule; `[p]rlcs upcoming`, `[p]rlcs event <URL or
+slug>`, and `[p]rlcs results <reference>` remain available, alongside `[p]rlcs recent` and
+`[p]rlcs events`.
 
 Completed official-event history is built prospectively from the same permitted weekly BLAST
 snapshots; history commands never make an extra BLAST request. Retention is bounded to 100 records
 and one year. The cache stores first/last-seen timestamps and the final observed fingerprint, but
-does not invent winners, standings, results, or completion details that BLAST did not provide.
+does not invent winners or completion details that BLAST did not provide. When a BLAST event
+confidently matches a cached start.gg tournament, verified start.gg placements may be shown with
+explicit attribution; unmatched BLAST events retain a results-unavailable state.
 
 Tournament URLs are configured independently for each Discord server. Administrators do
 not need to choose a provider-specific command; the cog identifies the provider from the

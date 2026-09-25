@@ -50,12 +50,14 @@ class StartGGAPITests(unittest.TestCase):
                     "nodes": [{"videogame": {"id": 10}, "tournament": tournament}],
                 }}},
             ])
-            return await client.league("league/rlcs-2026")
+            league = await client.league("league/rlcs-2026")
+            return league, client._query.await_args_list[0].args[0]
 
-        league = asyncio.run(scenario())
+        league, query_text = asyncio.run(scenario())
         self.assertEqual(league.name, "RLCS 2026")
         self.assertEqual([item.id for item in league.tournaments], [20])
         self.assertEqual(league.tournaments[0].image_url, "https://images.start.gg/rlcs.png")
+        self.assertIn("perPage: 25", query_text)
 
     def test_rlcs_filter_is_case_insensitive(self):
         self.assertTrue(
@@ -93,6 +95,10 @@ class StartGGAPITests(unittest.TestCase):
                         "state": 3,
                         "numEntrants": 8,
                         "entrantSizeMin": 3,
+                        "standings": {"nodes": [
+                            {"placement": 1, "isFinal": True, "setRecordWithoutByes": {"wins": 5, "losses": 1}, "totalPoints": 12, "entrant": {"id": 101, "name": "Champions"}},
+                            {"placement": 2, "isFinal": True, "entrant": {"id": 102, "name": "Runners-up"}},
+                        ]},
                     },
                     {
                         "id": 12,
@@ -112,6 +118,9 @@ class StartGGAPITests(unittest.TestCase):
         self.assertEqual(tournament.registration_closes_at, 250)
         self.assertEqual(tournament.events[0].state, 3)
         self.assertEqual(tournament.events[0].slug, "tournament/mixed/event/qualifier")
+        self.assertEqual(tournament.events[0].standings[0].entrant_name, "Champions")
+        self.assertEqual(tournament.events[0].standings[0].record, {"wins": 5, "losses": 1})
+        self.assertEqual(tournament.events[0].standings[0].provider_points, 12.0)
         self.assertIsNone(tournament.events[1].entrants)
 
     def test_parse_tournament_keeps_missing_registration_fields_unknown(self):
