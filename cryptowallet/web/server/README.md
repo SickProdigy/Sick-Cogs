@@ -11,7 +11,15 @@ Requirements: PHP 8.0+, PDO MySQL, OpenSSL, MySQL/MariaDB, and HTTPS. Publish th
 3. The wizard applies `recovery-schema.sql`, generates a relay secret, writes `recovery-config.local.php` with mode `0600`, and creates `setup-locked`.
 4. Run the displayed owner-only Red API-token command privately, then delete that Discord message.
 
-Alternatively apply `recovery-schema.sql` manually and configure:
+Fresh installs use the same numbered migrations as upgrades. For an existing installation, back up the database, deploy the updated `web/server/` directory, then run from the server command line:
+
+```bash
+php /absolute/path/to/cryptowallet/web/server/migrate.php
+```
+
+The command uses the existing private database configuration, takes a database advisory lock, applies only missing files from `server/migrations/`, records their SHA-256 checksums in `sickwallet_schema_migrations`, and is safe to rerun. Never edit a migration after release; add the next numbered, restart-safe SQL file. `recovery-schema.sql` is a readable current-schema snapshot, not the upgrade mechanism.
+
+Alternatively configure the database and relay manually:
 
 ```text
 SICKWALLET_RECOVERY_RELAY_SECRET=<random secret of at least 32 characters>

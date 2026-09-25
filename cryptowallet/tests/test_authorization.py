@@ -2541,6 +2541,30 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((root / "web" / "api" / "session.php").exists())
 
 
+    def test_database_migrations_are_numbered_immutable_and_shared_by_setup(self):
+        root = Path(__file__).resolve().parents[1]
+        server = root / "web" / "server"
+        migrations = sorted((server / "migrations").glob("*.sql"))
+        self.assertEqual(
+            [path.name for path in migrations],
+            ["0001_initial_relay.sql", "0002_totp_enrollments.sql"],
+        )
+        self.assertTrue(all("CREATE TABLE IF NOT EXISTS" in path.read_text(
+            encoding="utf-8"
+        ) for path in migrations))
+        runner = (server / "migration-runner.php").read_text(encoding="utf-8")
+        cli = (server / "migrate.php").read_text(encoding="utf-8")
+        setup = (root / "web" / "setup" / "index.php").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sickwallet_schema_migrations", runner)
+        self.assertIn("hash_equals", runner)
+        self.assertIn("GET_LOCK", runner)
+        self.assertIn("PHP_SAPI", cli)
+        self.assertIn("sickwallet_apply_migrations", cli)
+        self.assertIn("sickwallet_apply_migrations", setup)
+        self.assertNotIn("file_get_contents($schemaPath)", setup)
+
 class ClankerProviderPreparationTests(unittest.IsolatedAsyncioTestCase):
     async def test_prepares_exact_call_without_provider_submission(self):
         launch = ClankerIntentFixtures.clanker_intent()

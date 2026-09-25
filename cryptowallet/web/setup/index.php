@@ -17,7 +17,8 @@ $serverDirectory = dirname(__DIR__) . '/server';
 $installedLockPath = $serverDirectory . '/setup-locked';
 $lockPath = $serverDirectory . '/setup.lock';
 $configPath = $serverDirectory . '/recovery-config.local.php';
-$schemaPath = $serverDirectory . '/recovery-schema.sql';
+$migrationDirectory = $serverDirectory . '/migrations';
+require_once $serverDirectory . '/migration-runner.php';
 $installed = is_file($configPath) || is_file($installedLockPath);
 $success = false;
 $error = '';
@@ -96,16 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
-        $schema = file_get_contents($schemaPath);
-        if ($schema === false || trim($schema) === '') {
-            throw new RuntimeException('The recovery schema could not be loaded.');
-        }
-        $statements = preg_split('/;[[:space:]]*(?:$|\R)/', trim($schema));
-        foreach ($statements as $statement) {
-            if (trim((string) $statement) !== '') {
-                $connection->exec($statement);
-            }
-        }
+        sickwallet_apply_migrations($connection, $migrationDirectory);
         $relaySecret = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
         setup_write_configuration($configPath, [
             'relay_secret' => $relaySecret,
