@@ -2712,16 +2712,19 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8"
         ) for path in migrations))
         runner = (server / "migration-runner.php").read_text(encoding="utf-8")
-        cli = (server / "migrate.php").read_text(encoding="utf-8")
         setup = (root / "web" / "setup" / "index.php").read_text(
             encoding="utf-8"
         )
         self.assertIn("sickwallet_schema_migrations", runner)
         self.assertIn("hash_equals", runner)
         self.assertIn("GET_LOCK", runner)
-        self.assertIn("PHP_SAPI", cli)
-        self.assertIn("sickwallet_apply_migrations", cli)
+        self.assertFalse((server / "migrate.php").exists())
         self.assertIn("sickwallet_apply_migrations", setup)
+        self.assertIn("sickwallet_recovery_config", setup)
+        self.assertIn('name="action" value="update"', setup)
+        self.assertIn("Run database update", setup)
+        self.assertIn("Database is current", setup)
+        self.assertNotIn("implode($migrationResult", setup)
         self.assertNotIn("file_get_contents($schemaPath)", setup)
 
     def test_security_documents_and_data_statement_are_packaged(self):
@@ -2738,7 +2741,8 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Base mainnet remains unavailable", threat)
         self.assertIn("Discord compromise", threat)
         self.assertIn("Provider, RPC, and chain disagreement", threat)
-        self.assertIn("migrate.php", runbook)
+        self.assertIn("/cryptowallet/setup/", runbook)
+        self.assertNotIn("migrate.php", runbook)
         self.assertIn("Do not resubmit uncertain operations", runbook)
         self.assertIn("emergency lock", runbook)
         self.assertIn("encrypted authenticator enrollment state", package)

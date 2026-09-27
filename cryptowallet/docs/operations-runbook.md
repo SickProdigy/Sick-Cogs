@@ -6,14 +6,14 @@ This covers companion relay and bot controls. It does not authorize mainnet or p
 
 1. Back up exact CryptoWallet and Red configuration files plus the companion database; record hashes without printing secrets.
 2. Deploy the complete reviewed cryptowallet web tree.
-3. Run: php /absolute/path/to/cryptowallet/web/server/migrate.php
+3. Visit `/cryptowallet/setup/` over HTTPS and select **Run database update**.
 4. Verify sickwallet_schema_migrations contains expected immutable filenames and checksums.
 5. Update and reload the reviewed cog version in the test instance first.
 6. Verify relay readiness, enrollment, invalid and replayed TOTP rejection, normal non-TOTP sends, emergency lock, revocation, disable, replacement, and locked recovery.
 7. Restart the test bot and verify configuration hashes, loaded cogs, connection, logs, pending-intent recovery, and migration idempotency.
 8. Stage through main only after the issue checklist and release review are complete.
 
-Never rerun the public setup wizard for an existing installation. Never edit a released migration; add the next numbered migration.
+The setup page detects an existing private configuration and exposes only the database-update action; it does not display connection or migration details. Never edit a released migration; add the next numbered migration.
 
 ## Routine monitoring
 

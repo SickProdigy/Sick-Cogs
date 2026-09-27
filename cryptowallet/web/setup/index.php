@@ -19,8 +19,14 @@ $lockPath = $serverDirectory . '/setup.lock';
 $configPath = $serverDirectory . '/recovery-config.local.php';
 $migrationDirectory = $serverDirectory . '/migrations';
 require_once $serverDirectory . '/migration-runner.php';
-$installed = is_file($configPath) || is_file($installedLockPath);
+require_once $serverDirectory . '/recovery-config.php';
+$existingConfiguration = sickwallet_recovery_config();
+$configured = str_starts_with((string) ($existingConfiguration['database_dsn'] ?? ''), 'mysql:')
+    && (string) ($existingConfiguration['database_user'] ?? '') !== '';
+$installed = $configured || is_file($installedLockPath);
 $success = false;
+$updated = false;
+$alreadyCurrent = false;
 $error = '';
 $relaySecret = '';
 
@@ -57,64 +63,83 @@ function setup_write_configuration(string $path, array $configuration): void
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $lock = fopen($lockPath, 'c');
     try {
         if ($lock === false || !flock($lock, LOCK_EX)) {
             throw new RuntimeException('The installer lock could not be acquired.');
-        }
-        if (is_file($configPath)) {
-            throw new RuntimeException('CryptoWallet recovery is already configured.');
         }
         $csrf = (string) ($_POST['csrf'] ?? '');
         if (!hash_equals((string) $_SESSION['sickwallet_setup_csrf'], $csrf)) {
             throw new RuntimeException('The setup form expired. Refresh it and try again.');
         }
         if (empty($_SERVER['HTTPS']) || $_SERVER['HTTPS'] === 'off') {
-            throw new RuntimeException('HTTPS is required to run this installer.');
-        }
-
-        $host = trim((string) ($_POST['database_host'] ?? ''));
-        $port = trim((string) ($_POST['database_port'] ?? '3306'));
-        $database = trim((string) ($_POST['database_name'] ?? ''));
-        $user = trim((string) ($_POST['database_user'] ?? ''));
-        $password = (string) ($_POST['database_password'] ?? '');
-        if (!preg_match('/^[A-Za-z0-9.-]{1,253}$/D', $host)
-            || !ctype_digit($port) || (int) $port < 1 || (int) $port > 65535
-            || !preg_match('/^[A-Za-z0-9_$-]{1,64}$/D', $database)
-            || $user === '' || strlen($user) > 128 || $password === '') {
-            throw new RuntimeException('The database details are incomplete or invalid.');
+            throw new RuntimeException('HTTPS is required.');
         }
         if (!extension_loaded('pdo_mysql')) {
             throw new RuntimeException('The PHP PDO MySQL extension is not enabled.');
         }
-        if (!extension_loaded('openssl')) {
-            throw new RuntimeException('The PHP OpenSSL extension is not enabled.');
-        }
 
-        $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, (int) $port, $database);
+        $action = (string) ($_POST['action'] ?? '');
+        if ($installed) {
+            if ($action !== 'update' || !$configured) {
+                throw new RuntimeException('The database update is unavailable.');
+            }
+            $dsn = (string) $existingConfiguration['database_dsn'];
+            $user = (string) $existingConfiguration['database_user'];
+            $password = (string) ($existingConfiguration['database_password'] ?? '');
+        } else {
+            if ($action !== 'install') {
+                throw new RuntimeException('The setup request is invalid.');
+            }
+            if (!extension_loaded('openssl')) {
+                throw new RuntimeException('The PHP OpenSSL extension is not enabled.');
+            }
+            $host = trim((string) ($_POST['database_host'] ?? ''));
+            $port = trim((string) ($_POST['database_port'] ?? '3306'));
+            $database = trim((string) ($_POST['database_name'] ?? ''));
+            $user = trim((string) ($_POST['database_user'] ?? ''));
+            $password = (string) ($_POST['database_password'] ?? '');
+            if (!preg_match('/^[A-Za-z0-9.-]{1,253}$/D', $host)
+                || !ctype_digit($port) || (int) $port < 1 || (int) $port > 65535
+                || !preg_match('/^[A-Za-z0-9_$-]{1,64}$/D', $database)
+                || $user === '' || strlen($user) > 128 || $password === '') {
+                throw new RuntimeException('The database details are incomplete or invalid.');
+            }
+            $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, (int) $port, $database);
+        }
         $connection = new PDO($dsn, $user, $password, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
-        sickwallet_apply_migrations($connection, $migrationDirectory);
-        $relaySecret = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
-        setup_write_configuration($configPath, [
-            'relay_secret' => $relaySecret,
-            'database_dsn' => $dsn,
-            'database_user' => $user,
-            'database_password' => $password,
-        ]);
-        if (file_put_contents($installedLockPath, "installed\n", LOCK_EX) !== false) {
-            chmod($installedLockPath, 0600);
+        $migrationResult = sickwallet_apply_migrations($connection, $migrationDirectory);
+        if ($installed) {
+            $alreadyCurrent = $migrationResult['applied'] === [];
+            $updated = !$alreadyCurrent;
+        } else {
+            $relaySecret = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
+            setup_write_configuration($configPath, [
+                'relay_secret' => $relaySecret,
+                'database_dsn' => $dsn,
+                'database_user' => $user,
+                'database_password' => $password,
+            ]);
+            if (file_put_contents($installedLockPath, "installed\n", LOCK_EX) !== false) {
+                chmod($installedLockPath, 0600);
+            }
+            $success = true;
+            $installed = true;
+            unset($_SESSION['sickwallet_setup_csrf']);
         }
-        $success = true;
-        $installed = true;
-        unset($_SESSION['sickwallet_setup_csrf']);
     } catch (Throwable $exception) {
-        $error = $exception instanceof PDOException
-            ? 'The database connection or schema installation failed.'
-            : $exception->getMessage();
+        if ($installed) {
+            error_log('CryptoWallet database update failed: ' . $exception->getMessage());
+            $error = 'The database update failed. Check the server log and try again.';
+        } else {
+            $error = $exception instanceof PDOException
+                ? 'The database connection or schema installation failed.'
+                : $exception->getMessage();
+        }
     } finally {
         if (is_resource($lock)) {
             flock($lock, LOCK_UN);
@@ -128,13 +153,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CryptoWallet Recovery Setup</title>
+  <title>CryptoWallet Companion Setup</title>
   <link rel="stylesheet" href="../styles.css">
 </head>
 <body>
   <main class="card">
     <p class="eyebrow">SickGaming CryptoWallet</p>
-    <h1>Recovery relay setup</h1>
+    <h1>Companion setup and upgrade</h1>
     <?php if ($success): ?>
       <div class="notice info"><strong>Installation complete.</strong><p>The database tables and private configuration were created, and setup is now locked.</p></div>
       <p>Run this owner-only command in a private Discord channel, then delete the message:</p>
@@ -145,7 +170,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
       <p id="copy-setup-status" role="status" aria-live="polite"></p>
       <p>This secret is shown only on this response. Store it in Red before leaving this page.</p>
     <?php elseif ($installed): ?>
-      <div class="notice info"><strong>Setup is locked.</strong><p>CryptoWallet recovery is already configured.</p></div>
+      <?php if ($updated): ?>
+        <div class="notice info"><strong>Database update complete.</strong><p>The bundled database updates were applied.</p></div>
+      <?php elseif ($alreadyCurrent): ?>
+        <div class="notice info"><strong>Database is current.</strong><p>No database update was needed.</p></div>
+      <?php elseif ($error !== ''): ?>
+        <div class="notice danger"><strong>Database update failed.</strong><p><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></div>
+      <?php else: ?>
+        <div class="notice info"><strong>Existing installation detected.</strong><p>Use this page after deploying an updated CryptoWallet companion.</p></div>
+      <?php endif; ?>
+      <form method="post" autocomplete="off">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars((string) $_SESSION['sickwallet_setup_csrf'], ENT_QUOTES, 'UTF-8') ?>">
+        <button type="submit">Run database update</button>
+      </form>
     <?php else: ?>
       <?php if ($error !== ''): ?>
         <div class="notice danger"><strong>Setup failed.</strong><p><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></div>
@@ -153,6 +191,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$installed) {
       <p>Create an empty database and database user in DirectAdmin first. This wizard tests the connection, installs only the CryptoWallet relay tables, generates the relay secret, and writes the private configuration.</p>
       <div class="notice danger"><strong>Complete setup promptly.</strong><p>This installer is public until installation succeeds and creates its lock.</p></div>
       <form method="post" autocomplete="off">
+        <input type="hidden" name="action" value="install">
         <input type="hidden" name="csrf" value="<?= htmlspecialchars((string) $_SESSION['sickwallet_setup_csrf'], ENT_QUOTES, 'UTF-8') ?>">
         <label for="database_host">Database host</label>
         <input id="database_host" name="database_host" value="<?= setup_value('database_host', '127.0.0.1') ?>" required maxlength="253">

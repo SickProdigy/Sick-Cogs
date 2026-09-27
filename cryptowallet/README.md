@@ -464,9 +464,10 @@ at rest by the public relay. The DM URL carries an opaque random handle that is 
 once; replay, expiry, and unknown handles return the same unavailable response. Authorization still
 uses a direct three-minute signed handoff and must not be described as single-use. Normal wallet
 provisioning, reads, and authorized sends do not depend on the relay.
-The packaged `/setup/` wizard can initialize the MySQL/MariaDB relay tables and private server-side
-configuration on DirectAdmin-style hosting. It stays available until installation succeeds, then
-writes a private lock file and refuses reuse. Deploy it only when you are ready to complete setup.
+The packaged `/setup/` page can initialize the MySQL/MariaDB relay tables and private server-side
+configuration on DirectAdmin-style hosting. For an existing installation, the same page uses the
+private configuration to apply only bundled database updates and displays no connection or migration
+details. The original relay secret and configuration remain unchanged during updates.
 
 ## Remaining work
 
