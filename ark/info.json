@@ -1,0 +1,16 @@
+{
+    "author": ["SickProdigy"],
+    "description": "Publish official ARK: Survival Ascended Steam announcements with configurable categories and role notifications.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild announcement settings and bounded Steam announcement IDs. It does not persistently store user data or metadata.",
+    "hidden": false,
+    "install_msg": "Set an announcement channel with `[p]arkset channel #channel`, optionally set a notification role, then start automatic posting with `[p]arkset autopost start`, optionally adding a number from 2 to 10 to publish recent posts first. All official Steam announcement categories are included by default; use `[p]arkset categories` to choose fewer categories. Existing Steam posts are seeded during setup and will not flood the channel.",
+    "min_bot_version": "3.5.0",
+    "permissions": ["embed_links"],
+    "name": "ArkAnnouncements",
+    "requirements": [],
+    "short": "Official ARK: Survival Ascended Steam announcements",
+    "tags": ["ark", "steam", "updates", "notifications", "games"],
+    "type": "COG",
+    "version": "1.0.0"
+}
