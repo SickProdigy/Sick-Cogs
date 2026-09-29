@@ -65,7 +65,7 @@ class WalletAccountCommands:
             )
             embed.add_field(
                 name="Private-key safety",
-                value="Choose the account on the protected page. Coinbase displays its key only inside the isolated secure export frame.",
+                value="Coinbase resolves the existing owner of your Base smart account and displays that signer key only inside its isolated secure export frame.",
                 inline=False,
             )
             await ctx.author.send(embed=embed)

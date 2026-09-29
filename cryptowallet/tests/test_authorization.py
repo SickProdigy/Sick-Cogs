@@ -825,6 +825,12 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             sent["embed"].description,
         )
         self.assertIn("protected wallet recovery link", ctx.send.await_args.args[0])
+        safety = next(
+            field for field in sent["embed"].fields
+            if field.name == "Private-key safety"
+        )
+        self.assertIn("existing owner", safety.value)
+        self.assertIn("isolated secure export frame", safety.value)
 
     def test_recovery_relay_signature_is_stable_and_body_bound(self):
         signature = _relay_signature(

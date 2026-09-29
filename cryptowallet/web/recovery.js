@@ -72,9 +72,15 @@ function addAccountControl(account) {
   const card = document.createElement("section");
   card.className = "recovery-account";
   const heading = document.createElement("strong");
-  heading.textContent = account.family === "evm" ? "Base Sepolia EVM signer" : "Solana Devnet account";
+  heading.textContent = account.family === "evm" ? "Base Sepolia smart account" : "Solana Devnet account";
   const address = document.createElement("code");
   address.textContent = account.address;
+  const exportIdentity = document.createElement("p");
+  exportIdentity.className = "recovery-account-identity";
+  exportIdentity.dataset.family = account.family;
+  exportIdentity.textContent = account.family === "evm"
+    ? "Coinbase will resolve and export this smart account’s existing owner signer."
+    : "The exported key directly controls this Solana account.";
   const target = document.createElement("div");
   target.className = "recovery-account-export";
   target.setAttribute("aria-label", `Coinbase ${accountLabel(account)} key export control`);
@@ -83,7 +89,7 @@ function addAccountControl(account) {
   waiting.textContent = "Confirm the private-key safety notice to enable Coinbase export.";
   target.append(waiting);
   exportTargets.set(account.family, target);
-  card.append(heading, address, target);
+  card.append(heading, address, exportIdentity, target);
   accountsElement.append(card);
 }
 
@@ -119,6 +125,17 @@ async function mountCoinbaseExportControls() {
 
 confirmInput.addEventListener("change", () => {
   if (confirmInput.checked) void mountCoinbaseExportControls();
+});
+
+window.addEventListener("sickwallet-export-target", (event) => {
+  const { family, accountAddress, exportAddress } = event.detail || {};
+  const identity = accountsElement.querySelector(
+    `.recovery-account-identity[data-family="${family}"]`
+  );
+  if (!identity || !exportAddress) return;
+  identity.textContent = family === "evm"
+    ? `Existing owner signer to export: ${exportAddress}. It controls smart account ${accountAddress}.`
+    : `Account key to export: ${exportAddress}.`;
 });
 
 window.addEventListener("sickwallet-export-status", (event) => {

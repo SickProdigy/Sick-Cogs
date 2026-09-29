@@ -23,7 +23,7 @@
       </label>
       <div id="recovery-accounts" class="recovery-accounts" aria-label="Wallet accounts"></div>
     </section>
-    <p class="notice info">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds, revoke bot access, or delete your provider account. An exported EVM signer controls the Base smart account through its owner relationship; an exported Solana key directly controls the displayed Solana account.</p>
+    <p class="notice info">Coinbase displays and copies the key inside an isolated secure frame. This page and the Discord bot cannot read it. Exporting does not move funds, revoke bot access, or delete your provider account. Coinbase created the EVM owner signer when it created the smart account—even for profiles made before CryptoWallet displayed that relationship. Exporting that existing owner key lets another compatible wallet control the Base smart account; leaving CDP still requires revoking bot delegation and deliberately transferring assets if the destination wallet cannot operate the smart account. An exported Solana key directly controls the displayed Solana account.</p>
     <a href="./">Return to wallet home</a>
   </main>
   <script src="recovery.js" type="module"></script>

@@ -8,6 +8,8 @@ import {
   signOut,
 } from "@coinbase/cdp-core";
 
+import { resolveSmartAccountOwner } from "./wallet-ownership.js";
+
 async function authenticateWallet(projectId, expectedUserId, expectedAccounts, handoffToken) {
   if (!projectId || !expectedUserId || !Array.isArray(expectedAccounts) || !expectedAccounts.length || !handoffToken) {
     throw new Error("Wallet authentication configuration is incomplete.");
@@ -66,22 +68,6 @@ export async function authorizeWallet(
   }
 }
 
-export function resolveSmartAccountOwner(user, expectedAddress) {
-  const smartAccount = (user.evmSmartAccountObjects || []).find(
-    (account) => account.address.toLowerCase() === expectedAddress.toLowerCase()
-  );
-  const ownerAddresses = new Set(
-    (smartAccount?.ownerAddresses || []).map((address) => address.toLowerCase())
-  );
-  const owner = (user.evmAccountObjects || []).find((account) =>
-    ownerAddresses.has(account.address.toLowerCase())
-  );
-  if (!owner) {
-    throw new Error("Coinbase did not return an exportable owner for this smart account.");
-  }
-  return owner.address;
-}
-
 export async function prepareRecoveryExports(
   projectId, expectedUserId, expectedAccounts, handoffToken, targets
 ) {
@@ -96,6 +82,13 @@ export async function prepareRecoveryExports(
       const exportAddress = account.family === "evm"
         ? resolveSmartAccountOwner(user, account.address)
         : account.address;
+      window.dispatchEvent(new CustomEvent("sickwallet-export-target", {
+        detail: {
+          family: account.family,
+          accountAddress: account.address,
+          exportAddress,
+        },
+      }));
       const createExportIframe = account.family === "evm"
         ? createEvmKeyExportIframe
         : createSolanaKeyExportIframe;
