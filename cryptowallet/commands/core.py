@@ -1,3 +1,4 @@
+import logging
 import secrets
 import time
 from urllib.parse import quote
@@ -18,6 +19,9 @@ from ..providers import WalletProviderError
 from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
 from .views import WalletTotpEnrollmentView, WalletTotpManagementView
+
+
+log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
 class WalletCoreCommands:
@@ -698,13 +702,18 @@ class WalletCoreCommands:
             view = WalletTotpEnrollmentView(
                 self, ctx.author.id, result_handle, expires_at, link
             )
+        except (KeyError, RuntimeError, ValueError):
+            log.exception("Could not prepare authenticator enrollment for user %s", ctx.author.id)
+            await ctx.send(
+                "Authenticator setup could not be created because the protected website "
+                "relay rejected it. Try again; if this continues, contact the bot owner."
+            )
+            return
+        try:
             message = await ctx.author.send(embed=embed, view=view)
             view.message = message
-        except (discord.HTTPException, KeyError, RuntimeError, ValueError):
-            await ctx.send(
-                "Authenticator setup could not be started. Enable DMs and verify the "
-                "protected website configuration."
-            )
+        except discord.HTTPException:
+            await ctx.send("I could not send you a DM. Enable direct messages and try again.")
             return
         await ctx.send(
             f"I sent your protected authenticator setup by DM; it expires <t:{expires_at}:R>."

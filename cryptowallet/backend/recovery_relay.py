@@ -12,6 +12,7 @@ RECOVERY_RELAY_TOKEN_NAMESPACE = "cryptowallet_relay"
 RECOVERY_RELAY_PATH = "/api/recovery-handoff.php"
 RECOVERY_RELAY_TIMEOUT_SECONDS = 15
 RECOVERY_RELAY_MAX_RESPONSE_BYTES = 16 * 1024
+RECOVERY_RELAY_MAX_LIFETIME_SECONDS = 10 * 60
 
 
 def _relay_signature(secret: str, timestamp: int, nonce: str, body: bytes) -> str:
@@ -47,7 +48,7 @@ class RecoveryRelayMixin:
         if not status["configured"]:
             raise RuntimeError("The one-time recovery relay is not configured")
         now = int(time.time())
-        if expires_at <= now or expires_at > now + 5 * 60:
+        if expires_at <= now or expires_at > now + RECOVERY_RELAY_MAX_LIFETIME_SECONDS:
             raise RuntimeError("The recovery handoff expiry is invalid")
         if not jwt_token or len(jwt_token) > 16 * 1024:
             raise RuntimeError("The recovery handoff token is invalid")

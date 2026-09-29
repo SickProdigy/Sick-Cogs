@@ -20,7 +20,11 @@ from ..backend.auth import (
     JwtAuthMixin,
     _key_id,
 )
-from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
+from ..backend.recovery_relay import (
+    RECOVERY_RELAY_MAX_LIFETIME_SECONDS,
+    RecoveryRelayMixin,
+    _relay_signature,
+)
 from ..backend.totp_security import (
     TotpSecurityMixin,
     protect_totp_secret,
@@ -718,6 +722,41 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             sent["view"].children[0].url,
             f"https://wallet.example.test/cryptowallet/security.html#handoff={handoff}",
         )
+
+    def test_relay_lifetime_accepts_full_totp_enrollment_window(self):
+        self.assertEqual(
+            RECOVERY_RELAY_MAX_LIFETIME_SECONDS,
+            TOTP_ENROLLMENT_LIFETIME_SECONDS,
+        )
+
+    async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):
+        author = SimpleNamespace(id=7, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
+        cog = SimpleNamespace(
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            user_totp_enabled=AsyncMock(return_value=False),
+            _wallet_profile_or_error=AsyncMock(return_value=_profile()),
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True,
+                "approval_base_url": "https://wallet.example.test/cryptowallet",
+            }),
+            totp_enrollment_public_jwk=AsyncMock(return_value={
+                "kty": "RSA", "alg": "RSA-OAEP-256", "use": "enc",
+                "n": "public-modulus", "e": "AQAB",
+            }),
+            create_external_companion_handoff=AsyncMock(
+                return_value=("signed-token", 1_800_000_000)
+            ),
+            register_recovery_handoff=AsyncMock(
+                side_effect=RuntimeError("The recovery handoff expiry is invalid")
+            ),
+        )
+
+        await WalletCoreCommands.wallet_security_2fa_setup.callback(cog, ctx)
+
+        author.send.assert_not_awaited()
+        self.assertIn("protected website relay rejected it", ctx.send.await_args.args[0])
+        self.assertNotIn("Enable DMs", ctx.send.await_args.args[0])
 
     async def test_recovery_handoff_is_inside_card(self):
         token = "x" * 600
