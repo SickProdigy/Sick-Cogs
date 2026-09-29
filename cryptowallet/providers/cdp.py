@@ -53,6 +53,7 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
+CDP_MAINNET_TOKEN_NAMESPACE = "cryptowallet_cdp_mainnet"
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
 PROVISIONING_IDEMPOTENCY_VERSION = 3
@@ -259,6 +260,37 @@ class CdpWalletProvider(WalletProvider):
                 "error": str(exc),
             }
         return {"ready": True, "stage": "complete"}
+
+    async def mainnet_readiness(self) -> dict:
+        """Report isolated Base-mainnet credential readiness without exposing values."""
+        tokens = await self.bot.get_shared_api_tokens(CDP_MAINNET_TOKEN_NAMESPACE)
+        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
+        combined = dict(tokens)
+        combined["jwt_kid"] = jwt_tokens.get("kid")
+        required = ("project_id", "api_key_id", "api_key_secret", "wallet_secret")
+        missing = [key for key in required if not str(combined.get(key) or "").strip()]
+        if not str(combined.get("jwt_kid") or "").strip():
+            missing.append("generated_jwt_key")
+        return {"configured": not missing, "missing": missing}
+
+    async def mainnet_diagnostics(self) -> dict:
+        """Validate isolated mainnet credentials with one non-mutating project request."""
+        readiness = await self.mainnet_readiness()
+        if not readiness["configured"]:
+            return {"ready": False, "stage": "configuration", "missing": readiness["missing"]}
+        tokens = await self.bot.get_shared_api_tokens(CDP_MAINNET_TOKEN_NAMESPACE)
+        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
+        combined = dict(tokens)
+        combined["jwt_kid"] = jwt_tokens.get("kid")
+        credentials = CdpCredentials.from_tokens(combined)
+        if credentials is None:
+            return {"ready": False, "stage": "configuration", "missing": []}
+        try:
+            await self._api_client(credentials).check_connection()
+        except CdpApiError as exc:
+            return {"ready": False, "stage": "authentication", "error": str(exc)}
+        return {"ready": True, "stage": "complete"}
+
     @staticmethod
     def _idempotency_key(profile_id: str) -> str:
         return str(
@@ -509,7 +541,24 @@ class CdpWalletProvider(WalletProvider):
                 "has_more": has_more,
                 "next_page": str(next_page or ""),
             }
-        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+        except CdpApiError as exc:
+            log.warning(
+                "CDP address history failed for network=%s status=%s type=%s correlation=%s reason=%s",
+                configured_network.key,
+                exc.status if exc.status is not None else "none",
+                exc.error_type or "none",
+                exc.correlation_id or "none",
+                str(exc),
+            )
+            raise WalletProviderError(
+                f"CDP could not retrieve this wallet's {configured_network.name} activity."
+            ) from exc
+        except (AttributeError, TypeError, ValueError) as exc:
+            log.warning(
+                "CDP address history returned an invalid shape for network=%s error=%s",
+                configured_network.key,
+                type(exc).__name__,
+            )
             raise WalletProviderError(
                 f"CDP could not retrieve this wallet's {configured_network.name} activity."
             ) from exc

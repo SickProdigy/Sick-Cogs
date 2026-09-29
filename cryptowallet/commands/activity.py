@@ -4,7 +4,7 @@ import discord
 from redbot.core import commands
 
 from ..core.models import TransactionIntent
-from ..core.networks import BASE_SEPOLIA, NETWORKS, ChainFamily, NetworkCapability
+from ..core.networks import BASE_SEPOLIA, ChainFamily, NetworkCapability, resolve_network
 from ..providers import WalletProviderError
 from ..providers.base_rpc import BaseRpcError, get_solana_transaction, get_transaction
 from ..core.validation import (
@@ -26,29 +26,9 @@ from .views import WalletHistoryView
 class WalletActivityCommands:
     """Public transaction lookup and wallet activity commands."""
 
-    NETWORK_ALIASES = {
-        "base": "base-sepolia",
-        "base-sepolia": "base-sepolia",
-        "eth": "ethereum-sepolia",
-        "ethereum": "ethereum-sepolia",
-        "ethereum-sepolia": "ethereum-sepolia",
-        "arb": "arbitrum-sepolia",
-        "arbitrum": "arbitrum-sepolia",
-        "arbitrum-sepolia": "arbitrum-sepolia",
-        "polygon": "polygon-amoy",
-        "pol": "polygon-amoy",
-        "polygon-amoy": "polygon-amoy",
-        "avax": "avalanche-fuji",
-        "avalanche": "avalanche-fuji",
-        "avalanche-fuji": "avalanche-fuji",
-        "sol": "solana-devnet",
-        "solana": "solana-devnet",
-        "solana-devnet": "solana-devnet",
-    }
-
-    @classmethod
-    def _activity_network(cls, value: str):
-        return NETWORKS.get(cls.NETWORK_ALIASES.get(value.strip().lower(), ""))
+    @staticmethod
+    def _activity_network(value: str):
+        return resolve_network(value)
 
     @staticmethod
     def _activity_embed(address: str, page: dict, page_index: int, color, network=BASE_SEPOLIA) -> discord.Embed:

@@ -14,7 +14,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from redbot.core import commands
 
-from ..backend.auth import CLAIM_HANDOFF_LIFETIME_SECONDS, JwtAuthMixin, _key_id
+from ..backend.auth import (
+    CLAIM_HANDOFF_LIFETIME_SECONDS,
+    TOTP_ENROLLMENT_LIFETIME_SECONDS,
+    JwtAuthMixin,
+    _key_id,
+)
 from ..backend.recovery_relay import RecoveryRelayMixin, _relay_signature
 from ..backend.totp_security import (
     TotpSecurityMixin,
@@ -70,6 +75,7 @@ from ..core.networks import (
     Network,
     NetworkCapabilities,
     NetworkCapability,
+    resolve_network,
 )
 from ..core.validation import (
     format_atomic_amount,
@@ -97,10 +103,18 @@ from ..providers.cdp import (
 from tokenfactory.models import TokenDraft
 from tokenfactory.operations import token_operation
 from ..providers.clanker import clanker_deployment_calldata
-from ..providers.cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError, _api_jwt
+from ..providers.cdp_api import (
+    MAX_HISTORY_RESPONSE_BYTES,
+    CdpApiClient,
+    CdpApiCredentials,
+    CdpApiError,
+    _api_jwt,
+)
 from ..providers.base_rpc import (
     _decode_abi_text,
     _read_bounded_content,
+    EVM_RPC_URLS,
+    get_chain_id,
     build_solana_transfer_message,
     serialize_unsigned_solana_transfer,
 )
@@ -634,6 +648,34 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
                 cog, user, _profile(), requested_days=91
             )
 
+    async def test_totp_status_gives_enabled_account_management_commands(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), send=AsyncMock(), clean_prefix="!"
+        )
+        cog = SimpleNamespace(user_totp_enabled=AsyncMock(return_value=True))
+
+        await WalletCoreCommands.wallet_security_2fa.callback(cog, ctx)
+
+        message = ctx.send.await_args.args[0]
+        self.assertIn("enabled for your CryptoWallet account", message)
+        self.assertIn("!wallet security 2fa replace", message)
+        self.assertIn("!wallet security 2fa disable", message)
+        self.assertIn("!wallet security 2fa lost", message)
+        self.assertNotIn("2fa setup", message)
+
+    async def test_totp_status_gives_unenrolled_account_setup_command(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), send=AsyncMock(), clean_prefix="?"
+        )
+        cog = SimpleNamespace(user_totp_enabled=AsyncMock(return_value=False))
+
+        await WalletCoreCommands.wallet_security_2fa.callback(cog, ctx)
+
+        message = ctx.send.await_args.args[0]
+        self.assertIn("not enabled for your CryptoWallet account", message)
+        self.assertIn("?wallet security 2fa setup", message)
+        self.assertNotIn("2fa replace", message)
+
     async def test_totp_setup_sends_only_opaque_handles_and_public_key(self):
         token = "signed-public-metadata-token"
         handoff = "opaque_setup_handoff_abcdefghijklmnopqrstuvwxyz"
@@ -666,11 +708,15 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret", repr(payload).lower())
         sent = author.send.await_args.kwargs
         self.assertNotIn(token, sent["embed"].description)
-        self.assertIn(f"#handoff={handoff}", sent["embed"].description)
+        self.assertNotIn(handoff, sent["embed"].description)
         self.assertIsInstance(sent["view"], WalletTotpEnrollmentView)
         self.assertEqual(
             [item.label for item in sent["view"].children],
-            ["Confirm enrollment"],
+            ["Set up authenticator", "Confirm enrollment"],
+        )
+        self.assertEqual(
+            sent["view"].children[0].url,
+            f"https://wallet.example.test/cryptowallet/security.html#handoff={handoff}",
         )
 
     async def test_recovery_handoff_is_inside_card(self):
@@ -883,7 +929,7 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
                 "kty": "RSA", "alg": "RSA-OAEP-256", "n": "public", "e": "AQAB"
             },
         }
-        token, _ = await harness.create_external_companion_handoff(
+        token, expires_at = await harness.create_external_companion_handoff(
             7, "totp_enroll", payload
         )
         claims = jwt.decode(
@@ -891,6 +937,8 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             audience="project-id", issuer="https://wallet.example.test",
         )
         self.assertEqual(claims["sickwallet_purpose"], "totp_enroll")
+        self.assertEqual(expires_at - claims["iat"], TOTP_ENROLLMENT_LIFETIME_SECONDS)
+        self.assertEqual(TOTP_ENROLLMENT_LIFETIME_SECONDS, 10 * 60)
         self.assertEqual(claims["sickwallet_totp"], payload)
         self.assertNotIn("secret", repr(claims).lower())
         self.assertNotIn("sickwallet_accounts", claims)
@@ -1082,6 +1130,21 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         cog.disable_user_totp.assert_awaited_once_with(7)
         self.assertTrue(user_config.security_locked.value)
         self.assertIn("remains emergency-locked", ctx.send.await_args.args[0])
+
+    async def test_verify_control_checks_factor_without_removing_it(self):
+        author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        cog = SimpleNamespace(
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            user_totp_enabled=AsyncMock(return_value=True),
+        )
+
+        await WalletCoreCommands._send_totp_management(cog, ctx, "verify")
+
+        sent = author.send.await_args.kwargs
+        self.assertEqual(sent["view"].action, "verify")
+        self.assertEqual(sent["view"].children[0].label, "Check authenticator")
+        self.assertIn("No transaction or settings change", sent["embed"].description)
 
     async def test_management_controls_are_dm_only_and_action_specific(self):
         author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
@@ -1682,6 +1745,41 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             profile["accounts"][0],
         )
 
+    async def test_base_mainnet_preflight_uses_reviewed_rpc_chain_identity(self):
+        self.assertIn(BASE_MAINNET.key, EVM_RPC_URLS)
+        with patch(
+            "cryptowallet.providers.base_rpc._rpc_with_urls",
+            new=AsyncMock(return_value="0x2105"),
+        ) as rpc:
+            self.assertEqual(await get_chain_id(BASE_MAINNET.key), 8453)
+        rpc.assert_awaited_once_with(
+            EVM_RPC_URLS[BASE_MAINNET.key],
+            "eth_chainId",
+            [],
+            BASE_MAINNET.key,
+        )
+
+    async def test_mainnet_credentials_use_an_isolated_secret_namespace(self):
+        token_sets = {
+            "cryptowallet_cdp_mainnet": {
+                "project_id": "main-project",
+                "api_key_id": "main-key",
+                "api_key_secret": "main-secret",
+                "wallet_secret": "main-wallet-secret",
+            },
+            "cryptowallet_jwt": {"kid": "deployment-key"},
+            "cryptowallet_cdp": {},
+        }
+        bot = SimpleNamespace(
+            get_shared_api_tokens=AsyncMock(
+                side_effect=lambda namespace: token_sets.get(namespace, {})
+            )
+        )
+        provider = CdpWalletProvider(bot)
+
+        self.assertTrue((await provider.mainnet_readiness())["configured"])
+        self.assertFalse((await provider.readiness())["configured"])
+
     def test_mainnet_policy_requires_every_gate_and_limit(self):
         policy = copy.deepcopy(BASE_MAINNET_POLICY_DEFAULT)
 
@@ -1871,6 +1969,14 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         })
         self.assertFalse(policy.data["enabled"])
         self.assertTrue(policy.data["paused"])
+
+    def test_shared_network_aliases_cover_balance_commands(self):
+        self.assertIs(resolve_network("base"), BASE_SEPOLIA)
+        self.assertIs(resolve_network("base-sepolia"), BASE_SEPOLIA)
+        self.assertIs(resolve_network("eth"), ETHEREUM_SEPOLIA)
+        self.assertIs(resolve_network("sol"), SOLANA_DEVNET)
+        self.assertIsNone(resolve_network("base-mainnet"))
+        self.assertIsNone(resolve_network("unknown"))
 
     def test_activity_network_aliases_are_explicit(self):
         self.assertIs(WalletActivityCommands._activity_network("base"), BASE_SEPOLIA)
@@ -2700,6 +2806,23 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((root / "web" / "api" / "session.php").exists())
 
 
+    def test_totp_enrollment_page_prefers_local_qr_with_manual_fallback(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "security.html").read_text(encoding="utf-8")
+        source = (root / "web" / "src" / "security.js").read_text(encoding="utf-8")
+        bundle = (root / "web" / "security.js").read_text(encoding="utf-8")
+        package = (root / "web" / "package.json").read_text(encoding="utf-8")
+
+        self.assertIn('id="totp-qr"', page)
+        self.assertIn("Enter the setup key manually", page)
+        self.assertIn('import QRCode from "qrcode"', source)
+        self.assertIn("otpauth://totp/", source)
+        self.assertIn("QRCode.toCanvas", source)
+        self.assertIn("otpauth://totp/", bundle)
+        self.assertIn('"qrcode": "1.5.4"', package)
+        self.assertNotIn("api.qrserver", source)
+        self.assertNotIn("chart.googleapis", source)
+
     def test_database_migrations_are_numbered_immutable_and_shared_by_setup(self):
         root = Path(__file__).resolve().parents[1]
         server = root / "web" / "server"
@@ -2716,6 +2839,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8"
         )
         self.assertIn("sickwallet_schema_migrations", runner)
+        self.assertIn("sickwallet_migration_fingerprint", runner)
         self.assertIn("hash_equals", runner)
         self.assertIn("GET_LOCK", runner)
         self.assertFalse((server / "migrate.php").exists())
@@ -2724,6 +2848,9 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('name="action" value="update"', setup)
         self.assertIn("Run database update", setup)
         self.assertIn("Database is current", setup)
+        self.assertIn("if ($updateAvailable)", setup)
+        self.assertIn("migration-current", setup)
+        self.assertIn("setup_write_marker", setup)
         self.assertNotIn("implode($migrationResult", setup)
         self.assertNotIn("file_get_contents($schemaPath)", setup)
 
@@ -3048,6 +3175,22 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raw, b'{"jsonrpc":"2.0","result":"0x1234"}')
         self.assertEqual(content.requested_size, 64 * 1024)
+
+    async def test_address_history_uses_endpoint_specific_bounded_response_limit(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"data": [], "has_more": False})
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+
+        await client.list_address_transactions(
+            address, BASE_SEPOLIA.key, limit=10
+        )
+
+        client._request.assert_awaited_once_with(
+            "GET",
+            f"/v1/networks/{BASE_SEPOLIA.key}/addresses/{address.lower()}/transactions",
+            query={"limit": 10},
+            max_response_bytes=MAX_HISTORY_RESPONSE_BYTES,
+        )
 
     async def test_smart_account_batch_preserves_exact_reviewed_calls(self):
         client = object.__new__(CdpApiClient)

@@ -201,3 +201,29 @@ button:disabled {
   overflow-wrap: anywhere;
   color: #bfdbfe;
 }
+
+.totp-qr-region {
+  width: fit-content;
+  max-width: 100%;
+  margin: 1rem auto;
+  padding: .75rem;
+  border-radius: .75rem;
+  background: #ffffff;
+}
+
+.totp-qr-region canvas {
+  display: block;
+  width: min(240px, 70vw) !important;
+  height: auto !important;
+  image-rendering: pixelated;
+}
+
+.totp-manual {
+  margin: 1rem 0;
+}
+
+.totp-manual summary {
+  color: #bfdbfe;
+  cursor: pointer;
+  font-weight: 700;
+}

@@ -16,10 +16,16 @@
         <strong>Generated only in this browser</strong>
         <p>The key below is encrypted to the bot before leaving this page. The website relay receives ciphertext only.</p>
       </div>
-      <p>Add a new time-based account in Authy, Google Authenticator, 1Password, or another standard TOTP app and enter this setup key:</p>
-      <code id="totp-secret" class="setup-command" aria-label="Authenticator setup key"></code>
-      <button id="copy-totp-secret" type="button">Copy setup key</button>
-      <p id="copy-totp-status" role="status"></p>
+      <p>Scan this QR code with Authy, Google Authenticator, 1Password, or another standard TOTP app:</p>
+      <div id="totp-qr-region" class="totp-qr-region" hidden>
+        <canvas id="totp-qr" aria-label="Authenticator enrollment QR code"></canvas>
+      </div>
+      <details class="totp-manual">
+        <summary>Enter the setup key manually</summary>
+        <code id="totp-secret" class="setup-command" aria-label="Authenticator setup key"></code>
+        <button id="copy-totp-secret" type="button">Copy setup key</button>
+        <p id="copy-totp-status" role="status"></p>
+      </details>
       <div class="notice danger">
         <strong>Finish in Discord</strong>
         <p>Return to the bot DM, press <strong>Confirm enrollment</strong>, and enter the current six-digit code in the private modal. Do not paste the setup key or code into chat.</p>

@@ -275,4 +275,31 @@ KNOWN_NETWORKS = {
 NETWORKS = {
     key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
 }
+NETWORK_ALIASES = {
+    "base": BASE_SEPOLIA.key,
+    "base-sepolia": BASE_SEPOLIA.key,
+    "eth": ETHEREUM_SEPOLIA.key,
+    "ethereum": ETHEREUM_SEPOLIA.key,
+    "ethereum-sepolia": ETHEREUM_SEPOLIA.key,
+    "arb": ARBITRUM_SEPOLIA.key,
+    "arbitrum": ARBITRUM_SEPOLIA.key,
+    "arbitrum-sepolia": ARBITRUM_SEPOLIA.key,
+    "pol": POLYGON_AMOY.key,
+    "polygon": POLYGON_AMOY.key,
+    "polygon-amoy": POLYGON_AMOY.key,
+    "avax": AVALANCHE_FUJI.key,
+    "avalanche": AVALANCHE_FUJI.key,
+    "avalanche-fuji": AVALANCHE_FUJI.key,
+    "sol": SOLANA_DEVNET.key,
+    "solana": SOLANA_DEVNET.key,
+    "solana-devnet": SOLANA_DEVNET.key,
+}
+
+
+def resolve_network(value: str):
+    """Resolve an explicit reviewed network key or documented short alias."""
+    normalized = str(value or "").strip().lower()
+    return NETWORKS.get(NETWORK_ALIASES.get(normalized, normalized))
+
+
 DEFAULT_NETWORK = BASE_SEPOLIA.key

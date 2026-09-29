@@ -99,8 +99,21 @@ class WalletTotpEnrollmentModal(discord.ui.Modal, title="Confirm authenticator s
 class WalletTotpEnrollmentView(discord.ui.View):
     """Owner-bound confirmation for one browser-generated encrypted seed."""
 
-    def __init__(self, cog, user_id: int, result_handle: str, expires_at: int):
+    def __init__(
+        self, cog, user_id: int, result_handle: str, expires_at: int, setup_url: str
+    ):
         super().__init__(timeout=max(1.0, expires_at - time.time()))
+        confirm_button = self.children[0]
+        self.remove_item(confirm_button)
+        self.add_item(
+            discord.ui.Button(
+                label="Set up authenticator",
+                emoji="🔐",
+                style=discord.ButtonStyle.link,
+                url=setup_url,
+            )
+        )
+        self.add_item(confirm_button)
         self.cog = cog
         self.user_id = user_id
         self.result_handle = result_handle
@@ -155,7 +168,8 @@ class WalletTotpManagementModal(discord.ui.Modal, title="Verify authenticator ch
                 ephemeral=True,
             )
             return
-        await self.view.cog.disable_user_totp(self.view.user_id)
+        if self.view.action != "verify":
+            await self.view.cog.disable_user_totp(self.view.user_id)
         self.view.disable_controls()
         self.view.stop()
         if self.view.message is not None:
@@ -165,8 +179,13 @@ class WalletTotpManagementModal(discord.ui.Modal, title="Verify authenticator ch
                 "The old authenticator was removed. Immediately run `wallet security 2fa setup` "
                 "to enroll the replacement. Wallet sends use the normal confirmation flow until setup completes."
             )
-        else:
+        elif self.view.action == "disable":
             message = "Authenticator protection was disabled. Wallet authorization and confirmation remain active."
+        else:
+            message = (
+                "Your authenticator is working. This code was consumed and cannot be reused; "
+                "authenticator protection remains enabled."
+            )
         await interaction.followup.send(message, ephemeral=True)
 
 
@@ -174,16 +193,20 @@ class WalletTotpManagementView(discord.ui.View):
     """Owner-bound current-factor verification for disable or replacement."""
 
     def __init__(self, cog, user_id: int, action: str):
-        if action not in {"disable", "replace"}:
+        if action not in {"disable", "replace", "verify"}:
             raise ValueError("Unsupported authenticator management action")
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
         self.action = action
         self.message = None
-        self.confirm.label = (
-            "Verify and replace" if action == "replace" else "Verify and disable"
-        )
+        self.confirm.label = {
+            "replace": "Verify and replace",
+            "disable": "Verify and disable",
+            "verify": "Check authenticator",
+        }[action]
+        if action == "verify":
+            self.confirm.style = discord.ButtonStyle.primary
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:

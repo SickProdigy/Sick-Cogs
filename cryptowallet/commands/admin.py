@@ -16,6 +16,7 @@ from ..core.validation import (
     parse_native_amount,
 )
 from ..providers import WalletProviderError
+from ..providers.base_rpc import BaseRpcError, get_chain_id
 from ..backend.config import MAINNET_ENABLE_ACKNOWLEDGEMENT
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
@@ -382,6 +383,38 @@ class WalletAdminCommands:
             f"Reviewed capabilities: `{reviewed}`\n"
             f"Limits (transaction / user-day / installation-day): "
             f"`{limit_values[0]} / {limit_values[1]} / {limit_values[2]} ETH`"
+        )
+
+    @walletset_mainnet.command(name="preflight")
+    @commands.is_owner()
+    async def walletset_mainnet_preflight(self, ctx: commands.Context):
+        """Run non-mutating Base-mainnet environment and provider checks."""
+        async with ctx.typing():
+            try:
+                chain_id = await get_chain_id(BASE_MAINNET.key)
+                rpc_error = None
+            except BaseRpcError as exc:
+                chain_id = None
+                rpc_error = str(exc)
+            diagnostic = await self.wallet_provider.mainnet_diagnostics()
+        chain_ready = chain_id == BASE_MAINNET.chain_id
+        provider_ready = bool(diagnostic.get("ready"))
+        if diagnostic.get("stage") == "configuration":
+            provider_detail = "missing isolated fields: " + ", ".join(
+                diagnostic.get("missing") or ["unknown"]
+            )
+        elif provider_ready:
+            provider_detail = "read-only authentication successful"
+        else:
+            provider_detail = str(diagnostic.get("error") or "authentication failed")
+        await ctx.send(
+            "**Base mainnet experimental preflight**\n"
+            f"RPC chain identity: `{chain_id if chain_id is not None else rpc_error}` "
+            f"(`{'passed' if chain_ready else 'failed'}`)\n"
+            f"Isolated CDP credentials: `{provider_detail}` "
+            f"(`{'passed' if provider_ready else 'failed'}`)\n"
+            "Transaction submission: `disabled`\n"
+            "No wallet, policy, delegation, or transaction was created."
         )
 
     @walletset_mainnet.command(name="pause")

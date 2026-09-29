@@ -11,7 +11,7 @@ Requirements: PHP 8.0+, PDO MySQL, OpenSSL, MySQL/MariaDB, and HTTPS. Publish th
 3. The wizard applies the numbered database migrations, generates a relay secret, writes `recovery-config.local.php` with mode `0600`, and creates `setup-locked`.
 4. Run the displayed owner-only Red API-token command privately, then delete that Discord message.
 
-Fresh installs use the same numbered migrations as upgrades. For an existing installation, back up the database and private configuration, deploy the complete updated `web/` directory, visit `/cryptowallet/setup/` over HTTPS, and select **Run database update**. The updater uses the existing private database configuration, applies only bundled missing migrations, and reveals no database or migration details in the browser. Running it again safely reports that the database is current.
+Fresh installs use the same numbered migrations as upgrades. For an existing installation, back up the database and private configuration, deploy the complete updated `web/` directory, then visit `/cryptowallet/setup/` over HTTPS. **Run database update** appears when the uploaded migration bundle has not been checked by this deployment. A successful update check records the bundle fingerprint locally, including when the database was already current, so the button stays hidden until a future bundle changes. The updater applies only bundled missing migrations and reveals no database or migration details in the browser.
 
 The migration runner takes database and filesystem locks and records migration checksums in `sickwallet_schema_migrations`. Never edit a migration after release; add the next numbered, restart-safe SQL file. `recovery-schema.sql` is a readable current-schema snapshot, not the upgrade mechanism.
 

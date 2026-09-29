@@ -13,11 +13,47 @@ function sickwallet_migration_statements(string $sql): array
     ));
 }
 
-function sickwallet_apply_migrations(PDO $database, string $directory): array
+function sickwallet_migration_files(string $directory): array
 {
     if (!is_dir($directory) || is_link($directory)) {
         throw new RuntimeException("The database migration directory is unavailable.");
     }
+    $files = glob($directory . "/*.sql");
+    if ($files === false) {
+        throw new RuntimeException("Could not enumerate database migrations.");
+    }
+    sort($files, SORT_STRING);
+    $migrations = [];
+    foreach ($files as $path) {
+        if (!is_file($path) || is_link($path)) {
+            throw new RuntimeException("A database migration path is invalid.");
+        }
+        $name = basename($path);
+        if (!preg_match("/^[0-9]{4}_[a-z0-9_]+[.]sql$/D", $name)) {
+            throw new RuntimeException("A database migration filename is invalid.");
+        }
+        $sql = file_get_contents($path);
+        if ($sql === false || trim($sql) === "") {
+            throw new RuntimeException("Database migration " . $name . " is empty.");
+        }
+        $migrations[$name] = ["sql" => $sql, "checksum" => hash("sha256", $sql)];
+    }
+    return $migrations;
+}
+
+function sickwallet_migration_fingerprint(string $directory): string
+{
+    $migrations = sickwallet_migration_files($directory);
+    $checksums = [];
+    foreach ($migrations as $name => $migration) {
+        $checksums[] = $name . ":" . $migration["checksum"];
+    }
+    return hash("sha256", implode("\n", $checksums));
+}
+
+function sickwallet_apply_migrations(PDO $database, string $directory): array
+{
+    $migrations = sickwallet_migration_files($directory);
     $database->exec(
         "CREATE TABLE IF NOT EXISTS sickwallet_schema_migrations ("
         . "migration VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,"
@@ -33,30 +69,15 @@ function sickwallet_apply_migrations(PDO $database, string $directory): array
     }
 
     try {
-        $files = glob($directory . "/*.sql");
-        if ($files === false) {
-            throw new RuntimeException("Could not enumerate database migrations.");
-        }
-        sort($files, SORT_STRING);
         $appliedRows = $database->query(
             "SELECT migration, checksum FROM sickwallet_schema_migrations"
         )->fetchAll(PDO::FETCH_KEY_PAIR);
         $applied = [];
         $current = [];
 
-        foreach ($files as $path) {
-            if (!is_file($path) || is_link($path)) {
-                throw new RuntimeException("A database migration path is invalid.");
-            }
-            $name = basename($path);
-            if (!preg_match("/^[0-9]{4}_[a-z0-9_]+[.]sql$/D", $name)) {
-                throw new RuntimeException("A database migration filename is invalid.");
-            }
-            $sql = file_get_contents($path);
-            if ($sql === false || trim($sql) === "") {
-                throw new RuntimeException("Database migration " . $name . " is empty.");
-            }
-            $checksum = hash("sha256", $sql);
+        foreach ($migrations as $name => $migration) {
+            $sql = $migration["sql"];
+            $checksum = $migration["checksum"];
             if (array_key_exists($name, $appliedRows)) {
                 if (!hash_equals((string) $appliedRows[$name], $checksum)) {
                     throw new RuntimeException(

@@ -14,6 +14,7 @@ from ..core.validation import normalize_evm_address, normalize_solana_address
 JWT_TOKEN_NAMESPACE = "cryptowallet_jwt"
 JWT_LIFETIME_SECONDS = 5 * 60
 CLAIM_HANDOFF_LIFETIME_SECONDS = 3 * 60
+TOTP_ENROLLMENT_LIFETIME_SECONDS = 10 * 60
 
 
 def _base64url(value: bytes) -> str:
@@ -189,7 +190,12 @@ class JwtAuthMixin:
         if not deployment_id or application_id is None:
             raise RuntimeError("The protected companion identity is incomplete")
         now = int(time.time())
-        expires_at = now + CLAIM_HANDOFF_LIFETIME_SECONDS
+        lifetime = (
+            TOTP_ENROLLMENT_LIFETIME_SECONDS
+            if purpose == "totp_enroll"
+            else CLAIM_HANDOFF_LIFETIME_SECONDS
+        )
+        expires_at = now + lifetime
         claims = {
             "iss": configuration["issuer"],
             "aud": configuration["audience"],

@@ -18,6 +18,7 @@ CDP_API_BASE_URL = "https://api.cdp.coinbase.com/platform"
 CDP_API_HOST = "api.cdp.coinbase.com"
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_HISTORY_RESPONSE_BYTES = 4 * 1024 * 1024
 DIAGNOSTIC_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
@@ -170,6 +171,7 @@ class CdpApiClient:
         developer_auth: bool = False,
         idempotency_key: str | None = None,
         allow_empty_response: bool = False,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> dict:
         method = method.upper()
         if self.request_limiter is not None:
@@ -223,7 +225,7 @@ class CdpApiClient:
                 raw = bytearray()
                 async for chunk in response.content.iter_chunked(64 * 1024):
                     raw.extend(chunk)
-                    if len(raw) > MAX_RESPONSE_BYTES:
+                    if len(raw) > max_response_bytes:
                         raise CdpApiError("CDP returned an oversized response.")
                 if (
                     200 <= response.status < 300
@@ -494,4 +496,6 @@ class CdpApiClient:
         query: dict[str, str | int] = {"limit": limit}
         if page_token:
             query["page"] = page_token
-        return await self._request("GET", path, query=query)
+        return await self._request(
+            "GET", path, query=query, max_response_bytes=MAX_HISTORY_RESPONSE_BYTES
+        )

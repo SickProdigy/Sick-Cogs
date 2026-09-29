@@ -7,7 +7,7 @@ from redbot.core import commands
 
 from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
-    BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability
+    BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability, resolve_network
 )
 from ..providers import WalletProviderError
 from ..core.validation import (
@@ -26,26 +26,7 @@ class WalletTransactionCommands:
 
     @staticmethod
     def _send_network(value: str):
-        aliases = {
-            "base": BASE_SEPOLIA.key,
-            "base-sepolia": BASE_SEPOLIA.key,
-            "eth": "ethereum-sepolia",
-            "ethereum": "ethereum-sepolia",
-            "ethereum-sepolia": "ethereum-sepolia",
-            "arb": "arbitrum-sepolia",
-            "arbitrum": "arbitrum-sepolia",
-            "arbitrum-sepolia": "arbitrum-sepolia",
-            "pol": "polygon-amoy",
-            "polygon": "polygon-amoy",
-            "polygon-amoy": "polygon-amoy",
-            "avax": "avalanche-fuji",
-            "avalanche": "avalanche-fuji",
-            "avalanche-fuji": "avalanche-fuji",
-            "sol": SOLANA_DEVNET.key,
-            "solana": SOLANA_DEVNET.key,
-            "solana-devnet": SOLANA_DEVNET.key,
-        }
-        return NETWORKS.get(aliases.get(value.strip().lower(), ""))
+        return resolve_network(value)
 
     @staticmethod
     def _intent_quote(intent: TransactionIntent) -> tuple:

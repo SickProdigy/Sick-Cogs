@@ -16,6 +16,7 @@ header("Content-Security-Policy: default-src 'none'; style-src 'self'; script-sr
 $serverDirectory = dirname(__DIR__) . '/server';
 $installedLockPath = $serverDirectory . '/setup-locked';
 $lockPath = $serverDirectory . '/setup.lock';
+$migrationMarkerPath = $serverDirectory . '/migration-current';
 $configPath = $serverDirectory . '/recovery-config.local.php';
 $migrationDirectory = $serverDirectory . '/migrations';
 require_once $serverDirectory . '/migration-runner.php';
@@ -27,6 +28,7 @@ $installed = $configured || is_file($installedLockPath);
 $success = false;
 $updated = false;
 $alreadyCurrent = false;
+$updateAvailable = false;
 $error = '';
 $relaySecret = '';
 
@@ -61,6 +63,37 @@ function setup_write_configuration(string $path, array $configuration): void
         @unlink($temporary);
         throw new RuntimeException('Could not activate the private configuration file.');
     }
+}
+
+function setup_database(string $dsn, string $user, string $password): PDO
+{
+    return new PDO($dsn, $user, $password, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+}
+
+function setup_write_marker(string $path, string $fingerprint): void
+{
+    $temporary = $path . '.' . bin2hex(random_bytes(8)) . '.tmp';
+    if (file_put_contents($temporary, $fingerprint . "\n", LOCK_EX) === false) {
+        throw new RuntimeException('Could not record the database update state.');
+    }
+    chmod($temporary, 0600);
+    if (!rename($temporary, $path)) {
+        @unlink($temporary);
+        throw new RuntimeException('Could not activate the database update state.');
+    }
+}
+
+$migrationFingerprint = sickwallet_migration_fingerprint($migrationDirectory);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $configured) {
+    $recordedFingerprint = is_file($migrationMarkerPath) && !is_link($migrationMarkerPath)
+        ? trim((string) file_get_contents($migrationMarkerPath))
+        : '';
+    $alreadyCurrent = $recordedFingerprint !== ''
+        && hash_equals($migrationFingerprint, $recordedFingerprint);
+    $updateAvailable = !$alreadyCurrent;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -108,14 +141,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, (int) $port, $database);
         }
-        $connection = new PDO($dsn, $user, $password, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ]);
+        $connection = setup_database($dsn, $user, $password);
         $migrationResult = sickwallet_apply_migrations($connection, $migrationDirectory);
+        setup_write_marker($migrationMarkerPath, $migrationFingerprint);
         if ($installed) {
             $alreadyCurrent = $migrationResult['applied'] === [];
             $updated = !$alreadyCurrent;
+            $updateAvailable = false;
         } else {
             $relaySecret = rtrim(strtr(base64_encode(random_bytes(48)), '+/', '-_'), '=');
             setup_write_configuration($configPath, [
@@ -176,14 +208,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="notice info"><strong>Database is current.</strong><p>No database update was needed.</p></div>
       <?php elseif ($error !== ''): ?>
         <div class="notice danger"><strong>Database update failed.</strong><p><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></div>
+      <?php elseif ($updateAvailable): ?>
+        <div class="notice info"><strong>Database update available.</strong><p>The uploaded companion includes a database update that has not been applied.</p></div>
       <?php else: ?>
         <div class="notice info"><strong>Existing installation detected.</strong><p>Use this page after deploying an updated CryptoWallet companion.</p></div>
       <?php endif; ?>
-      <form method="post" autocomplete="off">
-        <input type="hidden" name="action" value="update">
-        <input type="hidden" name="csrf" value="<?= htmlspecialchars((string) $_SESSION['sickwallet_setup_csrf'], ENT_QUOTES, 'UTF-8') ?>">
-        <button type="submit">Run database update</button>
-      </form>
+      <?php if ($updateAvailable): ?>
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="action" value="update">
+          <input type="hidden" name="csrf" value="<?= htmlspecialchars((string) $_SESSION['sickwallet_setup_csrf'], ENT_QUOTES, 'UTF-8') ?>">
+          <button type="submit">Run database update</button>
+        </form>
+      <?php endif; ?>
     <?php else: ?>
       <?php if ($error !== ''): ?>
         <div class="notice danger"><strong>Setup failed.</strong><p><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></p></div>

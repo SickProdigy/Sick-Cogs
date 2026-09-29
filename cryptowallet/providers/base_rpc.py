@@ -17,6 +17,10 @@ EVM_RPC_URLS = {
         "https://sepolia.base.org",
         "https://sepolia-preconf.base.org",
     ),
+    "base-mainnet": (
+        "https://mainnet.base.org",
+        "https://mainnet-preconf.base.org",
+    ),
     "ethereum-sepolia": (
         "https://ethereum-sepolia-rpc.publicnode.com",
         "https://rpc.sepolia.org",
@@ -242,6 +246,18 @@ async def get_solana_transaction_history(address: str, limit: int = 10) -> dict:
             "account_changes": [],
         })
     return {"transactions": transactions, "has_more": len(result) == limit, "next_page": ""}
+
+
+async def get_chain_id(network: str) -> int:
+    """Return and validate the chain identity from a bounded reviewed RPC."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Chain identity lookup is unavailable for this network.")
+    result = await _rpc_with_urls(rpc_urls, "eth_chainId", [], network)
+    try:
+        return int(str(result), 16)
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError("The network returned an invalid chain ID.") from exc
 
 
 async def get_native_balance(address: str, network: str) -> int:

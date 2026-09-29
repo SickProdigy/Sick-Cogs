@@ -12,6 +12,7 @@ from ..core.networks import (
     NETWORKS,
     ChainFamily,
     NetworkCapability,
+    resolve_network,
 )
 from ..providers import WalletProviderError
 from ..core.validation import format_atomic_amount
@@ -353,7 +354,7 @@ class WalletCoreCommands:
             return
         network = None
         if network_key is not None:
-            network = NETWORKS.get(network_key.strip().lower())
+            network = resolve_network(network_key)
             if network is None or not network.testnet:
                 await ctx.send(
                     f"That testnet is unavailable. Use `{ctx.clean_prefix}wallet networks` "
@@ -625,11 +626,18 @@ class WalletCoreCommands:
         """Show optional authenticator protection status."""
 
         enabled = await self.user_totp_enabled(ctx.author.id)
-        state = "enabled" if enabled else "not enabled"
-        await ctx.send(
-            f"Authenticator protection is **{state}**. "
-            f"Use `{ctx.clean_prefix}wallet security 2fa setup` to start protected setup."
-        )
+        if enabled:
+            await ctx.send(
+                "**Authenticator protection is enabled for your CryptoWallet account.** "
+                f"Use `{ctx.clean_prefix}wallet security 2fa replace` to change your "
+                f"authenticator, `{ctx.clean_prefix}wallet security 2fa disable` to remove "
+                f"it, or `{ctx.clean_prefix}wallet security 2fa lost` if you cannot access it."
+            )
+        else:
+            await ctx.send(
+                "**Authenticator protection is not enabled for your CryptoWallet account.** "
+                f"Use `{ctx.clean_prefix}wallet security 2fa setup` to enable it."
+            )
 
     @wallet_security_2fa.command(name="setup", aliases=("enroll",))
     async def wallet_security_2fa_setup(self, ctx: commands.Context):
@@ -671,9 +679,8 @@ class WalletCoreCommands:
             embed = discord.Embed(
                 title="Set Up Wallet Authenticator",
                 description=(
-                    "Open the protected page, add the displayed key to Authy or another "
-                    "authenticator, then return here and press **Confirm enrollment**.\n\n"
-                    f"🔐 **[Open protected authenticator setup]({link})**"
+                    "Press **Set up authenticator**, scan the QR code or use the manual "
+                    "key, then return here and press **Confirm enrollment**."
                 ),
                 color=discord.Color.blurple(),
             )
@@ -689,7 +696,7 @@ class WalletCoreCommands:
                 name="Link expires", value=f"<t:{expires_at}:R>", inline=True
             )
             view = WalletTotpEnrollmentView(
-                self, ctx.author.id, result_handle, expires_at
+                self, ctx.author.id, result_handle, expires_at, link
             )
             message = await ctx.author.send(embed=embed, view=view)
             view.message = message
@@ -709,13 +716,24 @@ class WalletCoreCommands:
         if not await self.user_totp_enabled(ctx.author.id):
             await ctx.send("Authenticator protection is not enabled for this wallet.")
             return
-        title = "Replace Wallet Authenticator" if action == "replace" else "Disable Wallet Authenticator"
-        warning = (
-            "After verification, the old factor is removed and you must immediately run "
-            "`wallet security 2fa setup` to enroll the replacement."
-            if action == "replace"
-            else "After verification, future sends will no longer require an authenticator code."
-        )
+        title = {
+            "replace": "Replace Wallet Authenticator",
+            "disable": "Disable Wallet Authenticator",
+            "verify": "Check Wallet Authenticator",
+        }[action]
+        warning = {
+            "replace": (
+                "After verification, the old factor is removed and you must immediately run "
+                "`wallet security 2fa setup` to enroll the replacement."
+            ),
+            "disable": (
+                "After verification, future sends will no longer require an authenticator code."
+            ),
+            "verify": (
+                "Enter a current code to confirm that your enrolled authenticator still works. "
+                "No transaction or settings change will be made."
+            ),
+        }[action]
         embed = discord.Embed(
             title=title,
             description=(
@@ -732,6 +750,12 @@ class WalletCoreCommands:
             await ctx.send("Enable direct messages and try again.")
             return
         await ctx.send("I sent the protected authenticator change controls by DM.")
+
+    @wallet_security_2fa.command(name="verify", aliases=("check", "test"))
+    async def wallet_security_2fa_verify(self, ctx: commands.Context):
+        """Check the enrolled authenticator without changing wallet settings."""
+
+        await self._send_totp_management(ctx, "verify")
 
     @wallet_security_2fa.command(name="disable", aliases=("remove",))
     async def wallet_security_2fa_disable(self, ctx: commands.Context):
