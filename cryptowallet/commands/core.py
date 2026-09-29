@@ -749,7 +749,12 @@ class WalletCoreCommands:
         except discord.HTTPException:
             await ctx.send("Enable direct messages and try again.")
             return
-        await ctx.send("I sent the protected authenticator change controls by DM.")
+        acknowledgement = {
+            "verify": "I sent you a private authenticator check by DM.",
+            "disable": "I sent you private authenticator disable controls by DM.",
+            "replace": "I sent you private authenticator replacement controls by DM.",
+        }[action]
+        await ctx.send(acknowledgement)
 
     @wallet_security_2fa.command(name="verify", aliases=("check", "test"))
     async def wallet_security_2fa_verify(self, ctx: commands.Context):

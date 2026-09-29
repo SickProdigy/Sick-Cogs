@@ -1145,6 +1145,10 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["view"].action, "verify")
         self.assertEqual(sent["view"].children[0].label, "Check authenticator")
         self.assertIn("No transaction or settings change", sent["embed"].description)
+        self.assertEqual(
+            ctx.send.await_args.args[0],
+            "I sent you a private authenticator check by DM.",
+        )
 
     async def test_management_controls_are_dm_only_and_action_specific(self):
         author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
@@ -1159,6 +1163,10 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["view"].action, "replace")
         self.assertEqual(sent["view"].children[0].label, "Verify and replace")
         self.assertIn("private modal", sent["embed"].description)
+        self.assertEqual(
+            ctx.send.await_args.args[0],
+            "I sent you private authenticator replacement controls by DM.",
+        )
         self.assertNotIn("code", str(ctx.send.await_args.args).lower())
 
 
