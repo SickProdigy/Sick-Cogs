@@ -738,6 +738,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS = 300", endpoint)
         self.assertIn("RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600", endpoint)
+        self.assertIn("$expiresAt > $signedAt + $maxLifetime", endpoint)
         self.assertIn("totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS", endpoint)
 
     async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):

@@ -145,11 +145,13 @@ try {
         $digest = (string) ($body['handoff_digest'] ?? '');
         $jwt = (string) ($body['jwt'] ?? '');
         $expiresAt = (int) ($body['expires_at'] ?? 0);
+        $signedAt = (int) ($_SERVER['HTTP_X_SICKWALLET_TIMESTAMP'] ?? 0);
         $now = time();
         if ($maxLifetime === 0
             || !preg_match('/^[a-f0-9]{64}$/D', $digest)
             || $jwt === '' || strlen($jwt) > 16384
-            || $expiresAt <= $now || $expiresAt > $now + $maxLifetime) {
+            || $expiresAt <= $now || $expiresAt <= $signedAt
+            || $expiresAt > $signedAt + $maxLifetime) {
             recovery_error('invalid_request', 'The recovery registration is invalid.', 400);
         }
         [$ciphertext, $cipherNonce, $cipherTag] = recovery_encrypt($jwt, $secret);
