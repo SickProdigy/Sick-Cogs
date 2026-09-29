@@ -331,6 +331,51 @@ class WalletIntentView(discord.ui.View):
             self.processing = False
 
 
+class WalletEmergencyLockView(discord.ui.View):
+    """Owner-bound confirmation for a reversible emergency wallet lock."""
+
+    def __init__(self, cog, user_id: int):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.user_id = user_id
+        self.processing = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can confirm this emergency lock.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    @discord.ui.button(label="Emergency lock", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.processing:
+            await interaction.response.send_message(
+                "The emergency lock is already being applied.", ephemeral=True
+            )
+            return
+        self.processing = True
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await self.cog._apply_user_emergency_lock(interaction.user)
+            self.disable_controls()
+            await interaction.message.edit(view=self)
+            await interaction.followup.send(message, ephemeral=True)
+        finally:
+            self.processing = False
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.disable_controls()
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send("Your wallet was not locked.", ephemeral=True)
+
+
 class WalletRevocationView(discord.ui.View):
     """Owner-bound confirmation for wallet-profile delegation revocation."""
 

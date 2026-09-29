@@ -18,7 +18,11 @@ from ..core.networks import (
 from ..providers import WalletProviderError
 from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
-from .views import WalletTotpEnrollmentView, WalletTotpManagementView
+from .views import (
+    WalletEmergencyLockView,
+    WalletTotpEnrollmentView,
+    WalletTotpManagementView,
+)
 
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -800,13 +804,12 @@ class WalletCoreCommands:
             "and after an independent identity review. Unlocking does not restore authorization."
         )
 
-    @wallet_security.command(name="lock", aliases=("freeze",))
-    async def wallet_security_lock(self, ctx: commands.Context):
-        """Emergency-lock your wallet and revoke current bot signing authorization."""
-        user_config = self.config.user(ctx.author)
+    async def _apply_user_emergency_lock(self, user) -> str:
+        """Persist a user emergency lock before attempting provider revocation."""
+
+        user_config = self.config.user(user)
         if await user_config.security_locked():
-            await ctx.send("Your wallet is already emergency-locked.")
-            return
+            return "Your wallet is already emergency-locked."
         await user_config.security_locked.set(True)
         await user_config.security_locked_at.set(int(time.time()))
         await user_config.security_lock_source.set("user")
@@ -825,9 +828,52 @@ class WalletCoreCommands:
                     "The lock is active, but CDP revocation could not be confirmed. "
                     "The bot owner should retry revocation."
                 )
-        await ctx.send(
+        return (
             "Your wallet is now emergency-locked. " + revocation + " Only the bot owner "
-            "can unlock it; receiving funds and read-only wallet commands still work."
+            "can unlock outgoing use; receiving funds and read-only commands still work. "
+            "Previously exported keys or recovery material cannot be revoked by this lock."
+        )
+
+    @wallet_security.command(name="lock", aliases=("freeze",))
+    async def wallet_security_lock(self, ctx: commands.Context, confirmed: bool = False):
+        """Review or immediately apply an emergency wallet lock."""
+
+        if await self.config.user(ctx.author).security_locked():
+            await ctx.send("Your wallet is already emergency-locked.")
+            return
+        if confirmed:
+            await ctx.send(await self._apply_user_emergency_lock(ctx.author))
+            return
+        embed = discord.Embed(
+            title="Emergency-lock your wallet?",
+            description=(
+                "**Use this if your Discord or wallet access may be compromised.**\n"
+                "Receiving funds and read-only commands will continue to work."
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(
+            name="Lock effects",
+            value=(
+                "Blocks sends, authorization, renewal, and signer export; rejects pending "
+                "intents; and attempts to revoke current bot signing authorization."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Important limits",
+            value=(
+                "Only the bot owner can unlock outgoing use. Previously exported keys or "
+                "recovery material cannot be revoked by this lock."
+            ),
+            inline=False,
+        )
+        embed.set_footer(
+            text=f"For an immediate lock, use {ctx.clean_prefix}wallet security lock true"
+        )
+        await ctx.send(
+            embed=embed,
+            view=WalletEmergencyLockView(self, ctx.author.id),
         )
 
     @wallet.command(name="networks")

@@ -49,6 +49,7 @@ from ..commands.activity import WalletActivityCommands
 from ..commands.authorization import WalletAuthorizationCommands
 from ..commands.views import (
     WalletAuthorizationView,
+    WalletEmergencyLockView,
     WalletIntentView,
     WalletRevocationView,
     WalletTotpModal,
@@ -1144,12 +1145,37 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
             config=SimpleNamespace(user=lambda user: user_config),
             wallet_provider=SimpleNamespace(revoke_authorization=AsyncMock()),
         )
-        await WalletCoreCommands.wallet_security_lock.callback(cog, ctx)
+        await WalletCoreCommands._apply_user_emergency_lock(cog, author)
         self.assertTrue(user_config.security_locked.value)
         self.assertGreater(user_config.security_locked_at.value, 0)
         self.assertEqual(user_config.security_lock_source.value, "user")
         self.assertEqual(user_config.intents.data["pending-intent"]["status"], "rejected")
         cog.wallet_provider.revoke_authorization.assert_not_awaited()
+
+    async def test_bare_user_lock_shows_confirmation_without_locking(self):
+        user_config = self._user_config()
+        author = SimpleNamespace(id=7)
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user=lambda user: user_config),
+        )
+
+        await WalletCoreCommands.wallet_security_lock.callback(cog, ctx)
+
+        self.assertFalse(user_config.security_locked.value)
+        sent = ctx.send.await_args.kwargs
+        self.assertIsInstance(sent["view"], WalletEmergencyLockView)
+        self.assertEqual(
+            [item.label for item in sent["view"].children],
+            ["Emergency lock", "Cancel"],
+        )
+        self.assertIn("Receiving funds", sent["embed"].description)
+        limits = next(
+            field.value for field in sent["embed"].fields
+            if field.name == "Important limits"
+        )
+        self.assertIn("exported keys", limits)
+        self.assertIn("!wallet security lock true", sent["embed"].footer.text)
 
     def test_owner_target_parser_accepts_mentions_and_raw_ids(self):
         parser = lambda value: WalletAdminCommands._wallet_user_id(None, value)
