@@ -1,6 +1,9 @@
 <?php
 declare(strict_types=1);
 
+const RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS = 300;
+const RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600;
+
 require_once dirname(__DIR__) . '/server/recovery-config.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -133,13 +136,20 @@ try {
     $operation = (string) ($body['operation'] ?? '');
     if ($operation === 'register') {
         recovery_verify_registration($database, $raw, $secret);
+        $handoffType = (string) ($body['handoff_type'] ?? 'standard');
+        $maxLifetime = match ($handoffType) {
+            'standard' => RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS,
+            'totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS,
+            default => 0,
+        };
         $digest = (string) ($body['handoff_digest'] ?? '');
         $jwt = (string) ($body['jwt'] ?? '');
         $expiresAt = (int) ($body['expires_at'] ?? 0);
         $now = time();
-        if (!preg_match('/^[a-f0-9]{64}$/D', $digest)
+        if ($maxLifetime === 0
+            || !preg_match('/^[a-f0-9]{64}$/D', $digest)
             || $jwt === '' || strlen($jwt) > 16384
-            || $expiresAt <= $now || $expiresAt > $now + 300) {
+            || $expiresAt <= $now || $expiresAt > $now + $maxLifetime) {
             recovery_error('invalid_request', 'The recovery registration is invalid.', 400);
         }
         [$ciphertext, $cipherNonce, $cipherTag] = recovery_encrypt($jwt, $secret);

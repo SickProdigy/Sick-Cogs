@@ -676,7 +676,9 @@ class WalletCoreCommands:
             token, expires_at = await self.create_external_companion_handoff(
                 ctx.author.id, "totp_enroll", payload
             )
-            handoff = await self.register_recovery_handoff(token, expires_at)
+            handoff = await self.register_recovery_handoff(
+                token, expires_at, purpose="totp_enroll"
+            )
             base_url = status["approval_base_url"]
             encoded_handoff = quote(handoff, safe="")
             link = f"{base_url}/security.html#handoff={encoded_handoff}"

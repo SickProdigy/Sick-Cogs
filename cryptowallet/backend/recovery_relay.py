@@ -12,7 +12,8 @@ RECOVERY_RELAY_TOKEN_NAMESPACE = "cryptowallet_relay"
 RECOVERY_RELAY_PATH = "/api/recovery-handoff.php"
 RECOVERY_RELAY_TIMEOUT_SECONDS = 15
 RECOVERY_RELAY_MAX_RESPONSE_BYTES = 16 * 1024
-RECOVERY_RELAY_MAX_LIFETIME_SECONDS = 10 * 60
+RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS = 5 * 60
+RECOVERY_RELAY_TOTP_LIFETIME_SECONDS = 10 * 60
 
 
 def _relay_signature(secret: str, timestamp: int, nonce: str, body: bytes) -> str:
@@ -42,13 +43,18 @@ class RecoveryRelayMixin:
         return {"configured": configured, "approval_base_url": approval_base_url}
 
     async def register_recovery_handoff(
-        self, jwt_token: str, expires_at: int
+        self, jwt_token: str, expires_at: int, *, purpose: str = "standard"
     ) -> str:
         status = await self.recovery_relay_status()
         if not status["configured"]:
             raise RuntimeError("The one-time recovery relay is not configured")
+        lifetimes = {
+            "standard": RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
+            "totp_enroll": RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
+        }
+        max_lifetime = lifetimes.get(purpose)
         now = int(time.time())
-        if expires_at <= now or expires_at > now + RECOVERY_RELAY_MAX_LIFETIME_SECONDS:
+        if max_lifetime is None or expires_at <= now or expires_at > now + max_lifetime:
             raise RuntimeError("The recovery handoff expiry is invalid")
         if not jwt_token or len(jwt_token) > 16 * 1024:
             raise RuntimeError("The recovery handoff token is invalid")
@@ -57,6 +63,7 @@ class RecoveryRelayMixin:
         handle = secrets.token_urlsafe(32)
         payload = {
             "operation": "register",
+            "handoff_type": purpose,
             "handoff_digest": hashlib.sha256(handle.encode("utf-8")).hexdigest(),
             "jwt": jwt_token,
             "expires_at": expires_at,

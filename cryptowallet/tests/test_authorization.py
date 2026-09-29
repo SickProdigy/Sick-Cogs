@@ -21,7 +21,8 @@ from ..backend.auth import (
     _key_id,
 )
 from ..backend.recovery_relay import (
-    RECOVERY_RELAY_MAX_LIFETIME_SECONDS,
+    RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
+    RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
     RecoveryRelayMixin,
     _relay_signature,
 )
@@ -722,12 +723,22 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             sent["view"].children[0].url,
             f"https://wallet.example.test/cryptowallet/security.html#handoff={handoff}",
         )
+        cog.register_recovery_handoff.assert_awaited_once_with(
+            token, 1_800_000_000, purpose="totp_enroll"
+        )
 
     def test_relay_lifetime_accepts_full_totp_enrollment_window(self):
         self.assertEqual(
-            RECOVERY_RELAY_MAX_LIFETIME_SECONDS,
+            RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
             TOTP_ENROLLMENT_LIFETIME_SECONDS,
         )
+        self.assertEqual(RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS, 5 * 60)
+        endpoint = (
+            Path(__file__).resolve().parents[1] / "web" / "api" / "recovery-handoff.php"
+        ).read_text(encoding="utf-8")
+        self.assertIn("RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS = 300", endpoint)
+        self.assertIn("RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600", endpoint)
+        self.assertIn("totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS", endpoint)
 
     async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):
         author = SimpleNamespace(id=7, send=AsyncMock())
