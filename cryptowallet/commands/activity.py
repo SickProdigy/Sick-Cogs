@@ -409,13 +409,17 @@ class WalletActivityCommands:
             return
         try:
             address = normalize_address_for_network(str(account.get("address") or ""), network)
-            page = await self.wallet_provider.get_transaction_history(
+            page = await self.get_wallet_transaction_history(
                 address,
                 network.key,
                 limit=HISTORY_PAGE_SIZE,
             )
         except (ValueError, WalletProviderError) as exc:
-            await ctx.send(f"Wallet activity is unavailable: {exc}")
+            await ctx.send(
+                f"Wallet activity is unavailable: {exc}\n"
+                f"[View complete {network.name} activity]"
+                f"({network.explorer_address_url(str(account.get('address') or ''))})"
+            )
             return
         view = WalletHistoryView(
             self,

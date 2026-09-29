@@ -18,6 +18,7 @@ from ..core.validation import (
 from ..providers import WalletProviderError
 from ..providers.base_rpc import BaseRpcError, get_chain_id
 from ..backend.config import MAINNET_ENABLE_ACKNOWLEDGEMENT
+from ..backend.history import HISTORY_MODES
 from ..backend.usage import (
     NODE_FREE_BILLING_UNITS,
     NODE_SAFETY_TARGET,
@@ -73,6 +74,41 @@ class WalletAdminCommands:
             return None
         user_id = int(match.group(1) or match.group(2))
         return user_id if 0 < user_id < 2**64 else None
+
+    @walletset.group(name="history", invoke_without_command=True)
+    @commands.is_owner()
+    async def walletset_history(self, ctx: commands.Context):
+        """Show public transaction-history routing."""
+        mode = str(await self.config.history_provider_mode() or "auto")
+        etherscan = await self.etherscan_history_status()
+        setup = (
+            " Etherscan is ready for compact EVM history."
+            if etherscan["configured"]
+            else (
+                " Configure Red shared API tokens under `etherscan` with field "
+                "`api_key`."
+            )
+        )
+        await ctx.send(
+            "**Wallet history routing**\n"
+            f"Mode: `{mode}`\n"
+            f"Etherscan V2: `{'configured' if etherscan['configured'] else 'not configured'}`\n"
+            "Modes: `auto`, `etherscan`, `cdp`, `explorer-only`\n"
+            "`auto` uses Etherscan first and CDP only when Etherscan is unavailable."
+            f"{setup}"
+        )
+
+    @walletset_history.command(name="mode")
+    @commands.is_owner()
+    async def walletset_history_mode(self, ctx: commands.Context, mode: str):
+        """Select transaction-history routing."""
+        mode = mode.strip().lower()
+        if mode not in HISTORY_MODES:
+            await ctx.send("Choose `auto`, `etherscan`, `cdp`, or `explorer-only`.")
+            return
+        await self.config.history_provider_mode.set(mode)
+        self._history_cache.clear()
+        await ctx.send(f"Wallet history mode is now `{mode}`.")
 
     @walletset.command(name="lock", aliases=("freeze",))
     @commands.is_owner()

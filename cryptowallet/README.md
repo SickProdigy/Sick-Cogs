@@ -41,8 +41,11 @@ Routine account information remains available through Discord:
 
 Provider-backed wallet summaries are limited to one request per user every 10 seconds, and new
 transaction-history cards to one every 15 seconds. Bot owners and server administrators bypass
-these limits. History remains compact at 10 entries per page, protects new page requests from
-rapid repeat clicks, and includes a permanent BaseScan address link for complete public history.
+these limits. History remains compact at 10 entries per page, protects new requests from rapid repeat
+clicks, and includes a permanent explorer link for complete public history. EVM history uses
+Etherscan V2 first when the shared `etherscan.api_key` token is configured; the owner can select
+`auto`, `etherscan`, `cdp`, or `explorer-only` routing. Identical requests are coalesced and cached
+for 30 seconds, with bounded response bodies, cache size, and installation-wide concurrency.
 The plural `wallets` command is accepted as an alias for `wallet`. Other CDP-backed commands
 and public RPC lookups have separate per-user guards; local notification and network commands do
 not. CDP traffic is also globally limited to half the published rolling read/write ceilings.
@@ -157,6 +160,8 @@ Owner commands:
 ```text
 [p]walletset view
 [p]walletset usage
+[p]walletset history
+[p]walletset history mode <auto|etherscan|cdp|explorer-only>
 [p]walletset lock <mention-or-user-id>      # Alias: freeze
 [p]walletset unlock <mention-or-user-id>    # Alias: unfreeze
 [p]walletset 2fareset <user-id> I CONFIRM IDENTITY REVIEW AND RESET 2FA
@@ -270,7 +275,9 @@ uncertain and cannot be overridden or guessed as failed.
 
 `wallet transactions` without a network returns lightweight explorer links. Supplying `base`,
 `eth`, or `sol` retrieves at most the latest ten supported activity records and links to complete
-public history. `wallet txid <network> <txid-or-signature>` performs an explicit-network public
+public history. EVM history is normalized behind a provider-neutral boundary; `etherscan` mode
+never falls back to CDP, while `auto` uses bounded CDP history only if Etherscan is unavailable.
+`wallet txid <network> <txid-or-signature>` performs an explicit-network public
 lookup and does not expose private intent metadata. Arbitrum Sepolia, Polygon Amoy, and Avalanche
 Fuji support explicit TXID lookup but not indexed activity.
 
@@ -360,7 +367,11 @@ Authorization handoffs expire after three minutes. They are sent by DM, carried 
 are not sent to the web server, and removed from browser history as soon as the page loads. The
 static page authenticates the handoff directly with CDP and grants one user-scoped delegation across all wallet accounts only after the user presses the confirmation button. No website-to-bot listener is required.
 
-The provider reads these values from Red's shared API-token namespace `cryptowallet_cdp`.
+Public EVM history reads the reusable Red shared API-token namespace `etherscan` with
+field `api_key`. Configure it with `[p]set api etherscan api_key,<key>` in a private bot-owner
+context; CryptoWallet never displays the value. One Etherscan V2 key can be reused by other cogs.
+
+The wallet provider reads its separate values from Red's shared API-token namespace `cryptowallet_cdp`.
 Provision them only through Red's bot-owner API-token modal or another approved server-side
 secret mechanism; there is intentionally no CryptoWallet command that accepts or displays them.
 

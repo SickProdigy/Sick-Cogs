@@ -10,6 +10,7 @@ from .backend import JwtAuthMixin, RecoveryRelayMixin, TotpSecurityMixin
 from .backend.clanker_lifecycle import ClankerLifecycleMixin
 from .backend.confirmation import ConfirmationProcessorMixin
 from .backend.config import WalletConfigMixin, create_config
+from .backend.history import WalletHistoryMixin
 from .backend.provisioning import WalletProvisioningMixin
 from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
@@ -25,6 +26,7 @@ log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 class CryptoWallet(
     ProviderUsageMixin,
+    WalletHistoryMixin,
     ClankerLifecycleMixin,
     ConfirmationProcessorMixin,
     WalletCommands,
@@ -44,6 +46,7 @@ class CryptoWallet(
         self.wallet_read_cooldowns = {}
         self.initialize_provisioning()
         self.initialize_provider_usage()
+        self.initialize_wallet_history()
         self.wallet_provider = CdpWalletProvider(
             bot,
             request_limiter=self.limit_cdp_request,
