@@ -46,6 +46,11 @@ clicks, and includes a permanent explorer link for complete public history. EVM 
 Etherscan V2 first when the shared `etherscan.api_key` token is configured; the owner can select
 `auto`, `etherscan`, `cdp`, or `explorer-only` routing. Identical requests are coalesced and cached
 for 30 seconds, with bounded response bodies, cache size, and installation-wide concurrency.
+The repeatable synthetic load benchmark uses no provider credentials or network requests. On the
+authorized SGBTestAgent environment, 1,000 distinct requests stayed at eight active loads, 1,000
+identical requests coalesced to one provider call, the cache stopped at 512 entries, and peak RSS
+increased by approximately 3.9 MiB. Run it with
+`python -m cryptowallet.tests.benchmark_history_load` in the representative Red environment.
 The plural `wallets` command is accepted as an alias for `wallet`. Other CDP-backed commands
 and public RPC lookups have separate per-user guards; local notification and network commands do
 not. CDP traffic is also globally limited to half the published rolling read/write ceilings.

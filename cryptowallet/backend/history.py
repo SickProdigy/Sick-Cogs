@@ -65,7 +65,7 @@ class WalletHistoryMixin:
                 )
                 self._history_inflight[key] = task
         try:
-            result = await asyncio.shield(task)
+            result = await task
             if len(self._history_cache) >= 512:
                 oldest = min(self._history_cache, key=lambda item: self._history_cache[item][0])
                 self._history_cache.pop(oldest, None)
