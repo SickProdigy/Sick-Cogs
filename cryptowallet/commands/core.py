@@ -625,18 +625,23 @@ class WalletCoreCommands:
             "only the bot owner can remove it. Use the wallet security 2fa subcommands to manage optional authenticator protection."
         )
 
+    @staticmethod
+    def _totp_enabled_message(prefix: str) -> str:
+        return (
+            "**Authenticator protection is enabled for your CryptoWallet account.**\n"
+            f"`{prefix}wallet security 2fa verify` — Check your current authenticator\n"
+            f"`{prefix}wallet security 2fa replace` — Move to a new app or device\n"
+            f"`{prefix}wallet security 2fa disable` — Remove authenticator protection\n"
+            f"`{prefix}wallet security 2fa lost` — Start lost-access recovery"
+        )
+
     @wallet_security.group(name="2fa", aliases=("totp",), invoke_without_command=True)
     async def wallet_security_2fa(self, ctx: commands.Context):
         """Show optional authenticator protection status."""
 
         enabled = await self.user_totp_enabled(ctx.author.id)
         if enabled:
-            await ctx.send(
-                "**Authenticator protection is enabled for your CryptoWallet account.** "
-                f"Use `{ctx.clean_prefix}wallet security 2fa replace` to change your "
-                f"authenticator, `{ctx.clean_prefix}wallet security 2fa disable` to remove "
-                f"it, or `{ctx.clean_prefix}wallet security 2fa lost` if you cannot access it."
-            )
+            await ctx.send(WalletCoreCommands._totp_enabled_message(ctx.clean_prefix))
         else:
             await ctx.send(
                 "**Authenticator protection is not enabled for your CryptoWallet account.** "
@@ -650,10 +655,7 @@ class WalletCoreCommands:
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if await self.user_totp_enabled(ctx.author.id):
-            await ctx.send(
-                "Authenticator protection is already enabled. Replacement and recovery "
-                "require a separate protected flow; setup will not overwrite it."
-            )
+            await ctx.send(WalletCoreCommands._totp_enabled_message(ctx.clean_prefix))
             return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:

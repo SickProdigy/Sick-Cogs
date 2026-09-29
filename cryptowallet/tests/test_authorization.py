@@ -663,10 +663,29 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
 
         message = ctx.send.await_args.args[0]
         self.assertIn("enabled for your CryptoWallet account", message)
+        self.assertIn("!wallet security 2fa verify", message)
         self.assertIn("!wallet security 2fa replace", message)
         self.assertIn("!wallet security 2fa disable", message)
         self.assertIn("!wallet security 2fa lost", message)
         self.assertNotIn("2fa setup", message)
+
+    async def test_totp_setup_when_enabled_shows_uniform_management_menu(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), send=AsyncMock(), clean_prefix="?"
+        )
+        cog = SimpleNamespace(
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            user_totp_enabled=AsyncMock(return_value=True),
+        )
+
+        await WalletCoreCommands.wallet_security_2fa_setup.callback(cog, ctx)
+
+        message = ctx.send.await_args.args[0]
+        self.assertIn("?wallet security 2fa verify", message)
+        self.assertIn("?wallet security 2fa replace", message)
+        self.assertIn("?wallet security 2fa disable", message)
+        self.assertIn("?wallet security 2fa lost", message)
+        self.assertNotIn("separate protected flow", message)
 
     async def test_totp_status_gives_unenrolled_account_setup_command(self):
         ctx = SimpleNamespace(
