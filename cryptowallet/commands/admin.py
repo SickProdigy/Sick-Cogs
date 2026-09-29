@@ -666,7 +666,7 @@ class WalletAdminCommands:
             return
         network = self._send_network(network_key)
         if network is None or not network.supports(NetworkCapability.SEND):
-            await ctx.send("Choose a send-enabled testnet from `wallet networks`.")
+            await ctx.send(f"Choose a send-enabled testnet from `{ctx.clean_prefix}wallet networks`.")
             return
         if amount is None:
             raw = limits.get(network.key)

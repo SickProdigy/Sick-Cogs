@@ -416,7 +416,7 @@ class WalletCoreCommands:
             or not network.testnet
             or not network.supports(NetworkCapability.BALANCE)
         ):
-            await ctx.send("Choose an enabled EVM testnet from `!wallet networks`.")
+            await ctx.send(f"Choose an enabled EVM testnet from `{ctx.clean_prefix}wallet networks`.")
             return
         try:
             from ..core.validation import normalize_evm_address
@@ -528,7 +528,7 @@ class WalletCoreCommands:
                 return
             network = NETWORKS.get(str(current.get("network") or ""))
             if network is None:
-                await ctx.send("Your stored default asset is unavailable. Use `wallet token default reset`.")
+                await ctx.send(f"Your stored default asset is unavailable. Use `{ctx.clean_prefix}wallet token default reset`.")
                 return
             symbol = str(current.get("symbol") or network.native_symbol)
             contract = current.get("contract")
@@ -541,7 +541,7 @@ class WalletCoreCommands:
             return
         network = self._send_network(network_or_action)
         if network is None or not network.testnet or not network.supports(NetworkCapability.SEND):
-            await ctx.send("Choose a send-enabled testnet from `wallet networks`.")
+            await ctx.send(f"Choose a send-enabled testnet from `{ctx.clean_prefix}wallet networks`.")
             return
         selector = str(asset or "native").strip().lower()
         if selector in {"native", network.native_symbol.lower()}:
@@ -734,8 +734,9 @@ class WalletCoreCommands:
         }[action]
         warning = {
             "replace": (
-                "After verification, the old factor is removed and you must immediately run "
-                "`wallet security 2fa setup` to enroll the replacement."
+                "After verification, the old factor is removed and authenticator protection "
+                "is temporarily off. Immediately run "
+                f"`{ctx.clean_prefix}wallet security 2fa setup` to enroll the replacement."
             ),
             "disable": (
                 "After verification, future sends will no longer require an authenticator code."
@@ -753,7 +754,9 @@ class WalletCoreCommands:
             ),
             color=discord.Color.orange(),
         )
-        view = WalletTotpManagementView(self, ctx.author.id, action)
+        view = WalletTotpManagementView(
+            self, ctx.author.id, action, command_prefix=ctx.clean_prefix
+        )
         try:
             message = await ctx.author.send(embed=embed, view=view)
             view.message = message

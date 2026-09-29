@@ -850,7 +850,7 @@ class WalletTransactionCommands:
                 or not network.supports(NetworkCapability.SEND)
                 or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)):
             if network is None:
-                await ctx.send("That wallet network is unknown. Use `wallet networks` to list testnets.")
+                await ctx.send(f"That wallet network is unknown. Use `{ctx.clean_prefix}wallet networks` to list testnets.")
             else:
                 await ctx.send(f"Sending is not enabled for {network.name}. Only capability-reviewed testnet send paths are available.")
             return
@@ -881,7 +881,7 @@ class WalletTransactionCommands:
                        and (contract.lower() == selector
                             or str(entry.get("symbol") or "").lower() == selector)]
             if not matches:
-                await ctx.send("That token is not an enabled registered token on Base Sepolia. Use `wallet token base` and verify its contract address.")
+                await ctx.send(f"That token is not an enabled registered token on Base Sepolia. Use `{ctx.clean_prefix}wallet token base` and verify its contract address.")
                 return
             if len(matches) != 1:
                 await ctx.send("That token symbol is ambiguous. Use the exact contract address.")

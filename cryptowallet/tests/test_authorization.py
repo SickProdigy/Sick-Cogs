@@ -351,7 +351,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
         author = SimpleNamespace(id=7)
         profile = _profile()
-        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
         cog = SimpleNamespace(
             _wallet_read_allowed=AsyncMock(return_value=True),
             _wallet_profile_for_user_or_error=AsyncMock(return_value=profile),
@@ -774,7 +774,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         token = "x" * 600
         handle = "opaque_recovery_handle_abcdefghijklmnopqrstuvwxyz"
         author = SimpleNamespace(id=7, send=AsyncMock())
-        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
         cog = SimpleNamespace(
             _wallet_read_allowed=AsyncMock(return_value=True),
             _wallet_sensitive_allowed=AsyncMock(return_value=True),
@@ -832,7 +832,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_emergency_lock_blocks_sensitive_commands_but_explains_reads(self):
         locked_config = SimpleNamespace(security_locked=_Value(True))
-        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock(), clean_prefix="!")
         cog = SimpleNamespace(
             config=SimpleNamespace(user=lambda user: locked_config)
         )
@@ -864,7 +864,9 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Revoke authorization", options)
 
     async def test_auth_days_does_not_replace_an_active_grant(self):
-        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), send=AsyncMock(), clean_prefix="!"
+        )
         cog = SimpleNamespace(
             _active_authorization_embed=WalletAuthorizationCommands._active_authorization_embed,
             _wallet_read_allowed=AsyncMock(return_value=True),
@@ -1184,7 +1186,7 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_verify_control_checks_factor_without_removing_it(self):
         author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
-        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
         cog = SimpleNamespace(
             _wallet_sensitive_allowed=AsyncMock(return_value=True),
             user_totp_enabled=AsyncMock(return_value=True),
@@ -1203,7 +1205,7 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_management_controls_are_dm_only_and_action_specific(self):
         author = SimpleNamespace(id=7, send=AsyncMock(return_value=SimpleNamespace()))
-        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
         cog = SimpleNamespace(
             _wallet_sensitive_allowed=AsyncMock(return_value=True),
             user_totp_enabled=AsyncMock(return_value=True),
@@ -1214,6 +1216,9 @@ class SecurityLockCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sent["view"].action, "replace")
         self.assertEqual(sent["view"].children[0].label, "Verify and replace")
         self.assertIn("private modal", sent["embed"].description)
+        self.assertEqual(sent["view"].command_prefix, "!")
+        self.assertIn("temporarily off", sent["embed"].description)
+        self.assertIn("!wallet security 2fa setup", sent["embed"].description)
         self.assertEqual(
             ctx.send.await_args.args[0],
             "I sent you private authenticator replacement controls by DM.",

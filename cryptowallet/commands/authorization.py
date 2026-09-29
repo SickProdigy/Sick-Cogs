@@ -77,7 +77,7 @@ class WalletAuthorizationCommands:
                         name="Duration not changed",
                         value=(
                             "CDP allows only one active authorization. Revoke the current "
-                            f"authorization first, then use `wallet auth {days}` again."
+                            f"authorization first, then use `{ctx.clean_prefix}wallet auth {days}` again."
                         ),
                         inline=False,
                     )
@@ -88,7 +88,7 @@ class WalletAuthorizationCommands:
                 return
             if status.get("partial"):
                 await ctx.send(
-                    "Wallet authorization is incomplete. Use `wallet revoke` to clear "
+                    f"Wallet authorization is incomplete. Use `{ctx.clean_prefix}wallet revoke` to clear "
                     "the partial grant before authorizing again."
                 )
                 return
@@ -200,7 +200,7 @@ class WalletAuthorizationCommands:
                 "Wallet authorization is incomplete: only "
                 f"`{status.get('active_accounts', 0)}` of "
                 f"`{status.get('required_accounts', 0)}` accounts are authorized. "
-                "Use `wallet revoke` to clear the partial grant before trying again."
+                f"Use `{ctx.clean_prefix}wallet revoke` to clear the partial grant before trying again."
             )
             return
         await ctx.send(

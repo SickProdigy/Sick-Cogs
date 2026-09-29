@@ -176,8 +176,10 @@ class WalletTotpManagementModal(discord.ui.Modal, title="Verify authenticator ch
             await self.view.message.edit(view=self.view)
         if self.view.action == "replace":
             message = (
-                "The old authenticator was removed. Immediately run `wallet security 2fa setup` "
-                "to enroll the replacement. Wallet sends use the normal confirmation flow until setup completes."
+                "The old authenticator was removed, so protection is temporarily off. "
+                f"Immediately run `{self.view.command_prefix}wallet security 2fa setup` "
+                "to enroll the replacement. Wallet sends use the normal confirmation flow "
+                "until setup completes."
             )
         elif self.view.action == "disable":
             message = "Authenticator protection was disabled. Wallet authorization and confirmation remain active."
@@ -192,13 +194,14 @@ class WalletTotpManagementModal(discord.ui.Modal, title="Verify authenticator ch
 class WalletTotpManagementView(discord.ui.View):
     """Owner-bound current-factor verification for disable or replacement."""
 
-    def __init__(self, cog, user_id: int, action: str):
+    def __init__(self, cog, user_id: int, action: str, *, command_prefix: str = "!"):
         if action not in {"disable", "replace", "verify"}:
             raise ValueError("Unsupported authenticator management action")
         super().__init__(timeout=180)
         self.cog = cog
         self.user_id = user_id
         self.action = action
+        self.command_prefix = command_prefix
         self.message = None
         self.confirm.label = {
             "replace": "Verify and replace",
