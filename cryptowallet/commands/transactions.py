@@ -831,12 +831,18 @@ class WalletTransactionCommands:
             else:
                 network = NETWORKS.get(await self.config.default_network())
         elif len(arguments) == 3:
-            asset_selector, to_address, amount = arguments
-            default_asset = await self.config.user(ctx.author).default_send_asset()
-            if isinstance(default_asset, dict):
-                network = NETWORKS.get(str(default_asset.get("network") or ""))
+            selector, to_address, amount = arguments
+            selected_network = self._send_network(selector)
+            if selected_network is not None:
+                network = selected_network
+                asset_selector = "native"
             else:
-                network = NETWORKS.get(await self.config.default_network())
+                asset_selector = selector
+                default_asset = await self.config.user(ctx.author).default_send_asset()
+                if isinstance(default_asset, dict):
+                    network = NETWORKS.get(str(default_asset.get("network") or ""))
+                else:
+                    network = NETWORKS.get(await self.config.default_network())
         else:
             asset_selector, network_value, to_address, amount = arguments
             network = self._send_network(network_value)

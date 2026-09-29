@@ -3332,6 +3332,56 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         provider.get_registered_token_asset.assert_awaited_once()
         provider.prepare_transaction.assert_awaited_once()
 
+    async def test_three_argument_network_send_uses_native_asset(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
+        intents = _ApprovalStore()
+        user_config = SimpleNamespace(default_send_asset=_Value(None), intents=intents)
+        provider = SimpleNamespace(
+            supports=lambda network, capability: True,
+            get_native_balance=AsyncMock(return_value=10**18),
+            prepare_transaction=AsyncMock(side_effect=lambda intent: intent),
+        )
+        profile = {
+            "profile_id": "profile-7",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": sender}],
+        }
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                user=lambda user: user_config,
+                token_registry=_Value({}),
+                default_network=_Value(SOLANA_DEVNET.key),
+            ),
+            wallet_provider=provider,
+            _wallet_sensitive_allowed=AsyncMock(return_value=True),
+            _wallet_read_allowed=AsyncMock(return_value=True),
+            _wallet_profile_or_error=AsyncMock(return_value=profile),
+            _account_for_network=lambda stored, network: stored["accounts"][0],
+            _send_network=WalletTransactionCommands._send_network,
+            _send_recipient_address=AsyncMock(return_value=recipient),
+            _send_value_allowed=AsyncMock(return_value=True),
+            expire_and_trim_intents=AsyncMock(),
+            _intent_embed=WalletTransactionCommands._intent_embed,
+            _intent_quote=WalletTransactionCommands._intent_quote,
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7),
+            send=AsyncMock(return_value=SimpleNamespace()),
+            embed_color=AsyncMock(return_value=None),
+        )
+
+        await WalletTransactionCommands.wallet_send.callback(
+            cog, ctx, "base", recipient, "0.000001"
+        )
+
+        stored = TransactionIntent.from_dict(next(iter(intents.data.values())))
+        self.assertEqual(stored.network, BASE_SEPOLIA.key)
+        self.assertEqual(stored.asset_kind, "native")
+        self.assertEqual(stored.asset_symbol, "ETH")
+        self.assertEqual(stored.value_wei, 10**12)
+        provider.get_native_balance.assert_awaited_once_with(sender, BASE_SEPOLIA.key)
+        provider.prepare_transaction.assert_awaited_once()
+
     async def test_empty_send_shows_effective_default_without_provider_read(self):
         user_config = SimpleNamespace(default_send_asset=_Value(None))
         cog = object.__new__(WalletTransactionCommands)
