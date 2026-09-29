@@ -9,6 +9,7 @@ import discord
 from redbot.core import commands
 
 from ..core.models import IntentStatus
+from ..core.provider_manifest import BASE_MAINNET_PROVIDER_MANIFEST
 from ..core.networks import BASE_MAINNET, BASE_SEPOLIA, NETWORKS, NetworkCapability
 from ..core.validation import (
     format_atomic_amount,
@@ -449,6 +450,9 @@ class WalletAdminCommands:
             f"(`{'passed' if chain_ready else 'failed'}`)\n"
             f"Isolated CDP credentials: `{provider_detail}` "
             f"(`{'passed' if provider_ready else 'failed'}`)\n"
+            f"Provider contract: `v{BASE_MAINNET_PROVIDER_MANIFEST.schema_version} / "
+            f"{BASE_MAINNET_PROVIDER_MANIFEST.fingerprint[:12]}` "
+            f"(`{'passed' if diagnostic.get('stage') != 'provider_contract' else 'failed'}`)\n"
             "Transaction submission: `disabled`\n"
             "No wallet, policy, delegation, or transaction was created."
         )

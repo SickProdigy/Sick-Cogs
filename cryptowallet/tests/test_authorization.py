@@ -2,6 +2,7 @@ from pathlib import Path
 import base64
 import copy
 import time
+from dataclasses import replace
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -63,6 +64,11 @@ from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
 from ..core.models import IntentStatus, TransactionIntent
+from ..core.provider_manifest import (
+    BASE_MAINNET_PROVIDER_MANIFEST,
+    validate_base_mainnet_provider_manifest,
+    validate_evm_provider_manifest,
+)
 from ..core.networks import (
     AVALANCHE_FUJI,
     ARBITRUM_SEPOLIA,
@@ -1853,6 +1859,46 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             ),
             profile["accounts"][0],
         )
+
+    def test_base_mainnet_provider_manifest_is_immutable_and_fail_closed(self):
+        manifest = BASE_MAINNET_PROVIDER_MANIFEST
+        self.assertEqual(validate_base_mainnet_provider_manifest(), ())
+        self.assertEqual(manifest.provider_network, "base")
+        self.assertEqual(manifest.chain_id, 8453)
+        self.assertEqual(manifest.owner_relationship_field, "ownerAddresses")
+        self.assertEqual(manifest.required_owner_count, 1)
+        self.assertEqual(manifest.exportable_account_type, "evm-eoa-owner")
+        self.assertFalse(manifest.smart_account_key_exportable)
+        self.assertTrue(manifest.fee_quote_required)
+        self.assertEqual(manifest.executable_capabilities, ())
+        self.assertEqual(len(manifest.fingerprint), 64)
+        int(manifest.fingerprint, 16)
+
+    def test_base_mainnet_provider_manifest_rejects_reviewed_contract_drift(self):
+        cases = (
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, chain_id=1),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, required_owner_count=2),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, smart_account_key_exportable=True),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, fee_quote_required=False),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, operation_statuses=("complete",)),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, executable_capabilities=("send",)),
+        )
+        for changed in cases:
+            with self.subTest(fingerprint=changed.fingerprint):
+                self.assertTrue(validate_evm_provider_manifest(changed, BASE_MAINNET))
+
+    async def test_mainnet_diagnostics_stop_before_credentials_on_manifest_drift(self):
+        bot = SimpleNamespace(get_shared_api_tokens=AsyncMock())
+        provider = CdpWalletProvider(bot)
+        with patch(
+            "cryptowallet.providers.cdp.validate_base_mainnet_provider_manifest",
+            return_value=("chain ID mismatch",),
+        ):
+            result = await provider.mainnet_diagnostics()
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["stage"], "provider_contract")
+        self.assertIn("chain ID mismatch", result["error"])
+        bot.get_shared_api_tokens.assert_not_awaited()
 
     async def test_base_mainnet_preflight_uses_reviewed_rpc_chain_identity(self):
         self.assertIn(BASE_MAINNET.key, EVM_RPC_URLS)

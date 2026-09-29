@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 
 from ..backend.auth import JWT_TOKEN_NAMESPACE
 from ..core.clanker import ClankerDeploymentIntent
+from ..core.provider_manifest import (
+    BASE_MAINNET_PROVIDER_MANIFEST,
+    validate_base_mainnet_provider_manifest,
+)
 from ..core.models import (
     AccountType,
     IntentStatus,
@@ -274,7 +278,15 @@ class CdpWalletProvider(WalletProvider):
         return {"configured": not missing, "missing": missing}
 
     async def mainnet_diagnostics(self) -> dict:
-        """Validate isolated mainnet credentials with one non-mutating project request."""
+        """Validate the pinned provider contract and isolated credentials read-only."""
+        manifest_errors = validate_base_mainnet_provider_manifest()
+        if manifest_errors:
+            return {
+                "ready": False,
+                "stage": "provider_contract",
+                "error": "; ".join(manifest_errors),
+                "manifest": BASE_MAINNET_PROVIDER_MANIFEST.fingerprint,
+            }
         readiness = await self.mainnet_readiness()
         if not readiness["configured"]:
             return {"ready": False, "stage": "configuration", "missing": readiness["missing"]}
@@ -289,7 +301,11 @@ class CdpWalletProvider(WalletProvider):
             await self._api_client(credentials).check_connection()
         except CdpApiError as exc:
             return {"ready": False, "stage": "authentication", "error": str(exc)}
-        return {"ready": True, "stage": "complete"}
+        return {
+            "ready": True,
+            "stage": "complete",
+            "manifest": BASE_MAINNET_PROVIDER_MANIFEST.fingerprint,
+        }
 
     @staticmethod
     def _idempotency_key(profile_id: str) -> str:
