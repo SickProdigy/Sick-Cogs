@@ -3,6 +3,11 @@ from datetime import datetime, timezone
 
 from redbot.core import Config
 
+from .terms import (
+    create_cryptowallet_terms_acceptance,
+    is_current_cryptowallet_terms_acceptance,
+)
+
 from ..core.models import IntentStatus
 from ..core.networks import DEFAULT_NETWORK
 
@@ -112,12 +117,28 @@ def create_config(cog) -> Config:
         security_locked_at=0,
         security_lock_source=None,
         totp_security=None,
+        mainnet_terms_acceptance=None,
     )
     return config
 
 
 class WalletConfigMixin:
     """Stored-data helpers shared by wallet command and relay layers."""
+
+    async def accept_cryptowallet_mainnet_terms(
+        self, user_id: int, *, acceptance_id: str | None = None, now: int | None = None,
+    ) -> dict:
+        """Persist this user's current CryptoWallet-only terms acceptance."""
+        record = create_cryptowallet_terms_acceptance(
+            user_id, acceptance_id=acceptance_id, now=now
+        )
+        await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance.set(record)
+        return record
+
+    async def has_current_cryptowallet_mainnet_terms(self, user_id: int) -> bool:
+        """Check current CryptoWallet terms without consulting another product."""
+        record = await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance()
+        return is_current_cryptowallet_terms_acceptance(record, user_id)
 
     async def reserve_base_mainnet_spend(
         self, user_id: int, intent_id: str, value_atomic: int, *,
