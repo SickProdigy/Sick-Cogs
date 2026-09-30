@@ -28,6 +28,9 @@ evidence must never fall back between environments.
 On 2026-09-30, Base's official RPC reported chain 8453, matching EIP-2470 singleton code, and no
 code at the predicted factory destination. A second trusted RPC check remains required.
 
-Every mainnet authorization flag is false, and no command/provider route can deploy the factory or
-a token. Independent security review, legal review, second-RPC verification, explicit owner canary
+Every mainnet authorization flag is false. The owner-only `mainnetcontrol` command can pause or
+disable immediately; its enable request fails with no state change while external gates remain.
+Conservative immutable canary ceilings permit at most one factory deployment, one token deployment
+per day, fixed gas ceilings, zero native value, and no public/member deployment. No provider route
+can deploy the factory or a token. Independent security review, legal review, second-RPC verification, explicit owner canary
 approval, source verification, evidence recording, and combined test-bot validation remain gates.

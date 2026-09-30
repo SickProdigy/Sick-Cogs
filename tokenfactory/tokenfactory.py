@@ -14,6 +14,7 @@ from redbot.core.bot import Red
 from .constants import CONFIG_IDENTIFIER
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
+from .policy import default_mainnet_limits, validate_mainnet_limits
 from .operations import (
     TOKEN_DEPLOY_GAS_LIMIT,
     TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
@@ -79,6 +80,7 @@ class TokenFactory(commands.Cog):
             mainnet_emergency_paused=True,
             mainnet_manifest_approved=False,
             mainnet_owner_canary_enabled=False,
+            mainnet_limits=default_mainnet_limits(),
         )
 
     def cog_unload(self):
@@ -851,6 +853,27 @@ class TokenFactory(commands.Cog):
             ),
             inline=False,
         )
+        limits = validate_mainnet_limits(await self.config.mainnet_limits())
+        enabled = bool(await self.config.mainnet_deployment_enabled())
+        paused = bool(await self.config.mainnet_emergency_paused())
+        canary = bool(await self.config.mainnet_owner_canary_enabled())
+        embed.add_field(
+            name="Control state",
+            value=(
+                f"Enabled: **{enabled}**\\nPaused: **{paused}**\\n"
+                f"Owner canary: **{canary}**"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Canary ceilings",
+            value=(
+                f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\\n"
+                f"Token deployments/day: **{limits['token_deployments_per_day']}**\\n"
+                f"Token gas: **{limits['token_gas_limit']:,}** | Native value: **0 ETH**"
+            ),
+            inline=False,
+        )
         embed.add_field(
             name="Required gates",
             value=(
@@ -862,6 +885,32 @@ class TokenFactory(commands.Cog):
         )
         embed.set_footer(text="Mainnet deployment remains unavailable and fail-closed")
         await ctx.send(embed=embed)
+
+    @tokenfactoryset.command(name="mainnetcontrol")
+    async def tokenfactoryset_mainnet_control(self, ctx: commands.Context, mode: str):
+        """Pause or request enablement of the gated owner-only mainnet canary."""
+
+        choice = str(mode or "").strip().lower()
+        if choice not in {"enable", "pause", "disable"}:
+            await ctx.send("Choose `enable`, `pause`, or `disable`.")
+            return
+        if choice == "enable":
+            status = mainnet_readiness()
+            await ctx.send(
+                "Base mainnet TokenFactory enablement was rejected with no state "
+                f"change. Manifest: `{status['status']}`; independent audit: "
+                f"**{status['independent_audit']}**. Complete every issue #203 gate "
+                "and update the reviewed manifest before requesting a canary."
+            )
+            return
+        await self.config.mainnet_deployment_enabled.set(False)
+        await self.config.mainnet_emergency_paused.set(True)
+        await self.config.mainnet_owner_canary_enabled.set(False)
+        action = "disabled" if choice == "disable" else "emergency-paused"
+        await ctx.send(
+            f"Base mainnet TokenFactory is **{action}**. No factory or token "
+            "deployment can be submitted."
+        )
 
     @tokenfactoryset.command(name="deployment")
     async def tokenfactoryset_deployment(self, ctx: commands.Context, mode: str):

@@ -6,6 +6,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ..network_manifest import TokenFactoryManifestError, load_network_manifest, mainnet_readiness
+from ..policy import (
+    MAINNET_LIMITS_DEFAULT, TokenFactoryPolicyError,
+    default_mainnet_limits, validate_mainnet_limits,
+)
 from ..tokenfactory import TokenFactory
 
 class TokenFactoryNetworkManifestTests(unittest.TestCase):
@@ -43,14 +47,70 @@ class TokenFactoryNetworkManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(TokenFactoryManifestError, "Unsupported"):
             load_network_manifest("base")
 
+class _AsyncValue:
+    def __init__(self, value):
+        self.value = value
+
+    async def __call__(self):
+        return self.value
+
+    async def set(self, value):
+        self.value = value
+
+
 class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_status_is_read_only_and_discloses_unmet_gates(self):
         ctx = SimpleNamespace(send=AsyncMock())
+        config = SimpleNamespace(
+            mainnet_limits=_AsyncValue(default_mainnet_limits()),
+            mainnet_deployment_enabled=_AsyncValue(False),
+            mainnet_emergency_paused=_AsyncValue(True),
+            mainnet_owner_canary_enabled=_AsyncValue(False),
+        )
         await TokenFactory.tokenfactoryset_mainnet_status.callback(
-            SimpleNamespace(), ctx
+            SimpleNamespace(config=config), ctx
         )
         embed = ctx.send.await_args.kwargs["embed"]
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["Network"], "Base mainnet (`8453`)")
         self.assertIn("required", fields["Required gates"])
         self.assertIn("unavailable", embed.footer.text)
+
+class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def test_limits_are_conservative_and_reject_expansion(self):
+        limits = validate_mainnet_limits(default_mainnet_limits())
+        self.assertEqual(limits["factory_deployments_per_day"], 1)
+        self.assertEqual(limits["token_deployments_per_day"], 1)
+        self.assertEqual(limits["native_value_wei"], 0)
+        expanded = {**MAINNET_LIMITS_DEFAULT, "token_deployments_per_day": 2}
+        with self.assertRaisesRegex(TokenFactoryPolicyError, "ceiling"):
+            validate_mainnet_limits(expanded)
+
+    async def test_enable_is_rejected_without_state_change(self):
+        config = SimpleNamespace(
+            mainnet_deployment_enabled=_AsyncValue(False),
+            mainnet_emergency_paused=_AsyncValue(True),
+            mainnet_owner_canary_enabled=_AsyncValue(False),
+        )
+        ctx = SimpleNamespace(send=AsyncMock())
+        await TokenFactory.tokenfactoryset_mainnet_control.callback(
+            SimpleNamespace(config=config), ctx, "enable"
+        )
+        self.assertFalse(config.mainnet_deployment_enabled.value)
+        self.assertTrue(config.mainnet_emergency_paused.value)
+        self.assertFalse(config.mainnet_owner_canary_enabled.value)
+        self.assertIn("rejected", ctx.send.await_args.args[0])
+
+    async def test_pause_clears_every_execution_flag(self):
+        config = SimpleNamespace(
+            mainnet_deployment_enabled=_AsyncValue(True),
+            mainnet_emergency_paused=_AsyncValue(False),
+            mainnet_owner_canary_enabled=_AsyncValue(True),
+        )
+        ctx = SimpleNamespace(send=AsyncMock())
+        await TokenFactory.tokenfactoryset_mainnet_control.callback(
+            SimpleNamespace(config=config), ctx, "pause"
+        )
+        self.assertFalse(config.mainnet_deployment_enabled.value)
+        self.assertTrue(config.mainnet_emergency_paused.value)
+        self.assertFalse(config.mainnet_owner_canary_enabled.value)

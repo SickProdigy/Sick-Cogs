@@ -22,6 +22,8 @@ deployment is valid.
 [p]tokenfactory deployment <transaction_hash> <recipient_address>
 [p]tokenfactory status
 [p]tokenfactoryset mainnetstatus
+[p]tokenfactoryset mainnetcontrol pause
+[p]tokenfactoryset mainnetcontrol enable
 [p]tokenfactoryset deployment enable
 [p]tokenfactoryset deployment pause
 [p]tokenfactoryset deployment disable
