@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import discord
 from redbot.core import commands
 
+from ..core.environment import WalletEnvironment, parse_wallet_environment
 from ..core.models import IntentStatus
 from ..core.provider_manifest import BASE_MAINNET_PROVIDER_MANIFEST
 from ..core.networks import BASE_MAINNET, BASE_SEPOLIA, NETWORKS, NetworkCapability
@@ -67,6 +68,47 @@ class WalletAdminCommands:
 
         await ctx.send_help()
 
+
+    @walletset.command(name="environment", aliases=("mode",))
+    @commands.is_owner()
+    async def walletset_environment(self, ctx: commands.Context, mode: str = None):
+        """Show or select the installation-wide wallet operating mode."""
+        current = parse_wallet_environment(await self.config.operating_mode())
+        if current is None:
+            current = WalletEnvironment.TESTNET
+        if mode is None:
+            await ctx.send(
+                f"Wallet operating mode: **{current.value}**\n"
+                "Modes: `testnet`, `mainnet`, `mainnet-only`. Changing this mode "
+                "does not enable a mainnet capability or delete hidden network data."
+            )
+            return
+        requested = parse_wallet_environment(mode)
+        if requested is None:
+            await ctx.send("Choose `testnet`, `mainnet`, or `mainnet-only`.")
+            return
+        if requested is not WalletEnvironment.TESTNET:
+            policy = await self.config.base_mainnet_policy()
+            if not isinstance(policy, dict) or not policy.get("enabled") or policy.get("paused", True):
+                await ctx.send(
+                    "No setting changed. Arm the reviewed Base mainnet gate before "
+                    f"selecting `{requested.value}` mode."
+                )
+                return
+        await self.config.operating_mode.set(requested.value)
+        if requested is WalletEnvironment.TESTNET:
+            detail = "Only reviewed testnet networks are presented and routed."
+        elif requested is WalletEnvironment.MAINNET:
+            detail = (
+                "Mainnet is primary; testnet remains available only through explicit "
+                "testnet commands."
+            )
+        else:
+            detail = "Mainnet is primary and testnet commands are rejected."
+        await ctx.send(
+            f"Wallet operating mode set to **{requested.value}**. {detail} "
+            "No wallet or network data was deleted."
+        )
 
     def _wallet_user_id(self, reference: str) -> int | None:
         """Parse a raw Discord snowflake or an actual user mention."""
@@ -394,6 +436,9 @@ class WalletAdminCommands:
     async def walletset_mainnet_status(self, ctx: commands.Context):
         """Show non-secret Base mainnet policy state."""
         policy = await self.config.base_mainnet_policy()
+        operating_mode = parse_wallet_environment(await self.config.operating_mode())
+        if operating_mode is None:
+            operating_mode = WalletEnvironment.TESTNET
         capabilities = policy.get("capabilities") or {}
         enabled_capabilities = sorted(
             name for name, enabled in capabilities.items() if enabled
@@ -413,6 +458,7 @@ class WalletAdminCommands:
             )
         await ctx.send(
             "**Base mainnet experimental gate**\n"
+            f"Operating mode: `{operating_mode.value}`\n"
             f"Gate: `{gate}`\n"
             f"Emergency pause: `{pause}`\n"
             "Access: `bot owner only`\n"
@@ -585,9 +631,11 @@ class WalletAdminCommands:
             policy["experimental"] = True
             policy["enabled_by"] = ctx.author.id
             policy["enabled_at"] = int(time.time())
+        await self.config.operating_mode.set(WalletEnvironment.MAINNET.value)
         await ctx.send(
             "Base mainnet experimental access is armed for bot-owner use only. "
-            "Real funds may be permanently lost."
+            "Wallet operating mode is now `mainnet`; explicit testnet commands remain "
+            "available. Real funds may be permanently lost."
         )
 
     @walletset.command(name="pause")

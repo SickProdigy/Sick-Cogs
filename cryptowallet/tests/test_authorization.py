@@ -63,6 +63,11 @@ from ..commands.admin import TOTP_RESET_ACKNOWLEDGEMENT, WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
 )
+from ..core.environment import (
+    WalletEnvironment,
+    environment_allows_network,
+    parse_wallet_environment,
+)
 from ..core.models import IntentStatus, TransactionIntent
 from ..core.provider_manifest import (
     BASE_MAINNET_PROVIDER_MANIFEST,
@@ -2043,6 +2048,67 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(usage.data["installation_atomic"], "1")
         self.assertEqual(set(usage.data["intents"]), {"intent-next-day"})
 
+    def test_wallet_operating_modes_route_testnet_explicitly(self):
+        self.assertIs(parse_wallet_environment("testnet"), WalletEnvironment.TESTNET)
+        self.assertIs(parse_wallet_environment("mainnet"), WalletEnvironment.MAINNET)
+        self.assertIs(
+            parse_wallet_environment("mainnet-only"), WalletEnvironment.MAINNET_ONLY
+        )
+        self.assertIsNone(parse_wallet_environment("mixed"))
+        self.assertTrue(environment_allows_network(
+            WalletEnvironment.TESTNET, network_is_testnet=True
+        ))
+        self.assertFalse(environment_allows_network(
+            WalletEnvironment.TESTNET, network_is_testnet=False
+        ))
+        self.assertFalse(environment_allows_network(
+            WalletEnvironment.MAINNET, network_is_testnet=True
+        ))
+        self.assertTrue(environment_allows_network(
+            WalletEnvironment.MAINNET, network_is_testnet=True, explicit_testnet=True
+        ))
+        self.assertTrue(environment_allows_network(
+            WalletEnvironment.MAINNET, network_is_testnet=False
+        ))
+        self.assertFalse(environment_allows_network(
+            WalletEnvironment.MAINNET_ONLY, network_is_testnet=True, explicit_testnet=True
+        ))
+
+    async def test_owner_operating_mode_control_is_fail_closed(self):
+        mode = _MutableValue("testnet")
+        policy = _Value({"enabled": False, "paused": True})
+        cog = SimpleNamespace(config=SimpleNamespace(
+            operating_mode=mode, base_mainnet_policy=policy
+        ))
+        ctx = SimpleNamespace(send=AsyncMock())
+
+        await WalletAdminCommands.walletset_environment.callback(cog, ctx, "mainnet")
+        self.assertEqual(mode.value, "testnet")
+        self.assertIn("No setting changed", ctx.send.await_args.args[0])
+
+        policy.value = {"enabled": True, "paused": False}
+        await WalletAdminCommands.walletset_environment.callback(cog, ctx, "mainnet")
+        self.assertEqual(mode.value, "mainnet")
+        self.assertIn("explicit testnet", ctx.send.await_args.args[0])
+
+        await WalletAdminCommands.walletset_environment.callback(cog, ctx, "mainnet-only")
+        self.assertEqual(mode.value, "mainnet-only")
+        self.assertIn("testnet commands are rejected", ctx.send.await_args.args[0])
+
+        policy.value = {"enabled": False, "paused": True}
+        await WalletAdminCommands.walletset_environment.callback(cog, ctx, "testnet")
+        self.assertEqual(mode.value, "testnet")
+
+    async def test_user_mode_is_read_only_installation_status(self):
+        cog = SimpleNamespace(
+            config=SimpleNamespace(operating_mode=_Value("mainnet"))
+        )
+        ctx = SimpleNamespace(send=AsyncMock())
+        await WalletCoreCommands.wallet_mode.callback(cog, ctx)
+        message = ctx.send.await_args.args[0]
+        self.assertIn("mainnet", message)
+        self.assertIn("Only the bot owner", message)
+
     async def test_mainnet_owner_controls_remain_fail_closed(self):
         policy = _ApprovalStore()
         policy.data.update({
@@ -2053,7 +2119,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             "capabilities": {},
         })
         cog = SimpleNamespace(
-            config=SimpleNamespace(base_mainnet_policy=policy)
+            config=SimpleNamespace(
+                base_mainnet_policy=policy, operating_mode=_Value("testnet")
+            )
         )
         ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
 

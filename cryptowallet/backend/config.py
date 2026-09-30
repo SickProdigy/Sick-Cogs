@@ -82,6 +82,7 @@ def create_config(cog) -> Config:
         deployment_id=None,
         approval_base_url=None,
         provider="unconfigured",
+        operating_mode="testnet",
         default_network=DEFAULT_NETWORK,
         provider_paused=False,
         base_mainnet_policy=BASE_MAINNET_POLICY_DEFAULT,

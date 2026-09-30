@@ -6,6 +6,7 @@ from urllib.parse import quote
 import discord
 from redbot.core import commands
 
+from ..core.environment import WalletEnvironment, parse_wallet_environment
 from ..core.networks import (
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
@@ -372,28 +373,24 @@ class WalletCoreCommands:
         await ctx.send(embed=await self._wallet_embed(ctx, profile, network=network))
 
     @wallet.command(name="mode", aliases=("environment",))
-    async def wallet_mode(self, ctx: commands.Context, environment: str = None):
-        """Show wallet mode.
-
-        Shows or selects the wallet environment; live chains remain disabled.
-        """
-        user_config = self.config.user(ctx.author)
-        current = await user_config.selected_environment()
-        if environment is None:
-            await ctx.send(f"Wallet environment: **{current}**")
-            return
-        requested = environment.strip().lower()
-        if requested in {"live", "mainnet"}:
-            await ctx.send(
-                "Live wallet networks are not enabled in this CryptoWallet prototype yet. This restriction is enforced by the cog, not CDP. "
-                "Continue using **testnet** mode until mainnet support is separately reviewed and enabled."
+    async def wallet_mode(self, ctx: commands.Context):
+        """Show the bot owner's installation-wide wallet operating mode."""
+        current = parse_wallet_environment(await self.config.operating_mode())
+        if current is None:
+            current = WalletEnvironment.TESTNET
+        if current is WalletEnvironment.TESTNET:
+            detail = "Only reviewed testnet networks are presented and routed."
+        elif current is WalletEnvironment.MAINNET:
+            detail = (
+                "Mainnet is primary; testnet is available only through explicit "
+                "testnet commands."
             )
-            return
-        if requested not in {"testnet", "test"}:
-            await ctx.send("Choose `testnet` or `live`. Live chains are not available yet.")
-            return
-        await user_config.selected_environment.set("testnet")
-        await ctx.send("Wallet environment set to **testnet**.")
+        else:
+            detail = "Mainnet is primary and testnet commands are disabled."
+        await ctx.send(
+            f"Wallet operating mode: **{current.value}**\n{detail} "
+            "Only the bot owner can change the installation mode."
+        )
 
     @wallet.group(name="token", aliases=("tokens",), invoke_without_command=True)
     async def wallet_token(self, ctx: commands.Context):
