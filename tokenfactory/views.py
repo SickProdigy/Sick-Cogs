@@ -13,6 +13,51 @@ if TYPE_CHECKING:
     from .tokenfactory import TokenFactory
 
 
+class TokenFactoryTermsView(discord.ui.View):
+    """Discord-native, product-specific one-time terms acceptance."""
+
+    def __init__(self, cog: "TokenFactory", user_id: int, terms_url: str | None, *, current: bool):
+        super().__init__(timeout=180)
+        accept_button = self.children[0]
+        self.remove_item(accept_button)
+        if terms_url:
+            self.add_item(discord.ui.Button(
+                label="View terms", style=discord.ButtonStyle.link, url=terms_url
+            ))
+        accept_button.disabled = current
+        if current:
+            accept_button.label = "Terms accepted"
+        self.add_item(accept_button)
+        self.cog = cog
+        self.user_id = int(user_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the account owner can accept these TokenFactory terms.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Accept terms", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        if await self.cog.has_current_mainnet_terms(self.user_id):
+            button.disabled = True
+            button.label = "Terms accepted"
+            await interaction.message.edit(view=self)
+            await interaction.followup.send("Your TokenFactory terms acceptance is already current.", ephemeral=True)
+            return
+        await self.cog.accept_mainnet_terms(self.user_id)
+        button.disabled = True
+        button.label = "Terms accepted"
+        await interaction.message.edit(view=self)
+        await interaction.followup.send(
+            "TokenFactory mainnet terms accepted. This does not deploy a token or authorize a transaction.",
+            ephemeral=True,
+        )
+
+
 def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     """Render a non-executable disclosure of one immutable owner canary."""
 
@@ -144,13 +189,6 @@ class MainnetFactoryApprovalModal(
         min_length=27,
         max_length=27,
     )
-    code = discord.ui.TextInput(
-        label="6-digit authenticator code",
-        placeholder="123456",
-        min_length=6,
-        max_length=6,
-    )
-
     def __init__(self, view: "MainnetFactoryApprovalView"):
         super().__init__(timeout=120)
         self.view = view
@@ -162,7 +200,6 @@ class MainnetFactoryApprovalModal(
                 interaction.user.id,
                 self.view.review_fingerprint,
                 acknowledgement=str(self.acknowledgement.value),
-                totp_code=str(self.code.value),
             )
         except (RuntimeError, ValueError) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
@@ -223,13 +260,6 @@ class MainnetCanaryApprovalModal(
         min_length=len(TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT),
         max_length=len(TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT),
     )
-    code = discord.ui.TextInput(
-        label="6-digit authenticator code",
-        placeholder="123456",
-        min_length=6,
-        max_length=6,
-    )
-
     def __init__(self, view: "MainnetCanaryApprovalView"):
         super().__init__(timeout=120)
         self.view = view
@@ -241,7 +271,6 @@ class MainnetCanaryApprovalModal(
                 interaction.user.id,
                 self.view.review_fingerprint,
                 acknowledgement=str(self.acknowledgement.value),
-                totp_code=str(self.code.value),
             )
         except (RuntimeError, ValueError) as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
@@ -257,7 +286,7 @@ class MainnetCanaryApprovalModal(
 
 
 class MainnetCanaryApprovalView(discord.ui.View):
-    """Owner-bound, TOTP-protected approval for one immutable canary review."""
+    """Owner-bound Discord approval for one immutable canary review."""
 
     def __init__(self, cog: "TokenFactory", owner_id: int, review: MainnetTokenReview):
         super().__init__(timeout=10 * 60)

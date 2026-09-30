@@ -19,7 +19,7 @@ class MainnetCanaryApproval:
     review_fingerprint: str
     approved_at: int
     expires_at: int
-    totp_verified: bool
+    discord_confirmed: bool
     consumed_at: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -32,7 +32,7 @@ class MainnetCanaryApproval:
             review_fingerprint=str(data["review_fingerprint"]),
             approved_at=int(data["approved_at"]),
             expires_at=int(data["expires_at"]),
-            totp_verified=data.get("totp_verified") is True,
+            discord_confirmed=data.get("discord_confirmed") is True,
             consumed_at=(
                 None if data.get("consumed_at") is None
                 else int(data["consumed_at"])
@@ -44,22 +44,22 @@ def create_mainnet_canary_approval(
     review: MainnetTokenReview,
     owner_discord_id: int,
     *,
-    totp_verified: bool,
+    discord_confirmed: bool,
     now: int | None = None,
 ) -> MainnetCanaryApproval:
     timestamp = int(time.time() if now is None else now)
     if int(owner_discord_id) != review.owner_discord_id:
         raise ValueError("The approving owner does not match the reviewed canary.")
-    if totp_verified is not True:
+    if discord_confirmed is not True:
         raise ValueError(
-            "Authenticator verification is required for the mainnet canary."
+            "Discord confirmation is required for the mainnet canary."
         )
     return MainnetCanaryApproval(
         owner_discord_id=int(owner_discord_id),
         review_fingerprint=review.fingerprint,
         approved_at=timestamp,
         expires_at=timestamp + APPROVAL_LIFETIME_SECONDS,
-        totp_verified=True,
+        discord_confirmed=True,
     )
 
 
@@ -85,7 +85,7 @@ def consume_mainnet_canary_approval(
         review_fingerprint=approval.review_fingerprint,
         approved_at=approval.approved_at,
         expires_at=approval.expires_at,
-        totp_verified=approval.totp_verified,
+        discord_confirmed=approval.discord_confirmed,
         consumed_at=timestamp,
     )
 
@@ -110,7 +110,7 @@ def revalidate_mainnet_pre_submission(
     timestamp = int(time.time() if now is None else now)
     reviewed_limits = validate_mainnet_limits(limits)
     manifest = load_network_manifest(BASE_MAINNET_NETWORK_KEY)
-    if approval.totp_verified is not True or approval.consumed_at is not None:
+    if approval.discord_confirmed is not True or approval.consumed_at is not None:
         raise ValueError(
             "The protected canary approval is missing or already consumed."
         )

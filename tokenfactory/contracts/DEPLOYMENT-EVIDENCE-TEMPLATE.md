@@ -12,7 +12,7 @@ not authorize a transaction.
 - Outside-counsel reference if an issue #228 trigger applies:
 - Explicit owner authorization reference and timestamp:
 - Approved factory review fingerprint:
-- TOTP-protected approval timestamp/expiry:
+- Discord-confirmed approval timestamp/expiry:
 - Factory attempt ID:
 - Token-canary review fingerprint:
 - Token-canary attempt ID:

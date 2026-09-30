@@ -57,6 +57,7 @@ from .views import (
     MainnetCanaryApprovalView,
     MainnetFactoryApprovalView,
     TokenFactoryDraftView,
+    TokenFactoryTermsView,
 )
 
 
@@ -64,7 +65,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.7"
+    __version__ = "1.1.8"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
@@ -170,7 +171,6 @@ class TokenFactory(commands.Cog):
         review_fingerprint: str,
         *,
         acknowledgement: str,
-        totp_code: str,
     ) -> MainnetCanaryApproval:
         """Record a short-lived protected approval; never submit an operation."""
 
@@ -194,18 +194,6 @@ class TokenFactory(commands.Cog):
             raise RuntimeError(
                 "Current TokenFactory mainnet terms must be accepted before this approval."
             )
-        wallet = self._cryptowallet()
-        if not await wallet.user_totp_enabled(owner_discord_id):
-            raise RuntimeError(
-                "Authenticator protection must be enabled before approving a mainnet canary."
-            )
-        if not await wallet.verify_user_totp(
-            owner_discord_id, totp_code, now=int(time.time())
-        ):
-            raise ValueError(
-                "That authenticator code is invalid, expired, or already used. "
-                "Nothing was approved."
-            )
         current_data = await self.config.mainnet_pending_review()
         try:
             current = MainnetTokenReview.from_dict(current_data)
@@ -220,7 +208,7 @@ class TokenFactory(commands.Cog):
         approval = create_mainnet_canary_approval(
             current,
             owner_discord_id,
-            totp_verified=True,
+            discord_confirmed=True,
             now=int(time.time()),
         )
         await self.config.mainnet_canary_approval.set(approval.to_dict())
@@ -349,7 +337,6 @@ class TokenFactory(commands.Cog):
         review_fingerprint: str,
         *,
         acknowledgement: str,
-        totp_code: str,
     ) -> MainnetCanaryApproval:
         """Record a protected factory approval without submitting anything."""
 
@@ -372,19 +359,6 @@ class TokenFactory(commands.Cog):
             raise ValueError(
                 "The mainnet factory review changed or belongs to another owner."
             )
-        wallet = self._cryptowallet()
-        if not await wallet.user_totp_enabled(owner_discord_id):
-            raise RuntimeError(
-                "Authenticator protection must be enabled before approving "
-                "the mainnet factory."
-            )
-        if not await wallet.verify_user_totp(
-            owner_discord_id, totp_code, now=int(time.time())
-        ):
-            raise ValueError(
-                "That authenticator code is invalid, expired, or already used. "
-                "Nothing was approved."
-            )
         current_data = await self.config.mainnet_factory_pending_review()
         try:
             current = MainnetFactoryReview.from_dict(current_data)
@@ -399,7 +373,7 @@ class TokenFactory(commands.Cog):
         approval = create_mainnet_canary_approval(
             current,
             owner_discord_id,
-            totp_verified=True,
+            discord_confirmed=True,
             now=int(time.time()),
         )
         await self.config.mainnet_factory_approval.set(approval.to_dict())
@@ -1097,22 +1071,39 @@ class TokenFactory(commands.Cog):
 
     @tokenfactory.command(name="terms")
     async def tokenfactory_terms(self, ctx: commands.Context):
-        """Show TokenFactory-only mainnet terms and acceptance status."""
+        """Show and accept TokenFactory-only mainnet terms in Discord."""
         current = await self.has_current_mainnet_terms(ctx.author.id)
-        page = "The TokenFactory terms page is not configured on this bot."
+        terms_url = None
         wallet = self.bot.get_cog("CryptoWallet")
         if wallet is not None:
             base_url = str(await wallet.config.approval_base_url() or "").rstrip("/")
             if base_url:
-                page = f"[Open TokenFactory terms]({base_url}/tokenfactory-terms.html)"
+                terms_url = f"{base_url}/tokenfactory-terms.html"
+        embed = discord.Embed(
+            title="TokenFactory Mainnet Terms",
+            description=(
+                f"Acceptance: **{'Current' if current else 'Not accepted'}**\n"
+                "Required once per material terms version before Base mainnet token creation. "
+                "Base Sepolia is unchanged."
+            ),
+            color=discord.Color.green() if current else discord.Color.blurple(),
+        )
+        embed.add_field(name="Terms version", value=f"`{TOKENFACTORY_MAINNET_TERMS_VERSION}`")
+        embed.add_field(
+            name="In short",
+            value=(
+                "You choose and create the token, pay network gas, and are responsible for "
+                "its legality and use. Deployment is irreversible. SickGaming charges no "
+                "TokenFactory service fee and does not sponsor, market, or provide liquidity."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Acceptance does not deploy a token or authorize a transaction.")
         await ctx.send(
-            "**TokenFactory mainnet terms**\n"
-            f"Version: `{TOKENFACTORY_MAINNET_TERMS_VERSION}`\n"
-            f"Your acceptance: **{'current' if current else 'not accepted'}**\n"
-            "Required only before your first Base mainnet token deployment. "
-            "Base Sepolia drafts and deployments are unchanged.\n"
-            f"{page}\n"
-            "Viewing the page does not accept terms or approve a deployment."
+            embed=embed,
+            view=TokenFactoryTermsView(
+                self, ctx.author.id, terms_url, current=current
+            ),
         )
 
     @tokenfactory.command(name="create", aliases=("card",))

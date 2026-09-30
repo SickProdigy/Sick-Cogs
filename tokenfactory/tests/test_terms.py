@@ -40,7 +40,7 @@ class TokenFactoryTermsRecordTests(unittest.TestCase):
 
 
 class TokenFactoryTermsCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_command_is_reference_only_and_product_specific(self):
+    async def test_command_has_view_and_green_accept_controls(self):
         ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
         wallet = SimpleNamespace(config=SimpleNamespace(
             approval_base_url=AsyncMock(return_value="https://wallet.example/")
@@ -50,11 +50,42 @@ class TokenFactoryTermsCommandTests(unittest.IsolatedAsyncioTestCase):
             has_current_mainnet_terms=AsyncMock(return_value=False),
         )
         await TokenFactory.tokenfactory_terms.callback(cog, ctx)
-        message = ctx.send.await_args.args[0]
-        self.assertIn("TokenFactory mainnet terms", message)
-        self.assertIn("tokenfactory-terms.html", message)
-        self.assertIn("Base Sepolia", message)
-        self.assertIn("does not accept", message)
+        embed = ctx.send.await_args.kwargs["embed"]
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIn("Acceptance: **Not accepted**", embed.description)
+        self.assertIn("pay network gas", embed.fields[1].value)
+        self.assertEqual([item.label for item in view.children], ["View terms", "Accept terms"])
+        self.assertEqual(view.children[1].style.name, "success")
+
+    async def test_green_button_records_acceptance_directly_in_discord(self):
+        from ..views import TokenFactoryTermsView
+        cog = SimpleNamespace(
+            has_current_mainnet_terms=AsyncMock(return_value=False),
+            accept_mainnet_terms=AsyncMock(return_value={"product": "tokenfactory"}),
+        )
+        view = TokenFactoryTermsView(cog, 42, None, current=False)
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=42),
+            response=SimpleNamespace(defer=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        await view.children[0].callback(interaction)
+        cog.accept_mainnet_terms.assert_awaited_once_with(42)
+        self.assertEqual(view.children[0].label, "Terms accepted")
+        self.assertTrue(view.children[0].disabled)
+        interaction.message.edit.assert_awaited_once_with(view=view)
+
+    async def test_current_acceptance_is_disabled_and_never_unaccepted(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
+        cog = SimpleNamespace(
+            bot=SimpleNamespace(get_cog=lambda name: None),
+            has_current_mainnet_terms=AsyncMock(return_value=True),
+        )
+        await TokenFactory.tokenfactory_terms.callback(cog, ctx)
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertEqual([item.label for item in view.children], ["Terms accepted"])
+        self.assertTrue(view.children[0].disabled)
 
     def test_page_excludes_other_product_acceptance(self):
         from pathlib import Path

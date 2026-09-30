@@ -39,7 +39,7 @@ class MainnetFactorySecurityTests(unittest.TestCase):
             limits=default_mainnet_limits(),
         )
         self.approval = create_mainnet_canary_approval(
-            self.review, 7, totp_verified=True, now=1_000
+            self.review, 7, discord_confirmed=True, now=1_000
         )
         self.operation = factory_operation(
             self.creation_code, network="base-mainnet"
@@ -229,10 +229,6 @@ class MainnetFactoryProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
             gas_payer="Bot-owner canary smart account",
             limits=default_mainnet_limits(),
         )
-        self.wallet = SimpleNamespace(
-            user_totp_enabled=AsyncMock(return_value=True),
-            verify_user_totp=AsyncMock(return_value=True),
-        )
         self.config = SimpleNamespace(
             mainnet_factory_pending_review=_AsyncValue(
                 self.review.to_dict()
@@ -241,32 +237,27 @@ class MainnetFactoryProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.subject = SimpleNamespace(
             config=self.config,
-            _cryptowallet=lambda: self.wallet,
         )
 
-    async def test_exact_factory_acknowledgement_and_totp_are_required(self):
+    async def test_exact_factory_acknowledgement_is_required(self):
         approval = await TokenFactory.approve_mainnet_factory_review(
             self.subject,
             7,
             self.review.fingerprint,
             acknowledgement="DEPLOY BASE MAINNET FACTORY",
-            totp_code="123456",
         )
-        self.assertTrue(approval.totp_verified)
+        self.assertTrue(approval.discord_confirmed)
         self.assertEqual(
             self.config.mainnet_factory_approval.value,
             approval.to_dict(),
         )
-        self.wallet.verify_user_totp.assert_awaited_once()
 
-    async def test_bad_factory_acknowledgement_does_not_consume_totp(self):
+    async def test_bad_factory_acknowledgement_records_no_approval(self):
         with self.assertRaisesRegex(ValueError, "acknowledgement"):
             await TokenFactory.approve_mainnet_factory_review(
                 self.subject,
                 7,
                 self.review.fingerprint,
                 acknowledgement="DEPLOY",
-                totp_code="123456",
             )
-        self.wallet.verify_user_totp.assert_not_awaited()
         self.assertIsNone(self.config.mainnet_factory_approval.value)

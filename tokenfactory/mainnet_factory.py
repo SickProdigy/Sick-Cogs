@@ -154,7 +154,7 @@ def revalidate_mainnet_factory_pre_submission(
     timestamp = int(time.time() if now is None else now)
     reviewed_limits = validate_mainnet_limits(limits)
     manifest = load_network_manifest(BASE_MAINNET_NETWORK_KEY)
-    if approval.totp_verified is not True or approval.consumed_at is not None:
+    if approval.discord_confirmed is not True or approval.consumed_at is not None:
         raise ValueError("The protected factory approval is missing or consumed.")
     if timestamp < approval.approved_at or timestamp >= approval.expires_at:
         raise ValueError("The protected factory approval has expired.")

@@ -41,7 +41,7 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
             limits=default_mainnet_limits(),
         )
         self.approval = create_mainnet_canary_approval(
-            self.review, 7, totp_verified=True, now=1_000
+            self.review, 7, discord_confirmed=True, now=1_000
         )
         self.operation = token_operation(
             self.draft,
@@ -66,14 +66,14 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
             "now": 1_001,
         }
 
-    def test_protected_approval_requires_matching_owner_and_totp(self):
+    def test_protected_approval_requires_matching_owner_and_confirmation(self):
         with self.assertRaisesRegex(ValueError, "owner"):
             create_mainnet_canary_approval(
-                self.review, 8, totp_verified=True, now=1_000
+                self.review, 8, discord_confirmed=True, now=1_000
             )
-        with self.assertRaisesRegex(ValueError, "Authenticator"):
+        with self.assertRaisesRegex(ValueError, "Discord confirmation"):
             create_mainnet_canary_approval(
-                self.review, 7, totp_verified=False, now=1_000
+                self.review, 7, discord_confirmed=False, now=1_000
             )
 
     def test_valid_review_passes_immediate_pre_submission_checks(self):
@@ -191,10 +191,6 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             gas_payer="Bot-owner canary smart account",
             limits=default_mainnet_limits(),
         )
-        self.wallet = SimpleNamespace(
-            user_totp_enabled=AsyncMock(return_value=True),
-            verify_user_totp=AsyncMock(return_value=True),
-        )
         self.config = SimpleNamespace(
             mainnet_pending_review=_AsyncValue(self.review.to_dict()),
             mainnet_canary_approval=_AsyncValue(None),
@@ -202,38 +198,33 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.subject = SimpleNamespace(
             config=self.config,
             has_current_mainnet_terms=AsyncMock(return_value=True),
-            _cryptowallet=lambda: self.wallet,
         )
 
-    async def test_exact_acknowledgement_and_totp_record_short_lived_approval(self):
+    async def test_exact_acknowledgement_records_short_lived_approval(self):
         approval = await TokenFactory.approve_mainnet_canary_review(
             self.subject,
             7,
             self.review.fingerprint,
             acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
-            totp_code="123456",
         )
-        self.assertTrue(approval.totp_verified)
+        self.assertTrue(approval.discord_confirmed)
         self.assertEqual(approval.review_fingerprint, self.review.fingerprint)
         self.assertEqual(
             self.config.mainnet_canary_approval.value,
             approval.to_dict(),
         )
-        self.wallet.verify_user_totp.assert_awaited_once()
 
-    async def test_bad_acknowledgement_never_consumes_totp(self):
+    async def test_bad_acknowledgement_records_no_approval(self):
         with self.assertRaisesRegex(ValueError, "acknowledgement"):
             await TokenFactory.approve_mainnet_canary_review(
                 self.subject,
                 7,
                 self.review.fingerprint,
                 acknowledgement="yes",
-                totp_code="123456",
             )
-        self.wallet.verify_user_totp.assert_not_awaited()
         self.assertIsNone(self.config.mainnet_canary_approval.value)
 
-    async def test_missing_current_terms_fails_before_totp(self):
+    async def test_missing_current_terms_records_no_approval(self):
         self.subject.has_current_mainnet_terms.return_value = False
         with self.assertRaisesRegex(RuntimeError, "terms must be accepted"):
             await TokenFactory.approve_mainnet_canary_review(
@@ -241,29 +232,5 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
                 7,
                 self.review.fingerprint,
                 acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
-                totp_code="123456",
-            )
-        self.wallet.verify_user_totp.assert_not_awaited()
-        self.assertIsNone(self.config.mainnet_canary_approval.value)
-
-    async def test_missing_or_invalid_totp_fails_closed(self):
-        self.wallet.user_totp_enabled.return_value = False
-        with self.assertRaisesRegex(RuntimeError, "must be enabled"):
-            await TokenFactory.approve_mainnet_canary_review(
-                self.subject,
-                7,
-                self.review.fingerprint,
-                acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
-                totp_code="123456",
-            )
-        self.wallet.user_totp_enabled.return_value = True
-        self.wallet.verify_user_totp.return_value = False
-        with self.assertRaisesRegex(ValueError, "invalid"):
-            await TokenFactory.approve_mainnet_canary_review(
-                self.subject,
-                7,
-                self.review.fingerprint,
-                acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
-                totp_code="000000",
             )
         self.assertIsNone(self.config.mainnet_canary_approval.value)
