@@ -1993,6 +1993,96 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue((await provider.mainnet_readiness())["configured"])
         self.assertFalse((await provider.readiness())["configured"])
+        mainnet = await provider.credentials_for_network(BASE_MAINNET.key)
+        testnet = await provider.credentials_for_network(BASE_SEPOLIA.key)
+        self.assertEqual(mainnet.project_id, "main-project")
+        self.assertIsNone(testnet)
+
+    async def test_mainnet_delegation_uses_only_mainnet_profile_and_credentials(self):
+        main_address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        test_address = "0xE338aDC6468484f2C6da16647B7154407661c371"
+        owner = "0x1111111111111111111111111111111111111111"
+        profile = {
+            "profile_id": "main-profile-7", "provider_user_id": "main-profile-7",
+            "accounts": [
+                {"network": BASE_MAINNET.key, "address": main_address},
+                {"network": BASE_SEPOLIA.key, "address": test_address},
+            ],
+        }
+        tokens = {
+            "cryptowallet_cdp_mainnet": {
+                "project_id": "main-project", "api_key_id": "main-key",
+                "api_key_secret": "main-secret", "wallet_secret": "main-wallet",
+            },
+            "cryptowallet_cdp": {
+                "project_id": "test-project", "api_key_id": "test-key",
+                "api_key_secret": "test-secret", "wallet_secret": "test-wallet",
+            },
+            "cryptowallet_jwt": {"kid": "deployment-key"},
+        }
+        bot = SimpleNamespace(get_shared_api_tokens=AsyncMock(
+            side_effect=lambda namespace: tokens.get(namespace, {})
+        ))
+        client = SimpleNamespace(
+            get_end_user=AsyncMock(return_value={
+                "userId": "main-profile-7",
+                "evmAccountObjects": [{"address": owner}],
+                "evmSmartAccountObjects": [{
+                    "address": main_address, "ownerAddresses": [owner],
+                }],
+                "solanaAccountObjects": [],
+            }),
+            get_user_delegation=AsyncMock(return_value={
+                "expiresAt": "2099-01-01T00:00:00Z",
+            }),
+            get_account_delegation=AsyncMock(),
+        )
+        provider = CdpWalletProvider(bot)
+        provider._api_client = lambda credentials: client
+
+        status = await provider.get_delegation_status(profile, BASE_MAINNET.key)
+
+        self.assertTrue(status["active"])
+        client.get_user_delegation.assert_awaited_once_with(
+            "main-profile-7", "main-project"
+        )
+        client.get_account_delegation.assert_not_awaited()
+        namespaces = [call.args[0] for call in bot.get_shared_api_tokens.await_args_list]
+        self.assertIn("cryptowallet_cdp_mainnet", namespaces)
+        self.assertNotIn("cryptowallet_cdp", namespaces)
+
+    async def test_mainnet_final_preflight_uses_isolated_contract(self):
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        profile = {
+            "profile_id": "main-profile-7", "provider_user_id": "main-profile-7",
+            "accounts": [{"network": BASE_MAINNET.key, "address": address}],
+        }
+        intent = TransactionIntent(
+            intent_id="main-preflight-7", profile_id="main-profile-7",
+            network=BASE_MAINNET.key, from_address=address,
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+            estimated_gas_fee_wei=10, max_gas_fee_wei=20,
+            gas_sponsored=False,
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.supports = lambda network, capability: network == BASE_MAINNET.key
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="main-project")
+        )
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        with patch(
+            "cryptowallet.providers.cdp.get_chain_id",
+            AsyncMock(return_value=BASE_MAINNET.chain_id),
+        ):
+            result = await provider.validate_pre_submission(profile, intent)
+
+        self.assertEqual(result["network"], BASE_MAINNET.key)
+        self.assertEqual(result["chain_id"], BASE_MAINNET.chain_id)
+        provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
+        provider.get_delegation_status.assert_awaited_once_with(
+            profile, BASE_MAINNET.key
+        )
 
     def test_mainnet_policy_requires_every_gate_and_limit(self):
         policy = copy.deepcopy(BASE_MAINNET_POLICY_DEFAULT)

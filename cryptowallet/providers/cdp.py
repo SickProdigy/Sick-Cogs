@@ -22,6 +22,7 @@ from ..core.networks import (
     AVALANCHE_FUJI,
     ChainFamily,
     ARBITRUM_SEPOLIA,
+    BASE_MAINNET,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     POLYGON_AMOY,
@@ -227,12 +228,25 @@ class CdpWalletProvider(WalletProvider):
         self.request_limiter = request_limiter
         self.request_observer = request_observer
 
-    async def credentials(self) -> CdpCredentials | None:
-        tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
+    async def _credentials_from_namespace(
+        self, namespace: str
+    ) -> CdpCredentials | None:
+        tokens = await self.bot.get_shared_api_tokens(namespace)
         jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
         combined = dict(tokens)
         combined["jwt_kid"] = jwt_tokens.get("kid")
         return CdpCredentials.from_tokens(combined)
+
+    async def credentials(self) -> CdpCredentials | None:
+        return await self._credentials_from_namespace(CDP_TOKEN_NAMESPACE)
+
+    async def credentials_for_network(
+        self, network: str
+    ) -> CdpCredentials | None:
+        """Select credentials without falling back across environment boundaries."""
+        if network == BASE_MAINNET.key:
+            return await self._credentials_from_namespace(CDP_MAINNET_TOKEN_NAMESPACE)
+        return await self.credentials()
 
     async def readiness(self) -> dict:
         tokens = await self.bot.get_shared_api_tokens(CDP_TOKEN_NAMESPACE)
@@ -636,7 +650,7 @@ class CdpWalletProvider(WalletProvider):
         for account in profile.get("accounts") or []:
             network = account.get("network")
             address = str(account.get("address") or "")
-            if network == BASE_SEPOLIA.key:
+            if network in {BASE_SEPOLIA.key, BASE_MAINNET.key}:
                 stored = normalize_evm_address(address)
                 matched = next(
                     (item for item in smart_accounts
@@ -662,16 +676,28 @@ class CdpWalletProvider(WalletProvider):
 
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
         """Read a legacy profile grant or the complete account-scoped grant set."""
-        if network not in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}:
+        if network not in {BASE_SEPOLIA.key, BASE_MAINNET.key, SOLANA_DEVNET.key}:
             raise WalletProviderError("Delegation lookup uses the wallet profile scope.")
         provider_user_id = str(profile.get("provider_user_id") or "")
+        environment_networks = (
+            {BASE_MAINNET.key}
+            if network == BASE_MAINNET.key
+            else {BASE_SEPOLIA.key, SOLANA_DEVNET.key}
+        )
+        scoped_profile = {
+            **profile,
+            "accounts": [
+                item for item in profile.get("accounts") or []
+                if item.get("network") in environment_networks
+            ],
+        }
         accounts = [
-            str(item.get("address") or "") for item in profile.get("accounts") or []
-            if item.get("network") in {BASE_SEPOLIA.key, SOLANA_DEVNET.key}
+            str(item.get("address") or "")
+            for item in scoped_profile["accounts"]
         ]
         if not provider_user_id or not accounts or any(not address for address in accounts):
             raise WalletProviderError("The stored wallet profile is incomplete.")
-        credentials = await self.credentials()
+        credentials = await self.credentials_for_network(network)
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
@@ -679,7 +705,7 @@ class CdpWalletProvider(WalletProvider):
             end_user = await client.get_end_user(provider_user_id)
             if str(end_user.get("userId") or "") != provider_user_id:
                 raise ValueError("CDP returned a different end user")
-            accounts = self._delegation_addresses(end_user, profile)
+            accounts = self._delegation_addresses(end_user, scoped_profile)
             delegation = await client.get_user_delegation(
                 provider_user_id, credentials.project_id
             )
@@ -1311,10 +1337,16 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "The final wallet profile or sender binding changed."
             )
-        credentials = await self.credentials()
+        if network.key == BASE_MAINNET.key:
+            manifest_errors = validate_base_mainnet_provider_manifest()
+            if manifest_errors:
+                raise WalletProviderError(
+                    "The reviewed Base mainnet provider contract changed."
+                )
+        credentials = await self.credentials_for_network(network.key)
         if credentials is None:
             raise WalletProviderError(
-                "CDP credentials are not completely configured."
+                "CDP credentials are not completely configured for this environment."
             )
         chain_id = None
         if network.family is ChainFamily.EVM:

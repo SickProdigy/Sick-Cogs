@@ -44,7 +44,7 @@ Intent IDs, stored pending state, owner-bound views, expiry, exact quote compari
 
 ### Provider, RPC, and chain disagreement
 
-Provider status or public RPC data may be stale, unavailable, or malicious. Network identity is explicit and capabilities fail closed. Mainnet remains prohibited until independent chain ID, nonce, fee, operation, balance, receipt/finality, replacement, and reorg handling are implemented and tested.
+Provider status or public RPC data may be stale, unavailable, or malicious. Network identity is explicit and capabilities fail closed. Final validation independently binds chain ID, provider-managed nonce strategy, fee policy, operation state, balance, authorization, and environment-isolated provider identity; confirmation independently handles public receipts, finality, replacement, and reorg evidence. Mainnet remains prohibited while its executable network capabilities are empty and until the remaining legal and release gates are complete.
 
 ### Credential leakage
 
