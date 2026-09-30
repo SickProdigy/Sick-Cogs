@@ -1,7 +1,9 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from ..backend.config import WalletConfigMixin
+from ..commands.core import WalletCoreCommands
 from ..backend.terms import (
     CRYPTOWALLET_MAINNET_TERMS_VERSION,
     create_cryptowallet_terms_acceptance,
@@ -86,3 +88,43 @@ class CryptoWalletTermsStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record, wallet.config.users[42].mainnet_terms_acceptance.value)
         self.assertTrue(await wallet.has_current_cryptowallet_mainnet_terms(42))
         self.assertFalse(await wallet.has_current_cryptowallet_mainnet_terms(43))
+
+
+class CryptoWalletTermsCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reference_command_reports_current_acceptance_and_link(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=42),
+            send=AsyncMock(),
+        )
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=AsyncMock(return_value="https://wallet.example/")
+            ),
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=True),
+            _wallet_environment=AsyncMock(return_value=__import__(
+                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
+            ).WalletEnvironment.MAINNET),
+        )
+        await WalletCoreCommands.wallet_terms.callback(cog, ctx)
+        message = ctx.send.await_args.args[0]
+        self.assertIn("Your acceptance: **current**", message)
+        self.assertIn("https://wallet.example/wallet-terms.html", message)
+        self.assertIn("Viewing the page does not accept", message)
+
+    async def test_reference_command_does_not_require_or_provision_testnet_wallet(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=42),
+            send=AsyncMock(),
+        )
+        cog = SimpleNamespace(
+            config=SimpleNamespace(approval_base_url=AsyncMock(return_value=None)),
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
+            _wallet_environment=AsyncMock(return_value=__import__(
+                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
+            ).WalletEnvironment.TESTNET),
+        )
+        await WalletCoreCommands.wallet_terms.callback(cog, ctx)
+        message = ctx.send.await_args.args[0]
+        self.assertIn("Your acceptance: **not accepted**", message)
+        self.assertIn("Not required for testnet use.", message)
+        self.assertIn("not configured", message)

@@ -17,6 +17,7 @@ from ..core.networks import (
     resolve_network,
 )
 from ..providers import WalletProviderError
+from ..backend.terms import CRYPTOWALLET_MAINNET_TERMS_VERSION
 from ..core.validation import format_atomic_amount
 from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
 from .views import (
@@ -400,6 +401,31 @@ class WalletCoreCommands:
             await ctx.send_help(ctx.command)
             return
         raise error
+
+    @wallet.command(name="terms")
+    async def wallet_terms(self, ctx: commands.Context):
+        """Show the current CryptoWallet terms and acceptance status."""
+        base_url = str(await self.config.approval_base_url() or "").rstrip("/")
+        current = await self.has_current_cryptowallet_mainnet_terms(ctx.author.id)
+        environment = await self._wallet_environment()
+        status = "current" if current else "not accepted"
+        requirement = (
+            "Required before mainnet signing is enabled for your account."
+            if environment is not WalletEnvironment.TESTNET
+            else "Not required for testnet use."
+        )
+        if base_url:
+            terms = f"[Open CryptoWallet terms]({base_url}/wallet-terms.html)"
+        else:
+            terms = "The CryptoWallet terms page is not configured on this bot."
+        await ctx.send(
+            f"**CryptoWallet terms**\n"
+            f"Version: `{CRYPTOWALLET_MAINNET_TERMS_VERSION}`\n"
+            f"Your acceptance: **{status}**\n"
+            f"{requirement}\n"
+            f"{terms}\n"
+            "Viewing the page does not accept the terms or authorize transactions."
+        )
 
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context, network_key: str = None):
