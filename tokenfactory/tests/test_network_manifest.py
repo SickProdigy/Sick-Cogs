@@ -72,6 +72,8 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
             mainnet_owner_canary_enabled=_AsyncValue(False),
             mainnet_canary_lifecycle=_AsyncValue(None),
             mainnet_canary_evidence=_AsyncValue(None),
+            mainnet_factory_lifecycle=_AsyncValue(None),
+            mainnet_factory_evidence=_AsyncValue(None),
         )
         await TokenFactory.tokenfactoryset_mainnet_status.callback(
             SimpleNamespace(config=config), ctx
@@ -82,7 +84,8 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("required", fields["Required gates"])
         self.assertIn("cross-check: **complete**", fields["Required gates"])
         self.assertNotIn(r"\n", "".join(fields.values()))
-        self.assertIn("not started", fields["Canary lifecycle"])
+        self.assertIn("not started", fields["Factory lifecycle"])
+        self.assertIn("not started", fields["Token canary lifecycle"])
         self.assertIn("unavailable", embed.footer.text)
 
 class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
@@ -130,6 +133,12 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
             mainnet_owner_canary_enabled=_AsyncValue(True),
             mainnet_pending_review=_AsyncValue({"fingerprint": "pending"}),
             mainnet_canary_approval=_AsyncValue({"fingerprint": "approved"}),
+            mainnet_factory_pending_review=_AsyncValue(
+                {"fingerprint": "factory-pending"}
+            ),
+            mainnet_factory_approval=_AsyncValue(
+                {"fingerprint": "factory-approved"}
+            ),
         )
         ctx = SimpleNamespace(send=AsyncMock())
         await TokenFactory.tokenfactoryset_mainnet_control.callback(
@@ -140,3 +149,5 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(config.mainnet_owner_canary_enabled.value)
         self.assertIsNone(config.mainnet_pending_review.value)
         self.assertIsNone(config.mainnet_canary_approval.value)
+        self.assertIsNone(config.mainnet_factory_pending_review.value)
+        self.assertIsNone(config.mainnet_factory_approval.value)

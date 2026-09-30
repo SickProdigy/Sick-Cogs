@@ -45,6 +45,16 @@ factory runtime hash, signer authorization, current policy, and absence of any e
 operation. These components remain unreachable from a deployment command until the external gates
 are complete.
 
+The deterministic factory deployment has its own review, approval, lifecycle, and evidence
+records, separate from the later token canary. Its protected card binds the canonical singleton,
+predicted factory, creation code, deployment calldata, signer, gas ceiling/payer, zero native value,
+and an independent fingerprint. Immediately before any future submission it must recheck chain
+8453, the singleton runtime pin, the still-empty predicted destination, authorization, fee policy,
+and absence of a provider operation. Its approval requires the distinct
+`DEPLOY BASE MAINNET FACTORY` acknowledgement plus a fresh TOTP code. Two-provider confirmation
+must agree on the receipt, calldata, signer, singleton runtime, predicted address, factory runtime,
+block, and the absence of ownership or upgrade authority.
+
 A separate persistent lifecycle permits only reviewed transitions across prepared, processing,
 submitted, uncertain, timed-out, confirmed, failed, dropped, and replaced states. The review
 fingerprint, request ID, attempt ID, provider operation, and transaction identifiers cannot drift

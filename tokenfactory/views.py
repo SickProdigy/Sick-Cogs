@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from .constants import DEFAULT_DECIMALS
+from .mainnet_factory import MainnetFactoryReview
 from .mainnet_review import MainnetTokenReview
 from .models import TokenDraft
 from .validation import normalize_decimals, normalize_name, normalize_symbol, parse_supply
@@ -65,6 +66,143 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     )
     embed.set_footer(text="Owner canary staging only - non-executable")
     return embed
+
+
+def mainnet_factory_review_embed(review: MainnetFactoryReview) -> discord.Embed:
+    max_fee = review.max_gas_fee_wei / 10**18
+    embed = discord.Embed(
+        title="Review Base mainnet TokenFactory deployment",
+        description=(
+            "This immutable review is non-executable. The deterministic factory "
+            "must pass every external gate before this approval can be used."
+        ),
+        color=discord.Color.red(),
+    )
+    embed.add_field(name="Network", value="Base mainnet (`8453`)", inline=True)
+    embed.add_field(
+        name="Signer", value=f"`{review.signer_address}`", inline=False
+    )
+    embed.add_field(
+        name="Singleton target",
+        value=f"`{review.singleton_address}`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Predicted factory",
+        value=f"`{review.predicted_factory_address}`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Creation code SHA-256",
+        value=f"`{review.creation_code_sha256}`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Calldata SHA-256",
+        value=f"`{review.calldata_sha256}`",
+        inline=False,
+    )
+    embed.add_field(name="Gas limit", value=f"`{review.gas_limit:,}`", inline=True)
+    embed.add_field(
+        name="Gas ceiling", value=f"`{max_fee:.8f} ETH`", inline=True
+    )
+    embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
+    embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
+    embed.add_field(
+        name="Review fingerprint",
+        value=f"`{review.fingerprint}`",
+        inline=False,
+    )
+    embed.add_field(
+        name="Irreversible",
+        value=(
+            "A confirmed Base mainnet factory deployment cannot be undone or "
+            "replaced. Incorrect code or configuration may permanently affect "
+            "every later token deployment."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Owner-only factory staging - non-executable")
+    return embed
+
+
+class MainnetFactoryApprovalModal(
+    discord.ui.Modal, title="Approve mainnet factory"
+):
+    acknowledgement = discord.ui.TextInput(
+        label="Type DEPLOY BASE MAINNET FACTORY",
+        placeholder="DEPLOY BASE MAINNET FACTORY",
+        min_length=27,
+        max_length=27,
+    )
+    code = discord.ui.TextInput(
+        label="6-digit authenticator code",
+        placeholder="123456",
+        min_length=6,
+        max_length=6,
+    )
+
+    def __init__(self, view: "MainnetFactoryApprovalView"):
+        super().__init__(timeout=120)
+        self.view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            approval = await self.view.cog.approve_mainnet_factory_review(
+                interaction.user.id,
+                self.view.review_fingerprint,
+                acknowledgement=str(self.acknowledgement.value),
+                totp_code=str(self.code.value),
+            )
+        except (RuntimeError, ValueError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        self.view.disable_controls()
+        if self.view.message is not None:
+            await self.view.message.edit(view=self.view)
+        await interaction.followup.send(
+            "Protected factory approval recorded for this exact review until "
+            f"<t:{approval.expires_at}:R>. No transaction was submitted.",
+            ephemeral=True,
+        )
+
+
+class MainnetFactoryApprovalView(discord.ui.View):
+    def __init__(self, cog: "TokenFactory", owner_id: int, review: MainnetFactoryReview):
+        super().__init__(timeout=10 * 60)
+        self.cog = cog
+        self.owner_id = int(owner_id)
+        self.review_fingerprint = review.fingerprint
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "Only the bot owner who created this factory review can approve it.",
+            ephemeral=True,
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_controls()
+        if self.message is not None:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(
+        label="Protected factory approval",
+        emoji="🔐",
+        style=discord.ButtonStyle.danger,
+    )
+    async def approve(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(MainnetFactoryApprovalModal(self))
 
 
 class MainnetCanaryApprovalModal(

@@ -17,6 +17,10 @@ from .mainnet_approval import (
     consume_mainnet_canary_approval,
     create_mainnet_canary_approval,
 )
+from .mainnet_factory import (
+    MainnetFactoryReview,
+    verify_mainnet_factory_evidence,
+)
 from .mainnet_lifecycle import (
     MainnetCanaryLifecycle,
     assert_same_mainnet_lifecycle,
@@ -45,6 +49,7 @@ from .validation import normalize_owner_address
 from .views import (
     FactoryDeploymentView,
     MainnetCanaryApprovalView,
+    MainnetFactoryApprovalView,
     TokenFactoryDraftView,
 )
 
@@ -91,6 +96,7 @@ class TokenFactory(commands.Cog):
         self.discord_watchers = {}
         self.deployment_locks = {}
         self.mainnet_lifecycle_lock = asyncio.Lock()
+        self.mainnet_factory_lock = asyncio.Lock()
         self.config.register_global(
             deployment_enabled=False,
             factory_address=None,
@@ -107,6 +113,10 @@ class TokenFactory(commands.Cog):
             mainnet_canary_approval=None,
             mainnet_canary_lifecycle=None,
             mainnet_canary_evidence=None,
+            mainnet_factory_pending_review=None,
+            mainnet_factory_approval=None,
+            mainnet_factory_lifecycle=None,
+            mainnet_factory_evidence=None,
         )
 
     def cog_unload(self):
@@ -294,6 +304,187 @@ class TokenFactory(commands.Cog):
                 )
             if existing is None:
                 await self.config.mainnet_canary_evidence.set(verified)
+            return verified
+
+    async def stage_mainnet_factory_review(
+        self, review: MainnetFactoryReview
+    ) -> MainnetFactoryApprovalView:
+        """Persist one exact factory review while clearing prior approval."""
+
+        if review.network != "base-mainnet" or review.chain_id != 8453:
+            raise ValueError("Only a Base mainnet factory review may be staged.")
+        await self.config.mainnet_factory_pending_review.set(review.to_dict())
+        await self.config.mainnet_factory_approval.set(None)
+        return MainnetFactoryApprovalView(
+            self, review.owner_discord_id, review
+        )
+
+    async def approve_mainnet_factory_review(
+        self,
+        owner_discord_id: int,
+        review_fingerprint: str,
+        *,
+        acknowledgement: str,
+        totp_code: str,
+    ) -> MainnetCanaryApproval:
+        """Record a protected factory approval without submitting anything."""
+
+        if acknowledgement != "DEPLOY BASE MAINNET FACTORY":
+            raise ValueError(
+                "The factory permanent-loss acknowledgement did not match. "
+                "Nothing was approved."
+            )
+        data = await self.config.mainnet_factory_pending_review()
+        try:
+            review = MainnetFactoryReview.from_dict(data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("The mainnet factory review is missing or invalid.") from exc
+        if (
+            int(owner_discord_id) != review.owner_discord_id
+            or not secrets.compare_digest(
+                review_fingerprint, review.fingerprint
+            )
+        ):
+            raise ValueError(
+                "The mainnet factory review changed or belongs to another owner."
+            )
+        wallet = self._cryptowallet()
+        if not await wallet.user_totp_enabled(owner_discord_id):
+            raise RuntimeError(
+                "Authenticator protection must be enabled before approving "
+                "the mainnet factory."
+            )
+        if not await wallet.verify_user_totp(
+            owner_discord_id, totp_code, now=int(time.time())
+        ):
+            raise ValueError(
+                "That authenticator code is invalid, expired, or already used. "
+                "Nothing was approved."
+            )
+        current_data = await self.config.mainnet_factory_pending_review()
+        try:
+            current = MainnetFactoryReview.from_dict(current_data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "The mainnet factory review changed during verification."
+            ) from exc
+        if not secrets.compare_digest(current.fingerprint, review.fingerprint):
+            raise RuntimeError(
+                "The mainnet factory review changed during verification."
+            )
+        approval = create_mainnet_canary_approval(
+            current,
+            owner_discord_id,
+            totp_verified=True,
+            now=int(time.time()),
+        )
+        await self.config.mainnet_factory_approval.set(approval.to_dict())
+        return approval
+
+    async def claim_mainnet_factory_approval(
+        self, review_fingerprint: str
+    ) -> MainnetCanaryApproval:
+        """Atomically consume one factory approval before a future provider call."""
+
+        async with self.config.mainnet_factory_approval() as data:
+            try:
+                approval = MainnetCanaryApproval.from_dict(data)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "No valid protected mainnet factory approval is available."
+                ) from exc
+            claimed = consume_mainnet_canary_approval(
+                approval, review_fingerprint, now=int(time.time())
+            )
+            data.clear()
+            data.update(claimed.to_dict())
+        return claimed
+
+    async def stage_mainnet_factory_lifecycle(
+        self,
+        review: MainnetFactoryReview,
+        attempt_id: str,
+        *,
+        now: int | None = None,
+    ) -> MainnetCanaryLifecycle:
+        """Persist the one-time factory attempt separately from token canaries."""
+
+        async with self.mainnet_factory_lock:
+            stored_data = await self.config.mainnet_factory_lifecycle()
+            if isinstance(stored_data, dict):
+                stored = MainnetCanaryLifecycle.from_dict(stored_data)
+                assert_same_mainnet_lifecycle(
+                    stored, review.fingerprint, attempt_id
+                )
+                return stored
+            lifecycle = create_mainnet_canary_lifecycle(
+                review,
+                attempt_id,
+                now=int(time.time()) if now is None else int(now),
+            )
+            await self.config.mainnet_factory_lifecycle.set(
+                lifecycle.to_dict()
+            )
+            await self.config.mainnet_factory_evidence.set(None)
+            return lifecycle
+
+    async def transition_mainnet_factory(
+        self,
+        review_fingerprint: str,
+        attempt_id: str,
+        status: str,
+        *,
+        now: int | None = None,
+        **evidence,
+    ) -> MainnetCanaryLifecycle:
+        """Atomically persist one factory lifecycle transition."""
+
+        async with self.mainnet_factory_lock:
+            data = await self.config.mainnet_factory_lifecycle()
+            try:
+                current = MainnetCanaryLifecycle.from_dict(data)
+                assert_same_mainnet_lifecycle(
+                    current, review_fingerprint, attempt_id
+                )
+                updated = transition_mainnet_canary_lifecycle(
+                    current,
+                    status,
+                    now=int(time.time()) if now is None else int(now),
+                    **evidence,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "The mainnet factory lifecycle transition was rejected."
+                ) from exc
+            await self.config.mainnet_factory_lifecycle.set(updated.to_dict())
+            return updated
+
+    async def record_mainnet_factory_evidence(
+        self,
+        review: MainnetFactoryReview,
+        primary: dict,
+        secondary: dict,
+    ) -> dict:
+        """Persist matching two-RPC factory evidence exactly once."""
+
+        async with self.mainnet_factory_lock:
+            data = await self.config.mainnet_factory_lifecycle()
+            try:
+                lifecycle = MainnetCanaryLifecycle.from_dict(data)
+                verified = verify_mainnet_factory_evidence(
+                    review, lifecycle, primary, secondary
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "The mainnet factory verification evidence was rejected."
+                ) from exc
+            existing = await self.config.mainnet_factory_evidence()
+            if existing is not None and existing != verified:
+                raise RuntimeError(
+                    "Different mainnet factory evidence is already recorded."
+                )
+            if existing is None:
+                await self.config.mainnet_factory_evidence.set(verified)
             return verified
 
     def _track_task(self, task: asyncio.Task) -> None:
@@ -1070,25 +1261,37 @@ class TokenFactory(commands.Cog):
             ),
             inline=False,
         )
-        lifecycle_data = await self.config.mainnet_canary_lifecycle()
-        evidence_data = await self.config.mainnet_canary_evidence()
-        if isinstance(lifecycle_data, dict):
-            try:
-                lifecycle = MainnetCanaryLifecycle.from_dict(lifecycle_data)
-                lifecycle_status = lifecycle.status
-                attempt = lifecycle.attempt_id
-            except (KeyError, TypeError, ValueError):
-                lifecycle_status = "invalid (fail-closed)"
-                attempt = "unavailable"
-        else:
-            lifecycle_status = "not started"
-            attempt = "none"
-        embed.add_field(
-            name="Canary lifecycle",
-            value=(
+        def lifecycle_text(lifecycle_data, evidence_data):
+            if isinstance(lifecycle_data, dict):
+                try:
+                    lifecycle = MainnetCanaryLifecycle.from_dict(lifecycle_data)
+                    lifecycle_status = lifecycle.status
+                    attempt = lifecycle.attempt_id
+                except (KeyError, TypeError, ValueError):
+                    lifecycle_status = "invalid (fail-closed)"
+                    attempt = "unavailable"
+            else:
+                lifecycle_status = "not started"
+                attempt = "none"
+            return (
                 f"Status: **{lifecycle_status}**\n"
-                f"Attempt: \u0060{attempt}\u0060\n"
+                f"Attempt: `{attempt}`\n"
                 f"Independent evidence recorded: **{isinstance(evidence_data, dict)}**"
+            )
+
+        embed.add_field(
+            name="Factory lifecycle",
+            value=lifecycle_text(
+                await self.config.mainnet_factory_lifecycle(),
+                await self.config.mainnet_factory_evidence(),
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Token canary lifecycle",
+            value=lifecycle_text(
+                await self.config.mainnet_canary_lifecycle(),
+                await self.config.mainnet_canary_evidence(),
             ),
             inline=False,
         )
@@ -1137,6 +1340,8 @@ class TokenFactory(commands.Cog):
         await self.config.mainnet_owner_canary_enabled.set(False)
         await self.config.mainnet_pending_review.set(None)
         await self.config.mainnet_canary_approval.set(None)
+        await self.config.mainnet_factory_pending_review.set(None)
+        await self.config.mainnet_factory_approval.set(None)
         action = "disabled" if choice == "disable" else "emergency-paused"
         await ctx.send(
             f"Base mainnet TokenFactory is **{action}**. No factory or token "
