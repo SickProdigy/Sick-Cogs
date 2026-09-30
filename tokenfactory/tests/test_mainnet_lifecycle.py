@@ -31,7 +31,7 @@ class MainnetCanaryLifecycleTests(unittest.TestCase):
             "0x" + "22" * 32,
             self.draft.owner_address,
             max_gas_fee_wei=10**15,
-            gas_payer="Bot-owner canary smart account",
+            gas_payer="creator wallet",
             limits=default_mainnet_limits(),
         )
         self.lifecycle = create_mainnet_canary_lifecycle(

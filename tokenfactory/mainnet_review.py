@@ -34,6 +34,7 @@ class MainnetTokenReview:
     gas_limit: int
     max_gas_fee_wei: int
     gas_payer: str
+    gas_sponsored: bool
     native_value_wei: int
     irreversible: bool = True
 
@@ -59,6 +60,7 @@ class MainnetTokenReview:
             gas_limit=int(data["gas_limit"]),
             max_gas_fee_wei=int(data["max_gas_fee_wei"]),
             gas_payer=str(data["gas_payer"]),
+            gas_sponsored=data.get("gas_sponsored") is True,
             native_value_wei=int(data["native_value_wei"]),
             irreversible=data.get("irreversible") is True,
         )
@@ -93,8 +95,8 @@ def build_mainnet_token_review(
     ):
         raise ValueError("The maximum gas fee exceeds the reviewed canary ceiling.")
     payer = str(gas_payer or "").strip()
-    if not payer or len(payer) > 80:
-        raise ValueError("The reviewed gas payer is invalid.")
+    if payer != "creator wallet":
+        raise ValueError("Base mainnet gas must be paid by the creator wallet.")
 
     profile_id = str(draft.wallet_profile_id or "").strip()
     if not profile_id or len(profile_id) > 160:
@@ -128,5 +130,6 @@ def build_mainnet_token_review(
         gas_limit=int(operation["gas_limit"]),
         max_gas_fee_wei=int(max_gas_fee_wei),
         gas_payer=payer,
+        gas_sponsored=False,
         native_value_wei=int(operation["value_wei"]),
     )

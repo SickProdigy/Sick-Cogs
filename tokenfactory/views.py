@@ -98,6 +98,7 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
         name="Gas ceiling", value=f"\u0060{max_fee:.8f} ETH\u0060", inline=True
     )
     embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
+    embed.add_field(name="Gas sponsorship", value="None · creator pays network gas", inline=False)
     embed.add_field(name="Native value", value="\u00600.00000000 ETH\u0060", inline=True)
     embed.add_field(
         name="Review fingerprint", value=f"\u0060{review.fingerprint}\u0060", inline=False

@@ -33,15 +33,15 @@ require two-provider verification after an explicitly approved canary.
 Every mainnet authorization flag is false. The owner-only `mainnetcontrol` command can pause or
 disable immediately; its enable request fails with no state change while external gates remain.
 Conservative immutable canary ceilings permit at most one factory deployment, one token deployment
-per day, fixed gas ceilings, zero native value, and no public/member deployment. No provider route
+per day, fixed gas ceilings, zero native value, and no public/member deployment. Base mainnet gas is never sponsored by SickGaming: the creator wallet must pay the displayed network fee and hold at least the approved maximum before submission. No provider route
 can deploy the factory or a token.
 
 The staged owner-canary approval component binds the bot owner, wallet profile, signer, recipient,
 chain, factory, request ID, calldata hash, gas ceiling/payer, native value, and review fingerprint.
-It requires the exact permanent-loss acknowledgement plus a fresh TOTP code, expires after ten
+It requires current TokenFactory terms and the exact creator-responsibility acknowledgment, expires after ten
 minutes, and can be claimed atomically only once. Emergency pause clears every pending review and
 approval. The separate pre-submission validator rechecks all immutable bindings, the live chain and
-factory runtime hash, signer authorization, current policy, and absence of any existing provider
+factory runtime hash, signer authorization, current policy, creator-wallet balance sufficient for the approved gas maximum, and absence of any existing provider
 operation. These components remain unreachable from a deployment command until the external gates
 are complete.
 

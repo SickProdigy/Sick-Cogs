@@ -101,6 +101,7 @@ def revalidate_mainnet_pre_submission(
     live_chain_id: int,
     live_factory_code_hash: str,
     authorization_active: bool,
+    signer_balance_wei: int,
     operation_state: str,
     limits: dict[str, Any],
     now: int | None = None,
@@ -159,6 +160,10 @@ def revalidate_mainnet_pre_submission(
         or review.max_gas_fee_wei > reviewed_limits["max_gas_fee_wei"]
     ):
         raise ValueError("The approved gas maximum violates current policy.")
+    if review.gas_sponsored or review.gas_payer != "creator wallet":
+        raise ValueError("Base mainnet gas must remain creator-funded.")
+    if int(signer_balance_wei) < review.max_gas_fee_wei:
+        raise ValueError("The creator wallet balance cannot cover the approved gas maximum.")
     if int(operation.get("value_wei", -1)) != 0 or review.native_value_wei != 0:
         raise ValueError("The operation native value must remain zero.")
     expected_hash = str(manifest["factoryRuntimeCodeHash"]).lower()
@@ -174,5 +179,7 @@ def revalidate_mainnet_pre_submission(
         "review_fingerprint": review.fingerprint,
         "approval_expires_at": approval.expires_at,
         "factory_code_hash": expected_hash,
+        "gas_payer": review.gas_payer,
+        "gas_sponsored": False,
         "operation_state": "not-created",
     }

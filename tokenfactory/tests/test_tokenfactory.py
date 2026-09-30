@@ -201,6 +201,17 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "gas_sponsored": True, "gas_payer": "CDP paymaster",
         }
 
+    def test_execution_terms_separate_sponsored_testnet_from_creator_paid_mainnet(self):
+        subject = object.__new__(TokenFactory)
+        testnet = subject.execution_terms(route="discord", network="base-sepolia")
+        mainnet = subject.execution_terms(route="discord", network="base-mainnet")
+        external = subject.execution_terms(route="external", network="base-mainnet")
+        self.assertTrue(testnet["gas_sponsored"])
+        self.assertEqual(testnet["gas_payer"], "CDP paymaster")
+        for terms in (mainnet, external):
+            self.assertFalse(terms["gas_sponsored"])
+            self.assertEqual(terms["gas_payer"], "creator wallet")
+
     def test_discord_review_discloses_all_execution_terms(self):
         view = TokenDeploymentConfirmView(
             SimpleNamespace(), self.user, self.draft, self.terms

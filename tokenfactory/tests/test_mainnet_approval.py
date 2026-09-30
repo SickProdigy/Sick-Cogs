@@ -37,7 +37,7 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
             self.request_id,
             self.draft.owner_address,
             max_gas_fee_wei=2 * 10**15,
-            gas_payer="Bot-owner canary smart account",
+            gas_payer="creator wallet",
             limits=default_mainnet_limits(),
         )
         self.approval = create_mainnet_canary_approval(
@@ -61,6 +61,7 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
             "live_chain_id": 8453,
             "live_factory_code_hash": self.factory_hash,
             "authorization_active": True,
+            "signer_balance_wei": 2 * 10**15,
             "operation_state": "not-created",
             "limits": default_mainnet_limits(),
             "now": 1_001,
@@ -131,6 +132,13 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
                     **{**self.kwargs(), **kwarg_changes},
                 )
 
+    def test_creator_must_cover_mainnet_gas_maximum(self):
+        with self.assertRaisesRegex(ValueError, "balance cannot cover"):
+            revalidate_mainnet_pre_submission(
+                self.review, self.approval, self.operation,
+                **{**self.kwargs(), "signer_balance_wei": self.review.max_gas_fee_wei - 1},
+            )
+
     def test_fingerprint_mutation_is_rejected(self):
         changed = replace(
             self.approval, review_fingerprint="0x" + "00" * 32
@@ -188,7 +196,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             "0x" + "22" * 32,
             draft.owner_address,
             max_gas_fee_wei=10**15,
-            gas_payer="Bot-owner canary smart account",
+            gas_payer="creator wallet",
             limits=default_mainnet_limits(),
         )
         self.config = SimpleNamespace(

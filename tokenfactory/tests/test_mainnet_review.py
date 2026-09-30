@@ -29,7 +29,7 @@ class MainnetTokenReviewTests(unittest.TestCase):
             self.request_id,
             self.recipient,
             max_gas_fee_wei=2 * 10**15,
-            gas_payer="Bot-owner canary smart account",
+            gas_payer="creator wallet",
             limits=default_mainnet_limits(),
         )
 
@@ -71,7 +71,7 @@ class MainnetTokenReviewTests(unittest.TestCase):
                 build_mainnet_token_review(
                     draft, self.request_id, self.recipient,
                     max_gas_fee_wei=fee,
-                    gas_payer="Bot-owner canary smart account",
+                    gas_payer="creator wallet",
                     limits=default_mainnet_limits(),
                 )
 

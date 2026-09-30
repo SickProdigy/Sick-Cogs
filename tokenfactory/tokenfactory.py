@@ -65,14 +65,20 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.8"
+    __version__ = "1.1.9"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
     TERMINAL_PROVIDER_STATES = {"complete", "dropped", "failed", "ambiguous"}
 
-    def execution_terms(self, *, route: str, operation: str = "token") -> dict:
-        if route not in {"discord", "external"} or operation not in {"token", "factory"}:
+    def execution_terms(
+        self, *, route: str, operation: str = "token", network: str = "base-sepolia"
+    ) -> dict:
+        if (
+            route not in {"discord", "external"}
+            or operation not in {"token", "factory"}
+            or network not in {"base-sepolia", "base-mainnet"}
+        ):
             raise ValueError("Unsupported TokenFactory execution-terms request.")
         if route == "external" and operation != "token":
             raise ValueError("External wallets cannot deploy TokenFactory infrastructure.")
@@ -81,12 +87,16 @@ class TokenFactory(commands.Cog):
             if operation == "factory"
             else TOKEN_DEPLOY_GAS_LIMIT
         )
-        sponsored = route == "discord"
+        sponsored = route == "discord" and network == "base-sepolia"
         return {
             "gas_limit": gas_limit,
             "native_value_wei": 0,
             "gas_sponsored": sponsored,
-            "gas_payer": "CDP paymaster" if sponsored else "connected external wallet",
+            "gas_payer": (
+                "CDP paymaster" if sponsored
+                else "creator wallet" if network == "base-mainnet"
+                else "connected external wallet"
+            ),
         }
 
     def __init__(self, bot: Red):
