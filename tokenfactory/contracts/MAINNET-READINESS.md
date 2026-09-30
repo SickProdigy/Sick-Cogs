@@ -45,5 +45,14 @@ factory runtime hash, signer authorization, current policy, and absence of any e
 operation. These components remain unreachable from a deployment command until the external gates
 are complete.
 
+A separate persistent lifecycle permits only reviewed transitions across prepared, processing,
+submitted, uncertain, timed-out, confirmed, failed, dropped, and replaced states. The review
+fingerprint, request ID, attempt ID, provider operation, and transaction identifiers cannot drift
+during recovery. A confirmed canary is not considered verified until two independently collected
+Base mainnet RPC snapshots agree on the successful receipt, transaction and block, factory and token
+runtime hashes, token metadata, fixed supply, recipient balance, creation event, and factory registry
+record. Differing evidence fails closed and a different verification record cannot overwrite the
+first accepted record.
+
 Independent security review, legal review, explicit owner canary approval, source verification,
 evidence recording, and combined test-bot validation remain gates.

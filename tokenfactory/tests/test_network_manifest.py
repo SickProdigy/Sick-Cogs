@@ -70,6 +70,8 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
             mainnet_deployment_enabled=_AsyncValue(False),
             mainnet_emergency_paused=_AsyncValue(True),
             mainnet_owner_canary_enabled=_AsyncValue(False),
+            mainnet_canary_lifecycle=_AsyncValue(None),
+            mainnet_canary_evidence=_AsyncValue(None),
         )
         await TokenFactory.tokenfactoryset_mainnet_status.callback(
             SimpleNamespace(config=config), ctx
@@ -80,6 +82,7 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("required", fields["Required gates"])
         self.assertIn("cross-check: **complete**", fields["Required gates"])
         self.assertNotIn(r"\n", "".join(fields.values()))
+        self.assertIn("not started", fields["Canary lifecycle"])
         self.assertIn("unavailable", embed.footer.text)
 
 class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):

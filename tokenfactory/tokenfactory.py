@@ -17,7 +17,14 @@ from .mainnet_approval import (
     consume_mainnet_canary_approval,
     create_mainnet_canary_approval,
 )
+from .mainnet_lifecycle import (
+    MainnetCanaryLifecycle,
+    assert_same_mainnet_lifecycle,
+    create_mainnet_canary_lifecycle,
+    transition_mainnet_canary_lifecycle,
+)
 from .mainnet_review import MainnetTokenReview
+from .mainnet_verification import verify_mainnet_canary_evidence
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
 from .policy import (
@@ -83,6 +90,7 @@ class TokenFactory(commands.Cog):
         self.deployment_tasks = set()
         self.discord_watchers = {}
         self.deployment_locks = {}
+        self.mainnet_lifecycle_lock = asyncio.Lock()
         self.config.register_global(
             deployment_enabled=False,
             factory_address=None,
@@ -97,6 +105,8 @@ class TokenFactory(commands.Cog):
             mainnet_limits=default_mainnet_limits(),
             mainnet_pending_review=None,
             mainnet_canary_approval=None,
+            mainnet_canary_lifecycle=None,
+            mainnet_canary_evidence=None,
         )
 
     def cog_unload(self):
@@ -200,6 +210,91 @@ class TokenFactory(commands.Cog):
             data.clear()
             data.update(claimed.to_dict())
         return claimed
+
+    async def stage_mainnet_canary_lifecycle(
+        self,
+        review: MainnetTokenReview,
+        attempt_id: str,
+        *,
+        now: int | None = None,
+    ) -> MainnetCanaryLifecycle:
+        """Persist one immutable canary attempt without replacing prior history."""
+
+        async with self.mainnet_lifecycle_lock:
+            stored_data = await self.config.mainnet_canary_lifecycle()
+            if isinstance(stored_data, dict):
+                stored = MainnetCanaryLifecycle.from_dict(stored_data)
+                assert_same_mainnet_lifecycle(
+                    stored, review.fingerprint, attempt_id
+                )
+                return stored
+            lifecycle = create_mainnet_canary_lifecycle(
+                review,
+                attempt_id,
+                now=int(time.time()) if now is None else int(now),
+            )
+            await self.config.mainnet_canary_lifecycle.set(lifecycle.to_dict())
+            await self.config.mainnet_canary_evidence.set(None)
+            return lifecycle
+
+    async def transition_mainnet_canary(
+        self,
+        review_fingerprint: str,
+        attempt_id: str,
+        status: str,
+        *,
+        now: int | None = None,
+        **evidence,
+    ) -> MainnetCanaryLifecycle:
+        """Atomically persist one reviewed mainnet lifecycle transition."""
+
+        async with self.mainnet_lifecycle_lock:
+            data = await self.config.mainnet_canary_lifecycle()
+            try:
+                current = MainnetCanaryLifecycle.from_dict(data)
+                assert_same_mainnet_lifecycle(
+                    current, review_fingerprint, attempt_id
+                )
+                updated = transition_mainnet_canary_lifecycle(
+                    current,
+                    status,
+                    now=int(time.time()) if now is None else int(now),
+                    **evidence,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "The mainnet canary lifecycle transition was rejected."
+                ) from exc
+            await self.config.mainnet_canary_lifecycle.set(updated.to_dict())
+            return updated
+
+    async def record_mainnet_canary_evidence(
+        self,
+        review: MainnetTokenReview,
+        primary: dict,
+        secondary: dict,
+    ) -> dict:
+        """Persist matching two-RPC verification evidence exactly once."""
+
+        async with self.mainnet_lifecycle_lock:
+            data = await self.config.mainnet_canary_lifecycle()
+            try:
+                lifecycle = MainnetCanaryLifecycle.from_dict(data)
+                verified = verify_mainnet_canary_evidence(
+                    review, lifecycle, primary, secondary
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "The mainnet canary verification evidence was rejected."
+                ) from exc
+            existing = await self.config.mainnet_canary_evidence()
+            if existing is not None and existing != verified:
+                raise RuntimeError(
+                    "Different mainnet canary evidence is already recorded."
+                )
+            if existing is None:
+                await self.config.mainnet_canary_evidence.set(verified)
+            return verified
 
     def _track_task(self, task: asyncio.Task) -> None:
         self.deployment_tasks.add(task)
@@ -972,6 +1067,28 @@ class TokenFactory(commands.Cog):
             value=(
                 f"Enabled: **{enabled}**\nPaused: **{paused}**\n"
                 f"Owner canary: **{canary}**"
+            ),
+            inline=False,
+        )
+        lifecycle_data = await self.config.mainnet_canary_lifecycle()
+        evidence_data = await self.config.mainnet_canary_evidence()
+        if isinstance(lifecycle_data, dict):
+            try:
+                lifecycle = MainnetCanaryLifecycle.from_dict(lifecycle_data)
+                lifecycle_status = lifecycle.status
+                attempt = lifecycle.attempt_id
+            except (KeyError, TypeError, ValueError):
+                lifecycle_status = "invalid (fail-closed)"
+                attempt = "unavailable"
+        else:
+            lifecycle_status = "not started"
+            attempt = "none"
+        embed.add_field(
+            name="Canary lifecycle",
+            value=(
+                f"Status: **{lifecycle_status}**\n"
+                f"Attempt: \u0060{attempt}\u0060\n"
+                f"Independent evidence recorded: **{isinstance(evidence_data, dict)}**"
             ),
             inline=False,
         )
