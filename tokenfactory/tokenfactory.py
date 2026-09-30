@@ -31,6 +31,11 @@ from .mainnet_review import MainnetTokenReview
 from .mainnet_verification import verify_mainnet_canary_evidence
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
+from .terms import (
+    TOKENFACTORY_MAINNET_TERMS_VERSION,
+    create_tokenfactory_terms_acceptance,
+    is_current_tokenfactory_terms_acceptance,
+)
 from .policy import (
     default_mainnet_limits,
     migrate_mainnet_limits,
@@ -58,7 +63,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.3"
+    __version__ = "1.1.6"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
@@ -91,6 +96,7 @@ class TokenFactory(commands.Cog):
             deployment_draft=None,
             pending_deployment=None,
             deployed_tokens=[],
+            mainnet_terms_acceptance=None,
         )
         self.deployment_tasks = set()
         self.discord_watchers = {}
@@ -118,6 +124,19 @@ class TokenFactory(commands.Cog):
             mainnet_factory_lifecycle=None,
             mainnet_factory_evidence=None,
         )
+
+    async def accept_mainnet_terms(
+        self, user_id: int, *, acceptance_id: str | None = None, now: int | None = None,
+    ) -> dict:
+        record = create_tokenfactory_terms_acceptance(
+            user_id, acceptance_id=acceptance_id, now=now
+        )
+        await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance.set(record)
+        return record
+
+    async def has_current_mainnet_terms(self, user_id: int) -> bool:
+        record = await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance()
+        return is_current_tokenfactory_terms_acceptance(record, user_id)
 
     def cog_unload(self):
         for task in self.deployment_tasks:
@@ -1070,6 +1089,26 @@ class TokenFactory(commands.Cog):
     async def tokenfactory(self, ctx: commands.Context):
         """Create fixed-supply Base Sepolia test-token drafts."""
         await ctx.send_help()
+
+    @tokenfactory.command(name="terms")
+    async def tokenfactory_terms(self, ctx: commands.Context):
+        """Show TokenFactory-only mainnet terms and acceptance status."""
+        current = await self.has_current_mainnet_terms(ctx.author.id)
+        page = "The TokenFactory terms page is not configured on this bot."
+        wallet = self.bot.get_cog("CryptoWallet")
+        if wallet is not None:
+            base_url = str(await wallet.config.approval_base_url() or "").rstrip("/")
+            if base_url:
+                page = f"[Open TokenFactory terms]({base_url}/tokenfactory-terms.html)"
+        await ctx.send(
+            "**TokenFactory mainnet terms**\n"
+            f"Version: `{TOKENFACTORY_MAINNET_TERMS_VERSION}`\n"
+            f"Your acceptance: **{'current' if current else 'not accepted'}**\n"
+            "Required only before your first Base mainnet token deployment. "
+            "Base Sepolia drafts and deployments are unchanged.\n"
+            f"{page}\n"
+            "Viewing the page does not accept terms or approve a deployment."
+        )
 
     @tokenfactory.command(name="create", aliases=("card",))
     async def tokenfactory_create(self, ctx: commands.Context):
