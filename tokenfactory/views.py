@@ -33,6 +33,9 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
         name="Token", value=f"{review.name} ({review.symbol})", inline=False
     )
     embed.add_field(name="Fixed supply", value=supply, inline=True)
+    embed.add_field(
+        name="Signer", value=f"\u0060{review.signer_address}\u0060", inline=False
+    )
     embed.add_field(name="Recipient", value=f"\u0060{review.recipient}\u0060", inline=False)
     embed.add_field(name="Request ID", value=f"\u0060{review.request_id}\u0060", inline=False)
     embed.add_field(
@@ -62,6 +65,87 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     )
     embed.set_footer(text="Owner canary staging only - non-executable")
     return embed
+
+
+class MainnetCanaryApprovalModal(
+    discord.ui.Modal, title="Approve Base mainnet canary"
+):
+    acknowledgement = discord.ui.TextInput(
+        label="Type DEPLOY BASE MAINNET CANARY",
+        placeholder="DEPLOY BASE MAINNET CANARY",
+        min_length=26,
+        max_length=26,
+    )
+    code = discord.ui.TextInput(
+        label="6-digit authenticator code",
+        placeholder="123456",
+        min_length=6,
+        max_length=6,
+    )
+
+    def __init__(self, view: "MainnetCanaryApprovalView"):
+        super().__init__(timeout=120)
+        self.view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            approval = await self.view.cog.approve_mainnet_canary_review(
+                interaction.user.id,
+                self.view.review_fingerprint,
+                acknowledgement=str(self.acknowledgement.value),
+                totp_code=str(self.code.value),
+            )
+        except (RuntimeError, ValueError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        self.view.disable_controls()
+        if self.view.message is not None:
+            await self.view.message.edit(view=self.view)
+        await interaction.followup.send(
+            "Protected owner approval recorded for this exact review until "
+            f"<t:{approval.expires_at}:R>. No transaction was submitted.",
+            ephemeral=True,
+        )
+
+
+class MainnetCanaryApprovalView(discord.ui.View):
+    """Owner-bound, TOTP-protected approval for one immutable canary review."""
+
+    def __init__(self, cog: "TokenFactory", owner_id: int, review: MainnetTokenReview):
+        super().__init__(timeout=10 * 60)
+        self.cog = cog
+        self.owner_id = int(owner_id)
+        self.review_fingerprint = review.fingerprint
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "Only the bot owner who created this canary review can approve it.",
+            ephemeral=True,
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_controls()
+        if self.message is not None:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(
+        label="Protected approval",
+        emoji="🔐",
+        style=discord.ButtonStyle.danger,
+    )
+    async def approve(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(MainnetCanaryApprovalModal(self))
 
 
 class TokenDetailsModal(discord.ui.Modal):

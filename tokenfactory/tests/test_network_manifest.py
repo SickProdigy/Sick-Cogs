@@ -125,6 +125,8 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
             mainnet_deployment_enabled=_AsyncValue(True),
             mainnet_emergency_paused=_AsyncValue(False),
             mainnet_owner_canary_enabled=_AsyncValue(True),
+            mainnet_pending_review=_AsyncValue({"fingerprint": "pending"}),
+            mainnet_canary_approval=_AsyncValue({"fingerprint": "approved"}),
         )
         ctx = SimpleNamespace(send=AsyncMock())
         await TokenFactory.tokenfactoryset_mainnet_control.callback(
@@ -133,3 +135,5 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(config.mainnet_deployment_enabled.value)
         self.assertTrue(config.mainnet_emergency_paused.value)
         self.assertFalse(config.mainnet_owner_canary_enabled.value)
+        self.assertIsNone(config.mainnet_pending_review.value)
+        self.assertIsNone(config.mainnet_canary_approval.value)

@@ -34,5 +34,16 @@ Every mainnet authorization flag is false. The owner-only `mainnetcontrol` comma
 disable immediately; its enable request fails with no state change while external gates remain.
 Conservative immutable canary ceilings permit at most one factory deployment, one token deployment
 per day, fixed gas ceilings, zero native value, and no public/member deployment. No provider route
-can deploy the factory or a token. Independent security review, legal review, second-RPC verification, explicit owner canary
-approval, source verification, evidence recording, and combined test-bot validation remain gates.
+can deploy the factory or a token.
+
+The staged owner-canary approval component binds the bot owner, wallet profile, signer, recipient,
+chain, factory, request ID, calldata hash, gas ceiling/payer, native value, and review fingerprint.
+It requires the exact permanent-loss acknowledgement plus a fresh TOTP code, expires after ten
+minutes, and can be claimed atomically only once. Emergency pause clears every pending review and
+approval. The separate pre-submission validator rechecks all immutable bindings, the live chain and
+factory runtime hash, signer authorization, current policy, and absence of any existing provider
+operation. These components remain unreachable from a deployment command until the external gates
+are complete.
+
+Independent security review, legal review, explicit owner canary approval, source verification,
+evidence recording, and combined test-bot validation remain gates.

@@ -44,5 +44,7 @@ Use the bot's configured prefix in place of `[p]`.
 5. Review logs for migration loops, command collisions, provider calls, or attempted mainnet
    submission.
 
-Stop immediately if any command offers a mainnet confirmation button, requests mainnet credentials,
-changes an authorization flag during rejected enablement, or sends an RPC transaction.
+Stop immediately if a public command offers a mainnet confirmation button, requests mainnet
+credentials, changes an authorization flag during rejected enablement, or sends an RPC transaction.
+The protected canary approval component is code-only staging until the external gates are complete;
+it must not be reachable from the command surface or call a provider.

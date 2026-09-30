@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from hashlib import sha256
+from typing import Any
 
 from .constants import BASE_MAINNET_CHAIN_ID, BASE_MAINNET_NETWORK_KEY
 from .models import TokenDraft
@@ -23,6 +24,9 @@ class MainnetTokenReview:
     symbol: str
     decimals: int
     supply_atomic: int
+    owner_discord_id: int
+    wallet_profile_id: str
+    signer_address: str
     recipient: str
     request_id: str
     target_factory: str
@@ -32,6 +36,32 @@ class MainnetTokenReview:
     gas_payer: str
     native_value_wei: int
     irreversible: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MainnetTokenReview":
+        return cls(
+            network=str(data["network"]),
+            chain_id=int(data["chain_id"]),
+            name=str(data["name"]),
+            symbol=str(data["symbol"]),
+            decimals=int(data["decimals"]),
+            supply_atomic=int(data["supply_atomic"]),
+            owner_discord_id=int(data["owner_discord_id"]),
+            wallet_profile_id=str(data["wallet_profile_id"]),
+            signer_address=normalize_owner_address(data["signer_address"]),
+            recipient=normalize_owner_address(data["recipient"]),
+            request_id=str(data["request_id"]),
+            target_factory=normalize_owner_address(data["target_factory"]),
+            calldata_sha256=str(data["calldata_sha256"]),
+            gas_limit=int(data["gas_limit"]),
+            max_gas_fee_wei=int(data["max_gas_fee_wei"]),
+            gas_payer=str(data["gas_payer"]),
+            native_value_wei=int(data["native_value_wei"]),
+            irreversible=data.get("irreversible") is True,
+        )
 
     @property
     def fingerprint(self) -> str:
@@ -66,6 +96,10 @@ def build_mainnet_token_review(
     if not payer or len(payer) > 80:
         raise ValueError("The reviewed gas payer is invalid.")
 
+    profile_id = str(draft.wallet_profile_id or "").strip()
+    if not profile_id or len(profile_id) > 160:
+        raise ValueError("The reviewed wallet profile is invalid.")
+    signer = normalize_owner_address(draft.owner_address)
     owner = normalize_owner_address(recipient)
     operation = token_operation(
         draft, request_id, owner, network=BASE_MAINNET_NETWORK_KEY
@@ -82,6 +116,9 @@ def build_mainnet_token_review(
         symbol=draft.symbol,
         decimals=draft.decimals,
         supply_atomic=draft.supply_atomic,
+        owner_discord_id=int(draft.creator_discord_id),
+        wallet_profile_id=profile_id,
+        signer_address=signer,
         recipient=owner,
         request_id=str(request_id).lower(),
         target_factory=str(operation["to"]).lower(),

@@ -12,6 +12,12 @@ from redbot.core import Config, commands
 from redbot.core.bot import Red
 
 from .constants import CONFIG_IDENTIFIER
+from .mainnet_approval import (
+    MainnetCanaryApproval,
+    consume_mainnet_canary_approval,
+    create_mainnet_canary_approval,
+)
+from .mainnet_review import MainnetTokenReview
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
 from .policy import (
@@ -29,7 +35,11 @@ from .operations import (
     verify_fixed_supply_token,
 )
 from .validation import normalize_owner_address
-from .views import FactoryDeploymentView, TokenFactoryDraftView
+from .views import (
+    FactoryDeploymentView,
+    MainnetCanaryApprovalView,
+    TokenFactoryDraftView,
+)
 
 
 class TokenFactory(commands.Cog):
@@ -85,6 +95,8 @@ class TokenFactory(commands.Cog):
             mainnet_manifest_approved=False,
             mainnet_owner_canary_enabled=False,
             mainnet_limits=default_mainnet_limits(),
+            mainnet_pending_review=None,
+            mainnet_canary_approval=None,
         )
 
     def cog_unload(self):
@@ -98,6 +110,96 @@ class TokenFactory(commands.Cog):
             await self.config.mainnet_limits.set(reviewed_limits)
         task = asyncio.create_task(self._restore_discord_watchers())
         self._track_task(task)
+
+    async def stage_mainnet_canary_review(
+        self, review: MainnetTokenReview
+    ) -> MainnetCanaryApprovalView:
+        """Persist one exact review while clearing every prior approval."""
+
+        if review.network != "base-mainnet" or review.chain_id != 8453:
+            raise ValueError("Only a Base mainnet canary review may be staged.")
+        await self.config.mainnet_pending_review.set(review.to_dict())
+        await self.config.mainnet_canary_approval.set(None)
+        return MainnetCanaryApprovalView(
+            self, review.owner_discord_id, review
+        )
+
+    async def approve_mainnet_canary_review(
+        self,
+        owner_discord_id: int,
+        review_fingerprint: str,
+        *,
+        acknowledgement: str,
+        totp_code: str,
+    ) -> MainnetCanaryApproval:
+        """Record a short-lived protected approval; never submit an operation."""
+
+        if acknowledgement != "DEPLOY BASE MAINNET CANARY":
+            raise ValueError(
+                "The permanent-loss acknowledgement did not match. Nothing was approved."
+            )
+        data = await self.config.mainnet_pending_review()
+        try:
+            review = MainnetTokenReview.from_dict(data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("The mainnet canary review is missing or invalid.") from exc
+        if (
+            int(owner_discord_id) != review.owner_discord_id
+            or not secrets.compare_digest(review_fingerprint, review.fingerprint)
+        ):
+            raise ValueError(
+                "The mainnet canary review changed or belongs to another owner."
+            )
+        wallet = self._cryptowallet()
+        if not await wallet.user_totp_enabled(owner_discord_id):
+            raise RuntimeError(
+                "Authenticator protection must be enabled before approving a mainnet canary."
+            )
+        if not await wallet.verify_user_totp(
+            owner_discord_id, totp_code, now=int(time.time())
+        ):
+            raise ValueError(
+                "That authenticator code is invalid, expired, or already used. "
+                "Nothing was approved."
+            )
+        current_data = await self.config.mainnet_pending_review()
+        try:
+            current = MainnetTokenReview.from_dict(current_data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "The mainnet canary review changed during verification."
+            ) from exc
+        if not secrets.compare_digest(current.fingerprint, review.fingerprint):
+            raise RuntimeError(
+                "The mainnet canary review changed during verification."
+            )
+        approval = create_mainnet_canary_approval(
+            current,
+            owner_discord_id,
+            totp_verified=True,
+            now=int(time.time()),
+        )
+        await self.config.mainnet_canary_approval.set(approval.to_dict())
+        return approval
+
+    async def claim_mainnet_canary_approval(
+        self, review_fingerprint: str
+    ) -> MainnetCanaryApproval:
+        """Atomically consume one approval before any future provider call."""
+
+        async with self.config.mainnet_canary_approval() as data:
+            try:
+                approval = MainnetCanaryApproval.from_dict(data)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "No valid protected mainnet canary approval is available."
+                ) from exc
+            claimed = consume_mainnet_canary_approval(
+                approval, review_fingerprint, now=int(time.time())
+            )
+            data.clear()
+            data.update(claimed.to_dict())
+        return claimed
 
     def _track_task(self, task: asyncio.Task) -> None:
         self.deployment_tasks.add(task)
@@ -916,6 +1018,8 @@ class TokenFactory(commands.Cog):
         await self.config.mainnet_deployment_enabled.set(False)
         await self.config.mainnet_emergency_paused.set(True)
         await self.config.mainnet_owner_canary_enabled.set(False)
+        await self.config.mainnet_pending_review.set(None)
+        await self.config.mainnet_canary_approval.set(None)
         action = "disabled" if choice == "disable" else "emergency-paused"
         await ctx.send(
             f"Base mainnet TokenFactory is **{action}**. No factory or token "
