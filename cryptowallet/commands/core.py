@@ -29,8 +29,57 @@ from .views import (
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
 
 
+async def testnet_path_allowed(
+    cog, ctx: commands.Context, *, explicit: bool = False
+) -> bool:
+    """Fail closed for testnet routes outside the installation's operating mode."""
+    setting = getattr(getattr(cog, "config", None), "operating_mode", None)
+    raw = await setting() if setting is not None else WalletEnvironment.TESTNET.value
+    environment = parse_wallet_environment(raw) or WalletEnvironment.TESTNET
+    if environment is WalletEnvironment.TESTNET:
+        return True
+    if environment is WalletEnvironment.MAINNET and explicit:
+        return True
+    if environment is WalletEnvironment.MAINNET_ONLY:
+        await ctx.send(
+            "Testnet commands are disabled by this bot's `mainnet-only` wallet mode."
+        )
+    else:
+        await ctx.send(
+            f"Mainnet is this bot's primary wallet environment. Use "
+            f"`{ctx.clean_prefix}wallet testnet` for the separate testnet sandbox."
+        )
+    return False
+
+
 class WalletCoreCommands:
     """User-facing wallet commands."""
+
+    async def _wallet_environment(self) -> WalletEnvironment:
+        setting = getattr(self.config, "operating_mode", None)
+        raw = await setting() if setting is not None else WalletEnvironment.TESTNET.value
+        return parse_wallet_environment(raw) or WalletEnvironment.TESTNET
+
+    async def _testnet_path_allowed(
+        self, ctx: commands.Context, *, explicit: bool = False
+    ) -> bool:
+        return await testnet_path_allowed(self, ctx, explicit=explicit)
+
+    async def _invoke_testnet_command(self, ctx, command, *args, **kwargs):
+        if not await testnet_path_allowed(self, ctx, explicit=True):
+            return
+        setattr(ctx, "_cryptowallet_explicit_testnet", True)
+        try:
+            await ctx.invoke(command, *args, **kwargs)
+        finally:
+            if hasattr(ctx, "_cryptowallet_explicit_testnet"):
+                delattr(ctx, "_cryptowallet_explicit_testnet")
+
+    async def _current_testnet_path_allowed(self, ctx: commands.Context) -> bool:
+        return await testnet_path_allowed(
+            self, ctx,
+            explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False)),
+        )
 
     async def _wallet_read_allowed(
         self, ctx: commands.Context, key: str, cooldown_seconds: int
@@ -313,6 +362,10 @@ class WalletCoreCommands:
 
         Shows your wallet or another member's existing public testnet profile.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -354,6 +407,10 @@ class WalletCoreCommands:
 
         Shows all testnet assets or details for one enabled testnet.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
         ):
@@ -371,6 +428,33 @@ class WalletCoreCommands:
                 )
                 return
         await ctx.send(embed=await self._wallet_embed(ctx, profile, network=network))
+
+    @wallet.group(name="testnet", invoke_without_command=True)
+    async def wallet_testnet(self, ctx: commands.Context):
+        """Open the separate testnet sandbox when the bot is mainnet-primary."""
+        if not await self._testnet_path_allowed(ctx, explicit=True):
+            return
+        profile = await self._wallet_profile_or_error(ctx)
+        if profile is None:
+            return
+        await ctx.send(embed=await self._wallet_embed(ctx, profile, ctx.author))
+
+    @wallet_testnet.command(name="balance", aliases=("funds",))
+    async def wallet_testnet_balance(self, ctx: commands.Context, network_key: str = None):
+        """Show testnet balances through the explicit sandbox."""
+        await self._invoke_testnet_command(
+            ctx, self.wallet_balance, network_key=network_key
+        )
+
+    @wallet_testnet.command(name="networks")
+    async def wallet_testnet_networks(self, ctx: commands.Context):
+        """List networks available in the explicit testnet sandbox."""
+        await self._invoke_testnet_command(ctx, self.wallet_networks)
+
+    @wallet_testnet.command(name="tokens", aliases=("token",))
+    async def wallet_testnet_tokens(self, ctx: commands.Context):
+        """List tokens available in the explicit testnet sandbox."""
+        await self._invoke_testnet_command(ctx, self.wallet_token_list)
 
     @wallet.command(name="mode", aliases=("environment",))
     async def wallet_mode(self, ctx: commands.Context):
@@ -398,6 +482,10 @@ class WalletCoreCommands:
 
         Adds or lists tokens shared by this bot installation.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         await ctx.invoke(self.wallet_token_list)
 
     @wallet_token.command(name="add")
@@ -408,6 +496,10 @@ class WalletCoreCommands:
 
         Validates and adds an ERC-20 token for every wallet user.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         if not await self._wallet_read_allowed(ctx, "token_submission", 30):
             return
         network = NETWORKS.get(network_key.strip().lower())
@@ -481,6 +573,10 @@ class WalletCoreCommands:
     @wallet_token.command(name="list", aliases=("tokens",))
     async def wallet_token_list(self, ctx: commands.Context):
         """List shared registered tokens available to wallet commands."""
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         registry = await self.config.token_registry()
         visible = []
         for network_key, entries in registry.items():
@@ -521,6 +617,10 @@ class WalletCoreCommands:
         self, ctx: commands.Context, network_or_action: str = None, asset: str = None
     ):
         """View, set, or reset the asset used by the short wallet send form."""
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         user_config = self.config.user(ctx.author)
         if network_or_action is None:
             current = await user_config.default_send_asset()
@@ -879,6 +979,10 @@ class WalletCoreCommands:
 
         Lists the test networks enabled for this prototype.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         lines = []
         for network in NETWORKS.values():
             capabilities = ", ".join(
@@ -907,6 +1011,10 @@ class WalletCoreCommands:
 
         Shows or selects the preferred network for network-specific commands.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         user_config = self.config.user(ctx.author)
         current_key = await user_config.selected_network()
         if network_key is None:

@@ -19,12 +19,23 @@ from .constants import (
     WALLET_HISTORY_COOLDOWN_SECONDS,
     WALLET_RPC_COOLDOWN_SECONDS,
 )
-from .core import WalletCoreCommands
+from .core import WalletCoreCommands, testnet_path_allowed
 from .views import WalletHistoryView
 
 
 class WalletActivityCommands:
     """Public transaction lookup and wallet activity commands."""
+
+    @WalletCoreCommands.wallet_testnet.command(
+        name="transactions", aliases=("tx", "trans", "history")
+    )
+    async def wallet_testnet_transactions(
+        self, ctx: commands.Context, network_key: str = None
+    ):
+        """Browse activity through the explicit testnet sandbox."""
+        await self._invoke_testnet_command(
+            ctx, self.wallet_transactions, network_key=network_key
+        )
 
     @staticmethod
     def _activity_network(value: str):
@@ -366,6 +377,10 @@ class WalletActivityCommands:
 
         Browses indexed incoming and outgoing blockchain activity for your wallet.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return

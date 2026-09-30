@@ -141,6 +141,12 @@ User commands:
 [p]wallet token default <network> [native|symbol|contract]
 [p]wallet token default reset
 [p]wallet mode                    # Show the owner-controlled operating mode
+[p]wallet testnet                  # Explicit sandbox in mainnet mode
+[p]wallet testnet balance [network]
+[p]wallet testnet networks
+[p]wallet testnet tokens
+[p]wallet testnet transactions [network]
+[p]wallet testnet send [...]
 [p]walletset environment [testnet|mainnet|mainnet-only]
 [p]wallet notifications [true|false]
 [p]wallet security              # Show emergency-lock status

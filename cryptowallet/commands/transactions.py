@@ -17,12 +17,17 @@ from ..core.validation import (
     parse_native_amount,
 )
 from .constants import INTENT_LIFETIME_SECONDS, WALLET_PROVIDER_COOLDOWN_SECONDS
-from .core import WalletCoreCommands
+from .core import WalletCoreCommands, testnet_path_allowed
 from .views import WalletIntentView, WalletTotpModal
 
 
 class WalletTransactionCommands:
     """Transaction intent creation, approval, and status commands."""
+
+    @WalletCoreCommands.wallet_testnet.command(name="send")
+    async def wallet_testnet_send(self, ctx: commands.Context, *arguments: str):
+        """Prepare a send through the explicit testnet sandbox."""
+        await self._invoke_testnet_command(ctx, self.wallet_send, *arguments)
 
     @staticmethod
     def _send_network(value: str):
@@ -808,6 +813,10 @@ class WalletTransactionCommands:
         A recipient can be a wallet address or a non-bot server-member mention.
         Run this command without arguments for examples and your current default.
         """
+        if not await testnet_path_allowed(
+            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        ):
+            return
         if not await self._wallet_sensitive_allowed(ctx):
             return
         if not arguments:

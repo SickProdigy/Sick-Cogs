@@ -58,7 +58,7 @@ from ..commands.views import (
     WalletTotpManagementView,
 )
 from ..commands.transactions import WalletTransactionCommands
-from ..commands.core import WalletCoreCommands
+from ..commands.core import WalletCoreCommands, testnet_path_allowed
 from ..commands.admin import TOTP_RESET_ACKNOWLEDGEMENT, WalletAdminCommands
 from ..core.clanker import (
     ClankerDeploymentIntent, ClankerPool, ClankerPoolPosition, ClankerReward,
@@ -2073,6 +2073,22 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(environment_allows_network(
             WalletEnvironment.MAINNET_ONLY, network_is_testnet=True, explicit_testnet=True
         ))
+
+    async def test_testnet_command_routing_matches_operating_mode(self):
+        ctx = SimpleNamespace(clean_prefix="!", send=AsyncMock())
+        cog = SimpleNamespace(config=SimpleNamespace(
+            operating_mode=_Value("mainnet")
+        ))
+        self.assertFalse(await testnet_path_allowed(cog, ctx))
+        self.assertIn("!wallet testnet", ctx.send.await_args.args[0])
+        self.assertTrue(await testnet_path_allowed(cog, ctx, explicit=True))
+
+        cog.config.operating_mode.value = "mainnet-only"
+        self.assertFalse(await testnet_path_allowed(cog, ctx, explicit=True))
+        self.assertIn("mainnet-only", ctx.send.await_args.args[0])
+
+        cog.config.operating_mode.value = "testnet"
+        self.assertTrue(await testnet_path_allowed(cog, ctx))
 
     async def test_owner_operating_mode_control_is_fail_closed(self):
         mode = _MutableValue("testnet")
