@@ -110,14 +110,23 @@ def _singleton_deploy_data(creation_code: str) -> str:
 
 
 
-def _validate_tokenfactory_operation(operation: dict) -> tuple[str, int, str, int, str]:
+def _validate_tokenfactory_operation(
+    operation: dict,
+) -> tuple[str, int, str, int, str, str]:
     """Independently constrain one TokenFactory-owned call before signing."""
 
     if not isinstance(operation, dict):
         raise ValueError("Invalid TokenFactory operation")
     kind = str(operation.get("kind") or "")
-    if str(operation.get("network") or "") != BASE_SEPOLIA.key:
-        raise ValueError("TokenFactory operation targets the wrong network")
+    network = str(operation.get("network") or "")
+    expected_chain_ids = {
+        BASE_SEPOLIA.key: BASE_SEPOLIA.chain_id,
+        BASE_MAINNET.key: BASE_MAINNET.chain_id,
+    }
+    if network not in expected_chain_ids:
+        raise ValueError("TokenFactory operation targets an unsupported network")
+    if int(operation.get("chain_id", 0)) != expected_chain_ids[network]:
+        raise ValueError("TokenFactory operation targets the wrong chain")
     target = normalize_evm_address(str(operation.get("to") or ""))
     value_wei = int(operation.get("value_wei", -1))
     gas_limit = int(operation.get("gas_limit", 0))
@@ -126,7 +135,9 @@ def _validate_tokenfactory_operation(operation: dict) -> tuple[str, int, str, in
         raise ValueError("TokenFactory operation has invalid call data or value")
 
     if kind == "factory":
-        expected_keys = {"kind", "network", "to", "value_wei", "data", "gas_limit"}
+        expected_keys = {
+            "kind", "network", "chain_id", "to", "value_wei", "data", "gas_limit"
+        }
         if set(operation) != expected_keys:
             raise ValueError("TokenFactory infrastructure operation has unexpected fields")
         if target != TOKEN_FACTORY_SINGLETON or gas_limit != TOKEN_FACTORY_DEPLOY_GAS_LIMIT:
@@ -139,11 +150,11 @@ def _validate_tokenfactory_operation(operation: dict) -> tuple[str, int, str, in
         creation_code = "0x" + calldata[creation_start:creation_end]
         if _singleton_deploy_data(creation_code).lower() != calldata:
             raise ValueError("TokenFactory infrastructure calldata does not match its pin")
-        return target, value_wei, calldata, gas_limit, kind
+        return target, value_wei, calldata, gas_limit, kind, network
 
     if kind == "fixed_supply_token":
         expected_keys = {
-            "kind", "network", "to", "value_wei", "data", "gas_limit",
+            "kind", "network", "chain_id", "to", "value_wei", "data", "gas_limit",
             "recipient", "request_id",
         }
         if set(operation) != expected_keys:
@@ -164,7 +175,7 @@ def _validate_tokenfactory_operation(operation: dict) -> tuple[str, int, str, in
             or request_id != encoded_request_id
         ):
             raise ValueError("TokenFactory token bindings do not match its calldata")
-        return target, value_wei, calldata, gas_limit, kind
+        return target, value_wei, calldata, gas_limit, kind, network
 
     raise ValueError("Unsupported TokenFactory operation kind")
 
@@ -773,13 +784,17 @@ class CdpWalletProvider(WalletProvider):
         """Sign and submit one independently allowlisted TokenFactory-owned call."""
 
         try:
-            target, value_wei, calldata, gas_limit, kind = (
+            target, value_wei, calldata, gas_limit, kind, network = (
                 _validate_tokenfactory_operation(operation)
             )
         except (TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "The reviewed TokenFactory operation is invalid."
             ) from exc
+        if network != BASE_SEPOLIA.key:
+            raise WalletProviderError(
+                "Base mainnet TokenFactory submission is not authorized."
+            )
         state = await self.token_factory_deployment_status()
         if kind == "factory" and state["deployed"]:
             return {**state, "provider_status": "complete", "already_deployed": True}

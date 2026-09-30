@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from ..operations import (
     TokenFactoryOperationError,
-    fixed_supply_token_data, singleton_deploy_data, verify_fixed_supply_token,
+    factory_operation, fixed_supply_token_data, singleton_deploy_data,
+    token_operation, verify_fixed_supply_token,
 )
+from ..constants import BASE_MAINNET_CHAIN_ID, BASE_MAINNET_NETWORK_KEY
 from ..models import TokenDraft
 from ..tokenfactory import TokenFactory
 from ..views import FactoryDeploymentView, TokenDeploymentConfirmView
@@ -109,6 +111,37 @@ class TokenFactoryValidationTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Unrecognized"):
             singleton_deploy_data(mutated)
+
+
+    def test_operations_are_bound_to_network_and_chain(self):
+        artifact_path = (
+            Path(__file__).parents[1]
+            / "contracts" / "artifact" / "SickGamingTokenFactory.json"
+        )
+        artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        factory = factory_operation(
+            artifact["bytecode"], network=BASE_MAINNET_NETWORK_KEY
+        )
+        self.assertEqual(factory["network"], BASE_MAINNET_NETWORK_KEY)
+        self.assertEqual(factory["chain_id"], BASE_MAINNET_CHAIN_ID)
+        draft = TokenDraft(
+            creator_discord_id=7, name="Mainnet Dry Run", symbol="MDR",
+            decimals=18, supply_atomic=10**18, network=BASE_MAINNET_NETWORK_KEY,
+            chain_id=BASE_MAINNET_CHAIN_ID,
+        )
+        operation = token_operation(
+            draft, "0x" + "22" * 32,
+            "0x1111111111111111111111111111111111111111",
+            network=BASE_MAINNET_NETWORK_KEY,
+        )
+        self.assertEqual(operation["chain_id"], BASE_MAINNET_CHAIN_ID)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            token_operation(
+                TokenDraft(creator_discord_id=7, name="Wrong", symbol="WR", decimals=18, supply_atomic=1),
+                "0x" + "22" * 32,
+                "0x1111111111111111111111111111111111111111",
+                network=BASE_MAINNET_NETWORK_KEY,
+            )
 
 
 class TokenFactoryOperationVerificationTests(unittest.IsolatedAsyncioTestCase):

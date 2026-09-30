@@ -3151,10 +3151,10 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             decimals=18, supply_atomic=10**18,
         )
         operation = token_operation(draft, request_id, recipient)
-        self.assertEqual(
-            _validate_tokenfactory_operation(operation)[-1], "fixed_supply_token"
-        )
+        validated = _validate_tokenfactory_operation(operation)
+        self.assertEqual(validated[-2:], ("fixed_supply_token", BASE_SEPOLIA.key))
         for field, value in (
+            ("network", BASE_MAINNET.key), ("chain_id", BASE_MAINNET.chain_id),
             ("value_wei", 1), ("gas_limit", 1),
             ("recipient", "0x" + "33" * 20),
             ("request_id", "0x" + "44" * 32),
@@ -3162,6 +3162,31 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             mutated = {**operation, field: value}
             with self.subTest(field=field), self.assertRaises(ValueError):
                 _validate_tokenfactory_operation(mutated)
+
+
+    async def test_valid_mainnet_envelope_is_rejected_before_provider_access(self):
+        recipient = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        draft = TokenDraft(
+            creator_discord_id=7, name="Mainnet Dry Run", symbol="MDR",
+            decimals=18, supply_atomic=10**18, network=BASE_MAINNET.key,
+            chain_id=BASE_MAINNET.chain_id,
+        )
+        operation = token_operation(
+            draft, "0x" + "55" * 32, recipient, network=BASE_MAINNET.key
+        )
+        self.assertEqual(
+            _validate_tokenfactory_operation(operation)[-2:],
+            ("fixed_supply_token", BASE_MAINNET.key),
+        )
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.token_factory_deployment_status = AsyncMock()
+        provider.credentials = AsyncMock()
+        with self.assertRaisesRegex(WalletProviderError, "not authorized"):
+            await provider.submit_reviewed_tokenfactory_call(
+                {}, operation, "mainnet-dry-run"
+            )
+        provider.token_factory_deployment_status.assert_not_awaited()
+        provider.credentials.assert_not_awaited()
 
 
 class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):

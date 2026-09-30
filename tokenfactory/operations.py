@@ -3,7 +3,7 @@ from hashlib import sha256
 from importlib import import_module
 from typing import Any
 
-from .constants import NETWORK_KEY
+from .constants import NETWORK_CHAIN_IDS, NETWORK_KEY
 from .models import TokenDraft
 from .validation import normalize_owner_address
 
@@ -134,10 +134,16 @@ def singleton_deploy_data(creation_code: str) -> str:
     return "0x4af63f02" + format(64, "064x") + "0" * 64 + format(length, "064x") + padded
 
 
-def token_operation(draft: TokenDraft, request_id: str, recipient: str) -> dict[str, Any]:
+def token_operation(
+    draft: TokenDraft, request_id: str, recipient: str, *, network: str = NETWORK_KEY
+) -> dict[str, Any]:
+    chain_id = NETWORK_CHAIN_IDS.get(network)
+    if chain_id is None or draft.network != network or draft.chain_id != chain_id:
+        raise ValueError("TokenFactory draft does not match the selected network.")
     return {
         "kind": "fixed_supply_token",
-        "network": NETWORK_KEY,
+        "network": network,
+        "chain_id": chain_id,
         "to": TOKEN_FACTORY_ADDRESS,
         "value_wei": 0,
         "data": fixed_supply_token_data(draft, request_id, recipient),
@@ -147,10 +153,16 @@ def token_operation(draft: TokenDraft, request_id: str, recipient: str) -> dict[
     }
 
 
-def factory_operation(creation_code: str) -> dict[str, Any]:
+def factory_operation(
+    creation_code: str, *, network: str = NETWORK_KEY
+) -> dict[str, Any]:
+    chain_id = NETWORK_CHAIN_IDS.get(network)
+    if chain_id is None:
+        raise ValueError("Unsupported TokenFactory network.")
     return {
         "kind": "factory",
-        "network": NETWORK_KEY,
+        "network": network,
+        "chain_id": chain_id,
         "to": TOKEN_FACTORY_SINGLETON,
         "value_wei": 0,
         "data": singleton_deploy_data(creation_code),
