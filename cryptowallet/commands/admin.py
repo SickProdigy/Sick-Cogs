@@ -878,6 +878,8 @@ class WalletAdminCommands:
             f"`{usage.get('cdp_writes', 0)} writes` "
             f"(`{self.recent_cdp_request_count()}` in the last minute)\n"
             f"Onchain Data reads: `{usage.get('onchain_data_reads', 0)}`\n"
+            f"Provider errors: `{usage.get('rate_limited_responses', 0)} rate-limited`, "
+            f"`{usage.get('provider_server_errors', 0)} server errors`\n"
             f"Estimated wallet operations: `{wallet_operations} / {WALLET_SAFETY_TARGET}` "
             f"safety target (`{WALLET_FREE_OPERATIONS}` published free allowance)\n"
             f"Estimated CDP Node usage: `{node_units:,} / {NODE_SAFETY_TARGET:,} BU` "

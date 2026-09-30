@@ -314,7 +314,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             all_users=AsyncMock(return_value={7: {"intents": store.data}}),
             user_from_id=lambda user_id: SimpleNamespace(intents=store),
         )
-        cog = SimpleNamespace(config=config)
+        cog = SimpleNamespace(config=config, notify_wallet_owners=AsyncMock())
 
         await ConfirmationProcessorMixin._recover_interrupted_submissions(cog)
 
@@ -326,6 +326,8 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             store.data["sol-submitted"]["status"], IntentStatus.SUBMITTED.value
         )
+        cog.notify_wallet_owners.assert_awaited_once()
+        self.assertIn("2 interrupted submission(s)", cog.notify_wallet_owners.await_args.args[0])
         job, wait_seconds = await ConfirmationProcessorMixin._next_confirmation_job(cog)
         self.assertEqual(job, (7, "sol-submitted"))
         self.assertEqual(wait_seconds, 0)
@@ -342,7 +344,8 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         cog = SimpleNamespace(
             config=SimpleNamespace(
                 user_from_id=lambda user_id: SimpleNamespace(intents=store)
-            )
+            ),
+            notify_wallet_owners=AsyncMock(),
         )
 
         with patch(
@@ -358,6 +361,9 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stored["provider_status"], "confirmation_timeout")
         self.assertFalse(stored["confirmation_delivered"])
         self.assertEqual(stored["confirmation_attempts"], 5)
+        cog.notify_wallet_owners.assert_awaited_once()
+        self.assertIn("remained unconfirmed for 24 hours",
+                      cog.notify_wallet_owners.await_args.args[0])
 
     async def test_member_wallet_lookup_lazily_provisions_missing_profile(self):
         target = SimpleNamespace(id=8, bot=False, display_name="Recipient")
@@ -4110,6 +4116,45 @@ class TotpValidationTests(unittest.TestCase):
         self.assertIsNone(verify_totp_code("not-base32", "287082", 59))
         with self.assertRaises(ValueError):
             verify_totp_code(self.RFC_SECRET, "287082", 59, window=2)
+
+
+class ProviderOperationalAlertTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rate_limit_and_server_errors_are_counted_and_alert_once(self):
+        harness = SimpleNamespace(
+            cdp_retry_until=0.0,
+            usage_pending={
+                "cdp_reads": 0, "cdp_writes": 0, "onchain_data_reads": 0,
+                "wallet_operations_estimated": 0,
+                "node_billing_units_estimated": 0,
+                "rate_limited_responses": 0, "provider_server_errors": 0,
+            },
+            cdp_recent_requests=__import__("collections").deque(),
+        )
+        await ProviderUsageMixin.record_cdp_request(
+            harness, "GET", "/v2/evm/accounts", 429, retry_after=1
+        )
+        await ProviderUsageMixin.record_cdp_request(
+            harness, "POST", "/v2/end-users/test/send", 503
+        )
+        self.assertEqual(harness.usage_pending["rate_limited_responses"], 1)
+        self.assertEqual(harness.usage_pending["provider_server_errors"], 1)
+
+        usage = ProviderUsageMixin._empty_provider_usage("2026-09")
+        usage.update({"rate_limited_responses": 1, "provider_server_errors": 1})
+        alert = SimpleNamespace(
+            config=SimpleNamespace(provider_usage=SimpleNamespace(set=AsyncMock())),
+            notify_wallet_owners=AsyncMock(),
+            _usage_period=lambda: "2026-09",
+            _warning_level=ProviderUsageMixin._warning_level,
+        )
+        await ProviderUsageMixin._warn_provider_owners(alert, usage)
+        alert.notify_wallet_owners.assert_awaited_once()
+        message = alert.notify_wallet_owners.await_args.args[0]
+        self.assertIn("rate-limited responses 1", message)
+        self.assertIn("provider server errors 1", message)
+        alert.notify_wallet_owners.reset_mock()
+        await ProviderUsageMixin._warn_provider_owners(alert, usage)
+        alert.notify_wallet_owners.assert_not_awaited()
 
 
 class ProviderCooldownTests(unittest.IsolatedAsyncioTestCase):

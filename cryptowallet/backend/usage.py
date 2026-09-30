@@ -27,6 +27,8 @@ class ProviderUsageMixin:
             "onchain_data_reads": 0,
             "wallet_operations_estimated": 0,
             "node_billing_units_estimated": 0,
+            "rate_limited_responses": 0,
+            "provider_server_errors": 0,
         }
         self.usage_flush_lock = asyncio.Lock()
         self.usage_flush_task = self.bot.loop.create_task(self._usage_flush_loop())
@@ -67,6 +69,10 @@ class ProviderUsageMixin:
             )
         key = "cdp_reads" if method == "GET" else "cdp_writes"
         self.usage_pending[key] += 1
+        if status == 429:
+            self.usage_pending["rate_limited_responses"] += 1
+        elif 500 <= status < 600:
+            self.usage_pending["provider_server_errors"] += 1
         now = time.monotonic()
         self.cdp_recent_requests.append(now)
         while self.cdp_recent_requests and now - self.cdp_recent_requests[0] >= 60:
@@ -124,6 +130,9 @@ class ProviderUsageMixin:
             "node_billing_units_estimated": 0,
             "wallet_warning_level": 0,
             "node_warning_level": 0,
+            "provider_alert_level": 0,
+            "rate_limited_responses": 0,
+            "provider_server_errors": 0,
         }
 
     @staticmethod
@@ -136,6 +145,19 @@ class ProviderUsageMixin:
             return 80
         return 0
 
+    async def notify_wallet_owners(self, message: str) -> None:
+        """Send a bounded, non-secret operational alert to configured bot owners."""
+        owner_ids = set(getattr(self.bot, "owner_ids", None) or [])
+        owner_id = getattr(self.bot, "owner_id", None)
+        if owner_id:
+            owner_ids.add(owner_id)
+        for user_id in owner_ids:
+            try:
+                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                await user.send(message)
+            except Exception:
+                continue
+
     async def _warn_provider_owners(self, usage: dict) -> None:
         wallet_level = self._warning_level(
             int(usage.get("wallet_operations_estimated", 0) or 0),
@@ -145,33 +167,34 @@ class ProviderUsageMixin:
             int(usage.get("node_billing_units_estimated", 0) or 0),
             NODE_SAFETY_TARGET,
         )
+        rate_limits = int(usage.get("rate_limited_responses", 0) or 0)
+        server_errors = int(usage.get("provider_server_errors", 0) or 0)
+        provider_level = 2 if server_errors else 1 if rate_limits else 0
         old_wallet = int(usage.get("wallet_warning_level", 0) or 0)
         old_node = int(usage.get("node_warning_level", 0) or 0)
-        if wallet_level <= old_wallet and node_level <= old_node:
+        old_provider = int(usage.get("provider_alert_level", 0) or 0)
+        if (
+            wallet_level <= old_wallet
+            and node_level <= old_node
+            and provider_level <= old_provider
+        ):
             return
         usage["wallet_warning_level"] = max(wallet_level, old_wallet)
         usage["node_warning_level"] = max(node_level, old_node)
+        usage["provider_alert_level"] = max(provider_level, old_provider)
         await self.config.provider_usage.set(usage)
-        owner_ids = set(getattr(self.bot, "owner_ids", None) or [])
-        owner_id = getattr(self.bot, "owner_id", None)
-        if owner_id:
-            owner_ids.add(owner_id)
         message = (
-            "CryptoWallet provider usage warning for "
+            "CryptoWallet provider alert for "
             f"{usage.get('period', self._usage_period())}: "
             f"estimated wallet operations "
             f"{usage.get('wallet_operations_estimated', 0)}/{WALLET_SAFETY_TARGET}; "
             f"estimated CDP Node usage "
-            f"{usage.get('node_billing_units_estimated', 0)}/{NODE_SAFETY_TARGET} BU. "
-            "No operations were stopped. Use your bot's walletset usage command and "
-            "verify authoritative totals in the CDP billing portal."
+            f"{usage.get('node_billing_units_estimated', 0)}/{NODE_SAFETY_TARGET} BU; "
+            f"rate-limited responses {rate_limits}; provider server errors {server_errors}. "
+            "No operation was automatically retried or replaced. Use walletset usage, "
+            "pause processing if errors continue, and verify authoritative provider status."
         )
-        for user_id in owner_ids:
-            try:
-                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-                await user.send(message)
-            except Exception:
-                continue
+        await self.notify_wallet_owners(message)
 
     def recent_cdp_request_count(self) -> int:
         now = time.monotonic()

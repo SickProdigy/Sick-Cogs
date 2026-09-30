@@ -78,6 +78,7 @@ class ConfirmationProcessorMixin:
     async def _recover_interrupted_submissions(self) -> None:
         """Fail closed after a restart during the provider submission window."""
         all_users = await self.config.all_users()
+        recovered = []
         for user_id, user_data in all_users.items():
             for intent_id, data in (user_data.get("intents") or {}).items():
                 if data.get("status") != IntentStatus.PROCESSING.value:
@@ -88,6 +89,18 @@ class ConfirmationProcessorMixin:
                 await self.config.user_from_id(int(user_id)).intents.set_raw(
                     str(intent_id), "provider_status", value="unknown"
                 )
+                recovered.append((int(user_id), str(intent_id)))
+        if recovered:
+            references = ", ".join(
+                f"user {user_id} intent {intent_id}" for user_id, intent_id in recovered[:5]
+            )
+            suffix = "" if len(recovered) <= 5 else f" and {len(recovered) - 5} more"
+            await self.notify_wallet_owners(
+                "CryptoWallet restart alert: "
+                f"{len(recovered)} interrupted submission(s) became uncertain "
+                f"({references}{suffix}). No operation was resubmitted. Reconcile provider "
+                "and public-chain state before permitting replacements."
+            )
 
     async def _wait_for_confirmation_work(self, seconds: float) -> None:
         self.confirmation_wakeup.clear()
@@ -159,6 +172,7 @@ class ConfirmationProcessorMixin:
     async def _reschedule_confirmation(
         self, user_id: int, intent_id: str, *, failed: bool = False
     ) -> None:
+        became_uncertain = False
         async with self.config.user_from_id(user_id).intents() as intents:
             stored = intents.get(intent_id)
             if not stored or stored.get("status") != IntentStatus.SUBMITTED.value:
@@ -173,13 +187,21 @@ class ConfirmationProcessorMixin:
                 stored["provider_status"] = "confirmation_timeout"
                 stored["confirmation_delivered"] = False
                 stored["confirmation_next_check_at"] = 0
-                return
-            delay = (
-                120 + secrets.randbelow(31)
-                if failed
-                else self._confirmation_backoff(attempts)
+                became_uncertain = True
+            else:
+                delay = (
+                    120 + secrets.randbelow(31)
+                    if failed
+                    else self._confirmation_backoff(attempts)
+                )
+                stored["confirmation_next_check_at"] = int(time.time()) + delay
+        if became_uncertain:
+            await self.notify_wallet_owners(
+                "CryptoWallet confirmation alert: "
+                f"user {user_id} intent {intent_id} remained unconfirmed for 24 hours "
+                "and is now uncertain. No operation was resubmitted. Reconcile provider "
+                "and public-chain state before permitting a replacement."
             )
-            stored["confirmation_next_check_at"] = int(time.time()) + delay
 
     async def _deliver_confirmation(
         self, user_id: int, intent: TransactionIntent

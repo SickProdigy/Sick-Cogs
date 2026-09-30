@@ -17,7 +17,7 @@ The setup page detects an existing private configuration and exposes only the da
 
 ## Routine monitoring
 
-Review walletset view, walletset usage, pending and uncertain intents, provider billing, relay errors, database growth, migration state, and current provider behavior. Alerts must not include tokens, JWTs, TOTP material, authorization headers, private keys, compact configuration files, or secret-bearing request bodies.
+Review walletset view, walletset usage, pending and uncertain intents, provider billing, relay errors, database growth, migration state, and current provider behavior. Alerts must not include tokens, JWTs, TOTP material, authorization headers, private keys, compact configuration files, or secret-bearing request bodies. CryptoWallet DMs configured bot owners on the first monthly CDP rate-limit response, the first provider server-error class, a restart-interrupted submission, and a transaction that becomes uncertain after 24 hours. Provider alerts are severity-deduplicated for the accounting period; transaction alerts are emitted once at the state transition. Treat an alert as a prompt to inspect `walletset usage`, pause when errors persist, preserve public identifiers, and reconcile before any replacement.
 
 ## Immediate containment
 
