@@ -14,7 +14,11 @@ from redbot.core.bot import Red
 from .constants import CONFIG_IDENTIFIER
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
-from .policy import default_mainnet_limits, validate_mainnet_limits
+from .policy import (
+    default_mainnet_limits,
+    migrate_mainnet_limits,
+    validate_mainnet_limits,
+)
 from .operations import (
     TOKEN_DEPLOY_GAS_LIMIT,
     TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
@@ -88,6 +92,10 @@ class TokenFactory(commands.Cog):
             task.cancel()
 
     async def cog_load(self):
+        stored_limits = await self.config.mainnet_limits()
+        reviewed_limits = migrate_mainnet_limits(stored_limits)
+        if reviewed_limits != stored_limits:
+            await self.config.mainnet_limits.set(reviewed_limits)
         task = asyncio.create_task(self._restore_discord_watchers())
         self._track_task(task)
 
@@ -870,7 +878,9 @@ class TokenFactory(commands.Cog):
             value=(
                 f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\n"
                 f"Token deployments/day: **{limits['token_deployments_per_day']}**\n"
-                f"Token gas: **{limits['token_gas_limit']:,}** | Native value: **0 ETH**"
+                f"Token gas: **{limits['token_gas_limit']:,}** | "
+                f"Max fee: **{limits['max_gas_fee_wei'] / 10**18:.3f} ETH** | "
+                "Native value: **0 ETH**"
             ),
             inline=False,
         )

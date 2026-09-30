@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 from ..network_manifest import TokenFactoryManifestError, load_network_manifest, mainnet_readiness
 from ..policy import (
     MAINNET_LIMITS_DEFAULT, TokenFactoryPolicyError,
-    default_mainnet_limits, validate_mainnet_limits,
+    default_mainnet_limits, migrate_mainnet_limits, validate_mainnet_limits,
 )
 from ..tokenfactory import TokenFactory
 
@@ -91,6 +91,19 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
         expanded = {**MAINNET_LIMITS_DEFAULT, "token_deployments_per_day": 2}
         with self.assertRaisesRegex(TokenFactoryPolicyError, "ceiling"):
             validate_mainnet_limits(expanded)
+
+    def test_legacy_limits_gain_fee_ceiling_idempotently(self):
+        legacy = default_mainnet_limits()
+        legacy.pop("max_gas_fee_wei")
+        migrated = migrate_mainnet_limits(legacy)
+        self.assertEqual(
+            migrated["max_gas_fee_wei"], MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
+        )
+        self.assertEqual(migrate_mainnet_limits(migrated), migrated)
+
+    def test_limit_migration_rejects_unknown_fields(self):
+        with self.assertRaisesRegex(TokenFactoryPolicyError, "unknown"):
+            migrate_mainnet_limits({**default_mainnet_limits(), "future_limit": 1})
 
     async def test_enable_is_rejected_without_state_change(self):
         config = SimpleNamespace(

@@ -3,11 +3,65 @@ from typing import TYPE_CHECKING
 import discord
 
 from .constants import DEFAULT_DECIMALS
+from .mainnet_review import MainnetTokenReview
 from .models import TokenDraft
 from .validation import normalize_decimals, normalize_name, normalize_symbol, parse_supply
 
 if TYPE_CHECKING:
     from .tokenfactory import TokenFactory
+
+
+def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
+    """Render a non-executable disclosure of one immutable owner canary."""
+
+    scale = 10**review.decimals
+    whole, remainder = divmod(review.supply_atomic, scale)
+    supply = str(whole)
+    if remainder:
+        supply += f".{remainder:0{review.decimals}d}".rstrip("0")
+    max_fee = review.max_gas_fee_wei / 10**18
+    embed = discord.Embed(
+        title="Review Base mainnet TokenFactory canary",
+        description=(
+            "This immutable review is non-executable. It prepares the exact disclosure "
+            "that a separately gated protected approval must match."
+        ),
+        color=discord.Color.red(),
+    )
+    embed.add_field(name="Network", value="Base mainnet (\u00608453\u0060)", inline=True)
+    embed.add_field(
+        name="Token", value=f"{review.name} ({review.symbol})", inline=False
+    )
+    embed.add_field(name="Fixed supply", value=supply, inline=True)
+    embed.add_field(name="Recipient", value=f"\u0060{review.recipient}\u0060", inline=False)
+    embed.add_field(name="Request ID", value=f"\u0060{review.request_id}\u0060", inline=False)
+    embed.add_field(
+        name="Target factory", value=f"\u0060{review.target_factory}\u0060", inline=False
+    )
+    embed.add_field(
+        name="Calldata SHA-256",
+        value=f"\u0060{review.calldata_sha256}\u0060",
+        inline=False,
+    )
+    embed.add_field(name="Gas limit", value=f"\u0060{review.gas_limit:,}\u0060", inline=True)
+    embed.add_field(
+        name="Gas ceiling", value=f"\u0060{max_fee:.8f} ETH\u0060", inline=True
+    )
+    embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
+    embed.add_field(name="Native value", value="\u00600.00000000 ETH\u0060", inline=True)
+    embed.add_field(
+        name="Review fingerprint", value=f"\u0060{review.fingerprint}\u0060", inline=False
+    )
+    embed.add_field(
+        name="Irreversible",
+        value=(
+            "A confirmed mainnet deployment cannot be undone. The token supply, "
+            "recipient, and contract code become permanent."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Owner canary staging only - non-executable")
+    return embed
 
 
 class TokenDetailsModal(discord.ui.Modal):
