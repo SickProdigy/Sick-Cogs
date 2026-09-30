@@ -26,17 +26,17 @@ runtime code hash, and the deterministic zero-salt destination. Before submissio
 path must recheck the singleton code hash and confirm that the destination has no code. It may then
 send only the pinned creation bytecode and must verify the deployed runtime hash afterward.
 
-## Base mainnet audit package
+## Base mainnet review package
 
 Base mainnet remains disabled and requires an independent review. Send the reviewer only the
 committed source, lockfile, manifests, artifact, and documentation—not `node_modules/`, bot
 configuration, or credentials.
 
-- [Independent audit handoff](AUDIT-HANDOFF.md)
-- [Audit report template](AUDIT-REPORT-TEMPLATE.md)
+- [Independent technical review handoff](AUDIT-HANDOFF.md)
+- [Technical review report template](AUDIT-REPORT-TEMPLATE.md)
 - [Deployment evidence template](DEPLOYMENT-EVIDENCE-TEMPLATE.md)
 - [Mainnet readiness boundary](MAINNET-READINESS.md)
 
 `npm test` performs a fresh deterministic build before checking both candidate and mainnet
-manifest pins. A successful local test is reproducibility evidence, not an independent audit or
+manifest pins. A successful local test is reproducibility evidence, not an independent review or
 deployment authorization.

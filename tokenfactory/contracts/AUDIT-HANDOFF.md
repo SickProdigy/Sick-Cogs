@@ -1,7 +1,9 @@
-# Independent audit handoff
+# Independent technical review handoff
 
-This package supports the independent smart-contract/security review required by issue #203. It does
-not authorize deployment, provide credentials, or enable a mainnet command.
+This package supports the independent technical review required before the single owner-only canary
+in issue #203. It does not represent a formal audit and does not authorize deployment, provide
+credentials, or enable a mainnet command. A formal security audit remains required before public or
+commercial mainnet availability.
 
 ## Review target
 

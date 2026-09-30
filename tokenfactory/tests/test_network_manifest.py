@@ -82,6 +82,10 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["Network"], "Base mainnet (`8453`)")
         self.assertIn("required", fields["Required gates"])
+        self.assertIn("Independent technical review", fields["Required gates"])
+        self.assertIn("Owner risk/compliance attestation", fields["Required gates"])
+        self.assertIn("before public or commercial mainnet use", fields["Required gates"])
+        self.assertNotIn("Legal review and explicit owner", fields["Required gates"])
         self.assertIn("cross-check: **complete**", fields["Required gates"])
         self.assertNotIn(r"\n", "".join(fields.values()))
         self.assertIn("not started", fields["Factory lifecycle"])
@@ -125,6 +129,7 @@ class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(config.mainnet_emergency_paused.value)
         self.assertFalse(config.mainnet_owner_canary_enabled.value)
         self.assertIn("rejected", ctx.send.await_args.args[0])
+        self.assertIn("independent technical review", ctx.send.await_args.args[0])
 
     async def test_pause_clears_every_execution_flag(self):
         config = SimpleNamespace(

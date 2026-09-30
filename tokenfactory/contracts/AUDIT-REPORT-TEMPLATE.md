@@ -1,4 +1,7 @@
-# TokenFactory independent audit report
+# TokenFactory independent technical review report
+
+This report supports only the tightly limited owner canary. It is not represented as a formal
+security audit or approval for public or commercial mainnet use.
 
 ## Reviewer
 

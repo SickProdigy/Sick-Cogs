@@ -64,5 +64,9 @@ runtime hashes, token metadata, fixed supply, recipient balance, creation event,
 record. Differing evidence fails closed and a different verification record cannot overwrite the
 first accepted record.
 
-Independent security review, legal review, explicit owner canary approval, source verification,
-evidence recording, and combined test-bot validation remain gates.
+An independent technical review appropriate to this single owner-only canary, an explicit owner
+risk/compliance attestation, explicit owner canary approval, source verification, evidence recording,
+and combined test-bot validation remain gates. The attestation confirms that the canary involves no
+sale, fundraising, investment or profit promise, public distribution, custody service, or issuance
+fee. A formal paid security audit and focused legal review remain gates before public/member or
+commercial mainnet deployment becomes available.

@@ -21,7 +21,9 @@ Use the bot's configured prefix in place of `[p]`.
    - Manifest is `candidate-not-deployed`.
    - Both singleton checks are recorded and the destination is empty.
    - Enabled is false, paused is true, and owner canary is false.
-   - Independent audit, legal review, and canary approval remain required.
+   - Independent technical review, owner risk/compliance attestation, and canary approval remain
+     required.
+   - Formal audit and legal review remain required before public or commercial mainnet use.
 3. Run `[p]tokenfactoryset mainnetcontrol enable`.
    - The request is rejected.
    - No configuration flag changes.

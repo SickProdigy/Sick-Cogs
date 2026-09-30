@@ -1,13 +1,15 @@
 # Base mainnet deployment evidence record
 
-Complete this only after all audit, legal, and explicit owner gates are satisfied. This template does
+Complete this only after the independent technical review, owner risk/compliance attestation, and
+explicit owner gates are satisfied. This template does
 not authorize a transaction.
 
 ## Authorization
 
-- Issue #203 audit report:
-- Audit report hash/signature verified by:
-- Legal review reference:
+- Issue #203 technical review report:
+- Owner risk/compliance attestation:
+- Technical review report hash/signature verified by:
+- Public/commercial legal review reference (not required for the owner-only canary):
 - Explicit owner authorization reference and timestamp:
 - Approved factory review fingerprint:
 - TOTP-protected approval timestamp/expiry:

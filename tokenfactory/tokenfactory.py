@@ -1309,9 +1309,10 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Required gates",
             value=(
-                f"Independent audit: **{status['independent_audit']}**\n"
+                f"Independent technical review: **{status['independent_audit']}**\n"
                 "Pre-deployment RPC cross-check: **complete**\n"
-                "Legal review and explicit owner canary approval: **required**"
+                "Owner risk/compliance attestation and canary approval: **required**\n"
+                "Formal audit/legal review: **required before public or commercial mainnet use**"
             ),
             inline=False,
         )
@@ -1330,7 +1331,7 @@ class TokenFactory(commands.Cog):
             status = mainnet_readiness()
             await ctx.send(
                 "Base mainnet TokenFactory enablement was rejected with no state "
-                f"change. Manifest: `{status['status']}`; independent audit: "
+                f"change. Manifest: `{status['status']}`; independent technical review: "
                 f"**{status['independent_audit']}**. Complete every issue #203 gate "
                 "and update the reviewed manifest before requesting a canary."
             )
