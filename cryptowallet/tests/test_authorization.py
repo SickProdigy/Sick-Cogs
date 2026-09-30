@@ -1449,6 +1449,40 @@ class IntentExpirationViewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FailClosedTransactionTests(unittest.TestCase):
+    def test_approval_quote_and_fingerprint_reject_critical_mutations(self):
+        intent = TransactionIntent(
+            intent_id="mutation-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=10, created_at=100, expires_at=200,
+            asset_kind="native", asset_symbol="ETH", asset_decimals=18,
+            estimated_gas_fee_wei=0, max_gas_fee_wei=0, gas_sponsored=True,
+        )
+        quote = WalletTransactionCommands._intent_quote(intent)
+        fingerprint = intent.approval_fingerprint()
+        mutations = (
+            replace(intent, profile_id="profile-8"),
+            replace(intent, network=SOLANA_DEVNET.key),
+            replace(intent, from_address="0x1111111111111111111111111111111111111111"),
+            replace(intent, to_address="0x2222222222222222222222222222222222222222"),
+            replace(intent, value_wei=11),
+            replace(intent, asset_kind="erc20", asset_contract="0x" + "3" * 40),
+            replace(intent, asset_symbol="WETH"),
+            replace(intent, asset_decimals=6),
+            replace(intent, estimated_gas_fee_wei=1),
+            replace(intent, max_gas_fee_wei=1),
+            replace(intent, gas_sponsored=False),
+            replace(intent, created_at=101),
+            replace(intent, expires_at=201),
+        )
+        for changed in mutations:
+            with self.subTest(changed=changed.approval_payload()):
+                self.assertNotEqual(
+                    WalletTransactionCommands._intent_quote(changed), quote
+                )
+                self.assertNotEqual(changed.approval_fingerprint(), fingerprint)
+
     def test_final_binding_requires_reviewed_network_provider_and_exact_account(self):
         sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         intent = TransactionIntent(
