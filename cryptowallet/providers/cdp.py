@@ -45,6 +45,7 @@ from .base_rpc import (
     get_chain_id,
     get_contract_code,
     get_erc20_asset,
+    get_evm_block_number,
     get_factory_token_deployment,
     get_native_balance as get_rpc_native_balance,
     get_solana_native_balance,
@@ -59,6 +60,7 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
 CDP_MAINNET_TOKEN_NAMESPACE = "cryptowallet_cdp_mainnet"
+BASE_FINALITY_CONFIRMATIONS = 12
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
 PROVISIONING_IDEMPOTENCY_VERSION = 3
@@ -1601,13 +1603,59 @@ class CdpWalletProvider(WalletProvider):
                 raw_block_number = receipts[0].get("blockNumber")
                 if raw_block_number is not None:
                     block_number = int(raw_block_number)
+            if provider_status == "complete":
+                public = await get_user_operation_receipt(
+                    address, intent.user_operation_hash
+                )
+                if public is None:
+                    return {
+                        "provider_status": (
+                            "reorged" if intent.block_number is not None else "broadcast"
+                        ),
+                        "user_operation_hash": user_op_hash.lower(),
+                        "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                        "block_number": None,
+                    }
+                public_hash = str(public.get("transactionHash") or "").lower()
+                public_receipts = public.get("receipts") or []
+                public_block = int(public_receipts[0]["blockNumber"])
+                if (
+                    public.get("status") not in {"complete", "failed"}
+                    or not HASH_PATTERN.fullmatch(public_hash)
+                    or transaction_hash is not None
+                    and public_hash != transaction_hash.lower()
+                    or intent.transaction_hash is not None
+                    and public_hash != intent.transaction_hash.lower()
+                    or block_number is not None
+                    and public_block != block_number
+                    or intent.block_number is not None
+                    and public_block != intent.block_number
+                ):
+                    return {
+                        "provider_status": "reorged",
+                        "user_operation_hash": user_op_hash.lower(),
+                        "transaction_hash": public_hash or None,
+                        "block_number": public_block,
+                    }
+                if public["status"] == "failed":
+                    provider_status = "failed"
+                else:
+                    latest_block = await get_evm_block_number(intent.network)
+                    confirmations = max(0, latest_block - public_block + 1)
+                    provider_status = (
+                        "complete"
+                        if confirmations >= BASE_FINALITY_CONFIRMATIONS
+                        else "confirming"
+                    )
+                transaction_hash = public_hash
+                block_number = public_block
             return {
                 "provider_status": provider_status,
                 "user_operation_hash": user_op_hash.lower(),
                 "transaction_hash": transaction_hash.lower() if transaction_hash else None,
                 "block_number": block_number,
             }
-        except (AttributeError, TypeError, ValueError) as exc:
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not retrieve the submitted operation status.") from exc
 
     async def _get_solana_transaction_status(self, profile: dict, intent: TransactionIntent) -> dict:
@@ -1618,12 +1666,16 @@ class CdpWalletProvider(WalletProvider):
             signature = normalize_solana_signature(intent.transaction_hash or "")
             if sender != normalize_solana_address(intent.from_address):
                 raise ValueError("sender mismatch")
-            transaction = await get_solana_transaction(signature)
+            transaction = await get_solana_transaction(signature, commitment="finalized")
         except (BaseRpcError, ValueError) as exc:
             raise WalletProviderError("Solana Devnet could not retrieve this transaction status.") from exc
         if transaction is None:
-            return {"provider_status": "broadcast", "transaction_hash": signature,
-                    "block_number": None}
+            return {"provider_status": (
+                        "reorged" if intent.block_number is not None else "broadcast"
+                    ), "transaction_hash": signature, "block_number": None}
+        if intent.block_number is not None and int(transaction["slot"]) != intent.block_number:
+            return {"provider_status": "reorged", "transaction_hash": signature,
+                    "block_number": int(transaction["slot"])}
         transfers = transaction.get("native_transfers") or []
         if not any(
             item.get("from_address") == sender

@@ -273,7 +273,12 @@ Base Sepolia sends use CDP-sponsored smart-account operations and display a zero
 fee. Solana devnet sends label the current cost as a network fee (EVM cards retain the technically
 distinct gas-fee label) and submit a strict native System Program transfer. Before either
 transaction is accepted as confirmed, its public-chain result must match
-the stored sender, recipient, and exact atomic amount. Ethereum Sepolia and the additional EVM
+the stored sender, recipient, and exact atomic amount. Base Sepolia additionally requires 12
+public-chain confirmations after the ERC-4337 event is independently recovered; Solana requires a
+`finalized` RPC result. Provider `complete` alone is never treated as final. If an observed receipt
+disappears, changes transaction hash, or moves to another block, the intent becomes **uncertain**
+and requires evidence-based reconciliation instead of automatic replacement or resubmission.
+Ethereum Sepolia and the additional EVM
 testnets remain read-only because no reviewed, complete pre-approval fee path is available.
 
 Approval checks CDP's authoritative profile-wide delegation status. When authorization is absent,

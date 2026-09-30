@@ -219,7 +219,7 @@ class ConfirmationProcessorMixin:
                     )
                 elif intent.status is IntentStatus.FAILED:
                     await user.send(
-                        f"Transaction `{intent.intent_id}` failed or was dropped by CDP."
+                        f"Transaction `{intent.intent_id}` failed on the public chain."
                     )
                 elif intent.status is IntentStatus.UNCERTAIN:
                     await user.send(

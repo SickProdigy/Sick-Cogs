@@ -423,8 +423,8 @@ class WalletTransactionCommands:
         provider_status = result["provider_status"]
         final_status = (
             IntentStatus.CONFIRMED if provider_status == "complete"
-            else IntentStatus.FAILED if provider_status in {"dropped", "failed"}
-            else IntentStatus.UNCERTAIN if was_uncertain
+            else IntentStatus.FAILED if provider_status == "failed"
+            else IntentStatus.UNCERTAIN if provider_status in {"dropped", "reorged"} or was_uncertain
             else IntentStatus.SUBMITTED
         )
         async with self.config.user_from_id(user_id).intents() as intents:
@@ -777,11 +777,13 @@ class WalletTransactionCommands:
             )
             return
         provider_status = result["provider_status"]
-        if provider_status == "complete":
-            final_status = IntentStatus.CONFIRMED
-        elif provider_status in {"dropped", "failed"}:
+        if provider_status == "failed":
             final_status = IntentStatus.FAILED
+        elif provider_status in {"dropped", "reorged"}:
+            final_status = IntentStatus.UNCERTAIN
         else:
+            # Provider acceptance is not chain finality. The confirmation processor
+            # independently verifies the public receipt and required depth.
             final_status = IntentStatus.SUBMITTED
         async with self.config.user_from_id(view.user_id).intents() as intents:
             stored = intents.get(intent.intent_id)
@@ -805,10 +807,11 @@ class WalletTransactionCommands:
                 if intent.transaction_hash else view
             ),
         )
-        if final_status is IntentStatus.CONFIRMED:
-            message = f"Transaction confirmed on {network.name}."
-        elif final_status is IntentStatus.FAILED:
-            message = "CDP reported that the transaction failed or was dropped."
+        if final_status is IntentStatus.FAILED:
+            message = "The public-chain transaction failed."
+        elif final_status is IntentStatus.UNCERTAIN:
+            message = ("The provider dropped the operation, but non-inclusion is not final. "
+                       "Do not submit a replacement until it is reconciled.")
         else:
             message = f"Transaction submitted to {network.name} and awaiting confirmation."
         await interaction.followup.send(message, ephemeral=True)

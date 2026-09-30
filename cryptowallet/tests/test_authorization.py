@@ -2528,6 +2528,103 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["provider_status"], "failed")
         self.assertIsNone(result["transaction_hash"])
 
+    async def test_base_confirmation_waits_for_public_chain_depth(self):
+        user_op = "0x" + "1" * 64
+        tx_hash = "0x" + "2" * 64
+        profile = _profile()
+        intent = TransactionIntent(
+            intent_id="base-finality", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address=profile["accounts"][0]["address"],
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.SUBMITTED, user_operation_hash=user_op,
+        )
+        client = SimpleNamespace(get_smart_account_user_operation=AsyncMock(
+            return_value={"status": "complete", "userOpHash": user_op,
+                          "transactionHash": tx_hash,
+                          "receipts": [{"blockNumber": 100}]}
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+        public = {"status": "complete", "userOpHash": user_op,
+                  "transactionHash": tx_hash,
+                  "receipts": [{"blockNumber": 100}]}
+        with patch(
+            "cryptowallet.providers.cdp.get_user_operation_receipt",
+            AsyncMock(return_value=public),
+        ), patch(
+            "cryptowallet.providers.cdp.get_evm_block_number",
+            AsyncMock(return_value=110),
+        ):
+            confirming = await provider.get_transaction_status(profile, intent)
+        self.assertEqual(confirming["provider_status"], "confirming")
+        with patch(
+            "cryptowallet.providers.cdp.get_user_operation_receipt",
+            AsyncMock(return_value=public),
+        ), patch(
+            "cryptowallet.providers.cdp.get_evm_block_number",
+            AsyncMock(return_value=111),
+        ):
+            complete = await provider.get_transaction_status(profile, intent)
+        self.assertEqual(complete["provider_status"], "complete")
+        self.assertEqual(complete["block_number"], 100)
+
+    async def test_base_changed_receipt_becomes_reorged_not_failed(self):
+        user_op = "0x" + "1" * 64
+        tx_hash = "0x" + "2" * 64
+        profile = _profile()
+        intent = TransactionIntent(
+            intent_id="base-reorg", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address=profile["accounts"][0]["address"],
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2,
+            status=IntentStatus.SUBMITTED, user_operation_hash=user_op,
+            transaction_hash=tx_hash, block_number=100,
+        )
+        client = SimpleNamespace(get_smart_account_user_operation=AsyncMock(
+            return_value={"status": "complete", "userOpHash": user_op,
+                          "transactionHash": tx_hash,
+                          "receipts": [{"blockNumber": 101}]}
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-id")
+        )
+        provider._api_client = lambda credentials: client
+        with patch(
+            "cryptowallet.providers.cdp.get_user_operation_receipt",
+            AsyncMock(return_value={
+                "status": "complete", "userOpHash": user_op,
+                "transactionHash": tx_hash,
+                "receipts": [{"blockNumber": 101}],
+            }),
+        ):
+            result = await provider.get_transaction_status(profile, intent)
+        self.assertEqual(result["provider_status"], "reorged")
+        self.assertEqual(result["block_number"], 101)
+
+        replacement_hash = "0x" + "3" * 64
+        client.get_smart_account_user_operation.return_value = {
+            "status": "complete", "userOpHash": user_op,
+            "transactionHash": tx_hash, "receipts": [{"blockNumber": 100}],
+        }
+        with patch(
+            "cryptowallet.providers.cdp.get_user_operation_receipt",
+            AsyncMock(return_value={
+                "status": "complete", "userOpHash": user_op,
+                "transactionHash": replacement_hash,
+                "receipts": [{"blockNumber": 100}],
+            }),
+        ):
+            replaced = await provider.get_transaction_status(profile, intent)
+        self.assertEqual(replaced["provider_status"], "reorged")
+        self.assertEqual(replaced["transaction_hash"], replacement_hash)
+
     async def test_solana_confirmation_uses_public_signature_status(self):
         sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
         signature = "1" * 64
@@ -2553,11 +2650,12 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
                     "value_atomic": 1,
                 }],
             }),
-        ):
+        ) as transaction:
             result = await provider.get_transaction_status(profile, intent)
         self.assertEqual(result["provider_status"], "complete")
         self.assertEqual(result["transaction_hash"], signature)
         self.assertEqual(result["block_number"], 456)
+        transaction.assert_awaited_once_with(signature, commitment="finalized")
 
     async def test_solana_confirmation_rejects_a_mismatched_transfer(self):
         sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"

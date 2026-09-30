@@ -134,12 +134,16 @@ async def get_solana_native_balance(address: str) -> int:
         raise BaseRpcError("Solana Devnet returned an invalid balance.") from exc
 
 
-async def get_solana_transaction(signature: str) -> dict | None:
+async def get_solana_transaction(
+    signature: str, *, commitment: str = "confirmed"
+) -> dict | None:
     """Return bounded public Solana devnet transaction metadata."""
+    if commitment not in {"confirmed", "finalized"}:
+        raise BaseRpcError("Unsupported Solana commitment.")
     result = await _rpc_with_urls(
         SOLANA_DEVNET_RPC_URLS,
         "getTransaction",
-        [signature, {"encoding": "jsonParsed", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}],
+        [signature, {"encoding": "jsonParsed", "commitment": commitment, "maxSupportedTransactionVersion": 0}],
         "Solana Devnet",
     )
     if result is None:
@@ -382,6 +386,21 @@ def _decode_abi_text(value: str) -> str:
     if len(text) != length:
         raise ValueError("Invalid ABI length")
     return text.decode("utf-8").strip()
+
+
+async def get_evm_block_number(network: str = "base-sepolia") -> int:
+    """Return the latest public EVM block height for finality checks."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if rpc_urls is None:
+        raise BaseRpcError("Block-height lookup is unavailable for this network.")
+    value = await _rpc_with_urls(rpc_urls, "eth_blockNumber", [], network)
+    try:
+        height = int(str(value), 16)
+        if height < 0:
+            raise ValueError("negative block height")
+        return height
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError(f"{network} returned an invalid block number.") from exc
 
 
 async def get_transaction(tx_hash: str, network: str = "base-sepolia") -> dict | None:
