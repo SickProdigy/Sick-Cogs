@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 const RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS = 300;
 const RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600;
+const RECOVERY_HANDOFF_TERMS_LIFETIME_SECONDS = 600;
 
 require_once dirname(__DIR__) . '/server/recovery-config.php';
 
@@ -140,6 +141,7 @@ try {
         $maxLifetime = match ($handoffType) {
             'standard' => RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS,
             'totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS,
+            'wallet_terms' => RECOVERY_HANDOFF_TERMS_LIFETIME_SECONDS,
             default => 0,
         };
         $digest = (string) ($body['handoff_digest'] ?? '');

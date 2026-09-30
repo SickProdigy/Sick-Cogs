@@ -9,12 +9,14 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from ..core.validation import normalize_evm_address, normalize_solana_address
+from .terms import CRYPTOWALLET_MAINNET_TERMS_VERSION, CRYPTOWALLET_TERMS_PRODUCT
 
 
 JWT_TOKEN_NAMESPACE = "cryptowallet_jwt"
 JWT_LIFETIME_SECONDS = 5 * 60
 CLAIM_HANDOFF_LIFETIME_SECONDS = 3 * 60
 TOTP_ENROLLMENT_LIFETIME_SECONDS = 10 * 60
+WALLET_TERMS_LIFETIME_SECONDS = 10 * 60
 
 
 def _base64url(value: bytes) -> str:
@@ -178,10 +180,21 @@ class JwtAuthMixin:
         claim_names = {
             "tokenfactory_external": "sickwallet_tokenfactory",
             "totp_enroll": "sickwallet_totp",
+            "wallet_terms": "sickwallet_terms",
         }
         claim_name = claim_names.get(purpose)
         if claim_name is None or not isinstance(payload, dict):
             raise ValueError("Unsupported external companion handoff")
+        if purpose == "wallet_terms":
+            expected = {"product", "version", "result_handle"}
+            if (
+                set(payload) != expected
+                or payload.get("product") != CRYPTOWALLET_TERMS_PRODUCT
+                or payload.get("version") != CRYPTOWALLET_MAINNET_TERMS_VERSION
+                or not isinstance(payload.get("result_handle"), str)
+                or not 32 <= len(payload["result_handle"]) <= 128
+            ):
+                raise ValueError("The CryptoWallet terms handoff binding is invalid")
         configuration = await self.jwt_configuration()
         if configuration is None:
             raise RuntimeError("The protected companion signing key is not configured")
@@ -191,7 +204,9 @@ class JwtAuthMixin:
             raise RuntimeError("The protected companion identity is incomplete")
         now = int(time.time())
         lifetime = (
-            TOTP_ENROLLMENT_LIFETIME_SECONDS
+            WALLET_TERMS_LIFETIME_SECONDS
+            if purpose == "wallet_terms"
+            else TOTP_ENROLLMENT_LIFETIME_SECONDS
             if purpose == "totp_enroll"
             else CLAIM_HANDOFF_LIFETIME_SECONDS
         )

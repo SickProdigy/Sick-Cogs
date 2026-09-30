@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from .terms import CRYPTOWALLET_MAINNET_TERMS_VERSION, CRYPTOWALLET_TERMS_PRODUCT
+
 
 RECOVERY_RELAY_TOKEN_NAMESPACE = "cryptowallet_relay"
 RECOVERY_RELAY_PATH = "/api/recovery-handoff.php"
@@ -14,6 +16,7 @@ RECOVERY_RELAY_TIMEOUT_SECONDS = 15
 RECOVERY_RELAY_MAX_RESPONSE_BYTES = 16 * 1024
 RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS = 5 * 60
 RECOVERY_RELAY_TOTP_LIFETIME_SECONDS = 10 * 60
+RECOVERY_RELAY_TERMS_LIFETIME_SECONDS = 10 * 60
 
 
 def _relay_signature(secret: str, timestamp: int, nonce: str, body: bytes) -> str:
@@ -51,6 +54,7 @@ class RecoveryRelayMixin:
         lifetimes = {
             "standard": RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
             "totp_enroll": RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
+            "wallet_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
         }
         max_lifetime = lifetimes.get(purpose)
         now = int(time.time())
@@ -159,6 +163,72 @@ class RecoveryRelayMixin:
             aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError
         ) as exc:
             raise RuntimeError("The TOTP enrollment relay could not be reached") from exc
+
+    async def poll_wallet_terms_result(self, handle: str) -> dict | None:
+        """Consume one browser-submitted CryptoWallet terms acceptance."""
+        result = await self._poll_structured_relay_result(
+            handle,
+            path="/api/wallet-terms.php",
+            label="CryptoWallet terms",
+        )
+        if result is None:
+            return None
+        acceptance_id = result.get("acceptance_id")
+        if (
+            set(result) != {"status", "product", "version", "acceptance_id"}
+            or result.get("product") != CRYPTOWALLET_TERMS_PRODUCT
+            or result.get("version") != CRYPTOWALLET_MAINNET_TERMS_VERSION
+            or not isinstance(acceptance_id, str)
+            or not acceptance_id
+            or len(acceptance_id) > 128
+        ):
+            raise RuntimeError("The CryptoWallet terms relay returned an invalid binding")
+        return result
+
+    async def _poll_structured_relay_result(
+        self, handle: str, *, path: str, label: str
+    ) -> dict | None:
+        status = await self.recovery_relay_status()
+        if not status["configured"]:
+            raise RuntimeError("The one-time relay is not configured")
+        if not handle or len(handle) > 128:
+            raise RuntimeError(f"The {label} result handle is invalid")
+        tokens = await self.bot.get_shared_api_tokens(RECOVERY_RELAY_TOKEN_NAMESPACE)
+        secret = str(tokens.get("secret") or "").strip()
+        payload = {
+            "operation": "poll",
+            "handoff_digest": hashlib.sha256(handle.encode("utf-8")).hexdigest(),
+        }
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        timestamp = int(time.time())
+        nonce = secrets.token_urlsafe(24)
+        canonical = "\n".join((
+            "v1", str(timestamp), nonce, "POST", path, hashlib.sha256(body).hexdigest(),
+        ))
+        headers = {
+            "Accept": "application/json", "Content-Type": "application/json",
+            "X-SickWallet-Timestamp": str(timestamp), "X-SickWallet-Nonce": nonce,
+            "X-SickWallet-Signature": hmac.new(
+                secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256
+            ).hexdigest(),
+        }
+        timeout = aiohttp.ClientTimeout(total=RECOVERY_RELAY_TIMEOUT_SECONDS)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    f"{status['approval_base_url']}{path}", data=body, headers=headers
+                ) as response:
+                    raw = await response.content.read(RECOVERY_RELAY_MAX_RESPONSE_BYTES + 1)
+                    if len(raw) > RECOVERY_RELAY_MAX_RESPONSE_BYTES:
+                        raise RuntimeError(f"The {label} relay returned too much data")
+                    if response.status == 204:
+                        return None
+                    result = json.loads(raw.decode("utf-8"))
+                    if response.status != 200 or result.get("status") != "submitted":
+                        raise RuntimeError(f"The {label} relay rejected the poll")
+                    return result
+        except (aiohttp.ClientError, TimeoutError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"The {label} relay could not be reached") from exc
 
     async def poll_tokenfactory_result(self, handle: str) -> dict | None:
         """Poll one external TokenFactory handoff result through authenticated HTTPS."""

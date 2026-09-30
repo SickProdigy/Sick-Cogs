@@ -111,6 +111,22 @@ class CryptoWalletTermsCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://wallet.example/wallet-terms.html", message)
         self.assertIn("Viewing the page does not accept", message)
 
+    async def test_reference_command_reopens_protected_flow_when_mainnet_acceptance_missing(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
+        starter = AsyncMock(return_value=False)
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=AsyncMock(return_value="https://wallet.example")
+            ),
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
+            _wallet_environment=AsyncMock(return_value=__import__(
+                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
+            ).WalletEnvironment.MAINNET),
+            _start_wallet_terms_acceptance=starter,
+        )
+        await WalletCoreCommands.wallet_terms.callback(cog, ctx)
+        starter.assert_awaited_once_with(ctx)
+
     async def test_reference_command_does_not_require_or_provision_testnet_wallet(self):
         ctx = SimpleNamespace(
             author=SimpleNamespace(id=42),

@@ -30,7 +30,13 @@
     <h2>Changes, suspension, and privacy</h2>
     <p>Unsafe, abusive, unavailable, or unsupported capabilities may be paused or disabled. A material terms change requires a new acceptance. Acceptance records contain the terms version, Discord user ID, UTC time, and a non-secret identifier; they do not contain wallet keys, authenticator codes, or provider credentials.</p>
     <p class="notice">Reading this page does not itself accept these terms. Acceptance is recorded only through a protected, user-bound CryptoWallet flow.</p>
+    <section id="terms-controls" hidden>
+      <label><input id="terms-understood" type="checkbox"> I have read and accept these CryptoWallet mainnet terms.</label>
+      <p><button id="accept-terms" type="button" disabled>Accept CryptoWallet terms</button></p>
+    </section>
+    <p id="terms-status" class="notice">Checking for a protected acceptance link…</p>
     <p><a href="./">Return to CryptoWallet</a></p>
   </main>
+  <script type="module" src="wallet-terms.js"></script>
 </body>
 </html>

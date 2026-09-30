@@ -18,12 +18,14 @@ from redbot.core import commands
 from ..backend.auth import (
     CLAIM_HANDOFF_LIFETIME_SECONDS,
     TOTP_ENROLLMENT_LIFETIME_SECONDS,
+    WALLET_TERMS_LIFETIME_SECONDS,
     JwtAuthMixin,
     _key_id,
 )
 from ..backend.recovery_relay import (
     RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
     RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
+    RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
     RecoveryRelayMixin,
     _relay_signature,
 )
@@ -1038,6 +1040,31 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claims["sickwallet_totp"], payload)
         self.assertNotIn("secret", repr(claims).lower())
         self.assertNotIn("sickwallet_accounts", claims)
+
+    async def test_wallet_terms_handoff_is_exact_and_ten_minutes(self):
+        harness = _JwtHarness(self.configuration)
+        payload = {
+            "product": "cryptowallet",
+            "version": "2026-09-30.1",
+            "result_handle": "a" * 32,
+        }
+        token, expires_at = await harness.create_external_companion_handoff(
+            7, "wallet_terms", payload
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_terms"], payload)
+        self.assertEqual(expires_at - claims["iat"], WALLET_TERMS_LIFETIME_SECONDS)
+        self.assertEqual(WALLET_TERMS_LIFETIME_SECONDS, 10 * 60)
+        for changed in (
+            {**payload, "product": "tokenfactory"},
+            {**payload, "version": "old"},
+            {**payload, "extra": True},
+        ):
+            with self.assertRaisesRegex(ValueError, "binding"):
+                await harness.create_external_companion_handoff(7, "wallet_terms", changed)
 
     async def test_authorization_handoff_accepts_requested_default_days(self):
         harness = _JwtHarness(self.configuration)
@@ -3402,13 +3429,27 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("api.qrserver", source)
         self.assertNotIn("chart.googleapis", source)
 
+    def test_wallet_terms_page_has_protected_product_specific_acceptance(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "wallet-terms.html").read_text(encoding="utf-8")
+        source = (root / "web" / "src" / "wallet-terms.js").read_text(encoding="utf-8")
+        endpoint = (root / "web" / "api" / "wallet-terms.php").read_text(encoding="utf-8")
+        self.assertIn("I have read and accept these CryptoWallet mainnet terms", page)
+        self.assertIn("Viewing it does not accept", source)
+        self.assertIn("sickwallet_purpose !== \"wallet_terms\"", source)
+        self.assertIn("terms.product !== PRODUCT", source)
+        self.assertIn("/api/wallet-terms.php", endpoint)
+        self.assertIn("sickwallet_relay_nonces", endpoint)
+        self.assertIn("FOR UPDATE", endpoint)
+        self.assertNotIn("discord_user", endpoint)
+
     def test_database_migrations_are_numbered_immutable_and_shared_by_setup(self):
         root = Path(__file__).resolve().parents[1]
         server = root / "web" / "server"
         migrations = sorted((server / "migrations").glob("*.sql"))
         self.assertEqual(
             [path.name for path in migrations],
-            ["0001_initial_relay.sql", "0002_totp_enrollments.sql"],
+            ["0001_initial_relay.sql", "0002_totp_enrollments.sql", "0003_wallet_terms.sql"],
         )
         self.assertTrue(all("CREATE TABLE IF NOT EXISTS" in path.read_text(
             encoding="utf-8"
