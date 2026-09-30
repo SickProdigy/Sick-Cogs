@@ -73,6 +73,7 @@ installation's configured command prefix; documentation continues to use `[p]`.
 `tokenfactoryset mainnetstatus` displays the separate, non-executable Base mainnet candidate
 manifest and its unresolved gates. It cannot enable or deploy anything. See
 `contracts/MAINNET-READINESS.md` for the frozen contract behavior and release boundary.
+The safe SGBTestAgent checkpoint is documented in `docs/MAINNET-TEST-PLAN.md`.
 
 No mainnet network, arbitrary Solidity, arbitrary bytecode, arbitrary calldata, later minting
 authority, upgrade path, administrator, or bot ownership is supported. The external route permits
