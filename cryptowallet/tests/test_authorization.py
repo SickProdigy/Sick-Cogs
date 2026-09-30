@@ -3155,7 +3155,8 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validated[-2:], ("fixed_supply_token", BASE_SEPOLIA.key))
         for field, value in (
             ("network", BASE_MAINNET.key), ("chain_id", BASE_MAINNET.chain_id),
-            ("value_wei", 1), ("gas_limit", 1),
+            ("to", "0x" + "33" * 20), ("value_wei", 1),
+            ("gas_limit", 1), ("data", "0xdeadbeef" + operation["data"][10:]),
             ("recipient", "0x" + "33" * 20),
             ("request_id", "0x" + "44" * 32),
         ):
