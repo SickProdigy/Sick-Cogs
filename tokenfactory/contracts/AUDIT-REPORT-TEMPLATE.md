@@ -1,7 +1,7 @@
 # TokenFactory independent technical review report
 
-This report supports only the tightly limited owner canary. It is not represented as a formal
-security audit or approval for public or commercial mainnet use.
+This report supports the tightly limited owner canary and is not represented as a formal security
+audit. Free public release remains a separate owner decision after issue #203 and #229 gates pass.
 
 ## Reviewer
 

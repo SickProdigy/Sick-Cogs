@@ -2,8 +2,8 @@
 
 This package supports the independent technical review required before the single owner-only canary
 in issue #203. It does not represent a formal audit and does not authorize deployment, provide
-credentials, or enable a mainnet command. A formal security audit remains required before public or
-commercial mainnet availability.
+credentials, or enable a mainnet command. Review depth must be reassessed as usage or value at risk grows; issue #228
+separately requires outside counsel before monetization or expanded financial services.
 
 ## Review target
 

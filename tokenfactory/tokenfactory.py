@@ -1311,8 +1311,9 @@ class TokenFactory(commands.Cog):
             value=(
                 f"Independent technical review: **{status['independent_audit']}**\n"
                 "Pre-deployment RPC cross-check: **complete**\n"
-                "Owner risk/compliance attestation and canary approval: **required**\n"
-                "Formal audit/legal review: **required before public or commercial mainnet use**"
+                "Owner free-release scope attestation and canary approval: **required**\n"
+                "Public release acknowledgments: **tracked in issue #229**\n"
+                "Monetization or expanded financial services: **outside counsel first (#228)**"
             ),
             inline=False,
         )

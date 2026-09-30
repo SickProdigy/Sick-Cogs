@@ -65,8 +65,10 @@ record. Differing evidence fails closed and a different verification record cann
 first accepted record.
 
 An independent technical review appropriate to this single owner-only canary, an explicit owner
-risk/compliance attestation, explicit owner canary approval, source verification, evidence recording,
-and combined test-bot validation remain gates. The attestation confirms that the canary involves no
-sale, fundraising, investment or profit promise, public distribution, custody service, or issuance
-fee. A formal paid security audit and focused legal review remain gates before public/member or
-commercial mainnet deployment becomes available.
+free-release scope attestation, explicit owner canary approval, source verification, evidence
+recording, and combined test-bot validation remain gates. The attestation confirms that SickGaming
+does not sell, promote, endorse, list, trade, provide liquidity for, or promise returns on created
+tokens and charges no TokenFactory fee. Issue #229 tracks the concise acknowledgments required before
+free public/member use. A formal paid audit or legal opinion is not a launch gate for that scoped
+free creation tool; issue #228 requires outside counsel before monetization, custody, trading,
+promotion, or other expanded financial services.

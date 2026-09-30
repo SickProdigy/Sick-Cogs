@@ -7,9 +7,9 @@ not authorize a transaction.
 ## Authorization
 
 - Issue #203 technical review report:
-- Owner risk/compliance attestation:
+- Owner free-release scope attestation:
 - Technical review report hash/signature verified by:
-- Public/commercial legal review reference (not required for the owner-only canary):
+- Outside-counsel reference if an issue #228 trigger applies:
 - Explicit owner authorization reference and timestamp:
 - Approved factory review fingerprint:
 - TOTP-protected approval timestamp/expiry:
