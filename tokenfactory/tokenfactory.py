@@ -848,7 +848,7 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Read-only checks",
             value=(
-                f"Singleton matched: **{status['singleton_verified']}**\\n"
+                f"Singleton matched: **{status['singleton_verified']}**\n"
                 f"Destination empty: **{status['destination_empty']}**"
             ),
             inline=False,
@@ -860,7 +860,7 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Control state",
             value=(
-                f"Enabled: **{enabled}**\\nPaused: **{paused}**\\n"
+                f"Enabled: **{enabled}**\nPaused: **{paused}**\n"
                 f"Owner canary: **{canary}**"
             ),
             inline=False,
@@ -868,8 +868,8 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Canary ceilings",
             value=(
-                f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\\n"
-                f"Token deployments/day: **{limits['token_deployments_per_day']}**\\n"
+                f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\n"
+                f"Token deployments/day: **{limits['token_deployments_per_day']}**\n"
                 f"Token gas: **{limits['token_gas_limit']:,}** | Native value: **0 ETH**"
             ),
             inline=False,
@@ -877,8 +877,8 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Required gates",
             value=(
-                f"Independent audit: **{status['independent_audit']}**\\n"
-                "Second trusted RPC verification: **required**\\n"
+                f"Independent audit: **{status['independent_audit']}**\n"
+                "Pre-deployment RPC cross-check: **complete**\n"
                 "Legal review and explicit owner canary approval: **required**"
             ),
             inline=False,

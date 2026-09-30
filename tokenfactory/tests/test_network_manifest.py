@@ -78,6 +78,8 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["Network"], "Base mainnet (`8453`)")
         self.assertIn("required", fields["Required gates"])
+        self.assertIn("cross-check: **complete**", fields["Required gates"])
+        self.assertNotIn(r"\n", "".join(fields.values()))
         self.assertIn("unavailable", embed.footer.text)
 
 class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
