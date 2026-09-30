@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -13,6 +14,17 @@ const artifact = JSON.parse(
 const manifest = JSON.parse(
   fs.readFileSync(path.join(root, "candidate-manifest.json"), "utf8"),
 );
+const mainnetManifest = JSON.parse(
+  fs.readFileSync(path.join(root, "manifests", "base-mainnet.json"), "utf8"),
+);
+const source = fs.readFileSync(
+  path.join(root, "src", "SickGamingTokenFactory.sol"),
+);
+const packageLock = fs.readFileSync(path.join(root, "package-lock.json"));
+
+function sha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
 
 test("factory artifact exposes only the reviewed deployment surface", () => {
   const functions = artifact.abi
@@ -50,4 +62,28 @@ test("factory build records pinned reproducibility metadata", () => {
     ),
     manifest.predictedFactoryAddress,
   );
+});
+
+test("mainnet manifest is reproducible, isolated, and fail-closed", () => {
+  assert.equal(mainnetManifest.network, "base-mainnet");
+  assert.equal(mainnetManifest.chainId, 8453);
+  assert.equal(mainnetManifest.sourceSha256, sha256(source));
+  assert.equal(mainnetManifest.packageLockSha256, sha256(packageLock));
+  assert.equal(mainnetManifest.compiler, artifact.compilerVersion);
+  assert.deepEqual(mainnetManifest.optimizer, artifact.optimizer);
+  assert.equal(mainnetManifest.metadataBytecodeHash, "none");
+  assert.equal(mainnetManifest.factoryCreationCodeHash, artifact.creationCodeHash);
+  assert.equal(mainnetManifest.factoryRuntimeCodeHash, artifact.runtimeCodeHash);
+  assert.equal(
+    mainnetManifest.predictedFactoryAddress,
+    manifest.predictedFactoryAddress,
+  );
+  assert.equal(mainnetManifest.factoryAddress, null);
+  assert.equal(mainnetManifest.deploymentTransaction, null);
+  assert.deepEqual(mainnetManifest.authorization, {
+    factoryDeployment: false,
+    ownerCanary: false,
+    memberDeployment: false,
+  });
+  assert.equal(mainnetManifest.independentAudit.status, "required");
 });
