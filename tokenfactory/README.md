@@ -21,6 +21,7 @@ deployment is valid.
 [p]tokenfactory deployment
 [p]tokenfactory deployment <transaction_hash> <recipient_address>
 [p]tokenfactory status
+[p]tokenfactoryset mainnetstatus
 [p]tokenfactoryset deployment enable
 [p]tokenfactoryset deployment pause
 [p]tokenfactoryset deployment disable
@@ -66,6 +67,10 @@ signer pays its own testnet gas, the explicit gas limit, and zero native value. 
 are bound to submission; changed or stale terms require a fresh review. Both routes use retry-safe
 request IDs and the same pinned `createFixedSupplyToken` method. Live Discord guidance renders the
 installation's configured command prefix; documentation continues to use `[p]`.
+
+`tokenfactoryset mainnetstatus` displays the separate, non-executable Base mainnet candidate
+manifest and its unresolved gates. It cannot enable or deploy anything. See
+`contracts/MAINNET-READINESS.md` for the frozen contract behavior and release boundary.
 
 No mainnet network, arbitrary Solidity, arbitrary bytecode, arbitrary calldata, later minting
 authority, upgrade path, administrator, or bot ownership is supported. The external route permits

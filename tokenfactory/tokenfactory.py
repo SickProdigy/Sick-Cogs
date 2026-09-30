@@ -13,6 +13,7 @@ from redbot.core.bot import Red
 
 from .constants import CONFIG_IDENTIFIER
 from .models import TokenDraft
+from .network_manifest import mainnet_readiness
 from .operations import (
     TOKEN_DEPLOY_GAS_LIMIT,
     TOKEN_FACTORY_DEPLOY_GAS_LIMIT,
@@ -30,7 +31,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.5.2"
+    __version__ = "1.1.3"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
@@ -74,6 +75,10 @@ class TokenFactory(commands.Cog):
             factory_version=None,
             pending_factory_operation=None,
             emergency_paused=True,
+            mainnet_deployment_enabled=False,
+            mainnet_emergency_paused=True,
+            mainnet_manifest_approved=False,
+            mainnet_owner_canary_enabled=False,
         )
 
     def cog_unload(self):
@@ -813,6 +818,50 @@ class TokenFactory(commands.Cog):
         """Manage reviewed TokenFactory infrastructure."""
 
         await ctx.send_help()
+
+    @tokenfactoryset.command(name="mainnetstatus")
+    async def tokenfactoryset_mainnet_status(self, ctx: commands.Context):
+        """Show the non-executable Base mainnet readiness gates."""
+
+        try:
+            status = mainnet_readiness()
+        except Exception as exc:
+            await ctx.send(f"Base mainnet manifest validation failed: {exc}")
+            return
+        embed = discord.Embed(
+            title="TokenFactory Base mainnet readiness",
+            description=(
+                "Read-only staging state. No Base mainnet factory or token "
+                "deployment path is enabled."
+            ),
+            color=discord.Color.orange(),
+        )
+        embed.add_field(name="Network", value="Base mainnet (`8453`)", inline=True)
+        embed.add_field(name="Manifest", value=f"`{status['status']}`", inline=True)
+        embed.add_field(
+            name="Predicted factory",
+            value=f"`{status['predicted_factory_address']}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Read-only checks",
+            value=(
+                f"Singleton matched: **{status['singleton_verified']}**\\n"
+                f"Destination empty: **{status['destination_empty']}**"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Required gates",
+            value=(
+                f"Independent audit: **{status['independent_audit']}**\\n"
+                "Second trusted RPC verification: **required**\\n"
+                "Legal review and explicit owner canary approval: **required**"
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Mainnet deployment remains unavailable and fail-closed")
+        await ctx.send(embed=embed)
 
     @tokenfactoryset.command(name="deployment")
     async def tokenfactoryset_deployment(self, ctx: commands.Context, mode: str):
