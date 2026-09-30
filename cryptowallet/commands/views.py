@@ -39,6 +39,50 @@ class WalletHistoryView(discord.ui.View):
         )
 
 
+class WalletTermsReferenceView(discord.ui.View):
+    """Owner-bound reference card with an explicit protected acceptance action."""
+
+    def __init__(
+        self, cog, user_id: int, terms_url: str, *, current: bool, show_accept: bool
+    ):
+        super().__init__(timeout=180)
+        accept_button = self.children[0]
+        self.remove_item(accept_button)
+        self.add_item(discord.ui.Button(
+            label="View terms", style=discord.ButtonStyle.link, url=terms_url
+        ))
+        if show_accept:
+            accept_button.disabled = current
+            if current:
+                accept_button.label = "Terms accepted"
+            self.add_item(accept_button)
+        self.cog = cog
+        self.user_id = user_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the account owner can start this terms acceptance.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Accept terms", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            expires_at = await self.cog._send_wallet_terms_acceptance(interaction.user)
+        except (RuntimeError, ValueError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        button.disabled = True
+        await interaction.message.edit(view=self)
+        await interaction.followup.send(
+            f"I sent the protected acceptance card by DM; it expires <t:{expires_at}:R>.",
+            ephemeral=True,
+        )
+
+
 class WalletTermsAcceptanceView(discord.ui.View):
     """Owner-bound confirmation of one protected CryptoWallet terms acceptance."""
 

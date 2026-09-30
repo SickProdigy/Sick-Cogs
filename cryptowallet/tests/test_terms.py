@@ -91,56 +91,66 @@ class CryptoWalletTermsStorageTests(unittest.IsolatedAsyncioTestCase):
 
 
 class CryptoWalletTermsCommandTests(unittest.IsolatedAsyncioTestCase):
-    async def test_reference_command_reports_current_acceptance_and_link(self):
-        ctx = SimpleNamespace(
-            author=SimpleNamespace(id=42),
-            send=AsyncMock(),
-        )
+    @staticmethod
+    def _environment(name):
+        return getattr(__import__(
+            "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
+        ).WalletEnvironment, name)
+
+    async def test_mainnet_card_shows_view_and_accepted_state(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
         cog = SimpleNamespace(
             config=SimpleNamespace(
                 approval_base_url=AsyncMock(return_value="https://wallet.example/")
             ),
             has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=True),
-            _wallet_environment=AsyncMock(return_value=__import__(
-                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
-            ).WalletEnvironment.MAINNET),
+            _wallet_environment=AsyncMock(return_value=self._environment("MAINNET")),
         )
         await WalletCoreCommands.wallet_terms.callback(cog, ctx)
-        message = ctx.send.await_args.args[0]
-        self.assertIn("Your acceptance: **current**", message)
-        self.assertIn("https://wallet.example/wallet-terms.html", message)
-        self.assertIn("Viewing the page does not accept", message)
+        embed = ctx.send.await_args.kwargs["embed"]
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIn("Acceptance: **Current**", embed.description)
+        self.assertEqual([item.label for item in view.children], ["View terms", "Terms accepted"])
+        self.assertTrue(view.children[1].disabled)
 
-    async def test_reference_command_reopens_protected_flow_when_mainnet_acceptance_missing(self):
+    async def test_mainnet_card_shows_green_accept_button_when_missing(self):
         ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
-        starter = AsyncMock(return_value=False)
         cog = SimpleNamespace(
             config=SimpleNamespace(
                 approval_base_url=AsyncMock(return_value="https://wallet.example")
             ),
             has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
-            _wallet_environment=AsyncMock(return_value=__import__(
-                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
-            ).WalletEnvironment.MAINNET),
-            _start_wallet_terms_acceptance=starter,
+            _wallet_environment=AsyncMock(return_value=self._environment("MAINNET_ONLY")),
         )
         await WalletCoreCommands.wallet_terms.callback(cog, ctx)
-        starter.assert_awaited_once_with(ctx)
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertEqual([item.label for item in view.children], ["View terms", "Accept terms"])
+        self.assertEqual(view.children[1].style.name, "success")
+        self.assertFalse(view.children[1].disabled)
 
-    async def test_reference_command_does_not_require_or_provision_testnet_wallet(self):
-        ctx = SimpleNamespace(
-            author=SimpleNamespace(id=42),
-            send=AsyncMock(),
+    async def test_testnet_card_shows_only_view_terms(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                approval_base_url=AsyncMock(return_value="https://wallet.example")
+            ),
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
+            _wallet_environment=AsyncMock(return_value=self._environment("TESTNET")),
         )
+        await WalletCoreCommands.wallet_terms.callback(cog, ctx)
+        embed = ctx.send.await_args.kwargs["embed"]
+        view = ctx.send.await_args.kwargs["view"]
+        self.assertIn("Not required for testnet use", embed.description)
+        self.assertEqual([item.label for item in view.children], ["View terms"])
+
+    async def test_unconfigured_card_does_not_provision_or_offer_controls(self):
+        ctx = SimpleNamespace(author=SimpleNamespace(id=42), send=AsyncMock())
         cog = SimpleNamespace(
             config=SimpleNamespace(approval_base_url=AsyncMock(return_value=None)),
             has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
-            _wallet_environment=AsyncMock(return_value=__import__(
-                "cryptowallet.core.environment", fromlist=["WalletEnvironment"]
-            ).WalletEnvironment.TESTNET),
+            _wallet_environment=AsyncMock(return_value=self._environment("TESTNET")),
         )
         await WalletCoreCommands.wallet_terms.callback(cog, ctx)
-        message = ctx.send.await_args.args[0]
-        self.assertIn("Your acceptance: **not accepted**", message)
-        self.assertIn("Not required for testnet use.", message)
-        self.assertIn("not configured", message)
+        self.assertNotIn("view", ctx.send.await_args.kwargs)
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertTrue(any(field.name == "Unavailable" for field in embed.fields))

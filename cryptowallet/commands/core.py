@@ -26,6 +26,7 @@ from .constants import WALLET_SUMMARY_COOLDOWN_SECONDS
 from .views import (
     WalletEmergencyLockView,
     WalletTermsAcceptanceView,
+    WalletTermsReferenceView,
     WalletTotpEnrollmentView,
     WalletTotpManagementView,
 )
@@ -406,14 +407,13 @@ class WalletCoreCommands:
             return
         raise error
 
-    async def _start_wallet_terms_acceptance(self, ctx: commands.Context) -> bool:
-        """Send the owner-bound terms card used by mainnet setup and the reference command."""
-        if await self.has_current_cryptowallet_mainnet_terms(ctx.author.id):
-            return True
+    async def _send_wallet_terms_acceptance(self, user) -> int:
+        """DM one protected CryptoWallet terms flow and return its expiry."""
+        if await self.has_current_cryptowallet_mainnet_terms(user.id):
+            raise RuntimeError("CryptoWallet terms are already current for your account.")
         status = await self.recovery_relay_status()
         if not status["configured"]:
-            await ctx.send("Protected CryptoWallet terms acceptance is not configured on this bot.")
-            return False
+            raise RuntimeError("Protected CryptoWallet terms acceptance is not configured on this bot.")
         result_handle = secrets.token_urlsafe(32)
         payload = {
             "product": CRYPTOWALLET_TERMS_PRODUCT,
@@ -422,63 +422,66 @@ class WalletCoreCommands:
         }
         try:
             token, expires_at = await self.create_external_companion_handoff(
-                ctx.author.id, "wallet_terms", payload
+                user.id, "wallet_terms", payload
             )
             handoff = await self.register_recovery_handoff(
                 token, expires_at, purpose="wallet_terms"
             )
             link = f"{status['approval_base_url']}/wallet-terms.html#handoff={quote(handoff, safe='')}"
             view = WalletTermsAcceptanceView(
-                self, ctx.author.id, result_handle, expires_at, link
+                self, user.id, result_handle, expires_at, link
             )
             embed = discord.Embed(
-                title="CryptoWallet Mainnet Terms",
+                title="Accept CryptoWallet Mainnet Terms",
                 description=(
-                    "Review and accept the CryptoWallet terms, then return here and "
-                    "press **Confirm acceptance**. This does not authorize a transaction."
+                    "Review the terms on the protected page, submit your acceptance, "
+                    "then return here and press **Confirm acceptance**."
                 ),
                 color=discord.Color.blurple(),
             )
             embed.add_field(name="Terms version", value=f"`{CRYPTOWALLET_MAINNET_TERMS_VERSION}`")
             embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>")
-            message = await ctx.author.send(embed=embed, view=view)
+            embed.set_footer(text="Accepting terms does not authorize a transaction or enable mainnet.")
+            message = await user.send(embed=embed, view=view)
             view.message = message
-        except discord.HTTPException:
-            await ctx.send("I could not send you a DM. Enable direct messages and try again.")
-            return False
-        except (KeyError, RuntimeError, ValueError):
-            log.exception("Could not prepare CryptoWallet terms for user %s", ctx.author.id)
-            await ctx.send("Protected CryptoWallet terms acceptance could not be created. Try again later.")
-            return False
-        await ctx.send(f"I sent the protected CryptoWallet terms by DM; the link expires <t:{expires_at}:R>.")
-        return False
+        except discord.HTTPException as exc:
+            raise RuntimeError("I could not send you a DM. Enable direct messages and try again.") from exc
+        return expires_at
 
     @wallet.command(name="terms")
     async def wallet_terms(self, ctx: commands.Context):
-        """Show the current CryptoWallet terms and acceptance status."""
+        """Show CryptoWallet terms and protected acceptance controls."""
         base_url = str(await self.config.approval_base_url() or "").rstrip("/")
         current = await self.has_current_cryptowallet_mainnet_terms(ctx.author.id)
         environment = await self._wallet_environment()
-        status = "current" if current else "not accepted"
         requirement = (
             "Required before mainnet signing is enabled for your account."
             if environment is not WalletEnvironment.TESTNET
-            else "Not required for testnet use."
+            else "Not required for testnet use. Acceptance is offered when this bot switches to mainnet."
         )
-        if base_url:
-            terms = f"[Open CryptoWallet terms]({base_url}/wallet-terms.html)"
-        else:
-            terms = "The CryptoWallet terms page is not configured on this bot."
-        await ctx.send(
-            f"**CryptoWallet terms**\n"
-            f"Version: `{CRYPTOWALLET_MAINNET_TERMS_VERSION}`\n"
-            f"Your acceptance: **{status}**\n"
-            f"{requirement}\n"
-            f"{terms}\n"
-            "Viewing the page does not accept the terms or authorize transactions."
+        embed = discord.Embed(
+            title="CryptoWallet Terms",
+            description=(
+                f"Acceptance: **{'Current' if current else 'Not accepted'}**\n"
+                f"{requirement}"
+            ),
+            color=discord.Color.green() if current else discord.Color.blurple(),
         )
-        if environment is not WalletEnvironment.TESTNET and not current:
-            await self._start_wallet_terms_acceptance(ctx)
+        embed.add_field(name="Terms version", value=f"`{CRYPTOWALLET_MAINNET_TERMS_VERSION}`")
+        embed.add_field(
+            name="What acceptance does",
+            value="Records only your CryptoWallet terms acceptance. It does not authorize transactions or enable mainnet.",
+            inline=False,
+        )
+        if not base_url:
+            embed.add_field(name="Unavailable", value="The protected terms website is not configured.", inline=False)
+            await ctx.send(embed=embed)
+            return
+        view = WalletTermsReferenceView(
+            self, ctx.author.id, f"{base_url}/wallet-terms.html", current=current,
+            show_accept=environment is not WalletEnvironment.TESTNET
+        )
+        await ctx.send(embed=embed, view=view)
 
     @wallet.command(name="balance", aliases=("funds",))
     async def wallet_balance(self, ctx: commands.Context, network_key: str = None):
