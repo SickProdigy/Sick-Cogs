@@ -11,6 +11,15 @@ from ..backend.terms import (
 )
 
 
+class CryptoWalletTermsPageTests(unittest.TestCase):
+    def test_landing_page_links_retainable_wallet_terms(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        landing = (root / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('href="wallet-terms.html"', landing)
+        self.assertIn("CryptoWallet terms and risks", landing)
+
+
 class CryptoWalletTermsRecordTests(unittest.TestCase):
     def test_record_is_product_user_and_version_bound(self):
         record = create_cryptowallet_terms_acceptance(
