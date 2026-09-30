@@ -64,6 +64,14 @@ class WalletProvider(ABC):
     ) -> dict:
         """Return one cursor-paginated page of public address activity."""
 
+    async def validate_pre_submission(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        """Revalidate provider, chain, account, authorization, and operation state."""
+        raise WalletProviderError(
+            "Final pre-submission validation is unavailable for this provider."
+        )
+
     @abstractmethod
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
         """Sign and submit an approved transaction with provider idempotency."""

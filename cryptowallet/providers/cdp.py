@@ -42,6 +42,7 @@ from .clanker import (
 )
 from .base_rpc import (
     BaseRpcError,
+    get_chain_id,
     get_contract_code,
     get_erc20_asset,
     get_factory_token_deployment,
@@ -1259,6 +1260,105 @@ class CdpWalletProvider(WalletProvider):
                     "block_number": block_number}
         except (CdpApiError, AttributeError, KeyError, TypeError, ValueError) as exc:
             raise WalletProviderError("CDP could not refresh the Clanker operation.") from exc
+
+    async def validate_pre_submission(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        """Fail closed immediately before CDP creates the provider-managed operation."""
+        network = KNOWN_NETWORKS.get(intent.network)
+        if (
+            network is None
+            or not self.supports(network.key, NetworkCapability.SEND)
+            or intent.status is not IntentStatus.PENDING
+            or intent.provider_status is not None
+            or intent.user_operation_hash is not None
+            or intent.transaction_hash is not None
+            or intent.block_number is not None
+        ):
+            raise WalletProviderError(
+                "The transaction is not a clean pending provider operation."
+            )
+        profile_id = str(profile.get("profile_id") or "")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        account = next(
+            (item for item in profile.get("accounts") or []
+             if item.get("network") == network.key),
+            None,
+        )
+        try:
+            if network.family is ChainFamily.EVM:
+                account_address = normalize_evm_address(
+                    str((account or {}).get("address") or "")
+                )
+                sender = normalize_evm_address(intent.from_address)
+            else:
+                account_address = normalize_solana_address(
+                    str((account or {}).get("address") or "")
+                )
+                sender = normalize_solana_address(intent.from_address)
+        except ValueError as exc:
+            raise WalletProviderError(
+                "The final wallet account binding is invalid."
+            ) from exc
+        if (
+            not profile_id
+            or provider_user_id != profile_id
+            or intent.profile_id != profile_id
+            or account_address != sender
+        ):
+            raise WalletProviderError(
+                "The final wallet profile or sender binding changed."
+            )
+        credentials = await self.credentials()
+        if credentials is None:
+            raise WalletProviderError(
+                "CDP credentials are not completely configured."
+            )
+        chain_id = None
+        if network.family is ChainFamily.EVM:
+            try:
+                chain_id = await get_chain_id(network.key)
+            except BaseRpcError as exc:
+                raise WalletProviderError(
+                    "The final network identity could not be verified."
+                ) from exc
+            if chain_id != network.chain_id:
+                raise WalletProviderError(
+                    "The final network identity does not match the approved chain."
+                )
+        authorization = await self.get_delegation_status(profile, network.key)
+        if not authorization.get("active"):
+            raise WalletProviderError(
+                "The wallet authorization is no longer active."
+            )
+        if network.family is ChainFamily.SOLANA:
+            if intent.gas_sponsored or intent.estimated_gas_fee_wei < 0:
+                raise WalletProviderError(
+                    "The final Solana fee policy no longer matches the quote."
+                )
+        elif network.testnet:
+            if not intent.gas_sponsored or intent.estimated_gas_fee_wei != 0:
+                raise WalletProviderError(
+                    "The final sponsored-gas policy no longer matches the quote."
+                )
+        elif (
+            intent.gas_sponsored
+            or intent.max_gas_fee_wei <= 0
+            or intent.estimated_gas_fee_wei < 0
+            or intent.estimated_gas_fee_wei > intent.max_gas_fee_wei
+        ):
+            raise WalletProviderError(
+                "The final mainnet gas policy no longer matches the quote."
+            )
+        return {
+            "network": network.key,
+            "chain_id": chain_id,
+            "network_reference": network.reference,
+            "provider": self.name,
+            "authorization_active": True,
+            "operation_state": "not-created",
+            "nonce_strategy": "provider-managed-at-idempotent-submission",
+        }
 
     async def submit_transaction(self, profile: dict, intent: TransactionIntent) -> dict:
         """Submit one sponsored Base Sepolia transfer through delegated signing."""

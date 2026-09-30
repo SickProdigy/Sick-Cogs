@@ -1630,6 +1630,14 @@ class ApprovalSubmissionBoundaryTests(unittest.IsolatedAsyncioTestCase):
             get_delegation_status=AsyncMock(return_value={"active": True}),
             prepare_transaction=AsyncMock(side_effect=lambda current: current),
             get_native_balance=AsyncMock(return_value=10),
+            validate_pre_submission=AsyncMock(return_value={
+                "network": BASE_SEPOLIA.key,
+                "chain_id": BASE_SEPOLIA.chain_id,
+                "network_reference": BASE_SEPOLIA.reference,
+                "authorization_active": True,
+                "operation_state": "not-created",
+                "nonce_strategy": "provider-managed-at-idempotent-submission",
+            }),
             submit_transaction=AsyncMock(
                 side_effect=WalletProviderError("ambiguous provider timeout")
             ),
@@ -2673,6 +2681,78 @@ class AccountDelegationTests(unittest.IsolatedAsyncioTestCase):
             "0x1111111111111111111111111111111111111111",
             "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT",
         ])
+
+    async def test_pre_submission_revalidates_chain_authorization_and_clean_operation(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(return_value=SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        intent = TransactionIntent(
+            intent_id="preflight-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2, gas_sponsored=True,
+        )
+        with patch(
+            "cryptowallet.providers.cdp.get_chain_id",
+            new=AsyncMock(return_value=BASE_SEPOLIA.chain_id),
+        ) as chain:
+            result = await provider.validate_pre_submission(_profile(), intent)
+        self.assertEqual(result["chain_id"], BASE_SEPOLIA.chain_id)
+        self.assertEqual(result["operation_state"], "not-created")
+        self.assertEqual(
+            result["nonce_strategy"],
+            "provider-managed-at-idempotent-submission",
+        )
+        chain.assert_awaited_once_with(BASE_SEPOLIA.key)
+        provider.get_delegation_status.assert_awaited_once_with(
+            _profile(), BASE_SEPOLIA.key
+        )
+
+    async def test_pre_submission_accepts_solana_native_fee_without_evm_chain_lookup(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(return_value=SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        sender = "HpabPRRCFbBKSuJr5PdkVvQc85FyxyTWkFM2obBRSvHT"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": SOLANA_DEVNET.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="solana-preflight-7", profile_id="profile-7",
+            network=SOLANA_DEVNET.key, from_address=sender,
+            to_address="11111111111111111111111111111111",
+            value_wei=1, created_at=1, expires_at=2,
+            estimated_gas_fee_wei=5000, gas_sponsored=False,
+        )
+        with patch(
+            "cryptowallet.providers.cdp.get_chain_id", new=AsyncMock()
+        ) as chain:
+            result = await provider.validate_pre_submission(profile, intent)
+        self.assertIsNone(result["chain_id"])
+        self.assertEqual(result["network_reference"], SOLANA_DEVNET.reference)
+        chain.assert_not_awaited()
+
+    async def test_pre_submission_rejects_chain_drift_and_existing_operation(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials = AsyncMock(return_value=SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        intent = TransactionIntent(
+            intent_id="preflight-7", profile_id="profile-7",
+            network=BASE_SEPOLIA.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=1, created_at=1, expires_at=2, gas_sponsored=True,
+        )
+        with patch(
+            "cryptowallet.providers.cdp.get_chain_id",
+            new=AsyncMock(return_value=BASE_MAINNET.chain_id),
+        ):
+            with self.assertRaisesRegex(WalletProviderError, "approved chain"):
+                await provider.validate_pre_submission(_profile(), intent)
+        changed = replace(intent, user_operation_hash="0x" + "12" * 32)
+        with self.assertRaisesRegex(WalletProviderError, "clean pending"):
+            await provider.validate_pre_submission(_profile(), changed)
 
     def test_delegation_addresses_reject_unrelated_eoa(self):
         profile = _profile()

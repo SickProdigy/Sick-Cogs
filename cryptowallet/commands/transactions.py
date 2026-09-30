@@ -677,6 +677,29 @@ class WalletTransactionCommands:
                 ephemeral=True,
             )
             return
+        try:
+            preflight = await self.wallet_provider.validate_pre_submission(
+                profile, intent
+            )
+        except WalletProviderError as exc:
+            await interaction.followup.send(
+                f"Final provider validation failed: {exc}", ephemeral=True
+            )
+            return
+        if (
+            str(preflight.get("network") or "") != intent.network
+            or str(preflight.get("network_reference") or "") != network.reference
+            or preflight.get("authorization_active") is not True
+            or preflight.get("operation_state") != "not-created"
+            or preflight.get("nonce_strategy")
+            != "provider-managed-at-idempotent-submission"
+        ):
+            await interaction.followup.send(
+                "Final provider validation returned inconsistent transaction state.",
+                ephemeral=True,
+            )
+            return
+
         totp_enabled = await self.user_totp_enabled(view.user_id)
         if totp_enabled:
             if (
