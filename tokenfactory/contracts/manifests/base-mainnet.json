@@ -40,6 +40,14 @@
     "singletonCodeMatched": true,
     "singletonRuntimeSha256": "0x687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea",
     "factoryDestinationEmpty": true,
-    "secondRpcVerification": false
+    "secondRpcVerification": {
+      "provider": "PublicNode by Allnodes",
+      "rpc": "https://base-rpc.publicnode.com",
+      "observedAt": "2026-09-30T00:00:00Z",
+      "chainId": 8453,
+      "singletonCodeMatched": true,
+      "singletonRuntimeSha256": "0x687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea",
+      "factoryDestinationEmpty": true
+    }
   }
 }

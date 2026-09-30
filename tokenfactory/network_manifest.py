@@ -49,6 +49,19 @@ def load_network_manifest(network: str) -> dict[str, Any]:
             raise TokenFactoryManifestError("Base mainnet audit state is invalid or prematurely complete.")
         if configured is not None:
             raise TokenFactoryManifestError("Base mainnet factory is unexpectedly recorded as deployed.")
+        observations = manifest.get("observations")
+        second = observations.get("secondRpcVerification") if isinstance(observations, dict) else None
+        if (
+            not isinstance(second, dict)
+            or second.get("chainId") != 8453
+            or second.get("singletonCodeMatched") is not True
+            or second.get("factoryDestinationEmpty") is not True
+            or second.get("singletonRuntimeSha256")
+            != "0x687bc888d213f8eff1e6a982da794f24b835191feb99dd2cacfcd33a9e58fdea"
+        ):
+            raise TokenFactoryManifestError(
+                "Base mainnet independent RPC evidence is incomplete."
+            )
     return manifest
 
 def mainnet_readiness() -> dict[str, Any]:

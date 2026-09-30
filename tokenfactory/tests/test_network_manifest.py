@@ -21,6 +21,10 @@ class TokenFactoryNetworkManifestTests(unittest.TestCase):
         self.assertEqual(testnet["predictedFactoryAddress"].lower(), mainnet["predictedFactoryAddress"].lower())
         self.assertIsNone(mainnet["factoryAddress"])
         self.assertEqual(mainnet["independentAudit"]["status"], "required")
+        second = mainnet["observations"]["secondRpcVerification"]
+        self.assertEqual(second["chainId"], 8453)
+        self.assertTrue(second["singletonCodeMatched"])
+        self.assertTrue(second["factoryDestinationEmpty"])
         self.assertEqual(mainnet["authorization"], {"factoryDeployment": False, "ownerCanary": False, "memberDeployment": False})
 
     def test_mainnet_readiness_never_claims_authorization(self):
