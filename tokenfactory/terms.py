@@ -6,6 +6,7 @@ from typing import Any
 
 TOKENFACTORY_MAINNET_TERMS_VERSION = "2026-09-30.1"
 TOKENFACTORY_TERMS_PRODUCT = "tokenfactory"
+TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT = "I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY"
 _ACCEPTANCE_KEYS = {
     "product", "version", "discord_user_id", "accepted_at", "acceptance_id",
 }

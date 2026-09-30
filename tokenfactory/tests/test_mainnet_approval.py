@@ -201,6 +201,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         )
         self.subject = SimpleNamespace(
             config=self.config,
+            has_current_mainnet_terms=AsyncMock(return_value=True),
             _cryptowallet=lambda: self.wallet,
         )
 
@@ -209,7 +210,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             self.subject,
             7,
             self.review.fingerprint,
-            acknowledgement="DEPLOY BASE MAINNET CANARY",
+            acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
             totp_code="123456",
         )
         self.assertTrue(approval.totp_verified)
@@ -232,6 +233,19 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.wallet.verify_user_totp.assert_not_awaited()
         self.assertIsNone(self.config.mainnet_canary_approval.value)
 
+    async def test_missing_current_terms_fails_before_totp(self):
+        self.subject.has_current_mainnet_terms.return_value = False
+        with self.assertRaisesRegex(RuntimeError, "terms must be accepted"):
+            await TokenFactory.approve_mainnet_canary_review(
+                self.subject,
+                7,
+                self.review.fingerprint,
+                acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
+                totp_code="123456",
+            )
+        self.wallet.verify_user_totp.assert_not_awaited()
+        self.assertIsNone(self.config.mainnet_canary_approval.value)
+
     async def test_missing_or_invalid_totp_fails_closed(self):
         self.wallet.user_totp_enabled.return_value = False
         with self.assertRaisesRegex(RuntimeError, "must be enabled"):
@@ -239,7 +253,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.subject,
                 7,
                 self.review.fingerprint,
-                acknowledgement="DEPLOY BASE MAINNET CANARY",
+                acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
                 totp_code="123456",
             )
         self.wallet.user_totp_enabled.return_value = True
@@ -249,7 +263,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
                 self.subject,
                 7,
                 self.review.fingerprint,
-                acknowledgement="DEPLOY BASE MAINNET CANARY",
+                acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
                 totp_code="000000",
             )
         self.assertIsNone(self.config.mainnet_canary_approval.value)

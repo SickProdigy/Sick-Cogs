@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from ..terms import (
+    TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT,
     TOKENFACTORY_MAINNET_TERMS_VERSION,
     create_tokenfactory_terms_acceptance,
     is_current_tokenfactory_terms_acceptance,
@@ -16,6 +17,7 @@ class TokenFactoryTermsRecordTests(unittest.TestCase):
             42, now=1000, acceptance_id="tf-acceptance"
         )
         self.assertEqual(record["product"], "tokenfactory")
+        self.assertLessEqual(len(TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT), 45)
         self.assertEqual(record["version"], TOKENFACTORY_MAINNET_TERMS_VERSION)
         self.assertTrue(is_current_tokenfactory_terms_acceptance(record, 42))
         self.assertFalse(is_current_tokenfactory_terms_acceptance(record, 43))

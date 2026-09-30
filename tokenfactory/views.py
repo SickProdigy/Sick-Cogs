@@ -5,6 +5,7 @@ import discord
 from .constants import DEFAULT_DECIMALS
 from .mainnet_factory import MainnetFactoryReview
 from .mainnet_review import MainnetTokenReview
+from .terms import TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT
 from .models import TokenDraft
 from .validation import normalize_decimals, normalize_name, normalize_symbol, parse_supply
 
@@ -55,6 +56,14 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     embed.add_field(name="Native value", value="\u00600.00000000 ETH\u0060", inline=True)
     embed.add_field(
         name="Review fingerprint", value=f"\u0060{review.fingerprint}\u0060", inline=False
+    )
+    embed.add_field(
+        name="Creator acknowledgment",
+        value=(
+            "I reviewed these exact details. I am creating this token, accept "
+            "responsibility for its legality and use, and understand deployment is irreversible."
+        ),
+        inline=False,
     )
     embed.add_field(
         name="Irreversible",
@@ -209,10 +218,10 @@ class MainnetCanaryApprovalModal(
     discord.ui.Modal, title="Approve Base mainnet canary"
 ):
     acknowledgement = discord.ui.TextInput(
-        label="Type DEPLOY BASE MAINNET CANARY",
-        placeholder="DEPLOY BASE MAINNET CANARY",
-        min_length=26,
-        max_length=26,
+        label="Type the creator responsibility phrase",
+        placeholder=TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT,
+        min_length=len(TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT),
+        max_length=len(TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT),
     )
     code = discord.ui.TextInput(
         label="6-digit authenticator code",

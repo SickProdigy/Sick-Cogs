@@ -33,6 +33,7 @@ from .models import TokenDraft
 from .network_manifest import mainnet_readiness
 from .terms import (
     TOKENFACTORY_MAINNET_TERMS_VERSION,
+    TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT,
     create_tokenfactory_terms_acceptance,
     is_current_tokenfactory_terms_acceptance,
 )
@@ -63,7 +64,7 @@ class TokenFactory(commands.Cog):
     """Prepare protected, fixed-supply test-token deployment drafts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.6"
+    __version__ = "1.1.7"
 
     DISCORD_WATCH_INTERVAL = 4
     DISCORD_WATCH_SECONDS = 15 * 60
@@ -173,9 +174,9 @@ class TokenFactory(commands.Cog):
     ) -> MainnetCanaryApproval:
         """Record a short-lived protected approval; never submit an operation."""
 
-        if acknowledgement != "DEPLOY BASE MAINNET CANARY":
+        if acknowledgement != TOKENFACTORY_DEPLOYMENT_ACKNOWLEDGEMENT:
             raise ValueError(
-                "The permanent-loss acknowledgement did not match. Nothing was approved."
+                "The creator-responsibility acknowledgement did not match. Nothing was approved."
             )
         data = await self.config.mainnet_pending_review()
         try:
@@ -188,6 +189,10 @@ class TokenFactory(commands.Cog):
         ):
             raise ValueError(
                 "The mainnet canary review changed or belongs to another owner."
+            )
+        if not await self.has_current_mainnet_terms(owner_discord_id):
+            raise RuntimeError(
+                "Current TokenFactory mainnet terms must be accepted before this approval."
             )
         wallet = self._cryptowallet()
         if not await wallet.user_totp_enabled(owner_discord_id):
