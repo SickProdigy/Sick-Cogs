@@ -14,3 +14,6 @@ restarts.
 Durations accept combinations such as `10m`, `1h30m`, or `2d12h`. Reminders are delivered by DM.
 The configured offset only changes displayed calendar times; it does not change when a reminder is
 delivered.
+
+When creating a reminder as a reply to another Discord message, the cog saves that message's jump
+link and includes an **Original message** link in the reminder DM and pending-reminder list.
