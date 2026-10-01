@@ -9,7 +9,8 @@ import aiohttp
 APP_ID = 2399830
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-ArkAnnouncements/1.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-ArkAnnouncements/1.0.2 (+https://github.com/SickProdigy/Sick-Cogs)"
+STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 
 CATEGORIES = ("updates", "hotfixes", "community", "events", "wipes", "releases", "promotions")
 CATEGORY_LABELS = {
@@ -42,8 +43,10 @@ class SteamNewsError(RuntimeError):
 
 def normalize_image_url(value: str) -> Optional[str]:
     url = html.unescape(str(value or "").strip())
+    url = url.replace("{STEAM_CLAN_IMAGE}", STEAM_CLAN_IMAGE_ROOT)
     url = url.replace(
-        "{STEAM_CLAN_IMAGE}", "https://clan.cloudflare.steamstatic.com/images"
+        "https://clan.cloudflare.steamstatic.com/images",
+        STEAM_CLAN_IMAGE_ROOT,
     )
     if url.startswith("//"):
         url = f"https:{url}"

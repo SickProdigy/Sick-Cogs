@@ -62,7 +62,7 @@ class ArkAnnouncements(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.0.2"
 
     default_guild = {
         "enabled": False,

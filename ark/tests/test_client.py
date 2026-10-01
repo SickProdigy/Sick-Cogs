@@ -32,7 +32,7 @@ class ArkClientTests(unittest.TestCase):
         source = "[img]{STEAM_CLAN_IMAGE}/12345/banner.jpg[/img]"
         self.assertEqual(
             extract_image(source),
-            "https://clan.cloudflare.steamstatic.com/images/12345/banner.jpg",
+            "https://clan.steamstatic.com/images/12345/banner.jpg",
         )
 
     def test_prefers_artwork_before_full_resolution_link(self):
@@ -45,7 +45,29 @@ class ArkClientTests(unittest.TestCase):
         )
         self.assertEqual(
             extract_image(source),
-            "https://clan.cloudflare.steamstatic.com/images/12345/featured.jpg",
+            "https://clan.steamstatic.com/images/12345/featured.jpg",
+        )
+
+    def test_recent_release_artwork_uses_direct_steam_cdn(self):
+        source = (
+            "[img]{STEAM_CLAN_IMAGE}/44719856/"
+            "14decb75883b079ef427a162df1a3649fe9cefc6.png[/img]\n"
+            "[previewyoutube=gsWm02GX1zw;full]TRAILER[/previewyoutube]"
+        )
+        self.assertEqual(
+            extract_image(source),
+            "https://clan.steamstatic.com/images/44719856/"
+            "14decb75883b079ef427a162df1a3649fe9cefc6.png",
+        )
+
+    def test_redirecting_legacy_cdn_is_canonicalized(self):
+        source = (
+            "[img]https://clan.cloudflare.steamstatic.com/images/"
+            "12345/banner.png[/img]"
+        )
+        self.assertEqual(
+            extract_image(source),
+            "https://clan.steamstatic.com/images/12345/banner.png",
         )
 
     def test_plain_text_omits_full_resolution_link_and_extra_blank_line(self):
