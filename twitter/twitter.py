@@ -40,7 +40,7 @@ class Twitter(commands.Cog):
     """Publish new X posts from selected accounts into Discord channels."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
 
     default_guild = {
         "enabled": False,
@@ -96,15 +96,20 @@ class Twitter(commands.Cog):
         return False
 
     async def get_channel(self, guild, channel_id):
+        """Return (channel, permanently_missing) without deleting on transient failures."""
         channel = guild.get_channel_or_thread(int(channel_id))
         if channel is None:
             try:
                 channel = await self.bot.fetch_channel(int(channel_id))
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                return None
-        if getattr(channel, "guild", None) != guild or not can_user_send_messages_in(guild.me, channel):
-            return None
-        return channel
+            except discord.NotFound:
+                return None, True
+            except (discord.Forbidden, discord.HTTPException):
+                return None, False
+        if getattr(channel, "guild", None) != guild:
+            return None, True
+        if not can_user_send_messages_in(guild.me, channel):
+            return None, False
+        return channel, False
 
     async def send_post(self, channel, username, post):
         url = f"https://x.com/{username}/status/{post['id']}"
@@ -148,11 +153,18 @@ class Twitter(commands.Cog):
                 log.warning("X poll failed for @%s in guild %s: %s", key, guild.id, error)
                 continue
             for channel_id, cursor in list(channels.items()):
-                channel = await self.get_channel(guild, int(channel_id))
+                channel, permanently_missing = await self.get_channel(guild, int(channel_id))
                 if channel is None:
-                    channels.pop(channel_id, None)
-                    changed = True
-                    log.warning("Removed unavailable Twitter channel %s in guild %s", channel_id, guild.id)
+                    if permanently_missing:
+                        channels.pop(channel_id, None)
+                        changed = True
+                        log.warning("Removed deleted Twitter channel %s in guild %s", channel_id, guild.id)
+                    else:
+                        log.warning(
+                            "Twitter channel %s in guild %s is temporarily inaccessible; subscription retained",
+                            channel_id,
+                            guild.id,
+                        )
                     continue
                 pending = new_posts(posts, cursor)
                 for post in pending:
@@ -227,25 +239,34 @@ class Twitter(commands.Cog):
             normalized = normalize_username(username)
             user = await (await self.get_client()).user_by_username(normalized)
         except (ValueError, XAPIError) as error:
-            await ctx.send(str(error))
+            await ctx.send(str(error), allowed_mentions=discord.AllowedMentions.none())
+            return
+        if not can_user_send_messages_in(ctx.guild.me, channel):
+            await ctx.send(
+                "I cannot send messages in that channel.",
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
             return
         cursor = str(user.get("most_recent_tweet_id") or "0")
-        async with self.config.guild(ctx.guild).feeds() as feeds:
-            feed = feeds.setdefault(normalized, {
-                "user_id": str(user["id"]),
-                "username": user.get("username") or normalized,
-                "name": user.get("name") or user.get("username") or normalized,
-                "channels": {},
-            })
-            feed["user_id"] = str(user["id"])
-            feed["username"] = user.get("username") or normalized
-            feed["name"] = user.get("name") or feed["username"]
-            already = str(channel.id) in feed["channels"]
-            feed["channels"].setdefault(str(channel.id), cursor)
+        lock = self._poll_locks.setdefault(ctx.guild.id, asyncio.Lock())
+        async with lock:
+            async with self.config.guild(ctx.guild).feeds() as feeds:
+                feed = feeds.setdefault(normalized, {
+                    "user_id": str(user["id"]),
+                    "username": user.get("username") or normalized,
+                    "name": user.get("name") or user.get("username") or normalized,
+                    "channels": {},
+                })
+                feed["user_id"] = str(user["id"])
+                feed["username"] = user.get("username") or normalized
+                feed["name"] = user.get("name") or feed["username"]
+                already = str(channel.id) in feed["channels"]
+                feed["channels"].setdefault(str(channel.id), cursor)
         await ctx.send(
             f"@{user.get('username') or normalized} is already assigned to {channel.mention}."
             if already
-            else f"Future posts from **@{user.get('username') or normalized}** will publish in {channel.mention}. Existing posts were skipped."
+            else f"Future posts from **@{user.get('username') or normalized}** will publish in {channel.mention}. Existing posts were skipped.",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @twitterset.command(name="remove", aliases=["delete"])
@@ -259,12 +280,14 @@ class Twitter(commands.Cog):
             await ctx.send(str(error))
             return
         removed = False
-        async with self.config.guild(ctx.guild).feeds() as feeds:
-            feed = feeds.get(normalized)
-            if feed:
-                removed = feed.get("channels", {}).pop(str(channel.id), None) is not None
-                if not feed.get("channels"):
-                    feeds.pop(normalized, None)
+        lock = self._poll_locks.setdefault(ctx.guild.id, asyncio.Lock())
+        async with lock:
+            async with self.config.guild(ctx.guild).feeds() as feeds:
+                feed = feeds.get(normalized)
+                if feed:
+                    removed = feed.get("channels", {}).pop(str(channel.id), None) is not None
+                    if not feed.get("channels"):
+                        feeds.pop(normalized, None)
         await ctx.send(
             f"Removed **@{normalized}** from {channel.mention}."
             if removed
@@ -322,9 +345,12 @@ class Twitter(commands.Cog):
         try:
             user = await (await self.get_client()).user_by_username(username)
         except (ValueError, XAPIError) as error:
-            await ctx.send(str(error))
+            await ctx.send(str(error), allowed_mentions=discord.AllowedMentions.none())
             return
-        await ctx.send(f"Native X API connected: **{user.get('name', user['username'])}** (@{user['username']}, ID `{user['id']}`).")
+        await ctx.send(
+            f"Native X API connected: **{user.get('name', user['username'])}** (@{user['username']}, ID `{user['id']}`).",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
     @twitterset.command(name="check")
     async def twitterset_check(self, ctx):
@@ -334,6 +360,6 @@ class Twitter(commands.Cog):
         try:
             sent = await self.poll_guild(ctx.guild, force=True)
         except XAPIError as error:
-            await ctx.send(str(error))
+            await ctx.send(str(error), allowed_mentions=discord.AllowedMentions.none())
             return
         await ctx.send(f"Twitter check complete; published {sent} new post(s).")

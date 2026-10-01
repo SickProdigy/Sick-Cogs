@@ -12,5 +12,5 @@
     "short": "Native X post announcements",
     "tags": ["twitter", "x", "social", "feeds", "notifications"],
     "type": "COG",
-    "version": "0.1.0"
+    "version": "0.1.1"
 }

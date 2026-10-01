@@ -46,8 +46,10 @@ Optionally delegate subscription management to a staff role:
 ```
 
 Only Manage Server can change that role. Replies and reposts are excluded in the initial release.
-Unavailable channels are removed safely. Authentication, insufficient-credit, and rate-limit errors
-are logged without exposing the bearer token.
+Deleted channels are removed safely; subscriptions are retained across temporary Discord API or
+permission failures. Timeline pagination is bounded, and cursors are not advanced when the bound is
+exceeded. Authentication, insufficient-credit, and rate-limit errors are logged without exposing the
+bearer token.
 
 ## Provider direction
 

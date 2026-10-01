@@ -5,7 +5,8 @@ import aiohttp
 
 
 API_ROOT = "https://api.x.com/2"
-USER_AGENT = "Sick-Cogs-Twitter/0.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Twitter/0.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+MAX_TIMELINE_PAGES = 10
 
 
 class XAPIError(RuntimeError):
@@ -78,14 +79,30 @@ class XClient:
         return data
 
     async def user_posts(self, user_id: str, since_id: str) -> List[Dict[str, Any]]:
-        payload = await self.request(
-            f"/users/{int(user_id)}/tweets",
-            params={
-                "since_id": str(since_id),
-                "max_results": 100,
-                "exclude": "replies,retweets",
-                "tweet.fields": "created_at",
-            },
+        user_id, since_id = str(user_id), str(since_id)
+        if not user_id.isdigit() or not since_id.isdigit():
+            raise XAPIError("The saved X account cursor is invalid.")
+        params = {
+            "since_id": since_id,
+            "max_results": 100,
+            "exclude": "replies,retweets",
+            "tweet.fields": "created_at",
+        }
+        posts = {}
+        for _ in range(MAX_TIMELINE_PAGES):
+            payload = await self.request(f"/users/{user_id}/tweets", params=params)
+            data = payload.get("data", [])
+            if isinstance(data, list):
+                posts.update(
+                    (str(post["id"]), post)
+                    for post in data
+                    if isinstance(post, dict) and str(post.get("id", "")).isdigit()
+                )
+            meta = payload.get("meta", {})
+            next_token = meta.get("next_token") if isinstance(meta, dict) else None
+            if not next_token:
+                return list(posts.values())
+            params["pagination_token"] = str(next_token)
+        raise XAPIError(
+            "The X timeline exceeded the bounded pagination limit; saved cursors were not advanced."
         )
-        data = payload.get("data", [])
-        return data if isinstance(data, list) else []
