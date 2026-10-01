@@ -103,7 +103,9 @@ class Reminder(commands.Cog):
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
         "860872570416775575021079665631013972557943647633665882074464969932193856474375"
     )
+    MIN_SECONDS = 60
     MAX_SECONDS = 63_080_000
+    MAX_PENDING_REMINDERS = 25
     CHECK_INTERVAL = 3600.0
     ERROR_DELETE_AFTER = 15.0
     SUCCESS_FALLBACK_DELETE_AFTER = 10.0
@@ -145,6 +147,7 @@ class Reminder(commands.Cog):
         self._wake_scheduler.set()
 
     @commands.group(name="remind", aliases=["remindme"], invoke_without_command=True)
+    @commands.cooldown(3, 60.0, commands.BucketType.user)
     async def remind(self, ctx: Context, duration: str, *, text: str) -> None:
         """Create a reminder. Durations may be combined, for example `1h30min`."""
         compact_duration = re.sub(r"\s+", "", duration or "")
@@ -158,6 +161,12 @@ class Reminder(commands.Cog):
         if seconds is None:
             await ctx.send(
                 ":x: Invalid time format. Try `10min`, `2h`, `1w`, or `1mo`.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
+            return
+        if seconds < self.MIN_SECONDS:
+            await ctx.send(
+                ":x: Reminders must be at least 1 minute.",
                 delete_after=self.ERROR_DELETE_AFTER,
             )
             return
@@ -178,8 +187,20 @@ class Reminder(commands.Cog):
             control_message_id=ctx.message.id,
         )
         self._deleted_users.discard(ctx.author.id)
+        limit_reached = False
         async with self.config.user(ctx.author).reminders() as saved:
-            saved.append(entry.to_raw())
+            if self.pending_reminder_count(saved) >= self.MAX_PENDING_REMINDERS:
+                limit_reached = True
+            else:
+                saved.append(entry.to_raw())
+        if limit_reached:
+            await ctx.send(
+                f":x: You already have the maximum of "
+                f"{self.MAX_PENDING_REMINDERS} pending reminders. "
+                f"Use `{ctx.clean_prefix}remind forget` to remove one.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
+            return
         self._wake_scheduler.set()
 
         if ctx.guild is not None:
@@ -190,7 +211,7 @@ class Reminder(commands.Cog):
                 await ctx.reply(
                     f"⏰ Reminder set for <t:{due_timestamp}:F> "
                     f"(<t:{due_timestamp}:R>). Anyone else who wants this reminder "
-                    "can react to your message with 👍.",
+                    "can react to your message with 👍 (up to 25 pending reminders per user).",
                     mention_author=False,
                 )
             except (discord.Forbidden, discord.HTTPException):
@@ -212,6 +233,10 @@ class Reminder(commands.Cog):
             )
         except (discord.Forbidden, discord.HTTPException):
             pass
+
+    @classmethod
+    def pending_reminder_count(cls, raw_entries: object) -> int:
+        return len(cls._valid_entries(raw_entries))
 
     @staticmethod
     def has_shared_reminder(raw_entries: object, message_id: int) -> bool:
@@ -265,7 +290,10 @@ class Reminder(commands.Cog):
 
             user_config = self.config.user_from_id(payload.user_id)
             async with user_config.reminders() as saved:
-                if self.has_shared_reminder(saved, payload.message_id):
+                if (
+                    self.has_shared_reminder(saved, payload.message_id)
+                    or self.pending_reminder_count(saved) >= self.MAX_PENDING_REMINDERS
+                ):
                     return
                 saved.append(
                     ReminderEntry(

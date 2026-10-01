@@ -13,6 +13,12 @@ class DurationAndDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Reminder.parse_duration("1minute"), 60)
         self.assertEqual(Reminder.parse_duration("1month"), 2_628_000)
 
+    def test_pending_reminder_count_ignores_malformed_records(self):
+        entry = ReminderEntry("one", "First", 1.0, 2.0)
+        self.assertEqual(
+            Reminder.pending_reminder_count([entry.to_raw(), {"broken": True}]), 1
+        )
+
     def test_shared_reminder_detection_prevents_duplicates(self):
         first = ReminderEntry("one", "First", 1.0, 2.0, control_message_id=100)
         second = ReminderEntry("two", "Second", 1.0, 3.0, control_message_id=200)

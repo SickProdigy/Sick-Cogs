@@ -12,7 +12,9 @@ restarts.
 - `[p]remind offset <hours>` - Set an optional UTC offset used for displayed calendar times.
 
 Durations accept combinations such as `10min`, `1h30min`, or `2d12h`. Reminders are delivered by DM.
-Use `min` for minutes and `mo` for months; bare `m` is rejected as ambiguous.
+Use `min` for minutes and `mo` for months; bare `m` is rejected as ambiguous. Reminders must
+be at least one minute. Each user may keep up to 25 pending reminders, and creation is limited to
+three reminders per minute.
 In server channels, successful reminder commands receive a 👍 reaction and a short confirmation
 reply. Other members can react to the command with 👍 to schedule the same private reminder for
 themselves. The original author is subscribed automatically, repeated reactions do not create
