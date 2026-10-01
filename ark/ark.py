@@ -153,7 +153,6 @@ class ArkAnnouncements(commands.Cog):
             str(item.get("title") or "ARK: Survival Ascended announcement")[:240]
         )
         url = str(item.get("url") or ANNOUNCEMENTS_URL)
-        category = CATEGORY_LABELS.get(classify_news(item), CATEGORY_LABELS["official"])
         full_text = plain_text(
             item.get("contents") or "", limit=100_000, youtube_links=True
         )
@@ -164,7 +163,6 @@ class ArkAnnouncements(commands.Cog):
         lines = [
             "**ARK: Survival Ascended — Official Steam News**",
             f"## [{title}]({url})",
-            f"*{category}*",
         ]
         if description:
             lines.extend(("", description))
