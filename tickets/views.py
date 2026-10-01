@@ -189,20 +189,18 @@ class TicketControls(discord.ui.View):
     async def close(self, interaction, button):
         record = await self.cog.get_ticket(interaction.guild, self.channel_id)
         reopening = record.get("status") == "closed"
-        permanent = record.get("close_behavior") == "delete"
+        if not reopening:
+            await interaction.response.send_modal(
+                CloseTicketModal(self.cog, interaction.user, self.channel_id)
+            )
+            return
         await interaction.response.send_message(
-            "Reopen this ticket and restore requester access?"
-            if reopening
-            else (
-                "Permanently delete this ticket? This cannot be undone."
-                if permanent
-                else "Close this ticket and remove requester access?"
-            ),
+            "Reopen this ticket and restore requester access?",
             view=CloseConfirmation(
                 self.cog,
                 interaction.user,
                 self.channel_id,
-                reopening=reopening,
+                reopening=True,
             ),
             ephemeral=True,
         )
@@ -259,6 +257,51 @@ class StatusView(OwnedEphemeralView):
     def __init__(self, cog, owner, channel_id, record):
         super().__init__(cog, owner, channel_id)
         self.add_item(TicketStatusSelect(self, record.get("status", "open")))
+
+
+class CloseTicketModal(discord.ui.Modal, title="Confirm ticket closure"):
+    reason = discord.ui.TextInput(
+        label="Reason or resolution (optional)",
+        placeholder="Resolved, duplicate, unable to reproduce...",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=500,
+    )
+
+    def __init__(self, cog, owner, channel_id):
+        super().__init__()
+        self.cog = cog
+        self.owner_id = owner.id
+        self.channel_id = int(channel_id)
+
+    async def on_submit(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "This closure form belongs to someone else.", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            record = await self.cog.set_closed(
+                interaction.guild,
+                self.channel_id,
+                interaction.user,
+                closed=True,
+                reason=str(self.reason).strip(),
+            )
+        except TicketError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        if record["status"] != "deleted":
+            await self.cog.refresh_control_message(
+                interaction.guild, self.channel_id, record
+            )
+        await interaction.followup.send(
+            "Ticket permanently deleted."
+            if record["status"] == "deleted"
+            else "Ticket closed for staff review.",
+            ephemeral=True,
+        )
 
 
 class CloseConfirmation(OwnedEphemeralView):

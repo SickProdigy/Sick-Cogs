@@ -91,3 +91,7 @@ To retain closed tickets for staff review instead of deleting immediately:
 Review mode removes requester access when closed. Staff then see Reopen and Delete controls. Restore the simple immediate-delete behavior with:
 
     [p]ticketsset closebehavior delete
+
+## Closure receipts
+
+Closing a ticket opens a confirmation form with an optional reason or resolution. After a successful close, the requester receives a DM containing the server, ticket number, supplied reason, and a direct link to the launcher for opening another ticket. If DMs are disabled, closure still succeeds. The optional staff log includes the selected custom topic, destination mode, requester, closer, and closure reason without posting it publicly. Bounded metadata remains available to staff with `[p]tickets history` after the Discord destination is deleted; ticket message content is not copied.

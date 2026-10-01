@@ -17,8 +17,8 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(
             set(record),
             {
-                "number", "channel_id", "owner_id", "mode", "claims_enabled", "statuses_enabled", "close_behavior", "status", "claimed_by_id",
-                "created_at", "updated_at", "closed_at", "closed_by_id",
+                "number", "channel_id", "owner_id", "mode", "claims_enabled", "statuses_enabled", "close_behavior", "topic_prefix", "topic_label", "status", "claimed_by_id",
+                "created_at", "updated_at", "closed_at", "closed_by_id", "close_reason",
                 "control_message_id",
             },
         )
@@ -44,6 +44,9 @@ class TicketModelTests(unittest.TestCase):
     def test_display_text_neutralizes_mentions_and_limits_size(self):
         self.assertEqual(safe_display("@everyone", 7), "@\u200bevery")
         self.assertEqual(len(safe_display("x" * 200, 50)), 50)
+
+    def test_staff_commands_include_ticket_history(self):
+        self.assertIn("history", {command.name for command in Tickets.tickets.commands})
 
     def test_ticketset_singular_alias_is_registered(self):
         self.assertIn("ticketset", Tickets.ticketsset.aliases)
@@ -241,6 +244,22 @@ class TicketModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["type"], discord.ChannelType.private_thread)
         self.assertFalse(kwargs["invitable"])
         thread.add_user.assert_awaited_once_with(owner)
+
+    async def test_close_dm_includes_reason_and_new_ticket_link(self):
+        cog = self.make_cog()
+        owner = SimpleNamespace(send=AsyncMock())
+        cog.bot = SimpleNamespace(get_user=lambda user_id: None)
+        cog.config = SimpleNamespace(
+            guild=MagicMock(return_value=SimpleNamespace(all=AsyncMock(return_value={"launcher_channel_id": 20, "launcher_message_id": 30})))
+        )
+        guild = SimpleNamespace(id=10, name="Support Server", get_member=lambda user_id: owner)
+        delivered = await cog.notify_ticket_closed(guild, {"number": 7, "owner_id": 42, "topic_label": "Minecraft Support", "close_reason": "Issue resolved."})
+        self.assertTrue(delivered)
+        embed = owner.send.await_args.kwargs["embed"]
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["Support topic"], "Minecraft Support")
+        self.assertEqual(fields["Reason or resolution"], "Issue resolved.")
+        self.assertIn("/10/20/30", fields["Still need help?"])
 
     async def test_thread_mode_rejects_unboosted_server(self):
         cog = self.make_cog()

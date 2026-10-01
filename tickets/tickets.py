@@ -31,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.4.2"
+    __version__ = "0.5.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -96,7 +96,7 @@ class Tickets(commands.Cog):
                 for old_key, old in candidates:
                     if len(tickets) <= MAX_TRACKED_TICKETS:
                         break
-                    if old is None or old["status"] == "deleted":
+                    if old is None or old["status"] in {"closed", "deleted"}:
                         tickets.pop(old_key, None)
 
     async def settings_embed(self, guild):
@@ -392,6 +392,8 @@ class Tickets(commands.Cog):
                     claims_enabled=data["claims_enabled"],
                     statuses_enabled=data["statuses_enabled"],
                     close_behavior=data["close_behavior"],
+                    topic_prefix=topic_prefix or "",
+                    topic_label=topic["label"] if topic else "",
                 )
                 control = await destination.send(
                     content=owner.mention,
@@ -477,7 +479,8 @@ class Tickets(commands.Cog):
         await self.log_event(guild, f"status: {self.status_label(status)}", record, actor)
         return record
 
-    async def set_closed(self, guild, channel_id, actor, *, closed):
+    async def set_closed(self, guild, channel_id, actor, *, closed, reason=""):
+        reason = safe_display(reason.strip(), 500)
         async with self._locks[guild.id]:
             record = await self.get_ticket(guild, channel_id)
             if not record or record["status"] == "deleted":
@@ -504,9 +507,13 @@ class Tickets(commands.Cog):
                     updated_at=int(time.time()),
                     closed_at=int(time.time()),
                     closed_by_id=actor.id,
+                    close_reason=reason,
                     control_message_id=0,
                 )
                 await self._save_ticket(guild, record)
+                await self.notify_ticket_closed(guild, record)
+                detail = f"closed and deleted · {reason}" if reason else "closed and deleted"
+                await self.log_event(guild, detail, record, actor)
                 return record
             owner = guild.get_member(record["owner_id"])
             if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)):
@@ -534,11 +541,62 @@ class Tickets(commands.Cog):
             now = int(time.time())
             record.update(
                 status="closed" if closed else "open", updated_at=now,
-                closed_at=now if closed else 0, closed_by_id=actor.id if closed else 0,
+                closed_at=now if closed else 0,
+                closed_by_id=actor.id if closed else 0,
+                close_reason=reason if closed else "",
             )
             await self._save_ticket(guild, record)
-        await self.log_event(guild, "closed" if closed else "reopened", record, actor)
+        if closed:
+            await self.notify_ticket_closed(guild, record)
+            detail = f"closed · {reason}" if reason else "closed"
+            await self.log_event(guild, detail, record, actor)
+        else:
+            await self.log_event(guild, "reopened", record, actor)
         return record
+
+    async def notify_ticket_closed(self, guild, record):
+        owner = guild.get_member(record["owner_id"]) or self.bot.get_user(record["owner_id"])
+        if owner is None:
+            return False
+        data = await self.config.guild(guild).all()
+        launcher_url = ""
+        if data["launcher_channel_id"] and data["launcher_message_id"]:
+            launcher_url = (
+                f"https://discord.com/channels/{guild.id}/"
+                f"{data['launcher_channel_id']}/{data['launcher_message_id']}"
+            )
+        embed = discord.Embed(
+            title=f"Ticket #{record['number']} closed",
+            description=f"Your support ticket in **{safe_display(guild.name, 100)}** was closed.",
+            color=discord.Color.orange(),
+            timestamp=discord.utils.utcnow(),
+        )
+        if record.get("topic_label"):
+            embed.add_field(
+                name="Support topic",
+                value=record["topic_label"],
+                inline=False,
+            )
+        if record.get("close_reason"):
+            embed.add_field(
+                name="Reason or resolution",
+                value=record["close_reason"],
+                inline=False,
+            )
+        embed.add_field(
+            name="Still need help?",
+            value=(
+                f"[Open another ticket]({launcher_url}) from the server support panel."
+                if launcher_url
+                else "Return to the server support panel to open another ticket."
+            ),
+            inline=False,
+        )
+        try:
+            await owner.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+        return True
 
     async def delete_ticket(self, guild, channel_id, actor):
         if not await self.is_staff(actor):
@@ -576,8 +634,16 @@ class Tickets(commands.Cog):
         if not isinstance(channel, discord.TextChannel):
             return
         try:
+            topic = (
+                f" · Topic: **{safe_display(record['topic_label'], 80)}**"
+                if record.get("topic_label")
+                else ""
+            )
             await channel.send(
-                f"**Ticket #{record['number']}** {safe_display(action, 80)} · <#{record['channel_id']}> · {f'<@{actor.id}>' if actor else 'System'}",
+                f"**Ticket #{record['number']}** {safe_display(action, 580)}"
+                f"{topic} · Type: {record.get('mode', 'text')}"
+                f" · Requester: <@{record['owner_id']}>"
+                f" · Actor: {f'<@{actor.id}>' if actor else 'System'}",
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException:
@@ -588,7 +654,7 @@ class Tickets(commands.Cog):
         if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
             return
         record = await self.get_ticket(channel.guild, channel.id)
-        if record:
+        if record and record["status"] != "deleted":
             record.update(status="deleted", updated_at=int(time.time()), control_message_id=0)
             await self._save_ticket(channel.guild, record)
             await self.log_event(channel.guild, "channel deleted", record)
@@ -596,7 +662,7 @@ class Tickets(commands.Cog):
     @commands.Cog.listener()
     async def on_thread_delete(self, thread):
         record = await self.get_ticket(thread.guild, thread.id)
-        if record:
+        if record and record["status"] != "deleted":
             record.update(
                 status="deleted",
                 updated_at=int(time.time()),
@@ -624,6 +690,34 @@ class Tickets(commands.Cog):
             "Choose a private support ticket type.",
             view=LauncherView(self, modes),
             delete_after=300,
+        )
+
+    @tickets.command(name="history")
+    async def tickets_history(self, ctx):
+        """Show recent closed/deleted ticket metadata (staff only)."""
+        if not await self.is_staff(ctx.author):
+            raise commands.CheckFailure("Only support staff can view ticket history.")
+        records = [
+            record
+            for value in (await self.config.guild(ctx.guild).tickets()).values()
+            if (record := normalized_record(value))
+            and record["status"] in {"closed", "deleted"}
+        ]
+        records.sort(key=lambda item: item["closed_at"] or item["updated_at"], reverse=True)
+        if not records:
+            await ctx.send("No closed ticket history is available.")
+            return
+        lines = []
+        for record in records[:15]:
+            topic = record["topic_label"] or "General support"
+            reason = record["close_reason"] or "No reason supplied"
+            lines.append(
+                f"#{record['number']} · {topic} · {record['mode']} · "
+                f"requester <@{record['owner_id']}> · {reason}"
+            )
+        await ctx.send(
+            "\n".join(lines),
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     @tickets.command(name="queue")
