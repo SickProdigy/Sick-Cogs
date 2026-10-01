@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "contracts" / "clanker-v4-base-sepolia.json"
+MAINNET_CANDIDATE_PATH = ROOT / "contracts" / "clanker-v4-base-mainnet-candidate.json"
 ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -60,6 +61,23 @@ class ClankerContractManifestTests(unittest.TestCase):
             {"status", "network", "chainId", "protocol", "sdk", "factory", "relatedContracts"},
         )
         self.assertTrue(raw.endswith(b"\n"))
+
+    def test_mainnet_candidate_is_non_executable_audit_evidence(self):
+        candidate = json.loads(MAINNET_CANDIDATE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(candidate["status"], "audit-candidate-read-only")
+        self.assertIs(candidate["executionEnabled"], False)
+        self.assertEqual(candidate["network"], "base-mainnet")
+        self.assertEqual(candidate["chainId"], 8453)
+        self.assertIs(candidate["rpcVerification"]["allRuntimeCodeMatched"], True)
+        self.assertEqual(len(candidate["rpcVerification"]["sources"]), 2)
+        self.assertEqual(candidate["rewardMutability"]["platformGuarantee"], "not-yet-defined")
+        self.assertNotIn(
+            MAINNET_CANDIDATE_PATH.name,
+            (Path(__file__).parents[1] / "models.py").read_text(encoding="utf-8"),
+        )
+        pinned = [candidate["factory"], *candidate["contracts"].values()]
+        self.assertTrue(all(item["runtimeCodeBytes"] > 0 for item in pinned))
+        self.assertTrue(all(HASH_RE.fullmatch(item["runtimeCodeSha256"]) for item in pinned))
 
 
 if __name__ == "__main__":

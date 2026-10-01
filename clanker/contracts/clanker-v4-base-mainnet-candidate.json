@@ -1,0 +1,57 @@
+{
+  "status": "audit-candidate-read-only",
+  "executionEnabled": false,
+  "network": "base-mainnet",
+  "chainId": 8453,
+  "protocol": "clanker-v4.1",
+  "auditedAt": "2026-10-01",
+  "sdk": {
+    "repository": "https://github.com/clanker-devco/clanker-sdk",
+    "tag": "v4.2.19",
+    "commit": "4f4d2bbf41c7f10543559dc043c85f443a6d452e",
+    "sourceHashes": {
+      "src/abi/v4/Clanker.ts": "35c2bfc5fcc0a0706a921b84e2e9e803d0034eec87906ba3661d073b8940e3e3",
+      "src/config/clankerTokenV4.ts": "4a3d2a30f3805508cd06d91a0ce3795b84be98c12732a2781dc6ffa719e1d81c",
+      "src/utils/clankers.ts": "9906502072b8da2061039282cab731fa59c884bc2766eef435cbdb7739da8927"
+    }
+  },
+  "contractsSource": {
+    "repository": "https://github.com/clanker-devco/v4-contracts",
+    "commit": "b004c2edda29fa282a16d5d1441a26484f70b37f"
+  },
+  "rpcVerification": {
+    "blockTag": "latest",
+    "sources": ["https://mainnet.base.org", "https://base-rpc.publicnode.com"],
+    "allRuntimeCodeMatched": true
+  },
+  "factory": {
+    "address": "0xE85A59c628F7d27878ACeB4bf3b35733630083a9",
+    "runtimeCodeBytes": 12375,
+    "runtimeCodeSha256": "365456b7fae5f3d0f95eb1500426505f8a8a4a412fce23008792e1b7ff8b0b5f",
+    "function": "deployToken",
+    "selector": "0xdf40224a",
+    "stateMutability": "payable",
+    "tokenCreatedTopic": "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"
+  },
+  "contracts": {
+    "locker": {"address": "0xffA37784D619F228D8B379d287a4D7282e500762", "runtimeCodeBytes": 24150, "runtimeCodeSha256": "fb19caa92c9592f4330f32ca892add178c9e5f85df783d3e7d43c14711b823f8"},
+    "vault": {"address": "0x8E845EAd15737bF71904A30BdDD3aEE76d6ADF6C", "runtimeCodeBytes": 3739, "runtimeCodeSha256": "d59d607fbf59a6fa78ee56817936037987f14fde796ede19f151f3f1d7e4226a"},
+    "airdrop": {"address": "0xf652B3610D75D81871bf96DB50825d9af28391E0", "runtimeCodeBytes": 4749, "runtimeCodeSha256": "64d276b9518021fc1606398d5ab22e7f758af2af0f0067973a1cf470013f2907"},
+    "devbuy": {"address": "0x1331f0788F9c08C8F38D52c7a1152250A9dE00be", "runtimeCodeBytes": 6775, "runtimeCodeSha256": "fe52cd8af20cfe6bfe2fbe37752e163bff330f9b5df49f80ccd6dfa2afd424bd"},
+    "mevModuleV2": {"address": "0xebB25BB797D82CB78E1bc70406b13233c0854413", "runtimeCodeBytes": 8377, "runtimeCodeSha256": "da490d5ec07558964f50dd344cd5e11952294f68896a97d1ae8b8184fcc5379f"},
+    "feeLocker": {"address": "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68", "runtimeCodeBytes": 2663, "runtimeCodeSha256": "28b11075028fbd4a9969484ce9d99e46f68aacc2185744f15bed6c827525f49c"},
+    "feeStaticHookV2": {"address": "0xb429d62f8f3bFFb98CdB9569533eA23bF0Ba28CC", "runtimeCodeBytes": 16405, "runtimeCodeSha256": "bbe2c5b48cf276e7919ccd5c8bfb1933c570ed2e23bae1eef1b82051b4f96425"},
+    "feeDynamicHookV2": {"address": "0xd60D6B218116cFd801E28F78d011a203D2b068Cc", "runtimeCodeBytes": 20230, "runtimeCodeSha256": "07b9d755a28a9a8c234bf2d3a91c85529ea86d636e3b49fd2bc6578e992b7968"},
+    "quoteTokenWeth": {"address": "0x4200000000000000000000000000000000000006", "runtimeCodeBytes": 2041, "runtimeCodeSha256": "667c900c2c6da80d452501a9c6332e046384a0c438c3334ce6f71c86dd7b8735"}
+  },
+  "rewardMutability": {
+    "shares": "immutable after launch",
+    "recipient": "mutable only by that reward index administrator",
+    "administrator": "mutable only by the current reward index administrator",
+    "feePreference": "mutable only by that reward index administrator",
+    "platformGuarantee": "not-yet-defined"
+  },
+  "sourceDiscrepancies": [
+    "The v4-contracts README lists the older 0x63D2... fee-conversion locker, while clanker-sdk v4.2.19 pins 0xffA377... for Base. This candidate follows the newer SDK and cannot authorize execution until the operation audit is complete."
+  ]
+}

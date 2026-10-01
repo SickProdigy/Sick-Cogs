@@ -10,6 +10,12 @@ The Clanker capability remains a prototype. Clanker must reject every other
 network, factory, selector, ABI shape, and extension address, and it must require protected user
 approval before submission. Mainnet support is intentionally absent.
 
+`clanker-v4-base-mainnet-candidate.json` is read-only audit evidence for issue #204. It records the
+current official SDK's Base deployment map and matching runtime bytecode from two independent RPC
+sources. It is deliberately not imported by cog code, has `executionEnabled: false`, and does not
+authorize a mainnet launch. The candidate also records the current SDK's newer locker address where
+it differs from the older contracts-repository README.
+
 Authoritative sources:
 
 - <https://github.com/clanker-devco/clanker-sdk/releases/tag/v4.2.19>
