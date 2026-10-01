@@ -87,14 +87,12 @@ class WalletAdminCommands:
         if requested is None:
             await ctx.send("Choose `testnet`, `mainnet`, or `mainnet-only`.")
             return
-        if requested is not WalletEnvironment.TESTNET:
-            policy = await self.config.base_mainnet_policy()
-            if not isinstance(policy, dict) or not policy.get("enabled") or policy.get("paused", True):
-                await ctx.send(
-                    "No setting changed. Arm the reviewed Base mainnet gate before "
-                    f"selecting `{requested.value}` mode."
-                )
-                return
+        policy = await self.config.base_mainnet_policy()
+        mainnet_armed = (
+            isinstance(policy, dict)
+            and policy.get("enabled") is True
+            and policy.get("paused") is False
+        )
         await self.config.operating_mode.set(requested.value)
         if requested is WalletEnvironment.TESTNET:
             detail = "Only reviewed testnet networks are presented and routed."
@@ -105,6 +103,11 @@ class WalletAdminCommands:
             )
         else:
             detail = "Mainnet is primary and testnet commands are rejected."
+        if requested is not WalletEnvironment.TESTNET and not mainnet_armed:
+            detail += (
+                " This is staging presentation only; every Base mainnet transaction "
+                "capability remains disabled and emergency-paused."
+            )
         await ctx.send(
             f"Wallet operating mode set to **{requested.value}**. {detail} "
             "No wallet or network data was deleted."

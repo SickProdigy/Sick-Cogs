@@ -2317,7 +2317,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             await CryptoWallet.clanker_default_network(cog), "base-mainnet"
         )
 
-    async def test_owner_operating_mode_control_is_fail_closed(self):
+    async def test_owner_operating_mode_is_separate_from_execution_gate(self):
         mode = _MutableValue("testnet")
         policy = _Value({"enabled": False, "paused": True})
         cog = SimpleNamespace(config=SimpleNamespace(
@@ -2326,8 +2326,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         ctx = SimpleNamespace(send=AsyncMock())
 
         await WalletAdminCommands.walletset_environment.callback(cog, ctx, "mainnet")
-        self.assertEqual(mode.value, "testnet")
-        self.assertIn("No setting changed", ctx.send.await_args.args[0])
+        self.assertEqual(mode.value, "mainnet")
+        self.assertIn("staging presentation only", ctx.send.await_args.args[0])
+        self.assertIn("disabled and emergency-paused", ctx.send.await_args.args[0])
 
         policy.value = {"enabled": True, "paused": False}
         await WalletAdminCommands.walletset_environment.callback(cog, ctx, "mainnet")
