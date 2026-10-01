@@ -438,7 +438,9 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         }
         review_view = SimpleNamespace(message=None)
         view_cog = SimpleNamespace(
-            stage_mainnet_review=AsyncMock(return_value=review_view)
+            stage_mainnet_review=AsyncMock(return_value=review_view),
+            has_current_mainnet_terms=AsyncMock(return_value=True),
+            bot=SimpleNamespace(get_cog=lambda name: None)
         )
         view = ClankerVerifiedView(
             view_cog, SimpleNamespace(author=SimpleNamespace(id=7)),
@@ -461,6 +463,18 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(staged_intent.requester_id, 7)
         self.assertEqual(staged_intent.canonical_payload(), prepared["operation"])
         self.assertIs(review_view.message, sent_message)
+
+        view_cog.has_current_mainnet_terms.return_value = False
+        view_cog.stage_mainnet_review.reset_mock()
+        interaction.followup.send.reset_mock()
+        await view.launch_internal.callback(interaction)
+        view_cog.stage_mainnet_review.assert_not_awaited()
+        terms_prompt = interaction.followup.send.await_args.kwargs
+        self.assertEqual(terms_prompt["embed"].title, "Accept Clanker Mainnet Terms")
+        self.assertEqual(
+            [item.label for item in terms_prompt["view"].children],
+            ["Accept terms"],
+        )
 
     async def test_saved_draft_rejects_platform_reward_redirect(self):
         payload = Clanker.build_payload(

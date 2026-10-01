@@ -1524,6 +1524,32 @@ class ClankerVerifiedView(discord.ui.View):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             if str(self.record.get("network") or "base-sepolia") == "base-mainnet":
+                if not await self.cog.has_current_mainnet_terms(interaction.user.id):
+                    terms_url = None
+                    wallet = self.cog.bot.get_cog("CryptoWallet")
+                    if wallet is not None:
+                        base_url = str(
+                            await wallet.config.approval_base_url() or ""
+                        ).rstrip("/")
+                        if base_url:
+                            terms_url = f"{base_url}/clanker-terms.html"
+                    terms_embed = discord.Embed(
+                        title="Accept Clanker Mainnet Terms",
+                        description=(
+                            "Review and accept the Clanker-specific terms once, then "
+                            "press **Review Mainnet Launch** again. Acceptance does not "
+                            "launch a token or authorize a transaction."
+                        ),
+                        color=discord.Color.blurple(),
+                    )
+                    await interaction.followup.send(
+                        embed=terms_embed,
+                        view=ClankerTermsView(
+                            self.cog, interaction.user.id, terms_url, current=False
+                        ),
+                        ephemeral=True,
+                    )
+                    return
                 launch = ClankerLaunchIntent.from_dict(self.record["intent"])
                 intent = build_mainnet_launch_operation(
                     launch, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT,
