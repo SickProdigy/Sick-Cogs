@@ -295,7 +295,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "mainnet_operation_approval": None,
     }
 
-    default_user = {"launch_records": [], "mainnet_terms_acceptance": None}
+    default_user = {
+        "launch_records": [], "mainnet_terms_acceptance": None,
+        "mainnet_pending_review": None, "mainnet_operation_approval": None,
+    }
 
     default_guild = {
         "enabled": False,
@@ -354,13 +357,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
 
     async def stage_mainnet_review(self, intent: MainnetOperationIntent) -> MainnetApprovalView:
         """Persist one exact review and invalidate every older approval."""
-        await self.config.mainnet_pending_review.set({
+        scope = self.config.user_from_id(intent.requester_id)
+        await scope.mainnet_pending_review.set({
             "requester_id": intent.requester_id,
             "operation_id": intent.operation_id,
             "fingerprint": intent.fingerprint,
             "expires_at": intent.expires_at,
         })
-        await self.config.mainnet_operation_approval.set(None)
+        await scope.mainnet_operation_approval.set(None)
         return MainnetApprovalView(self, intent)
 
     async def approve_mainnet_review(self, intent: MainnetOperationIntent, requester_id: int, *, acknowledgement: str) -> MainnetOperationApproval:
@@ -368,7 +372,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise ValueError("The mainnet launch acknowledgement did not match.")
         if not await self.has_current_mainnet_terms(requester_id):
             raise RuntimeError("Current Clanker mainnet terms must be accepted first.")
-        pending = await self.config.mainnet_pending_review()
+        scope = self.config.user_from_id(int(requester_id))
+        pending = await scope.mainnet_pending_review()
         expected = {
             "requester_id": intent.requester_id, "operation_id": intent.operation_id,
             "fingerprint": intent.fingerprint, "expires_at": intent.expires_at,
@@ -379,11 +384,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             intent, requester_id, discord_confirmed=True,
             now=int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
         )
-        await self.config.mainnet_operation_approval.set(approval.to_dict())
+        await scope.mainnet_operation_approval.set(approval.to_dict())
         return approval
 
     async def claim_mainnet_approval(self, intent: MainnetOperationIntent, requester_id: int) -> MainnetOperationApproval:
-        async with self.config.mainnet_operation_approval() as data:
+        scope = self.config.user_from_id(int(requester_id))
+        async with scope.mainnet_operation_approval() as data:
             try:
                 approval = MainnetOperationApproval.from_dict(data)
                 claimed = consume_mainnet_approval(

@@ -203,6 +203,8 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             mainnet_pending_review=_AsyncValue(self.review.to_dict()),
             mainnet_canary_approval=_AsyncValue(None),
         )
+        self.config.mainnet_operation_approval = self.config.mainnet_canary_approval
+        self.config.user_from_id = lambda user_id: self.config
         self.subject = SimpleNamespace(
             config=self.config,
             has_current_mainnet_terms=AsyncMock(return_value=True),

@@ -3228,7 +3228,7 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
                 _validate_tokenfactory_operation(mutated)
 
 
-    async def test_valid_mainnet_envelope_is_rejected_before_provider_access(self):
+    async def test_valid_mainnet_envelope_uses_isolated_unsponsored_provider(self):
         recipient = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         draft = TokenDraft(
             creator_discord_id=7, name="Mainnet Dry Run", symbol="MDR",
@@ -3238,19 +3238,36 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
         operation = token_operation(
             draft, "0x" + "55" * 32, recipient, network=BASE_MAINNET.key
         )
-        self.assertEqual(
-            _validate_tokenfactory_operation(operation)[-2:],
-            ("fixed_supply_token", BASE_MAINNET.key),
-        )
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "status": "broadcast", "userOpHash": "0x" + "66" * 32,
+                "calls": [{"to": operation["to"], "value": "0",
+                           "data": operation["data"]}],
+            }
+        ))
         provider = CdpWalletProvider(SimpleNamespace())
-        provider.token_factory_deployment_status = AsyncMock()
-        provider.credentials = AsyncMock()
-        with self.assertRaisesRegex(WalletProviderError, "not authorized"):
-            await provider.submit_reviewed_tokenfactory_call(
-                {}, operation, "mainnet-dry-run"
-            )
-        provider.token_factory_deployment_status.assert_not_awaited()
-        provider.credentials.assert_not_awaited()
+        provider.token_factory_deployment_status = AsyncMock(
+            return_value={"deployed": True, "address": operation["to"]}
+        )
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="main-project")
+        )
+        provider._api_client = lambda credentials: client
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": BASE_MAINNET.key, "address": recipient}],
+        }
+
+        result = await provider.submit_reviewed_tokenfactory_call(
+            profile, operation, "mainnet-dry-run"
+        )
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
+        call = client.send_smart_account_user_operation.await_args
+        self.assertEqual(call.args[3], "base")
+        self.assertIs(call.kwargs["use_cdp_paymaster"], False)
 
 
 class ClankerBalanceReviewTests(unittest.IsolatedAsyncioTestCase):

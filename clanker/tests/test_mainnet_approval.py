@@ -92,6 +92,7 @@ class MainnetProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
             mainnet_pending_review=_AsyncValue(),
             mainnet_operation_approval=_AsyncValue({"old": True}),
         )
+        config.user_from_id = lambda user_id: config
         subject = SimpleNamespace(
             config=config, has_current_mainnet_terms=AsyncMock(return_value=True),
         )
@@ -127,6 +128,7 @@ class MainnetProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
             }),
             mainnet_operation_approval=_AsyncValue(),
         )
+        config.user_from_id = lambda user_id: config
         subject = SimpleNamespace(
             config=config, has_current_mainnet_terms=AsyncMock(return_value=False),
         )

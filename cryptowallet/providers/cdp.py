@@ -818,15 +818,17 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not retrieve delegation status. Try again later."
             ) from exc
 
-    async def token_factory_deployment_status(self) -> dict:
+    async def token_factory_deployment_status(self, network: str = BASE_SEPOLIA.key) -> dict:
         """Verify the pinned singleton and deterministic TokenFactory destination."""
 
+        if network not in {BASE_SEPOLIA.key, BASE_MAINNET.key}:
+            raise WalletProviderError("TokenFactory deployment status requires a reviewed Base network.")
         try:
             singleton_code = await get_contract_code(
-                TOKEN_FACTORY_SINGLETON, BASE_SEPOLIA.key
+                TOKEN_FACTORY_SINGLETON, network
             )
             factory_code = await get_contract_code(
-                TOKEN_FACTORY_ADDRESS, BASE_SEPOLIA.key
+                TOKEN_FACTORY_ADDRESS, network
             )
             if _sha256_bytecode(singleton_code) != TOKEN_FACTORY_SINGLETON_SHA256:
                 raise WalletProviderError(
@@ -841,7 +843,7 @@ class CdpWalletProvider(WalletProvider):
             return {"deployed": True, "address": TOKEN_FACTORY_ADDRESS}
         except BaseRpcError as exc:
             raise WalletProviderError(
-                "Base Sepolia could not verify the TokenFactory deployment state."
+                "The selected Base network could not verify the TokenFactory deployment state."
             ) from exc
 
     async def submit_reviewed_tokenfactory_call(
@@ -857,11 +859,7 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "The reviewed TokenFactory operation is invalid."
             ) from exc
-        if network != BASE_SEPOLIA.key:
-            raise WalletProviderError(
-                "Base mainnet TokenFactory submission is not authorized."
-            )
-        state = await self.token_factory_deployment_status()
+        state = await self.token_factory_deployment_status(network)
         if kind == "factory" and state["deployed"]:
             return {**state, "provider_status": "complete", "already_deployed": True}
         if kind == "fixed_supply_token" and not state["deployed"]:
@@ -873,14 +871,14 @@ class CdpWalletProvider(WalletProvider):
             (
                 item
                 for item in profile.get("accounts") or []
-                if item.get("network") == BASE_SEPOLIA.key
+                if item.get("network") == network
             ),
             None,
         )
         try:
             sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
             if kind == "fixed_supply_token":
-                recipient = normalize_evm_address(str(operation["recipient"]))
+                recipient = normalize_evm_address(str(operation["recipient"])).lower()
                 if sender != recipient:
                     raise ValueError("Token recipient does not match the signing wallet")
         except ValueError as exc:
@@ -889,12 +887,12 @@ class CdpWalletProvider(WalletProvider):
             ) from exc
         if not provider_user_id or not profile_id:
             raise WalletProviderError("The wallet profile is incomplete.")
-        delegation = await self.get_delegation_status(profile, BASE_SEPOLIA.key)
+        delegation = await self.get_delegation_status(profile, network)
         if not delegation.get("active"):
             raise WalletProviderError(
                 "An active wallet authorization is required for TokenFactory deployment."
             )
-        credentials = await self.credentials()
+        credentials = await self.credentials_for_network(network)
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
 
@@ -904,7 +902,7 @@ class CdpWalletProvider(WalletProvider):
                 provider_user_id,
                 sender,
                 credentials.project_id,
-                BASE_SEPOLIA.key,
+                "base" if network == BASE_MAINNET.key else BASE_SEPOLIA.key,
                 target,
                 value_wei,
                 str(
@@ -915,6 +913,7 @@ class CdpWalletProvider(WalletProvider):
                 ),
                 calldata,
                 override_gas_limit=gas_limit,
+                use_cdp_paymaster=network != BASE_MAINNET.key,
             )
             status = str(result.get("status") or "")
             user_op_hash = str(result.get("userOpHash") or "")
@@ -924,7 +923,7 @@ class CdpWalletProvider(WalletProvider):
                 or not HASH_PATTERN.fullmatch(user_op_hash)
                 or not isinstance(calls, list)
                 or len(calls) != 1
-                or normalize_evm_address(str(calls[0].get("to") or "")) != target
+                or normalize_evm_address(str(calls[0].get("to") or "")).lower() != target.lower()
                 or int(calls[0].get("value", -1)) != value_wei
                 or str(calls[0].get("data") or "").lower() != calldata
             ):
@@ -952,7 +951,7 @@ class CdpWalletProvider(WalletProvider):
             ) from exc
 
     async def token_factory_operation_status(
-        self, profile: dict, user_operation_hash: str
+        self, profile: dict, user_operation_hash: str, network: str = BASE_SEPOLIA.key
     ) -> dict:
         """Retrieve one pinned-factory deployment operation from CDP."""
 
@@ -963,7 +962,7 @@ class CdpWalletProvider(WalletProvider):
             (
                 item
                 for item in profile.get("accounts") or []
-                if item.get("network") == BASE_SEPOLIA.key
+                if item.get("network") == network
             ),
             None,
         )
@@ -973,7 +972,7 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("The stored wallet address is invalid.") from exc
         if not provider_user_id:
             raise WalletProviderError("The wallet profile is incomplete.")
-        credentials = await self.credentials_for_network(intent.network)
+        credentials = await self.credentials_for_network(network)
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:

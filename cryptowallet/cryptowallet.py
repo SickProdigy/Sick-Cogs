@@ -17,7 +17,7 @@ from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
 from .core.models import IntentStatus
 from .providers.clanker import validate_clanker_deployment_call
-from .core.networks import BASE_SEPOLIA
+from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS
 from .providers import CdpWalletProvider
 from .providers.cdp import CLANKER_DEPLOY_GAS_LIMIT
 
@@ -72,25 +72,32 @@ class CryptoWallet(
         self.usage_flush_task.cancel()
         self.bot.loop.create_task(self.flush_provider_usage())
 
-    async def tokenfactory_wallet_context(self, user) -> dict:
+    async def tokenfactory_wallet_context(
+        self, user, network: str = BASE_SEPOLIA.key
+    ) -> dict:
         """Return the narrow public wallet identity needed by TokenFactory."""
 
         profile = await self.get_or_create_wallet_profile(user)
+        if network == BASE_MAINNET.key:
+            profile = await self.ensure_mainnet_wallet_profile(user, profile)
         account = next(
             (
                 item
                 for item in profile.get("accounts") or []
-                if item.get("network") == BASE_SEPOLIA.key
+                if item.get("network") == network
             ),
             None,
         )
+        selected = KNOWN_NETWORKS.get(network)
+        if network not in {BASE_SEPOLIA.key, BASE_MAINNET.key} or selected is None:
+            raise RuntimeError("TokenFactory requires a reviewed Base network.")
         if not profile.get("profile_id") or not account or not account.get("address"):
-            raise RuntimeError("The Base Sepolia wallet profile is incomplete.")
+            raise RuntimeError("The selected Base wallet profile is incomplete.")
         return {
             "profile_id": str(profile["profile_id"]),
             "owner_address": str(account["address"]),
-            "network": BASE_SEPOLIA.key,
-            "chain_id": BASE_SEPOLIA.chain_id,
+            "network": network,
+            "chain_id": selected.chain_id,
         }
 
     async def tokenfactory_submit_reviewed_call(
@@ -102,8 +109,11 @@ class CryptoWallet(
             expected_terms = {
                 "gas_limit": int(operation["gas_limit"]),
                 "native_value_wei": int(operation["value_wei"]),
-                "gas_sponsored": True,
-                "gas_payer": "CDP paymaster",
+                "gas_sponsored": operation.get("network") != BASE_MAINNET.key,
+                "gas_payer": (
+                    "creator wallet" if operation.get("network") == BASE_MAINNET.key
+                    else "CDP paymaster"
+                ),
             }
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError("The reviewed TokenFactory operation is incomplete.") from exc
@@ -117,18 +127,20 @@ class CryptoWallet(
         if await self.config.user(user).security_locked():
             raise RuntimeError("This CryptoWallet profile is security locked.")
         profile = await self.get_or_create_wallet_profile(user)
+        if operation.get("network") == BASE_MAINNET.key:
+            profile = await self.ensure_mainnet_wallet_profile(user, profile)
         return await self.wallet_provider.submit_reviewed_tokenfactory_call(
             profile, operation, attempt_id
         )
 
     async def tokenfactory_operation_status(
-        self, user, user_operation_hash: str
+        self, user, user_operation_hash: str, network: str = BASE_SEPOLIA.key
     ) -> dict:
         """Return the CDP state of a submitted factory deployment operation."""
 
         profile = await self.get_or_create_wallet_profile(user)
         return await self.wallet_provider.token_factory_operation_status(
-            profile, user_operation_hash
+            profile, user_operation_hash, network
         )
 
     async def clanker_collect_rewards(

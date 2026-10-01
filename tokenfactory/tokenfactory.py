@@ -109,6 +109,10 @@ class TokenFactory(commands.Cog):
             pending_deployment=None,
             deployed_tokens=[],
             mainnet_terms_acceptance=None,
+            mainnet_pending_review=None,
+            mainnet_operation_approval=None,
+            mainnet_operation_lifecycle=None,
+            mainnet_operation_evidence=None,
         )
         self.deployment_tasks = set()
         self.discord_watchers = {}
@@ -169,8 +173,9 @@ class TokenFactory(commands.Cog):
 
         if review.network != "base-mainnet" or review.chain_id != 8453:
             raise ValueError("Only a Base mainnet canary review may be staged.")
-        await self.config.mainnet_pending_review.set(review.to_dict())
-        await self.config.mainnet_canary_approval.set(None)
+        scope = self.config.user_from_id(review.owner_discord_id)
+        await scope.mainnet_pending_review.set(review.to_dict())
+        await scope.mainnet_operation_approval.set(None)
         return MainnetCanaryApprovalView(
             self, review.owner_discord_id, review
         )
@@ -188,7 +193,8 @@ class TokenFactory(commands.Cog):
             raise ValueError(
                 "The creator-responsibility acknowledgement did not match. Nothing was approved."
             )
-        data = await self.config.mainnet_pending_review()
+        scope = self.config.user_from_id(int(owner_discord_id))
+        data = await scope.mainnet_pending_review()
         try:
             review = MainnetTokenReview.from_dict(data)
         except (KeyError, TypeError, ValueError) as exc:
@@ -204,7 +210,7 @@ class TokenFactory(commands.Cog):
             raise RuntimeError(
                 "Current TokenFactory mainnet terms must be accepted before this approval."
             )
-        current_data = await self.config.mainnet_pending_review()
+        current_data = await scope.mainnet_pending_review()
         try:
             current = MainnetTokenReview.from_dict(current_data)
         except (KeyError, TypeError, ValueError) as exc:
@@ -221,15 +227,16 @@ class TokenFactory(commands.Cog):
             discord_confirmed=True,
             now=int(time.time()),
         )
-        await self.config.mainnet_canary_approval.set(approval.to_dict())
+        await scope.mainnet_operation_approval.set(approval.to_dict())
         return approval
 
     async def claim_mainnet_canary_approval(
-        self, review_fingerprint: str
+        self, owner_discord_id: int, review_fingerprint: str
     ) -> MainnetCanaryApproval:
         """Atomically consume one approval before any future provider call."""
 
-        async with self.config.mainnet_canary_approval() as data:
+        scope = self.config.user_from_id(int(owner_discord_id))
+        async with scope.mainnet_operation_approval() as data:
             try:
                 approval = MainnetCanaryApproval.from_dict(data)
             except (KeyError, TypeError, ValueError) as exc:
@@ -253,7 +260,8 @@ class TokenFactory(commands.Cog):
         """Persist one immutable canary attempt without replacing prior history."""
 
         async with self.mainnet_lifecycle_lock:
-            stored_data = await self.config.mainnet_canary_lifecycle()
+            scope = self.config.user_from_id(review.owner_discord_id)
+            stored_data = await scope.mainnet_operation_lifecycle()
             if isinstance(stored_data, dict):
                 stored = MainnetCanaryLifecycle.from_dict(stored_data)
                 assert_same_mainnet_lifecycle(
@@ -265,12 +273,13 @@ class TokenFactory(commands.Cog):
                 attempt_id,
                 now=int(time.time()) if now is None else int(now),
             )
-            await self.config.mainnet_canary_lifecycle.set(lifecycle.to_dict())
-            await self.config.mainnet_canary_evidence.set(None)
+            await scope.mainnet_operation_lifecycle.set(lifecycle.to_dict())
+            await scope.mainnet_operation_evidence.set(None)
             return lifecycle
 
     async def transition_mainnet_canary(
         self,
+        owner_discord_id: int,
         review_fingerprint: str,
         attempt_id: str,
         status: str,
@@ -281,7 +290,8 @@ class TokenFactory(commands.Cog):
         """Atomically persist one reviewed mainnet lifecycle transition."""
 
         async with self.mainnet_lifecycle_lock:
-            data = await self.config.mainnet_canary_lifecycle()
+            scope = self.config.user_from_id(int(owner_discord_id))
+            data = await scope.mainnet_operation_lifecycle()
             try:
                 current = MainnetCanaryLifecycle.from_dict(data)
                 assert_same_mainnet_lifecycle(
@@ -297,7 +307,7 @@ class TokenFactory(commands.Cog):
                 raise RuntimeError(
                     "The mainnet canary lifecycle transition was rejected."
                 ) from exc
-            await self.config.mainnet_canary_lifecycle.set(updated.to_dict())
+            await scope.mainnet_operation_lifecycle.set(updated.to_dict())
             return updated
 
     async def record_mainnet_canary_evidence(
@@ -309,7 +319,8 @@ class TokenFactory(commands.Cog):
         """Persist matching two-RPC verification evidence exactly once."""
 
         async with self.mainnet_lifecycle_lock:
-            data = await self.config.mainnet_canary_lifecycle()
+            scope = self.config.user_from_id(review.owner_discord_id)
+            data = await scope.mainnet_operation_lifecycle()
             try:
                 lifecycle = MainnetCanaryLifecycle.from_dict(data)
                 verified = verify_mainnet_canary_evidence(
@@ -319,13 +330,13 @@ class TokenFactory(commands.Cog):
                 raise RuntimeError(
                     "The mainnet canary verification evidence was rejected."
                 ) from exc
-            existing = await self.config.mainnet_canary_evidence()
+            existing = await scope.mainnet_operation_evidence()
             if existing is not None and existing != verified:
                 raise RuntimeError(
                     "Different mainnet canary evidence is already recorded."
                 )
             if existing is None:
-                await self.config.mainnet_canary_evidence.set(verified)
+                await scope.mainnet_operation_evidence.set(verified)
             return verified
 
     async def stage_mainnet_factory_review(
