@@ -8,7 +8,7 @@ import discord
 from redbot.core import Config, commands
 
 from .models import OPEN_STATUSES, is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
-from .views import LauncherView, SetupView, TicketControls, TicketError
+from .views import LauncherView, SetupView, TicketControls, TicketError, TopicLauncherView
 
 CONFIG_ID = 7422161104
 MAX_TRACKED_TICKETS = 500
@@ -21,6 +21,7 @@ GUILD_DEFAULTS = {
     "launcher_title": "Tickets",
     "launcher_message": "To create a ticket, click a button below.",
     "welcome_message": "Thanks for contacting support. Please describe what you need help with below. A support team member will be with you shortly.",
+    "launcher_style": "generic", "topics": {},
     "next_ticket_number": 1, "tickets": {},
 }
 
@@ -29,7 +30,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.2.1"
+    __version__ = "0.3.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -40,7 +41,12 @@ class Tickets(commands.Cog):
 
     async def cog_load(self):
         self.bot.add_view(LauncherView(self))
-        for data in (await self.config.all_guilds()).values():
+        for guild_id, data in (await self.config.all_guilds()).items():
+            if data.get("launcher_style") == "custom" and data.get("topics"):
+                self.bot.add_view(
+                    TopicLauncherView(self, guild_id, data["topics"]),
+                    message_id=data.get("launcher_message_id") or None,
+                )
             for key, value in data.get("tickets", {}).items():
                 record = normalized_record(value)
                 if record and record["status"] != "deleted":
@@ -110,6 +116,7 @@ class Tickets(commands.Cog):
         embed.add_field(name="Staff log", value=log.mention if log else "Disabled")
         embed.add_field(name="Open limit", value=str(data["max_open_per_user"]))
         embed.add_field(name="Cooldown", value=f"{data['creation_cooldown']} seconds")
+        embed.add_field(name="Launcher style", value=data["launcher_style"].title())
         embed.add_field(name="Ticket modes", value=", ".join(data["enabled_modes"]))
         return embed
 
@@ -180,7 +187,12 @@ class Tickets(commands.Cog):
     async def publish_launcher(self, guild):
         data, launcher, category, roles = await self._configured_parts(guild)
         enabled_modes = data["enabled_modes"]
-        for mode in enabled_modes:
+        modes_to_validate = (
+            {item["mode"] for item in data["topics"].values()}
+            if data["launcher_style"] == "custom" and data["topics"]
+            else set(enabled_modes)
+        )
+        for mode in modes_to_validate:
             await self._validate_mode(guild, mode, launcher, category, roles)
         embed = discord.Embed(
             title=safe_display(data["launcher_title"], 100),
@@ -188,7 +200,11 @@ class Tickets(commands.Cog):
             color=await self.bot.get_embed_color(launcher),
         )
         old_channel = guild.get_channel(data["launcher_message_channel_id"])
-        view = LauncherView(self, enabled_modes)
+        view = (
+            TopicLauncherView(self, guild.id, data["topics"])
+            if data["launcher_style"] == "custom" and data["topics"]
+            else LauncherView(self, enabled_modes)
+        )
         if data["launcher_message_id"] and isinstance(old_channel, discord.TextChannel):
             try:
                 old_message = await old_channel.fetch_message(data["launcher_message_id"])
@@ -236,24 +252,25 @@ class Tickets(commands.Cog):
             )
         return overwrites
 
-    async def _create_destination(self, guild, owner, number, mode, launcher, category, roles):
+    async def _create_destination(self, guild, owner, number, mode, launcher, category, roles, prefix=None):
         reason = f"Support {mode} ticket #{number} opened by user {owner.id}"
+        name = f"sup-{prefix}-{number:04d}" if prefix else ticket_channel_name(number)
         if mode == "text":
             return await guild.create_text_channel(
-                ticket_channel_name(number),
+                name,
                 category=category,
                 overwrites=self._ticket_overwrites(guild, owner, roles),
                 reason=reason,
             )
         if mode == "voice":
             return await guild.create_voice_channel(
-                ticket_channel_name(number),
+                name,
                 category=category,
                 overwrites=self._ticket_overwrites(guild, owner, roles, voice=True),
                 reason=reason,
             )
         thread = await launcher.create_thread(
-            name=ticket_channel_name(number),
+            name=name,
             type=discord.ChannelType.private_thread,
             invitable=False,
             auto_archive_duration=1440,
@@ -298,12 +315,18 @@ class Tickets(commands.Cog):
             )
         return valid
 
-    async def create_ticket(self, interaction, *, mode):
+    async def create_ticket(self, interaction, *, mode=None, topic_prefix=None):
         guild, owner = interaction.guild, interaction.user
         if guild is None or not isinstance(owner, discord.Member):
             raise TicketError("Tickets can only be opened from a server.")
         async with self._locks[guild.id]:
             data, launcher, category, roles = await self._configured_parts(guild)
+            topic = None
+            if topic_prefix:
+                topic = data["topics"].get(topic_prefix)
+                if not topic:
+                    raise TicketError("That ticket topic is no longer configured.")
+                mode = topic["mode"]
             await self._validate_mode(guild, mode, launcher, category, roles)
             records = [
                 record
@@ -338,7 +361,7 @@ class Tickets(commands.Cog):
             destination = None
             try:
                 destination = await self._create_destination(
-                    guild, owner, number, mode, launcher, category, roles
+                    guild, owner, number, mode, launcher, category, roles, topic_prefix
                 )
                 if not self.verify_ticket_permissions(destination, owner, roles, mode):
                     raise TicketError(
@@ -351,6 +374,8 @@ class Tickets(commands.Cog):
                     timestamp=discord.utils.utcnow(),
                 )
                 embed.add_field(name="Requester", value=owner.mention)
+                if topic:
+                    embed.add_field(name="Topic", value=safe_display(topic["label"], 80))
                 embed.add_field(name="Type", value=mode.replace("_", " ").title())
                 embed.add_field(name="Status", value="Open")
                 embed.add_field(name="Claimed by", value="Nobody")
@@ -467,6 +492,7 @@ class Tickets(commands.Cog):
                     )
                 elif owner:
                     overwrite = channel.overwrites_for(owner)
+                    overwrite.view_channel = not closed
                     overwrite.send_messages = not closed
                     if isinstance(channel, discord.VoiceChannel):
                         overwrite.connect = not closed
@@ -484,6 +510,37 @@ class Tickets(commands.Cog):
             )
             await self._save_ticket(guild, record)
         await self.log_event(guild, "closed" if closed else "reopened", record, actor)
+        return record
+
+    async def delete_ticket(self, guild, channel_id, actor):
+        if not await self.is_staff(actor):
+            raise TicketError("Only support staff can permanently delete tickets.")
+        async with self._locks[guild.id]:
+            record = await self.get_ticket(guild, channel_id)
+            if not record or record["status"] == "deleted":
+                raise TicketError("This ticket is already deleted.")
+            destination = self._get_destination(guild, channel_id)
+            if destination is None:
+                record.update(
+                    status="deleted",
+                    updated_at=int(time.time()),
+                    control_message_id=0,
+                )
+                await self._save_ticket(guild, record)
+                return record
+            try:
+                await destination.delete(
+                    reason=f"Ticket permanently deleted by user {actor.id}"
+                )
+            except discord.HTTPException as error:
+                raise TicketError("I could not permanently delete this ticket.") from error
+            record.update(
+                status="deleted",
+                updated_at=int(time.time()),
+                control_message_id=0,
+            )
+            await self._save_ticket(guild, record)
+        await self.log_event(guild, "permanently deleted", record, actor)
         return record
 
     async def log_event(self, guild, action, record, actor=None):
@@ -636,6 +693,62 @@ class Tickets(commands.Cog):
             + ", ".join(mode for mode in ("text", "voice", "thread") if mode in requested)
             + ". Republish the launcher to apply the change."
         )
+
+    @ticketsset.group(name="topic", invoke_without_command=True)
+    async def topic(self, ctx):
+        """List custom launcher topics."""
+        data = await self.config.guild(ctx.guild).all()
+        topics = data["topics"]
+        if not topics:
+            await ctx.send("No custom ticket topics are configured.")
+            return
+        await ctx.send("\n".join(
+            f"{prefix}: {item['label']} ({item['mode']})"
+            for prefix, item in topics.items()
+        ))
+
+    @topic.command(name="add")
+    async def topic_add(self, ctx, prefix: str, mode: str, emoji: str, *, label: str):
+        """Add or replace a custom topic button."""
+        prefix = prefix.lower().strip()
+        mode = mode.lower().strip()
+        if not prefix.isalnum() or not 2 <= len(prefix) <= 10:
+            await ctx.send("Prefix must be 2-10 lowercase letters or numbers.")
+            return
+        if mode not in {"text", "voice", "thread"}:
+            await ctx.send("Mode must be text, voice, or thread.")
+            return
+        if mode == "thread" and ctx.guild.premium_tier < 2:
+            await ctx.send("Private thread tickets require a Level 2 boosted server.")
+            return
+        async with self.config.guild(ctx.guild).topics() as topics:
+            if prefix not in topics and len(topics) >= 25:
+                await ctx.send("A launcher can contain at most 25 topics.")
+                return
+            topics[prefix] = {"label": label[:80], "emoji": emoji, "mode": mode}
+        async with self.config.guild(ctx.guild).enabled_modes() as enabled:
+            if mode not in enabled:
+                enabled.append(mode)
+        await self.config.guild(ctx.guild).launcher_style.set("custom")
+        await ctx.send(f"Added **{label[:80]}** as sup-{prefix}-####. Republish the launcher.")
+
+    @topic.command(name="remove")
+    async def topic_remove(self, ctx, prefix: str):
+        async with self.config.guild(ctx.guild).topics() as topics:
+            removed = topics.pop(prefix.lower(), None)
+        await ctx.send("Topic removed. Republish the launcher." if removed else "Topic not found.")
+
+    @ticketsset.command(name="style")
+    async def set_style(self, ctx, style: str):
+        style = style.lower()
+        if style not in {"generic", "custom"}:
+            await ctx.send("Style must be generic or custom.")
+            return
+        if style == "custom" and not await self.config.guild(ctx.guild).topics():
+            await ctx.send("Add at least one custom topic first.")
+            return
+        await self.config.guild(ctx.guild).launcher_style.set(style)
+        await ctx.send(f"Launcher style set to {style}. Republish the launcher.")
 
     @ticketsset.command(name="publish")
     async def set_publish(self, ctx):

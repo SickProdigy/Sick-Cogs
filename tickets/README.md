@@ -61,3 +61,17 @@ Staff can review the bounded queue with:
 Each ticket has persistent controls for claim/unclaim, status, and close/reopen. Closing a text ticket prevents requester messages, closing a voice ticket also prevents requester connections, and closing a thread locks and archives it.
 
 Transcripts, automatic retention deletion, external help-desk integrations, and DM relay are not part of this release.
+
+## Custom topic launcher
+
+Switch from the generic mode buttons to recognizable support topics by adding buttons. Each topic uses a 2-10 character lowercase prefix and maps to text, voice, or thread mode:
+
+    [p]ticketsset topic add mine text ⛏️ Minecraft Support
+    [p]ticketsset topic add web text 🌐 Website Support
+    [p]ticketsset topic add disc text 💬 Discord Support
+    [p]ticketsset topic
+    [p]ticketsset topic remove mine
+    [p]ticketsset style generic
+    [p]ticketsset style custom
+
+Custom destinations use names such as `sup-mine-0007`. Adding a topic automatically enables its destination mode. Republish after changing topics or launcher style. Requester closure removes their channel access; staff can reopen a ticket or permanently delete it with confirmation.

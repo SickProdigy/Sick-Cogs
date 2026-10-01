@@ -7,7 +7,7 @@ import discord
 from tickets import setup
 from tickets.models import is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
 from tickets.tickets import CONFIG_ID, GUILD_DEFAULTS, MAX_ACTIVE_TICKETS, MAX_TRACKED_TICKETS, Tickets
-from tickets.views import BrandingModal, LauncherView, TicketControls
+from tickets.views import BrandingModal, LauncherView, TicketControls, TopicLauncherView
 
 
 class TicketModelTests(unittest.TestCase):
@@ -121,6 +121,14 @@ class TicketCogTests(unittest.TestCase):
         self.assertEqual(modal.launcher_message.default, "Choose a ticket type.")
         self.assertIn("staff member", modal.welcome_message.default)
 
+    def test_custom_topics_build_persistent_buttons(self):
+        view = TopicLauncherView(
+            object(), 123, {"mine": {"label": "Minecraft Support", "emoji": "⛏️", "mode": "text"}}
+        )
+        self.assertEqual(len(view.children), 1)
+        self.assertEqual(view.children[0].custom_id, "tickets:topic:123:mine")
+        self.assertEqual(view.children[0].label, "Minecraft Support")
+
     def test_persistent_views_have_stable_custom_ids(self):
         cog = SimpleNamespace(status_label=Tickets.status_label)
         launcher = LauncherView(cog)
@@ -138,7 +146,7 @@ class TicketCogTests(unittest.TestCase):
         )
         self.assertEqual(
             {item.custom_id for item in controls.children},
-            {"tickets:55:claim", "tickets:55:status", "tickets:55:close"},
+            {"tickets:55:claim", "tickets:55:status", "tickets:55:close", "tickets:55:delete"},
         )
 
 

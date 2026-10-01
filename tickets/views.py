@@ -68,6 +68,41 @@ class LauncherView(discord.ui.View):
         await self._create(interaction, "thread")
 
 
+class TopicTicketButton(discord.ui.Button):
+    def __init__(self, cog, guild_id, prefix, topic, row):
+        super().__init__(
+            label=topic["label"][:80],
+            emoji=topic.get("emoji") or None,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"tickets:topic:{guild_id}:{prefix}",
+            row=row,
+        )
+        self.cog = cog
+        self.prefix = prefix
+
+    async def callback(self, interaction):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            destination, number = await self.cog.create_ticket(
+                interaction, topic_prefix=self.prefix
+            )
+        except TicketError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Ticket #{number} created: {destination.mention}", ephemeral=True
+        )
+
+
+class TopicLauncherView(discord.ui.View):
+    def __init__(self, cog, guild_id, topics):
+        super().__init__(timeout=None)
+        for index, (prefix, topic) in enumerate(list(topics.items())[:25]):
+            self.add_item(
+                TopicTicketButton(cog, guild_id, prefix, topic, index // 5)
+            )
+
+
 class TicketControls(discord.ui.View):
     def __init__(self, cog, channel_id, record):
         super().__init__(timeout=None)
@@ -77,6 +112,7 @@ class TicketControls(discord.ui.View):
         self.claim.custom_id = f"tickets:{suffix}:claim"
         self.status.custom_id = f"tickets:{suffix}:status"
         self.close.custom_id = f"tickets:{suffix}:close"
+        self.delete.custom_id = f"tickets:{suffix}:delete"
         claimed = int(record.get("claimed_by_id", 0) or 0)
         closed = record.get("status") == "closed"
         self.claim.label = "Unclaim" if claimed else "Claim"
@@ -125,6 +161,21 @@ class TicketControls(discord.ui.View):
         await interaction.response.send_message(
             "Choose the current ticket status.",
             view=StatusView(self.cog, interaction.user, self.channel_id, record),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
+    async def delete(self, interaction, button):
+        if not await self.cog.is_staff(interaction.user):
+            await interaction.response.send_message(
+                "Only support staff can permanently delete tickets.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            "Permanently delete this ticket? This cannot be undone.",
+            view=DeleteConfirmation(
+                self.cog, interaction.user, self.channel_id
+            ),
             ephemeral=True,
         )
 
@@ -222,6 +273,27 @@ class CloseConfirmation(OwnedEphemeralView):
         await interaction.response.edit_message(
             content="Ticket reopened." if self.reopening else "Ticket closed.",
             view=None,
+        )
+        self.stop()
+
+    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction, button):
+        await interaction.response.edit_message(content="No changes made.", view=None)
+        self.stop()
+
+
+class DeleteConfirmation(OwnedEphemeralView):
+    @discord.ui.button(label="Delete permanently", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction, button):
+        try:
+            await self.cog.delete_ticket(
+                interaction.guild, self.channel_id, interaction.user
+            )
+        except TicketError as error:
+            await interaction.response.send_message(str(error), ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            content="Ticket permanently deleted.", view=None
         )
         self.stop()
 

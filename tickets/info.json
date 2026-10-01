@@ -11,5 +11,5 @@
   "short": "Private support tickets for members and server staff",
   "tags": ["tickets", "support", "helpdesk", "moderation", "private"],
   "type": "COG",
-  "version": "0.2.1"
+  "version": "0.3.0"
 }
