@@ -55,9 +55,32 @@ def mainnet_review_embed(intent: MainnetOperationIntent) -> discord.Embed:
         rewards = "\n".join(
             f"{item.bps} bps to {item.recipient}" for item in launch.rewards
         )
-        embed.add_field(name="Rewards", value=rewards, inline=False)
+        embed.add_field(name="Rewards and platform share", value=rewards, inline=False)
+        vault = launch.vault
+        embed.add_field(
+            name="Vault",
+            value=(
+                f"{vault.percentage}% to {vault.recipient}; lock {vault.lockup_seconds}s; "
+                f"vest {vault.vesting_seconds}s" if vault else "Disabled"
+            ), inline=False,
+        )
+        airdrop = launch.airdrop
+        embed.add_field(
+            name="Airdrop",
+            value=(
+                f"{airdrop.amount_tokens} tokens; admin {airdrop.admin}; "
+                f"lock {airdrop.lockup_seconds}s; vest {airdrop.vesting_seconds}s"
+                if airdrop else "Disabled"
+            ), inline=False,
+        )
     embed.add_field(name="Signer", value=intent.signer, inline=False)
     embed.add_field(name="Contract", value=intent.to, inline=False)
+    embed.add_field(
+        name="Gas",
+        value=f"Signer pays; {intent.gas_limit:,} gas limit; {format_eth_wei(intent.max_fee_wei)} maximum fee",
+        inline=False,
+    )
+    embed.add_field(name="Native value", value=format_eth_wei(intent.value), inline=True)
     embed.add_field(
         name="Wallet debit ceiling",
         value=(

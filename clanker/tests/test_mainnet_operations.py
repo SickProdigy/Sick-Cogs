@@ -137,6 +137,9 @@ class MainnetOperationTests(unittest.TestCase):
         self.assertIn("Base mainnet", rendered)
         self.assertIn(launch.token_admin, rendered)
         self.assertIn(operation.fingerprint, rendered)
+        self.assertIn("Signer pays", rendered)
+        self.assertGreaterEqual([field.name for field in embed.fields].count("Vault"), 1)
+        self.assertGreaterEqual([field.name for field in embed.fields].count("Airdrop"), 1)
         self.assertIn("submission disabled", embed.footer.text.lower())
         with self.assertRaisesRegex(ValueError, "calldata arguments"):
             dataclasses.replace(operation, data=data[:-2] + ("00" if data[-2:] != "00" else "01"))
