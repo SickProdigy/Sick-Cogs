@@ -1,4 +1,4 @@
-"""Guild-owned Google Calendar management."""
+"""Discord scheduled events and optional Google Calendar management."""
 
 import io
 from datetime import datetime, timezone
@@ -13,7 +13,7 @@ from .models import CalendarEvent
 class CalendarEvents(commands.Cog):
     """Manage native Discord events and optional shared Google calendars."""
     __author__ = ["SickProdigy"]
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
     CONFIG_IDENTIFIER = 9329894641121951861707075415179419308323035696195774470464762724187261
 
     def __init__(self, bot):
@@ -201,11 +201,12 @@ class CalendarEvents(commands.Cog):
     async def calendar(self, ctx):
         """View the server calendar and common commands."""
         embed = discord.Embed(title="Server Calendar",
-            description="Events live in this server's Google Calendar and can be shared with other apps.",
+            description="Create and browse native Discord scheduled events with the buttons below. Google Calendar is an optional separate integration.",
             color=discord.Color.blurple())
-        embed.add_field(name="Calendar", value="Connected" if await self.config.guild(ctx.guild).calendar_id() else "Not connected")
+        embed.add_field(name="Discord events", value="Use the buttons below to create or browse events.", inline=False)
+        embed.add_field(name="Optional Google Calendar", value="Connected" if await self.config.guild(ctx.guild).calendar_id() else "Not connected")
         embed.add_field(name="Timezone", value=await self.config.guild(ctx.guild).timezone())
-        embed.add_field(name="Commands", inline=False, value=(
+        embed.add_field(name="Optional Google commands", inline=False, value=(
             f"`{ctx.clean_prefix}calendar list` - upcoming events\n"
             f"`{ctx.clean_prefix}calendar add <start> <end> <title>` - create an event\n"
             f"`{ctx.clean_prefix}calendar show <event ID>` - details and ICS export"))

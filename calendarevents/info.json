@@ -13,5 +13,5 @@
   "short": "Native Discord events and reminders with optional Google Calendar access.",
   "tags": ["calendar", "events", "ics", "google-calendar"],
   "type": "COG",
-  "version": "0.3.0"
+  "version": "0.3.1"
 }

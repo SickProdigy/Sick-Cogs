@@ -1,6 +1,6 @@
 # CalendarEvents
 
-CalendarEvents manages Discord's native scheduled events and can connect each Discord server to its own Google Calendar. Discord events and repeated reminders work without Google. Google remains the planned shared source for eventual Discord, Apple Calendar, Outlook, MyBB, and website synchronization.
+CalendarEvents manages Discord's native scheduled events and can connect each Discord server to its own Google Calendar. Discord events and repeated reminders work without Google. The Google integration is an optional shared source for Apple Calendar, Outlook, MyBB, and website synchronization; native Discord events remain useful without it.
 
 The optional Google integration uses one bot-owned service account. A server owner shares only their chosen calendar with that service-account email, so servers do not share calendar data and nobody grants access to a personal Google account.
 
