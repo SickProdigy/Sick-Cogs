@@ -326,9 +326,16 @@ class WalletTransactionCommands:
                 else "Unavailable — submission blocked"
             )
             payer = "CDP paymaster" if intent.gas_sponsored else "Wallet owner (native ETH)"
-            embed.add_field(name="Maximum gas fee", value=maximum_gas, inline=True)
+            embed.add_field(name="Reapproval threshold", value=maximum_gas, inline=True)
             embed.add_field(name="Gas payer", value=payer, inline=True)
             embed.add_field(name="Recipients", value="1", inline=True)
+        if (not network.testnet and intent.asset_kind == "native"
+                and intent.estimated_gas_fee_wei > intent.value_wei):
+            embed.add_field(
+                name="High fee warning",
+                value="The estimated network fee is greater than the amount being sent.",
+                inline=False,
+            )
         if intent.asset_kind == "erc20":
             total_value = f"{amount_text} {asset_symbol}; gas {gas_value}"
         else:
@@ -352,7 +359,7 @@ class WalletTransactionCommands:
                 value=(
                     "The existing protected wallet authorization must remain active. "
                     "This Discord confirmation applies only to the displayed network, "
-                    "amount, maximum gas, payer, and destination."
+                    "amount, estimated fee, reapproval threshold, payer, and destination."
                 ),
                 inline=False,
             )
@@ -975,7 +982,10 @@ class WalletTransactionCommands:
         intent = TransactionIntent(
             intent_id=secrets.token_urlsafe(12), profile_id=str(profile.get("profile_id") or ""),
             network=network.key, from_address=from_address, to_address=recipient,
-            value_wei=value_wei, created_at=now, expires_at=now + INTENT_LIFETIME_SECONDS,
+            value_wei=value_wei, created_at=now,
+            expires_at=now + (
+                120 if network.key == BASE_MAINNET.key else INTENT_LIFETIME_SECONDS
+            ),
             asset_kind=asset_kind, asset_contract=asset_contract,
             asset_symbol=asset_symbol, asset_decimals=asset_decimals,
             estimated_gas_fee_wei=0,

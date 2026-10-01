@@ -1581,7 +1581,7 @@ class FailClosedTransactionTests(unittest.TestCase):
         self.assertEqual(fields["Network"], "Base Mainnet (chain ID `8453`)")
         self.assertEqual(fields["Real-value amount"], "0.01 ETH")
         self.assertEqual(fields["Estimated gas fee"], "0.0001 ETH")
-        self.assertEqual(fields["Maximum gas fee"], "0.0002 ETH")
+        self.assertEqual(fields["Reapproval threshold"], "0.0002 ETH")
         self.assertEqual(fields["Gas payer"], "Wallet owner (native ETH)")
         self.assertEqual(fields["Recipients"], "1")
         self.assertEqual(fields["To"], f"`{intent.to_address}`")
@@ -1595,7 +1595,7 @@ class FailClosedTransactionTests(unittest.TestCase):
         self.assertIn("maximum", error)
         blocked = WalletTransactionCommands._intent_embed(intent, BASE_MAINNET, None)
         blocked_fields = {field.name: field.value for field in blocked.fields}
-        self.assertIn("submission blocked", blocked_fields["Maximum gas fee"])
+        self.assertIn("submission blocked", blocked_fields["Reapproval threshold"])
 
     def test_rejected_intent_has_explicit_final_title_and_footer(self):
         intent = TransactionIntent(
@@ -3863,6 +3863,33 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[4], contract)
         self.assertEqual(args[5], 0)
         self.assertEqual(args[7], calldata)
+
+    async def test_mainnet_fee_quote_sets_and_honors_approval_tolerance(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        intent = TransactionIntent(
+            intent_id="mainnet-quote", profile_id="profile-7",
+            network=BASE_MAINNET.key, from_address="0x" + "11" * 20,
+            to_address="0x" + "22" * 20, value_wei=10**12, created_at=1,
+            expires_at=9999999999, gas_sponsored=False,
+        )
+        with patch("cryptowallet.providers.cdp.quote_evm_call_fee",
+                   AsyncMock(return_value={"fee_wei": 100_000, "gas_limit": 21_000, "gas_price_wei": 5})):
+            quoted = await provider.prepare_transaction(intent)
+        self.assertEqual(quoted.estimated_gas_fee_wei, 100_000)
+        self.assertEqual(quoted.max_gas_fee_wei, 10_000_000_100_000)
+
+        with patch("cryptowallet.providers.cdp.quote_evm_call_fee",
+                   AsyncMock(return_value={"fee_wei": quoted.max_gas_fee_wei, "gas_limit": 21_000, "gas_price_wei": 5})):
+            tolerated = await provider.prepare_transaction(quoted)
+        self.assertEqual(tolerated.estimated_gas_fee_wei, quoted.estimated_gas_fee_wei)
+        self.assertEqual(tolerated.max_gas_fee_wei, quoted.max_gas_fee_wei)
+
+        increased_fee = quoted.max_gas_fee_wei + 1
+        with patch("cryptowallet.providers.cdp.quote_evm_call_fee",
+                   AsyncMock(return_value={"fee_wei": increased_fee, "gas_limit": 21_000, "gas_price_wei": 5})):
+            refreshed = await provider.prepare_transaction(quoted)
+        self.assertEqual(refreshed.estimated_gas_fee_wei, increased_fee)
+        self.assertGreater(refreshed.max_gas_fee_wei, increased_fee)
 
     async def test_mainnet_smart_account_rejects_unbounded_user_paid_fee(self):
         provider = CdpWalletProvider(SimpleNamespace())

@@ -578,6 +578,30 @@ async def _rpc_with_urls(rpc_urls: tuple[str, ...], method: str, params: list, n
     raise BaseRpcError(f"{network} RPC could not complete the request.") from last_error
 
 
+async def quote_evm_call_fee(
+    network: str, from_address: str, to_address: str, value_wei: int, data: str
+) -> dict:
+    """Return a fresh public-RPC EVM call estimate without signing or submitting."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if network not in {"base-sepolia", "base-mainnet"} or rpc_urls is None:
+        raise BaseRpcError("EVM fee estimation is unavailable for this network.")
+    label = "Base Mainnet" if network == "base-mainnet" else "Base Sepolia"
+    call = {
+        "from": normalize_evm_address(from_address),
+        "to": normalize_evm_address(to_address),
+        "value": hex(int(value_wei)),
+        "data": str(data or "0x"),
+    }
+    try:
+        gas_limit = int(str(await _rpc_with_urls(rpc_urls, "eth_estimateGas", [call], label)), 16)
+        gas_price = int(str(await _rpc_with_urls(rpc_urls, "eth_gasPrice", [], label)), 16)
+    except (TypeError, ValueError) as exc:
+        raise BaseRpcError(f"{label} returned an invalid fee estimate.") from exc
+    if gas_limit <= 0 or gas_price <= 0:
+        raise BaseRpcError(f"{label} returned an invalid fee estimate.")
+    return {"gas_limit": gas_limit, "gas_price_wei": gas_price, "fee_wei": gas_limit * gas_price}
+
+
 async def get_user_operation_receipt(
     address: str, user_operation_hash: str, network: str = "base-sepolia"
 ) -> dict | None:

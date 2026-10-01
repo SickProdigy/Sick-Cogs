@@ -55,6 +55,7 @@ from .base_rpc import (
     get_solana_transaction,
     get_transaction,
     quote_solana_transfer,
+    quote_evm_call_fee,
     get_user_operation_receipt,
 )
 from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
@@ -2050,6 +2051,36 @@ class CdpWalletProvider(WalletProvider):
             return replace(intent, from_address=sender, to_address=recipient,
                            estimated_gas_fee_wei=int(quote_data["fee_atomic"]),
                            gas_sponsored=False)
+        if intent.network == BASE_MAINNET.key:
+            if (intent.status is not IntentStatus.PENDING or intent.value_wei <= 0
+                    or intent.gas_sponsored or intent.provider_status is not None
+                    or intent.user_operation_hash is not None
+                    or intent.transaction_hash is not None or intent.block_number is not None):
+                raise WalletProviderError("Only a clean pending Base mainnet intent can be quoted.")
+            try:
+                sender = normalize_evm_address(intent.from_address)
+                recipient = normalize_evm_address(intent.to_address)
+                call_to, call_value, call_data = recipient, intent.value_wei, "0x"
+                if intent.asset_kind == "erc20":
+                    call_to = normalize_evm_address(intent.asset_contract or "")
+                    call_value = 0
+                    call_data = _erc20_transfer_data(recipient, intent.value_wei)
+                elif intent.asset_kind != "native" or intent.asset_contract is not None:
+                    raise ValueError("unsupported asset")
+                quote = await quote_evm_call_fee(
+                    BASE_MAINNET.key, sender, call_to, call_value, call_data
+                )
+                estimate = int(quote["fee_wei"])
+            except (BaseRpcError, TypeError, ValueError) as exc:
+                raise WalletProviderError("The Base mainnet fee estimate is unavailable.") from exc
+            if intent.max_gas_fee_wei > 0 and estimate <= intent.max_gas_fee_wei:
+                return replace(intent, from_address=sender, to_address=recipient)
+            tolerance = max(estimate * 125 // 100, estimate + 10**13)
+            return replace(
+                intent, from_address=sender, to_address=recipient,
+                estimated_gas_fee_wei=estimate, max_gas_fee_wei=tolerance,
+                gas_sponsored=False,
+            )
         if intent.asset_kind == "erc20":
             if (
                 intent.status is not IntentStatus.PENDING
