@@ -1455,8 +1455,6 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Mainnet ceilings",
             value=(
-                f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\n"
-                f"Token deployments/day: **{limits['token_deployments_per_day']}**\n"
                 f"Token gas: **{limits['token_gas_limit']:,}** | "
                 f"Max fee: **{limits['max_gas_fee_wei'] / 10**18:.3f} ETH** | "
                 "Native value: **0 ETH**"

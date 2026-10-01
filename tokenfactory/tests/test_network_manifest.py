@@ -95,20 +95,24 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
 class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):
     def test_limits_are_conservative_and_reject_expansion(self):
         limits = validate_mainnet_limits(default_mainnet_limits())
-        self.assertEqual(limits["factory_deployments_per_day"], 1)
-        self.assertEqual(limits["token_deployments_per_day"], 1)
         self.assertEqual(limits["native_value_wei"], 0)
-        expanded = {**MAINNET_LIMITS_DEFAULT, "token_deployments_per_day": 2}
+        expanded = {**MAINNET_LIMITS_DEFAULT, "token_gas_limit": 2_000_000}
         with self.assertRaisesRegex(TokenFactoryPolicyError, "ceiling"):
             validate_mainnet_limits(expanded)
 
-    def test_legacy_limits_gain_fee_ceiling_idempotently(self):
-        legacy = default_mainnet_limits()
+    def test_legacy_limits_gain_fee_ceiling_and_drop_unenforced_daily_fields(self):
+        legacy = {
+            **default_mainnet_limits(),
+            "factory_deployments_per_day": 1,
+            "token_deployments_per_day": 1,
+        }
         legacy.pop("max_gas_fee_wei")
         migrated = migrate_mainnet_limits(legacy)
         self.assertEqual(
             migrated["max_gas_fee_wei"], MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
         )
+        self.assertNotIn("factory_deployments_per_day", migrated)
+        self.assertNotIn("token_deployments_per_day", migrated)
         self.assertEqual(migrate_mainnet_limits(migrated), migrated)
 
     def test_limit_migration_rejects_unknown_fields(self):
