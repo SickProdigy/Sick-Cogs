@@ -1,7 +1,10 @@
 "use strict";
 
 const FACTORY = "0xcba30318008035bb5a855a8684cea954d573c2c3";
-const CHAIN_ID = 84532;
+const NETWORKS = {
+  "base-sepolia": {chainId: 84532, name: "Base Sepolia", rpc: "https://sepolia.base.org", explorer: "https://sepolia.basescan.org"},
+  "base-mainnet": {chainId: 8453, name: "Base mainnet", rpc: "https://mainnet.base.org", explorer: "https://basescan.org"},
+};
 const TOKEN_DEPLOY_GAS_LIMIT = 1500000;
 const status = document.querySelector("#external-status");
 const details = document.querySelector("#external-details");
@@ -14,6 +17,7 @@ const commandBox = document.querySelector("#verification-command");
 const commandText = document.querySelector("#verification-text");
 const copyButton = document.querySelector("#copy-verification");
 let draft;
+let network;
 let signer;
 let resultHandle;
 
@@ -21,8 +25,12 @@ function executionTerms() {
   const terms = draft?.execution_terms;
   if (!terms || terms.gas_limit !== TOKEN_DEPLOY_GAS_LIMIT ||
       terms.native_value_wei !== 0 || terms.gas_sponsored !== false ||
-      terms.gas_payer !== "connected external wallet") {
+      !["connected external wallet", "creator wallet"].includes(terms.gas_payer)) {
     throw new Error("The gas or spending policy changed. Return to Discord for a new review link.");
+  }
+  if (draft.network === "base-mainnet" &&
+      (!Number.isSafeInteger(terms.max_gas_fee_wei) || terms.max_gas_fee_wei <= 0)) {
+    throw new Error("The signed mainnet fee ceiling is missing or invalid.");
   }
   return terms;
 }
@@ -98,21 +106,23 @@ async function verifyHandoff(token) {
     throw new Error("This external-wallet deployment link is invalid or expired.");
   }
   const value = claims.sickwallet_tokenfactory;
-  if (!value || Number(value.chain_id) !== CHAIN_ID ||
+  const selected = value && NETWORKS[value.network];
+  if (!selected || Number(value.chain_id) !== selected.chainId ||
       !/^0x[0-9a-fA-F]{64}$/.test(value.request_id)) {
     throw new Error("This deployment link contains invalid factory parameters.");
   }
+  network = selected;
   return value;
 }
 async function requireChain() {
-  const chain = "0x" + CHAIN_ID.toString(16);
+  const chain = "0x" + network.chainId.toString(16);
   try {
     await window.ethereum.request({method: "wallet_switchEthereumChain", params: [{chainId: chain}]});
   } catch (error) {
     if (error && error.code === 4902) {
       await window.ethereum.request({method: "wallet_addEthereumChain", params: [{
-        chainId: chain, chainName: "Base Sepolia", nativeCurrency: {name: "ETH", symbol: "ETH", decimals: 18},
-        rpcUrls: ["https://sepolia.base.org"], blockExplorerUrls: ["https://sepolia.basescan.org"]
+        chainId: chain, chainName: network.name, nativeCurrency: {name: "ETH", symbol: "ETH", decimals: 18},
+        rpcUrls: [network.rpc], blockExplorerUrls: [network.explorer]
       }]});
     } else throw error;
   }
@@ -148,7 +158,7 @@ deployButton.addEventListener("click", async () => {
 ` +
       `Signer / gas payer: ${signer}
 Recipient: ${recipient}
-Network: Base Sepolia
+Network: ${draft.network === "base-mainnet" ? "Base mainnet" : "Base Sepolia"}
 Gas limit: ${terms.gas_limit.toLocaleString()}
 Native value: 0.00000000 ETH
 Sponsorship: Not sponsored; connected wallet pays network gas`
@@ -157,7 +167,11 @@ Sponsorship: Not sponsored; connected wallet pays network gas`
     result.textContent = "Confirm the transaction in your wallet…";
     const txHash = await window.ethereum.request({method: "eth_sendTransaction", params: [{
       from: signer, to: FACTORY, value: "0x0",
-      gas: "0x" + terms.gas_limit.toString(16), data: calldata(recipient)
+      gas: "0x" + terms.gas_limit.toString(16),
+      ...(draft.network === "base-mainnet" ? {
+        maxFeePerGas: "0x" + (BigInt(terms.max_gas_fee_wei) / BigInt(terms.gas_limit)).toString(16)
+      } : {}),
+      data: calldata(recipient)
     }]});
     commandText.value = `!tokenfactory deployment ${txHash} ${recipient}`;
     commandBox.hidden = false;
@@ -199,13 +213,15 @@ copyButton.addEventListener("click", async () => {
     addDetail("Token", `${draft.name} (${draft.symbol})`);
     addDetail("Fixed supply", draft.supply_display);
     addDetail("Decimals", String(draft.decimals));
-    addDetail("Network", "Base Sepolia (84532)");
+    addDetail("Network", network.name + " (" + network.chainId + ")");
     addDetail("Factory", FACTORY);
     addDetail("Recipient", "Signing wallet unless you enter another address");
     const terms = executionTerms();
     addDetail("Gas limit", terms.gas_limit.toLocaleString());
     addDetail("Native value", "0.00000000 ETH");
-    addDetail("Network gas", "Not sponsored — connected external wallet pays");
+    addDetail("Network gas", draft.network === "base-mainnet"
+      ? "Creator wallet pays · signed maximum " + (Number(terms.max_gas_fee_wei) / 1e18).toFixed(6) + " ETH"
+      : "Not sponsored — connected external wallet pays");
     details.hidden = false; controls.hidden = false;
     status.textContent = "Protected external-wallet deployment loaded.";
   } catch (error) { status.textContent = error instanceof Error ? error.message : "The deployment link could not be loaded."; }

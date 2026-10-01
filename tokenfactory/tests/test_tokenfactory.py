@@ -209,9 +209,11 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         external = subject.execution_terms(route="external", network="base-mainnet")
         self.assertTrue(testnet["gas_sponsored"])
         self.assertEqual(testnet["gas_payer"], "CDP paymaster")
+        self.assertIsNone(testnet["max_gas_fee_wei"])
         for terms in (mainnet, external):
             self.assertFalse(terms["gas_sponsored"])
             self.assertEqual(terms["gas_payer"], "creator wallet")
+            self.assertEqual(terms["max_gas_fee_wei"], 2 * 10**15)
 
     def test_discord_review_discloses_all_execution_terms(self):
         view = TokenDeploymentConfirmView(
@@ -358,6 +360,9 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "Native value: 0.00000000 ETH",
             "Not sponsored; connected wallet pays network gas",
             "gas: \"0x\" + terms.gas_limit.toString(16)",
+            "maxFeePerGas",
+            "NETWORKS[value.network]",
+            "Number(value.chain_id) !== selected.chainId",
         ):
             self.assertIn(required, source)
 

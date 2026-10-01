@@ -370,7 +370,7 @@ class TokenDetailsModal(discord.ui.Modal):
         enabled = self.view_ref.deployment_available
         self.view_ref.discord_deploy.disabled = not enabled
         self.view_ref.external_deploy.disabled = not (
-            enabled and self.view_ref.network == "base-sepolia"
+            enabled
         )
         await self.view_ref.cog.save_draft(self.view_ref.user, draft)
         await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
@@ -391,7 +391,7 @@ class TokenFactoryDraftView(discord.ui.View):
         self.deployment_available = deployment_available
         self.discord_deploy.disabled = not (deployment_available and draft is not None)
         self.external_deploy.disabled = not (
-            deployment_available and draft is not None and network == "base-sepolia"
+            deployment_available and draft is not None
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -501,8 +501,11 @@ class TokenFactoryDraftView(discord.ui.View):
             label="Open external wallet deployment", url=link, emoji="🔗"
         ))
         await interaction.followup.send(
-            "Connect a Base Sepolia wallet on the protected page. That wallet pays gas. "
-            "Leave recipient blank to send the full supply to the signer.",
+            ("Connect a Base mainnet wallet on the protected page. "
+             if self.draft.network == "base-mainnet" else
+             "Connect a Base Sepolia wallet on the protected page. ")
+            + "That wallet pays gas. Leave recipient blank to send the full supply "
+              "to the signer.",
             view=view, ephemeral=True,
         )
 

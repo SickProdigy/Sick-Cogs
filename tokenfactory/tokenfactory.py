@@ -38,6 +38,7 @@ from .terms import (
     is_current_tokenfactory_terms_acceptance,
 )
 from .policy import (
+    MAINNET_LIMITS_DEFAULT,
     default_mainnet_limits,
     migrate_mainnet_limits,
     validate_mainnet_limits,
@@ -92,6 +93,10 @@ class TokenFactory(commands.Cog):
             "gas_limit": gas_limit,
             "native_value_wei": 0,
             "gas_sponsored": sponsored,
+            "max_gas_fee_wei": (
+                MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
+                if network == "base-mainnet" else None
+            ),
             "gas_payer": (
                 "CDP paymaster" if sponsored
                 else "creator wallet" if network == "base-mainnet"
@@ -589,8 +594,8 @@ class TokenFactory(commands.Cog):
         return resolved
 
     async def create_external_deployment_link(self, user, draft: TokenDraft) -> str:
-        if not await self.deployment_available():
-            raise RuntimeError("Token deployment is disabled or emergency-paused.")
+        if not await self.deployment_available(draft.network):
+            raise RuntimeError("Token deployment is disabled or emergency-paused for this network.")
         user_config = self.config.user(user)
         pending = await user_config.pending_deployment()
         if isinstance(pending, dict):
@@ -626,7 +631,7 @@ class TokenFactory(commands.Cog):
             user.id, "tokenfactory_external",
             {
                 **draft.to_dict(),
-                "execution_terms": self.execution_terms(route="external"),
+                "execution_terms": self.execution_terms(route="external", network=draft.network),
                 "request_id": request_id,
             },
         )
