@@ -31,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.3.1"
+    __version__ = "0.4.0"
 
     def __init__(self, bot):
         self.bot = bot

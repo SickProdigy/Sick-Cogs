@@ -32,7 +32,7 @@ Run (`ticketset` is a shorter alias):
     [p]ticketsset
     [p]ticketset
 
-Use the setup selectors for the launcher channel, optional category, staff roles, and enabled ticket modes. **Edit messages** customizes the launcher title, launcher instructions, and the welcome message posted in every new ticket. Configure the enabled ticket types, then publish:
+Use the main setup card to choose the launcher channel, optional category, and staff roles. Then choose **Classic setup** or **Custom setup**. Classic setup selects the text, voice, and thread modes, edits messages, and publishes the normal launcher. Custom setup walks through adding, editing, deleting, previewing, and publishing topic buttons. Saved custom buttons remain available while the classic launcher is active.
 
     [p]ticketsset modes text
     [p]ticketsset modes text voice

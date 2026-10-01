@@ -7,7 +7,7 @@ import discord
 from tickets import setup
 from tickets.models import is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
 from tickets.tickets import CONFIG_ID, GUILD_DEFAULTS, MAX_ACTIVE_TICKETS, MAX_TRACKED_TICKETS, Tickets
-from tickets.views import BrandingModal, LauncherView, TicketControls, TopicLauncherView
+from tickets.views import (BrandingModal, ClassicSetupView, CustomSetupView, LauncherView, SetupView, TicketControls, TopicLauncherView)
 
 
 class TicketModelTests(unittest.TestCase):
@@ -125,6 +125,19 @@ class TicketCogTests(unittest.TestCase):
         fields = {field.name: field.value for field in updated.fields}
         self.assertEqual(fields["Status"], "Waiting on member")
         self.assertEqual(fields["Claimed by"], "<@42>")
+
+    def test_setup_branches_into_classic_and_custom_workflows(self):
+        owner = SimpleNamespace(id=42)
+        main = SetupView(object(), owner)
+        labels = {getattr(item, "label", None) for item in main.children}
+        self.assertIn("Classic setup", labels)
+        self.assertIn("Custom setup", labels)
+        classic = ClassicSetupView(object(), owner)
+        self.assertIn("Publish classic", {getattr(item, "label", None) for item in classic.children})
+        custom = CustomSetupView(object(), owner, {"mine": {"label": "Minecraft Support", "emoji": "⛏️", "mode": "text"}})
+        custom_labels = {getattr(item, "label", None) for item in custom.children}
+        self.assertIn("Add button", custom_labels)
+        self.assertIn("Publish custom", custom_labels)
 
     def test_branding_modal_uses_current_server_messages(self):
         data = {

@@ -454,10 +454,11 @@ class BrandingModal(discord.ui.Modal, title="Customize Tickets messages"):
         max_length=1800,
     )
 
-    def __init__(self, cog, owner, data):
+    def __init__(self, cog, owner, data, return_to="main"):
         super().__init__()
         self.cog = cog
         self.owner_id = owner.id
+        self.return_to = return_to
         self.launcher_title.default = data["launcher_title"]
         self.launcher_message.default = data["launcher_message"]
         self.welcome_message.default = data["welcome_message"]
@@ -472,6 +473,228 @@ class BrandingModal(discord.ui.Modal, title="Customize Tickets messages"):
         await group.launcher_title.set(str(self.launcher_title).strip())
         await group.launcher_message.set(str(self.launcher_message).strip())
         await group.welcome_message.set(str(self.welcome_message).strip())
+        view = (
+            ClassicSetupView(self.cog, interaction.user)
+            if self.return_to == "classic"
+            else SetupView(self.cog, interaction.user)
+        )
+        await interaction.response.edit_message(
+            embed=await self.cog.settings_embed(interaction.guild),
+            view=view,
+        )
+
+
+class CustomTopicModal(discord.ui.Modal, title="Custom ticket button"):
+    label_input = discord.ui.TextInput(label="Button label", min_length=1, max_length=80)
+    prefix_input = discord.ui.TextInput(
+        label="Short channel prefix", placeholder="mine", min_length=2, max_length=10
+    )
+    mode_input = discord.ui.TextInput(
+        label="Ticket type", placeholder="text, voice, or thread", min_length=4, max_length=6
+    )
+    emoji_input = discord.ui.TextInput(
+        label="Button emoji (optional)", required=False, max_length=32
+    )
+
+    def __init__(self, cog, owner, topics, prefix=None):
+        super().__init__()
+        self.cog = cog
+        self.owner_id = owner.id
+        self.original_prefix = prefix
+        if prefix and prefix in topics:
+            topic = topics[prefix]
+            self.label_input.default = topic["label"]
+            self.prefix_input.default = prefix
+            self.mode_input.default = topic["mode"]
+            self.emoji_input.default = topic.get("emoji") or ""
+
+    async def on_submit(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "This setup form belongs to someone else.", ephemeral=True
+            )
+            return
+        prefix = str(self.prefix_input).strip().lower()
+        mode = str(self.mode_input).strip().lower()
+        label = str(self.label_input).strip()
+        emoji = str(self.emoji_input).strip()
+        if not prefix.isalnum() or not 2 <= len(prefix) <= 10:
+            await interaction.response.send_message(
+                "Prefix must be 2-10 lowercase letters or numbers.", ephemeral=True
+            )
+            return
+        if mode not in {"text", "voice", "thread"}:
+            await interaction.response.send_message(
+                "Ticket type must be text, voice, or thread.", ephemeral=True
+            )
+            return
+        if mode == "thread" and interaction.guild.premium_tier < 2:
+            await interaction.response.send_message(
+                "Private thread tickets require a Level 2 boosted server.", ephemeral=True
+            )
+            return
+        group = self.cog.config.guild(interaction.guild)
+        async with group.topics() as topics:
+            if prefix != self.original_prefix and prefix not in topics and len(topics) >= 25:
+                await interaction.response.send_message(
+                    "A launcher can contain at most 25 topics.", ephemeral=True
+                )
+                return
+            if self.original_prefix and self.original_prefix != prefix:
+                topics.pop(self.original_prefix, None)
+            topics[prefix] = {"label": label, "emoji": emoji, "mode": mode}
+        async with group.enabled_modes() as modes:
+            if mode not in modes:
+                modes.append(mode)
+        await group.launcher_style.set("custom")
+        topics = await group.topics()
+        await interaction.response.edit_message(
+            embed=await custom_setup_embed(self.cog, interaction.guild, topics),
+            view=CustomSetupView(self.cog, interaction.user, topics),
+        )
+
+
+async def custom_setup_embed(cog, guild, topics):
+    embed = await cog.settings_embed(guild)
+    embed.title = "Custom ticket launcher"
+    embed.description = (
+        "Add, edit, or delete the topic buttons that will appear on the custom launcher."
+    )
+    embed.add_field(
+        name="Custom buttons",
+        value="\n".join(
+            f"{item.get('emoji', '')} **{item['label']}** → "
+            f"{item['mode']} · sup-{prefix}-####"
+            for prefix, item in topics.items()
+        ) or "None configured",
+        inline=False,
+    )
+    return embed
+
+
+class TopicEditSelect(discord.ui.Select):
+    def __init__(self, parent, topics):
+        super().__init__(
+            placeholder="Choose a button to edit",
+            options=[
+                discord.SelectOption(
+                    label=item["label"][:100],
+                    value=prefix,
+                    emoji=item.get("emoji") or None,
+                    description=f"{item['mode']} · sup-{prefix}-####",
+                )
+                for prefix, item in list(topics.items())[:25]
+            ],
+            row=0,
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction):
+        await interaction.response.send_modal(
+            CustomTopicModal(
+                self.parent_view.cog,
+                interaction.user,
+                self.parent_view.topics,
+                self.values[0],
+            )
+        )
+
+
+class TopicDeleteSelect(discord.ui.Select):
+    def __init__(self, parent, topics):
+        super().__init__(
+            placeholder="Choose a button to delete",
+            options=[
+                discord.SelectOption(label=item["label"][:100], value=prefix)
+                for prefix, item in list(topics.items())[:25]
+            ],
+            row=1,
+        )
+        self.parent_view = parent
+
+    async def callback(self, interaction):
+        prefix = self.values[0]
+        group = self.parent_view.cog.config.guild(interaction.guild)
+        async with group.topics() as topics:
+            topics.pop(prefix, None)
+        topics = await group.topics()
+        await interaction.response.edit_message(
+            embed=await custom_setup_embed(
+                self.parent_view.cog, interaction.guild, topics
+            ),
+            view=CustomSetupView(
+                self.parent_view.cog, interaction.user, topics
+            ),
+        )
+
+
+class ClassicSetupView(SetupOwnedView):
+    def __init__(self, cog, owner):
+        super().__init__(cog, owner)
+        self.add_item(TicketModeSelect(self))
+
+    @discord.ui.button(label="Edit messages", style=discord.ButtonStyle.primary, row=4)
+    async def edit_messages(self, interaction, button):
+        data = await self.cog.config.guild(interaction.guild).all()
+        await interaction.response.send_modal(
+            BrandingModal(self.cog, interaction.user, data, "classic")
+        )
+
+    @discord.ui.button(label="Publish classic", style=discord.ButtonStyle.success, row=4)
+    async def publish(self, interaction, button):
+        await self.cog.config.guild(interaction.guild).launcher_style.set("generic")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await self.cog.publish_launcher(interaction.guild)
+        except TicketError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Classic launcher published: {message.jump_url}", ephemeral=True
+        )
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=4)
+    async def back(self, interaction, button):
+        await interaction.response.edit_message(
+            embed=await self.cog.settings_embed(interaction.guild),
+            view=SetupView(self.cog, interaction.user),
+        )
+
+
+class CustomSetupView(SetupOwnedView):
+    def __init__(self, cog, owner, topics):
+        super().__init__(cog, owner)
+        self.topics = topics
+        if topics:
+            self.add_item(TopicEditSelect(self, topics))
+            self.add_item(TopicDeleteSelect(self, topics))
+
+    @discord.ui.button(label="Add button", style=discord.ButtonStyle.primary, row=4)
+    async def add_topic(self, interaction, button):
+        await interaction.response.send_modal(
+            CustomTopicModal(self.cog, interaction.user, self.topics)
+        )
+
+    @discord.ui.button(label="Publish custom", style=discord.ButtonStyle.success, row=4)
+    async def publish(self, interaction, button):
+        if not self.topics:
+            await interaction.response.send_message(
+                "Add at least one custom button first.", ephemeral=True
+            )
+            return
+        await self.cog.config.guild(interaction.guild).launcher_style.set("custom")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            message = await self.cog.publish_launcher(interaction.guild)
+        except TicketError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Custom launcher published: {message.jump_url}", ephemeral=True
+        )
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, row=4)
+    async def back(self, interaction, button):
         await interaction.response.edit_message(
             embed=await self.cog.settings_embed(interaction.guild),
             view=SetupView(self.cog, interaction.user),
@@ -484,32 +707,20 @@ class SetupView(SetupOwnedView):
         self.add_item(LauncherChannelSelect(self))
         self.add_item(TicketCategorySelect(self))
         self.add_item(StaffRoleSelect(self))
-        self.add_item(TicketModeSelect(self))
 
-    @discord.ui.button(label="Edit messages", style=discord.ButtonStyle.primary, row=4)
-    async def edit_messages(self, interaction, button):
-        data = await self.cog.config.guild(interaction.guild).all()
-        await interaction.response.send_modal(
-            BrandingModal(self.cog, interaction.user, data)
-        )
-
-    @discord.ui.button(label="Publish launcher", style=discord.ButtonStyle.success, row=4)
-    async def publish(self, interaction, button):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            message = await self.cog.publish_launcher(interaction.guild)
-        except TicketError as error:
-            await interaction.followup.send(str(error), ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"Ticket launcher is ready: {message.jump_url}", ephemeral=True
-        )
-
-    @discord.ui.button(label="Refresh", style=discord.ButtonStyle.secondary, row=4)
-    async def refresh(self, interaction, button):
+    @discord.ui.button(label="Classic setup", emoji="🎫", style=discord.ButtonStyle.primary, row=4)
+    async def classic(self, interaction, button):
         await interaction.response.edit_message(
             embed=await self.cog.settings_embed(interaction.guild),
-            view=self,
+            view=ClassicSetupView(self.cog, interaction.user),
+        )
+
+    @discord.ui.button(label="Custom setup", emoji="🛠️", style=discord.ButtonStyle.secondary, row=4)
+    async def custom(self, interaction, button):
+        topics = await self.cog.config.guild(interaction.guild).topics()
+        await interaction.response.edit_message(
+            embed=await custom_setup_embed(self.cog, interaction.guild, topics),
+            view=CustomSetupView(self.cog, interaction.user, topics),
         )
 
     @discord.ui.button(label="Done", style=discord.ButtonStyle.secondary, row=4)
