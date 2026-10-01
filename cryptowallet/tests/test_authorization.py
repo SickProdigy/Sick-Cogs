@@ -2404,6 +2404,19 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("code-disabled", ctx.send.await_args.args[0])
 
+    async def test_mainnet_txid_route_remains_closed_at_code_boundary(self):
+        cog = SimpleNamespace(
+            _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
+            config=SimpleNamespace(base_mainnet_policy=_Value({})),
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletActivityCommands.wallet_txid.callback(
+            cog, ctx, "base", "0x" + "a" * 64
+        )
+
+        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+
     async def test_crypto_product_defaults_follow_operating_mode(self):
         cog = SimpleNamespace(
             config=SimpleNamespace(operating_mode=_MutableValue("testnet"))

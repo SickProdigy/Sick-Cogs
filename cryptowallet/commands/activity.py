@@ -41,6 +41,15 @@ class WalletActivityCommands:
             ctx, self.wallet_transactions, network_key=network_key
         )
 
+    @WalletCoreCommands.wallet_testnet.command(name="txid")
+    async def wallet_testnet_txid(
+        self, ctx: commands.Context, network_key: str, txid: str
+    ):
+        """Look up a transaction through the explicit testnet sandbox."""
+        await self._invoke_testnet_command(
+            ctx, self.wallet_txid, network_key, txid
+        )
+
     @staticmethod
     def _activity_network(value: str):
         return resolve_network(value)
@@ -179,7 +188,44 @@ class WalletActivityCommands:
 
         Looks up a public transaction on an explicitly selected testnet.
         """
-        network = self._activity_network(network_key)
+        explicit_testnet = bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        environment_resolver = getattr(self, "_wallet_environment", None)
+        environment = (
+            await environment_resolver()
+            if callable(environment_resolver)
+            else WalletEnvironment.TESTNET
+        )
+        mainnet_path = environment is not WalletEnvironment.TESTNET and not explicit_testnet
+        if mainnet_path:
+            policy_setting = getattr(
+                getattr(self, "config", None), "base_mainnet_policy", None
+            )
+            policy = await policy_setting() if callable(policy_setting) else {}
+            if not BASE_MAINNET.supports(NetworkCapability.TRANSACTION_LOOKUP):
+                await ctx.send(
+                    "Base mainnet transaction lookup remains code-disabled pending review."
+                )
+                return
+            if (
+                not isinstance(policy, dict)
+                or policy.get("enabled") is not True
+                or policy.get("paused", True) is not False
+                or (policy.get("capabilities") or {}).get("transaction_lookup") is not True
+            ):
+                await ctx.send(
+                    "Base mainnet transaction lookup is disabled or emergency-paused."
+                )
+                return
+            if str(network_key).strip().lower() not in {
+                "base", "base-mainnet", "mainnet", "eth"
+            }:
+                await ctx.send("Choose `base` for Base mainnet transaction lookup.")
+                return
+            network = BASE_MAINNET
+        else:
+            if not await testnet_path_allowed(self, ctx, explicit=explicit_testnet):
+                return
+            network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.TRANSACTION_LOOKUP):
             await ctx.send(
                 f"Choose `base`, `eth`, `arb`, `polygon`, `avax`, or `sol`, for example: "
