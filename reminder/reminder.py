@@ -64,7 +64,6 @@ class ReminderEntry:
             source_url=source_url,
             failed_at=failed_at,
         )
-
     @staticmethod
     def _valid_timestamp(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
@@ -87,7 +86,7 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
@@ -96,6 +95,7 @@ class Reminder(commands.Cog):
     MAX_SECONDS = 63_080_000
     CHECK_INTERVAL = 3600.0
     DURATION_PATTERN = re.compile(r"([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
+    AMBIGUOUS_MINUTE_PATTERN = re.compile(r"[1-9][0-9]*m(?=[0-9]|$)", re.IGNORECASE)
     DURATION_UNITS: Tuple[Tuple[str, int], ...] = (
         ("seconds", 1),
         ("minutes", 60),
@@ -131,10 +131,18 @@ class Reminder(commands.Cog):
 
     @commands.group(name="remind", aliases=["remindme"], invoke_without_command=True)
     async def remind(self, ctx: Context, duration: str, *, text: str) -> None:
-        """Create a reminder. Durations may be combined, for example `1h30m`."""
+        """Create a reminder. Durations may be combined, for example `1h30min`."""
+        compact_duration = re.sub(r"\s+", "", duration or "")
+        if self.AMBIGUOUS_MINUTE_PATTERN.search(compact_duration):
+            await ctx.send(
+                ":x: `m` is ambiguous. Use `min` for minutes or `mo` for months."
+            )
+            return
         seconds = self.parse_duration(duration)
         if seconds is None:
-            await ctx.send(":x: Invalid time format.")
+            await ctx.send(
+                ":x: Invalid time format. Try `10min`, `2h`, `1w`, or `1mo`."
+            )
             return
         if seconds > self.MAX_SECONDS:
             await ctx.send(":x: Too long amount of time. Maximum: 2 years")
@@ -295,18 +303,35 @@ class Reminder(commands.Cog):
             for entry in due:
                 await self._deliver_one(user, entry)
 
-    async def _deliver_one(self, user: discord.User, entry: ReminderEntry) -> None:
+
+    @staticmethod
+    def build_delivery(entry: ReminderEntry):
+        quoted = "\n".join(f"> {line}" for line in entry.content.splitlines())
         embed = discord.Embed(
-            title="Reminder", description=entry.content, color=discord.Colour.blue()
+            title="⏰ Reminder",
+            description=f"You asked me to remember:\n\n{quoted}",
+            color=discord.Colour.blue(),
+            timestamp=datetime.datetime.fromtimestamp(
+                entry.due_at, tz=datetime.timezone.utc
+            ),
         )
+        embed.set_footer(text="Reminder due")
+        view = None
         if entry.source_url:
-            embed.add_field(
-                name="Original message",
-                value=f"[Open message]({entry.source_url})",
-                inline=False,
+            view = discord.ui.View()
+            view.add_item(
+                discord.ui.Button(
+                    label="View original message",
+                    style=discord.ButtonStyle.link,
+                    url=entry.source_url,
+                )
             )
+        return embed, view
+
+    async def _deliver_one(self, user: discord.User, entry: ReminderEntry) -> None:
+        embed, view = self.build_delivery(entry)
         try:
-            await user.send(embed=embed)
+            await user.send(embed=embed, view=view)
         except (discord.Forbidden, discord.HTTPException) as exc:
             log.warning("Could not deliver reminder %s to user %s: %s", entry.reminder_id, user.id, exc)
             await self._mark_failed(user.id, [entry], time.time())
@@ -338,7 +363,6 @@ class Reminder(commands.Cog):
         if next_due is None:
             return self.CHECK_INTERVAL
         return max(0.05, min(self.CHECK_INTERVAL, next_due - now))
-
     @staticmethod
     def _valid_entries(raw_entries: object) -> List[ReminderEntry]:
         if not isinstance(raw_entries, list):
@@ -356,6 +380,8 @@ class Reminder(commands.Cog):
         for match in matches:
             amount = int(match.group(1))
             abbreviation = match.group(2).lower()
+            if abbreviation == "m":
+                return None
             unit = next(
                 (multiplier for name, multiplier in cls.DURATION_UNITS if name.startswith(abbreviation)),
                 None,
@@ -364,7 +390,6 @@ class Reminder(commands.Cog):
                 return None
             seconds += amount * unit
         return seconds or None
-
     @staticmethod
     def validate_offset(value: object) -> Optional[float]:
         try:
@@ -374,7 +399,6 @@ class Reminder(commands.Cog):
         if not isfinite(offset) or not -23.75 <= offset <= 23.75:
             return None
         return round(offset * 4) / 4.0
-
     @staticmethod
     def reply_source_url(message: discord.Message) -> Optional[str]:
         """Return the jump URL for the message being replied to, if any."""
@@ -390,7 +414,6 @@ class Reminder(commands.Cog):
             guild_id = guild.id if guild is not None else "@me"
         channel_id = reference.channel_id or message.channel.id
         return f"https://discord.com/channels/{guild_id}/{channel_id}/{reference.message_id}"
-
     @staticmethod
     def format_due_time(timestamp: float, offset: float) -> str:
         if offset == 0:
@@ -406,7 +429,6 @@ class Reminder(commands.Cog):
             f"{local_time:%Y-%m-%d %H:%M} "
             f"(UTC{sign}{offset_hours:02d}:{offset_minutes:02d})"
         )
-
     @staticmethod
     def describe_duration(seconds: int) -> str:
         hours, remainder = divmod(seconds, 3600)
