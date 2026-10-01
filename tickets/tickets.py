@@ -19,7 +19,7 @@ GUILD_DEFAULTS = {
     "staff_role_ids": [], "log_channel_id": 0, "max_open_per_user": 1,
     "creation_cooldown": 300, "enabled_modes": ["text"],
     "launcher_title": "Tickets",
-    "launcher_message": "To create a ticket, click a button below.",
+    "launcher_message": "To create a ticket, click 📩 below.",
     "welcome_message": "Thanks for contacting support. Please describe what you need help with below. A support team member will be with you shortly.",
     "launcher_style": "generic", "topics": {},
     "claims_enabled": False, "statuses_enabled": False, "close_behavior": "delete",
@@ -31,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
 
     def __init__(self, bot):
         self.bot = bot

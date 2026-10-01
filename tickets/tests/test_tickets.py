@@ -53,6 +53,10 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)
         self.assertEqual(GUILD_DEFAULTS["enabled_modes"], ["text"])
         self.assertEqual(GUILD_DEFAULTS["launcher_title"], "Tickets")
+        self.assertEqual(
+            GUILD_DEFAULTS["launcher_message"],
+            "To create a ticket, click 📩 below.",
+        )
         self.assertFalse(GUILD_DEFAULTS["claims_enabled"])
         self.assertFalse(GUILD_DEFAULTS["statuses_enabled"])
         self.assertEqual(GUILD_DEFAULTS["close_behavior"], "delete")
