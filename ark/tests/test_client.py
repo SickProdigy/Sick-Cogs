@@ -48,6 +48,15 @@ class ArkClientTests(unittest.TestCase):
             "https://clan.cloudflare.steamstatic.com/images/12345/featured.jpg",
         )
 
+    def test_plain_text_omits_full_resolution_link_and_extra_blank_line(self):
+        source = (
+            "First paragraph.\n\n"
+            "[url=https://drive.google.com/example][color=#3498db]"
+            "Download in full resolution[/color][/url]\n\n"
+            "Second paragraph."
+        )
+        self.assertEqual(plain_text(source), "First paragraph.\n\nSecond paragraph.")
+
     def test_recent_items_selects_newest_but_returns_oldest_first(self):
         items = [
             {"gid": "1", "date": 10},
