@@ -65,6 +65,59 @@ class MainnetLifecycleTests(unittest.TestCase):
                 submitted, "replaced", now=5, failure_reason="missing hash"
             )
 
+    def test_launch_state_is_bound_to_reviewed_semantics(self):
+        from ..mainnet_operations import MainnetOperationIntent, _mainnet_launch_calldata, _manifest
+        from .test_operation import intent as launch_intent
+        launch = launch_intent()
+        operation = MainnetOperationIntent(
+            operation_id=launch.launch_id, kind="launch",
+            requester_id=launch.requester_id, signer=launch.token_admin,
+            to=_manifest()["factory"]["address"],
+            value=launch.expected_native_value_wei,
+            data=_mainnet_launch_calldata(_manifest(), launch),
+            created_at=launch.created_at, expires_at=launch.expires_at,
+            gas_limit=3_000_000, max_fee_wei=10**15,
+            recipients=tuple(item.recipient for item in launch.rewards),
+            launch_config=launch,
+        )
+        lifecycle = create_mainnet_lifecycle(operation, "launch-attempt", now=1)
+        lifecycle = transition_mainnet_lifecycle(lifecycle, "processing", now=2)
+        lifecycle = transition_mainnet_lifecycle(
+            lifecycle, "submitted", now=3, transaction_hash=TX
+        )
+        lifecycle = transition_mainnet_lifecycle(
+            lifecycle, "confirmed", now=4, block_number=123
+        )
+        snapshot = {
+            "chain_id": 8453, "receipt_success": True, "transaction_hash": TX,
+            "block_number": 123, "block_hash": BLOCK, "latest_block_number": 140,
+            "signer": operation.signer, "to": operation.to,
+            "value": operation.value, "data": operation.data,
+            "target_runtime_code_hash": "0x365456b7fae5f3d0f95eb1500426505f8a8a4a412fce23008792e1b7ff8b0b5f",
+            "success_topic": "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67",
+            "token_address": "0x3333333333333333333333333333333333333333",
+            "token_admin": launch.token_admin, "name": launch.name,
+            "symbol": launch.symbol, "decimals": 18,
+            "total_supply_atomic": launch.supply_tokens * 10**18,
+            "rewards": [item.to_dict() for item in launch.rewards],
+            "vault": None, "airdrop": None,
+            "token_code_sha256": "0x" + "99" * 32,
+        }
+        result = verify_mainnet_operation_evidence(
+            operation, lifecycle, snapshot, dict(snapshot)
+        )
+        self.assertEqual(result["token_admin"], launch.token_admin)
+        for field, value, message in (
+            ("name", "Wrong", "metadata"), ("total_supply_atomic", 1, "supply"),
+            ("rewards", [], "reward"), ("vault", {"unexpected": True}, "vault"),
+            ("airdrop", {"unexpected": True}, "airdrop"),
+            ("token_code_sha256", "0x" + "00" * 32, "disagree"),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, message):
+                verify_mainnet_operation_evidence(
+                    operation, lifecycle, snapshot, {**snapshot, field: value}
+                )
+
     def test_two_rpc_evidence_is_exact(self):
         operation, lifecycle = self.confirmed()
         snapshot = {

@@ -58,3 +58,7 @@ provider-managed; duplicate prevention uses the immutable operation ID and clean
 Receipt evidence is accepted only after both RPC snapshots agree on the canonical block hash and
 report at least 12 confirmations. Lifecycle tests cover uncertain and timed-out recovery, dropped and
 replacement terminals, identifier mutation, and rejection of every transition out of terminal state.
+
+For launches, both finalized RPC snapshots must also agree on nonempty token runtime evidence, token
+address and administrator, name, symbol, 18 decimals, fixed 100-billion supply, every reward and
+platform-attribution entry, and the exact optional vault and airdrop configuration.

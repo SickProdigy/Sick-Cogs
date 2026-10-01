@@ -140,9 +140,30 @@ def _snapshot(intent: MainnetOperationIntent, lifecycle: MainnetOperationLifecyc
         token_admin = str(evidence.get("token_admin") or "").lower()
         if not re.fullmatch(r"0x[0-9a-f]{40}", token_address) or int(token_address[2:], 16) == 0:
             raise ValueError("Created Clanker token address is invalid.")
-        if intent.launch_config is None or token_admin != intent.launch_config.token_admin:
+        launch = intent.launch_config
+        if launch is None or token_admin != launch.token_admin:
             raise ValueError("Created Clanker token administrator changed.")
-        result.update(token_address=token_address, token_admin=token_admin)
+        if str(evidence.get("name")) != launch.name or str(evidence.get("symbol")) != launch.symbol:
+            raise ValueError("Created Clanker token metadata changed.")
+        if int(evidence.get("decimals", -1)) != 18 or int(evidence.get("total_supply_atomic", -1)) != launch.supply_tokens * 10**18:
+            raise ValueError("Created Clanker token supply changed.")
+        expected_rewards = [item.to_dict() for item in launch.rewards]
+        if evidence.get("rewards") != expected_rewards:
+            raise ValueError("Created Clanker reward or platform attribution changed.")
+        expected_vault = launch.vault.to_dict() if launch.vault else None
+        if evidence.get("vault") != expected_vault:
+            raise ValueError("Created Clanker vault configuration changed.")
+        expected_airdrop = launch.airdrop.to_dict() if launch.airdrop else None
+        if evidence.get("airdrop") != expected_airdrop:
+            raise ValueError("Created Clanker airdrop configuration changed.")
+        token_code_sha256 = _hash(evidence.get("token_code_sha256"), "token runtime", True)
+        result.update(
+            token_address=token_address, token_admin=token_admin, name=launch.name,
+            symbol=launch.symbol, decimals=18,
+            total_supply_atomic=str(launch.supply_tokens * 10**18),
+            rewards=expected_rewards, vault=expected_vault, airdrop=expected_airdrop,
+            token_code_sha256=token_code_sha256,
+        )
     return result
 
 def verify_mainnet_operation_evidence(
