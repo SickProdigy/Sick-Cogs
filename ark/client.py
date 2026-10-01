@@ -26,9 +26,12 @@ CATEGORY_LABELS = {
 
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)', re.IGNORECASE)
-_FULL_RESOLUTION_RE = re.compile(r"download\s+in\s+full\s+resolution", re.IGNORECASE)
+_FULL_RESOLUTION_RE = re.compile(
+    r"download(?:\s+all\s+screenshots)?\s+in\s+full\s+resolution",
+    re.IGNORECASE,
+)
 _FULL_RESOLUTION_LINE_RE = re.compile(
-    r"^[ \t]*download\s+in\s+full\s+resolution[ \t]*$",
+    r"^[ \t]*download(?:\s+all\s+screenshots)?\s+in\s+full\s+resolution[ \t]*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _BB_TAG_RE = re.compile(r"\[/?[a-z*][^\]]*\]", re.IGNORECASE)
