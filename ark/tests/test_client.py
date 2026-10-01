@@ -52,12 +52,16 @@ class ArkClientTests(unittest.TestCase):
         source = (
             "[img]{STEAM_CLAN_IMAGE}/44719856/"
             "14decb75883b079ef427a162df1a3649fe9cefc6.png[/img]\n"
-            "[previewyoutube=gsWm02GX1zw;full]TRAILER[/previewyoutube]"
+            "[previewyoutube=gsWm02GX1zw;full]TRAILER[/previewyoutube]\n"
+            "[img]{STEAM_CLAN_IMAGE}/44719856/"
+            "674a529bc710eb4218cb2ec321a4d5eb99776c33.png[/img]\n"
+            "[url=https://drive.google.com/example][color=#3498db]"
+            "Download all screenshots in full resolution[/color][/url]"
         )
         self.assertEqual(
             extract_image(source),
             "https://clan.steamstatic.com/images/44719856/"
-            "14decb75883b079ef427a162df1a3649fe9cefc6.png",
+            "674a529bc710eb4218cb2ec321a4d5eb99776c33.png",
         )
 
     def test_redirecting_legacy_cdn_is_canonicalized(self):
@@ -78,6 +82,14 @@ class ArkClientTests(unittest.TestCase):
             "Second paragraph."
         )
         self.assertEqual(plain_text(source), "First paragraph.\n\nSecond paragraph.")
+
+    def test_plain_text_omits_all_screenshots_full_resolution_link(self):
+        source = (
+            "First paragraph.\n"
+            "[url=https://drive.google.com/example][color=#3498db]"
+            "Download all screenshots in full resolution[/color][/url]"
+        )
+        self.assertEqual(plain_text(source), "First paragraph.")
 
     def test_recent_items_selects_newest_but_returns_oldest_first(self):
         items = [
