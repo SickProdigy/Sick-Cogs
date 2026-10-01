@@ -17,7 +17,11 @@ MAX_ACTIVE_TICKETS = 100
 GUILD_DEFAULTS = {
     "launcher_channel_id": 0, "launcher_message_id": 0, "launcher_message_channel_id": 0, "category_id": 0,
     "staff_role_ids": [], "log_channel_id": 0, "max_open_per_user": 1,
-    "creation_cooldown": 300, "enabled_modes": ["text"], "next_ticket_number": 1, "tickets": {},
+    "creation_cooldown": 300, "enabled_modes": ["text"],
+    "launcher_title": "Tickets",
+    "launcher_message": "To create a ticket, click a button below.",
+    "welcome_message": "Thanks for contacting support. Please describe what you need help with below. A support team member will be with you shortly.",
+    "next_ticket_number": 1, "tickets": {},
 }
 
 
@@ -25,7 +29,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -178,18 +182,9 @@ class Tickets(commands.Cog):
         enabled_modes = data["enabled_modes"]
         for mode in enabled_modes:
             await self._validate_mode(guild, mode, launcher, category, roles)
-        labels = {
-            "text": "private text channel",
-            "voice": "private voice channel",
-            "thread": "private thread",
-        }
-        choices = ", ".join(labels[mode] for mode in enabled_modes)
         embed = discord.Embed(
-            title="Need help?",
-            description=(
-                "Choose a ticket type below. The bot will create a private support space "
-                f"for you and the support team.\n\nAvailable: **{choices}**."
-            ),
+            title=safe_display(data["launcher_title"], 100),
+            description=safe_display(data["launcher_message"], 1000),
             color=await self.bot.get_embed_color(launcher),
         )
         old_channel = guild.get_channel(data["launcher_message_channel_id"])
@@ -208,7 +203,9 @@ class Tickets(commands.Cog):
                 )
             except (discord.NotFound, discord.Forbidden):
                 pass
-        message = await launcher.send(embed=embed, view=view)
+        message = await launcher.send(
+            embed=embed, view=view, allowed_mentions=discord.AllowedMentions.none()
+        )
         await self.config.guild(guild).launcher_message_id.set(message.id)
         await self.config.guild(guild).launcher_message_channel_id.set(launcher.id)
         return message
@@ -349,10 +346,7 @@ class Tickets(commands.Cog):
                     )
                 embed = discord.Embed(
                     title=f"Support ticket #{number}",
-                    description=(
-                        "Thanks for contacting support. Please describe what you need help "
-                        "with below. A support team member will be with you shortly."
-                    ),
+                    description=safe_display(data["welcome_message"], 1800),
                     color=await self.bot.get_embed_color(destination),
                     timestamp=discord.utils.utcnow(),
                 )

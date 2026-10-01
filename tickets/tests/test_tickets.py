@@ -7,7 +7,7 @@ import discord
 from tickets import setup
 from tickets.models import is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
 from tickets.tickets import CONFIG_ID, GUILD_DEFAULTS, MAX_ACTIVE_TICKETS, MAX_TRACKED_TICKETS, Tickets
-from tickets.views import LauncherView, TicketControls
+from tickets.views import BrandingModal, LauncherView, TicketControls
 
 
 class TicketModelTests(unittest.TestCase):
@@ -49,6 +49,7 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(CONFIG_ID, 7422161104)
         self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)
         self.assertEqual(GUILD_DEFAULTS["enabled_modes"], ["text"])
+        self.assertEqual(GUILD_DEFAULTS["launcher_title"], "Tickets")
         self.assertGreaterEqual(GUILD_DEFAULTS["creation_cooldown"], 300)
         self.assertLessEqual(MAX_ACTIVE_TICKETS, 100)
         self.assertLessEqual(MAX_TRACKED_TICKETS, 500)
@@ -108,6 +109,17 @@ class TicketCogTests(unittest.TestCase):
         fields = {field.name: field.value for field in updated.fields}
         self.assertEqual(fields["Status"], "Waiting on member")
         self.assertEqual(fields["Claimed by"], "<@42>")
+
+    def test_branding_modal_uses_current_server_messages(self):
+        data = {
+            "launcher_title": "Help desk",
+            "launcher_message": "Choose a ticket type.",
+            "welcome_message": "A staff member will be with you shortly.",
+        }
+        modal = BrandingModal(object(), SimpleNamespace(id=42), data)
+        self.assertEqual(modal.launcher_title.default, "Help desk")
+        self.assertEqual(modal.launcher_message.default, "Choose a ticket type.")
+        self.assertIn("staff member", modal.welcome_message.default)
 
     def test_persistent_views_have_stable_custom_ids(self):
         cog = SimpleNamespace(status_label=Tickets.status_label)

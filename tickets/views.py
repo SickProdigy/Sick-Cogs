@@ -41,8 +41,8 @@ class LauncherView(discord.ui.View):
         )
 
     @discord.ui.button(
-        label="Text ticket",
-        emoji="🎫",
+        label="Create ticket",
+        emoji="📩",
         style=discord.ButtonStyle.primary,
         custom_id="tickets:open",
     )
@@ -50,7 +50,7 @@ class LauncherView(discord.ui.View):
         await self._create(interaction, "text")
 
     @discord.ui.button(
-        label="Voice ticket",
+        label="Create voice ticket",
         emoji="🔊",
         style=discord.ButtonStyle.secondary,
         custom_id="tickets:open:voice",
@@ -59,7 +59,7 @@ class LauncherView(discord.ui.View):
         await self._create(interaction, "voice")
 
     @discord.ui.button(
-        label="Private thread",
+        label="Create thread ticket",
         emoji="🧵",
         style=discord.ButtonStyle.secondary,
         custom_id="tickets:open:thread",
@@ -271,7 +271,7 @@ class LauncherChannelSelect(discord.ui.ChannelSelect):
 class TicketCategorySelect(discord.ui.ChannelSelect):
     def __init__(self, parent):
         super().__init__(
-            placeholder="Choose private ticket category",
+            placeholder="Choose ticket category (optional)",
             min_values=1,
             max_values=1,
             channel_types=[discord.ChannelType.category],
@@ -348,6 +348,49 @@ class TicketModeSelect(discord.ui.Select):
         )
 
 
+class BrandingModal(discord.ui.Modal, title="Customize Tickets messages"):
+    launcher_title = discord.ui.TextInput(
+        label="Launcher title",
+        min_length=1,
+        max_length=100,
+    )
+    launcher_message = discord.ui.TextInput(
+        label="Launcher message",
+        style=discord.TextStyle.paragraph,
+        min_length=1,
+        max_length=1000,
+    )
+    welcome_message = discord.ui.TextInput(
+        label="New ticket welcome message",
+        style=discord.TextStyle.paragraph,
+        min_length=1,
+        max_length=1800,
+    )
+
+    def __init__(self, cog, owner, data):
+        super().__init__()
+        self.cog = cog
+        self.owner_id = owner.id
+        self.launcher_title.default = data["launcher_title"]
+        self.launcher_message.default = data["launcher_message"]
+        self.welcome_message.default = data["welcome_message"]
+
+    async def on_submit(self, interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "This setup form belongs to someone else.", ephemeral=True
+            )
+            return
+        group = self.cog.config.guild(interaction.guild)
+        await group.launcher_title.set(str(self.launcher_title).strip())
+        await group.launcher_message.set(str(self.launcher_message).strip())
+        await group.welcome_message.set(str(self.welcome_message).strip())
+        await interaction.response.edit_message(
+            embed=await self.cog.settings_embed(interaction.guild),
+            view=SetupView(self.cog, interaction.user),
+        )
+
+
 class SetupView(SetupOwnedView):
     def __init__(self, cog, owner):
         super().__init__(cog, owner)
@@ -355,6 +398,13 @@ class SetupView(SetupOwnedView):
         self.add_item(TicketCategorySelect(self))
         self.add_item(StaffRoleSelect(self))
         self.add_item(TicketModeSelect(self))
+
+    @discord.ui.button(label="Edit messages", style=discord.ButtonStyle.primary, row=4)
+    async def edit_messages(self, interaction, button):
+        data = await self.cog.config.guild(interaction.guild).all()
+        await interaction.response.send_modal(
+            BrandingModal(self.cog, interaction.user, data)
+        )
 
     @discord.ui.button(label="Publish launcher", style=discord.ButtonStyle.success, row=4)
     async def publish(self, interaction, button):

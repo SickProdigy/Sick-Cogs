@@ -31,7 +31,7 @@ Run:
 
     [p]ticketsset
 
-Use the setup selectors for the launcher channel, optional category, staff roles, and optional staff log. Configure the enabled ticket types, then publish:
+Use the setup selectors for the launcher channel, optional category, staff roles, and enabled ticket modes. **Edit messages** customizes the launcher title, launcher instructions, and the welcome message posted in every new ticket. Configure the enabled ticket types, then publish:
 
     [p]ticketsset modes text
     [p]ticketsset modes text voice
