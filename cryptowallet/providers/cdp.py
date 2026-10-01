@@ -1060,7 +1060,7 @@ class CdpWalletProvider(WalletProvider):
                     or to != target or not data.startswith(selector)
                     or value < 0 or (not payable and value != 0)
                     or not 0 < gas_limit <= CLANKER_DEPLOY_GAS_LIMIT
-                    or not 0 < max_fee <= 10**16 or requester_id <= 0
+                    or max_fee <= 0 or requester_id <= 0
                     or not attempt_id):
                 raise ValueError("Clanker mainnet operation exceeds its allowlist")
         except (KeyError, TypeError, ValueError) as exc:

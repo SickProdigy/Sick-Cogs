@@ -4676,7 +4676,7 @@ class ClankerMainnetSignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             "to": "0xf3622742b1e446d92e45e22923ef11c2fcd55d68",
             "value": "0", "data": "0x21c0b342" + signer[2:].rjust(64, "0")
             + token[2:].rjust(64, "0"), "created_at": 1, "expires_at": 600,
-            "gas_limit": 200000, "max_fee_wei": str(10**15),
+            "gas_limit": 200000, "max_fee_wei": str(25 * 10**18),
             "recipients": [signer], "token": token, "fee_owner": signer,
             "allocated_amount": None, "proof": [], "launch_payload_hash": None,
         }

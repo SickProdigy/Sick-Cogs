@@ -155,15 +155,12 @@ def revalidate_mainnet_pre_submission(
         or review.gas_limit != reviewed_limits["token_gas_limit"]
     ):
         raise ValueError("The operation gas limit changed after review.")
-    if (
-        review.max_gas_fee_wei <= 0
-        or review.max_gas_fee_wei > reviewed_limits["max_gas_fee_wei"]
-    ):
-        raise ValueError("The approved gas maximum violates current policy.")
+    if review.max_gas_fee_wei <= 0:
+        raise ValueError("The approved reapproval threshold is invalid.")
     if review.gas_sponsored or review.gas_payer != "creator wallet":
         raise ValueError("Base mainnet gas must remain creator-funded.")
     if int(signer_balance_wei) < review.max_gas_fee_wei:
-        raise ValueError("The creator wallet balance cannot cover the approved gas maximum.")
+        raise ValueError("The creator wallet balance cannot cover the approved reapproval threshold.")
     if int(operation.get("value_wei", -1)) != 0 or review.native_value_wei != 0:
         raise ValueError("The operation native value must remain zero.")
     expected_hash = str(manifest["factoryRuntimeCodeHash"]).lower()

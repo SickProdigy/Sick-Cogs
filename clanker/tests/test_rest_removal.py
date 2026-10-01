@@ -14,7 +14,7 @@ from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
                      draft_values_from_record, format_vault_duration,
                      parse_vault_duration)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
-from ..mainnet_operations import DEFAULT_LAUNCH_GAS_LIMIT, MAX_FEE_WEI
+from ..mainnet_operations import DEFAULT_LAUNCH_GAS_LIMIT
 
 
 WALLET = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
@@ -422,18 +422,18 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(prepared["payload"]["chainId"], 8453)
         self.assertEqual(prepared["operation"]["chain_id"], 8453)
         self.assertEqual(prepared["operation"]["gas_limit"], DEFAULT_LAUNCH_GAS_LIMIT)
-        self.assertEqual(int(prepared["operation"]["max_fee_wei"]), MAX_FEE_WEI)
+        self.assertEqual(int(prepared["operation"]["max_fee_wei"]), 1)
 
         prepared["status"] = "verified"
         prepared["execution_terms"] = {
             "gas_limit": DEFAULT_LAUNCH_GAS_LIMIT,
-            "max_gas_fee_wei": MAX_FEE_WEI,
+            "max_gas_fee_wei": 25 * 10**16,
             "native_value_wei": 0, "gas_sponsored": False,
             "gas_payer": "creator wallet",
         }
         prepared["network_fee_estimate"] = {
             "estimated_gas": DEFAULT_LAUNCH_GAS_LIMIT,
-            "estimated_fee_wei": MAX_FEE_WEI,
+            "estimated_fee_wei": 20 * 10**16,
             "estimate_kind": "safety_ceiling",
         }
         review_view = SimpleNamespace(message=None)

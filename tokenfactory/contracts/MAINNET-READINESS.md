@@ -33,21 +33,21 @@ require two-provider verification after an explicitly approved canary.
 Every mainnet authorization flag is false. The owner-only `mainnetcontrol` command can pause or
 disable immediately; its enable request fails with no state change while external gates remain.
 Conservative immutable canary ceilings permit at most one factory deployment, one token deployment
-per day, fixed gas ceilings, zero native value, and no public/member deployment. Base mainnet gas is never sponsored by SickGaming: the creator wallet must pay the displayed network fee and hold at least the approved maximum before submission. No provider route
+per day, fixed gas limits, zero native value, and no public/member deployment. Base mainnet gas is never sponsored by SickGaming: the creator wallet must pay the displayed network fee and hold at least the approved reapproval threshold before submission. No provider route
 can deploy the factory or a token.
 
 The staged owner-canary approval component binds the bot owner, wallet profile, signer, recipient,
-chain, factory, request ID, calldata hash, gas ceiling/payer, native value, and review fingerprint.
+chain, factory, request ID, calldata hash, gas limit, reapproval threshold, and payer, native value, and review fingerprint.
 It requires current TokenFactory terms and the exact creator-responsibility acknowledgment, expires after ten
 minutes, and can be claimed atomically only once. Emergency pause clears every pending review and
 approval. The separate pre-submission validator rechecks all immutable bindings, the live chain and
-factory runtime hash, signer authorization, current policy, creator-wallet balance sufficient for the approved gas maximum, and absence of any existing provider
+factory runtime hash, signer authorization, current policy, creator-wallet balance sufficient for the approved reapproval threshold, and absence of any existing provider
 operation. These components remain unreachable from a deployment command until the external gates
 are complete.
 
 The deterministic factory deployment has its own review, approval, lifecycle, and evidence
 records, separate from the later token canary. Its protected card binds the canonical singleton,
-predicted factory, creation code, deployment calldata, signer, gas ceiling/payer, zero native value,
+predicted factory, creation code, deployment calldata, signer, gas limit, reapproval threshold, and payer, zero native value,
 and an independent fingerprint. Immediately before any future submission it must recheck chain
 8453, the singleton runtime pin, the still-empty predicted destination, authorization, fee policy,
 and absence of a provider operation. Its approval requires the distinct

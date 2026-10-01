@@ -36,7 +36,7 @@ from .models import (
 )
 from .operation import clanker_deployment_operation
 from .mainnet_operations import (
-    DEFAULT_LAUNCH_GAS_LIMIT, MAINNET_SUBMISSION_ENABLED, MAX_FEE_WEI, MainnetOperationIntent,
+    DEFAULT_LAUNCH_GAS_LIMIT, MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
     build_mainnet_launch_operation, revalidate_mainnet_pre_submission,
 )
 from .mainnet_lifecycle import (
@@ -2439,7 +2439,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             record["intent"] = intent.to_dict()
             operation = (
                 build_mainnet_launch_operation(
-                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=MAX_FEE_WEI
+                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=max(
+                        1, int((record.get("execution_terms") or {}).get(
+                            "max_gas_fee_wei"
+                        ) or 1),
+                    )
                 )
                 if network == "base-mainnet"
                 else clanker_deployment_operation(intent)
@@ -2507,7 +2511,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             )
             operation = (
                 build_mainnet_launch_operation(
-                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=MAX_FEE_WEI
+                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=max(
+                        1, int((record.get("execution_terms") or {}).get(
+                            "max_gas_fee_wei"
+                        ) or 1),
+                    )
                 )
                 if network == "base-mainnet"
                 else clanker_deployment_operation(intent)
@@ -2545,7 +2553,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             estimated_gas = 8_000_000
             estimate_kind = "safety_ceiling"
             log.warning(
-                "Clanker launch gas simulation failed; using the reviewed gas ceiling (%s)",
+                "Clanker launch gas simulation failed; using the reviewed gas-limit fallback (%s)",
                 type(exc).__name__,
             )
         return {

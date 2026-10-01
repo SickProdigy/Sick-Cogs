@@ -86,13 +86,16 @@ class MainnetOperationTests(unittest.TestCase):
             {"data": "0xdeadbeef"},
             {"value": 1},
             {"gas_limit": 10_000_001},
-            {"max_fee_wei": 10**16 + 1},
             {"expires_at": 1_700_000_901},
             {"kind": "creatorBuyIn", "to": TOKEN, "data": "0x12345678"},
         )
         for changed in invalid:
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 intent(**changed)
+
+    def test_large_user_approved_fee_threshold_is_not_globally_capped(self):
+        operation = intent(max_fee_wei=25 * 10**18)
+        self.assertEqual(operation.max_fee_wei, 25 * 10**18)
 
     def test_semantic_fields_are_independently_bound_to_calldata(self):
         operation = intent()

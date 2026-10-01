@@ -215,7 +215,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         for terms in (mainnet, external):
             self.assertFalse(terms["gas_sponsored"])
             self.assertEqual(terms["gas_payer"], "creator wallet")
-            self.assertEqual(terms["max_gas_fee_wei"], 2 * 10**15)
+            self.assertIsNone(terms["max_gas_fee_wei"])
 
     def test_discord_review_discloses_all_execution_terms(self):
         view = TokenDeploymentConfirmView(
@@ -265,7 +265,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         review = build_mainnet_token_review(
             draft, "0x" + "22" * 32, draft.owner_address,
-            max_gas_fee_wei=terms["max_gas_fee_wei"],
+            max_gas_fee_wei=2 * 10**15,
             gas_payer=terms["gas_payer"], limits=default_mainnet_limits(),
         )
         review_view = SimpleNamespace(message=None)
@@ -474,7 +474,8 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             "Native value: 0.00000000 ETH",
             "Not sponsored; connected wallet pays network gas",
             "gas: \"0x\" + terms.gas_limit.toString(16)",
-            "maxFeePerGas",
+            "terms.max_gas_fee_wei !== null",
+            "your wallet shows the live fee before confirmation",
             "NETWORKS[value.network]",
             "Number(value.chain_id) !== selected.chainId",
         ):

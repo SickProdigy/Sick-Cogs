@@ -1,7 +1,7 @@
 import unittest
 
 from clanker.mainnet_operations import (
-    MAINNET_SUBMISSION_ENABLED, MAX_FEE_WEI, MainnetOperationIntent,
+    MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
     _manifest as clanker_manifest,
 )
 from clanker.mainnet_lifecycle import (
@@ -20,7 +20,7 @@ from tokenfactory.mainnet_lifecycle import (
 )
 from tokenfactory.mainnet_review import build_mainnet_token_review
 from tokenfactory.models import TokenDraft
-from tokenfactory.policy import MAINNET_LIMITS_DEFAULT, default_mainnet_limits
+from tokenfactory.policy import default_mainnet_limits
 from tokenfactory.tokenfactory import TokenFactory
 
 class CryptoStackMainnetBoundaryTests(unittest.TestCase):
@@ -50,10 +50,7 @@ class CryptoStackMainnetBoundaryTests(unittest.TestCase):
         terms = object.__new__(TokenFactory).execution_terms(
             route="external", network="base-mainnet"
         )
-        self.assertEqual(
-            terms["max_gas_fee_wei"], MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
-        )
-        self.assertLessEqual(terms["max_gas_fee_wei"], MAX_FEE_WEI)
+        self.assertIsNone(terms["max_gas_fee_wei"])
         self.assertFalse(BASE_MAINNET_PROVIDER_MANIFEST.bounded_user_paid_fee_supported)
         self.assertTrue(BASE_MAINNET_PROVIDER_MANIFEST.fee_quote_required)
         self.assertEqual(

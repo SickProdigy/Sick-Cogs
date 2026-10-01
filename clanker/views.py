@@ -17,7 +17,7 @@ from .constants import (
     SYMBOL_RE,
 )
 from .mainnet_operations import (
-    DEFAULT_LAUNCH_GAS_LIMIT, MAX_FEE_WEI, MainnetOperationIntent,
+    DEFAULT_LAUNCH_GAS_LIMIT, MainnetOperationIntent,
     build_mainnet_launch_operation,
 )
 from .mainnet_approval import MAINNET_ACKNOWLEDGEMENT
@@ -1860,7 +1860,7 @@ class ClankerDraftView(discord.ui.View):
                 record["wallet_balance_wei"] = None
                 record["execution_terms"] = {
                     "gas_limit": DEFAULT_LAUNCH_GAS_LIMIT,
-                    "max_gas_fee_wei": MAX_FEE_WEI,
+                    "max_gas_fee_wei": None,
                     "native_value_wei": native_value,
                     "gas_sponsored": False,
                     "gas_payer": "creator wallet",
@@ -1903,11 +1903,9 @@ class ClankerDraftView(discord.ui.View):
                     value_wei=int(operation.get("value", 0)), data=str(operation["data"]),
                 )
                 estimated_fee = int(estimate.get("fee_wei") or 0)
-                if estimated_fee <= 0 or estimated_fee > MAX_FEE_WEI:
-                    raise RuntimeError("The current network fee exceeds Clanker policy.")
-                threshold = min(
-                    MAX_FEE_WEI, max(estimated_fee * 125 // 100, estimated_fee + 10**13)
-                )
+                if estimated_fee <= 0:
+                    raise RuntimeError("The current network fee estimate is invalid.")
+                threshold = max(estimated_fee * 125 // 100, estimated_fee + 10**13)
                 launch = ClankerLaunchIntent.from_dict(record["intent"])
                 reviewed_operation = build_mainnet_launch_operation(
                     launch, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=threshold

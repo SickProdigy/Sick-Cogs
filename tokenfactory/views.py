@@ -163,7 +163,7 @@ def mainnet_factory_review_embed(review: MainnetFactoryReview) -> discord.Embed:
     )
     embed.add_field(name="Gas limit", value=f"`{review.gas_limit:,}`", inline=True)
     embed.add_field(
-        name="Gas policy ceiling", value=f"`{max_fee:.8f} ETH`", inline=True
+        name="Reapproval threshold", value=f"`{max_fee:.8f} ETH`", inline=True
     )
     embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
     embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
@@ -557,7 +557,7 @@ class TokenDeploymentConfirmView(discord.ui.View):
         embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
         embed.add_field(
             name="Network gas",
-            value=("Creator wallet pays · submission blocked until a bounded fee quote is enforceable"
+            value=("Creator wallet pays · exact estimate and reapproval threshold shown next"
                    if self.draft.network == "base-mainnet" else
                    "Sponsorship active · paid by CDP paymaster"),
             inline=False,
@@ -568,7 +568,7 @@ class TokenDeploymentConfirmView(discord.ui.View):
             inline=False,
         )
         embed.set_footer(text=(
-            "Mainnet fee enforcement gate not complete · no submission available"
+            "Protected mainnet review required · no transaction submitted yet"
             if self.draft.network == "base-mainnet" else
             "Testnet only · explicit confirmation · active wallet authorization required"
         ))

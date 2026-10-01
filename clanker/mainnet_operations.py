@@ -25,7 +25,6 @@ ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
 MAX_NATIVE_VALUE_WEI = 10**18
 MAX_GAS_LIMIT = 10_000_000
 DEFAULT_LAUNCH_GAS_LIMIT = 8_000_000
-MAX_FEE_WEI = 10**16
 
 
 def _manifest() -> dict[str, Any]:
@@ -195,8 +194,8 @@ class MainnetOperationIntent:
             raise ValueError("Mainnet operation expiry is invalid.")
         if not 0 < self.gas_limit <= MAX_GAS_LIMIT:
             raise ValueError("Mainnet gas limit exceeds policy.")
-        if not 0 < self.max_fee_wei <= MAX_FEE_WEI:
-            raise ValueError("Mainnet maximum fee exceeds policy.")
+        if self.max_fee_wei <= 0:
+            raise ValueError("Mainnet reapproval threshold must be positive.")
 
     def canonical_payload(self) -> dict[str, Any]:
         return {
@@ -315,7 +314,7 @@ def revalidate_mainnet_pre_submission(
         raise ValueError("The live Clanker gas quote changed after approval.")
     required_balance = intent.value + intent.max_fee_wei
     if int(signer_balance_wei) < required_balance:
-        raise ValueError("The signer balance cannot cover value plus the approved maximum fee.")
+        raise ValueError("The signer balance cannot cover value plus the approved reapproval threshold.")
     return {
         "intent_fingerprint": intent.fingerprint,
         "target_runtime_sha256": expected_hash,

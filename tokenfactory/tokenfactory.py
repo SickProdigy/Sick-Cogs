@@ -38,7 +38,6 @@ from .terms import (
     is_current_tokenfactory_terms_acceptance,
 )
 from .policy import (
-    MAINNET_LIMITS_DEFAULT,
     default_mainnet_limits,
     migrate_mainnet_limits,
     validate_mainnet_limits,
@@ -93,10 +92,7 @@ class TokenFactory(commands.Cog):
             "gas_limit": gas_limit,
             "native_value_wei": 0,
             "gas_sponsored": sponsored,
-            "max_gas_fee_wei": (
-                MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
-                if network == "base-mainnet" else None
-            ),
+            "max_gas_fee_wei": None,
             "gas_payer": (
                 "CDP paymaster" if sponsored
                 else "creator wallet" if network == "base-mainnet"
@@ -218,12 +214,9 @@ class TokenFactory(commands.Cog):
             value_wei=int(operation["value_wei"]), data=str(operation["data"]),
         )
         estimated_fee = int(quote.get("fee_wei") or 0)
-        policy_ceiling = int(execution_terms["max_gas_fee_wei"])
-        if estimated_fee <= 0 or estimated_fee > policy_ceiling:
-            raise RuntimeError("The current network fee exceeds TokenFactory policy.")
-        threshold = min(
-            policy_ceiling, max(estimated_fee * 125 // 100, estimated_fee + 10**13)
-        )
+        if estimated_fee <= 0:
+            raise RuntimeError("The current network fee estimate is invalid.")
+        threshold = max(estimated_fee * 125 // 100, estimated_fee + 10**13)
         review = build_mainnet_token_review(
             draft, request_id, draft.owner_address,
             max_gas_fee_wei=threshold,
@@ -1469,7 +1462,6 @@ class TokenFactory(commands.Cog):
             name="Mainnet ceilings",
             value=(
                 f"Token gas: **{limits['token_gas_limit']:,}** | "
-                f"Max fee: **{limits['max_gas_fee_wei'] / 10**18:.3f} ETH** | "
                 "Native value: **0 ETH**"
             ),
             inline=False,

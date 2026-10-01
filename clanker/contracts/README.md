@@ -26,7 +26,7 @@ part of the immutable launch extension; reward, vault, and airdrop administrativ
 and owner withdrawals are explicitly excluded from user operations.
 
 `mainnet_operations.py` turns those audited entries into immutable, expiring operation intents. It
-binds the expected chain, signer, target, value, complete calldata, gas limit, fee ceiling, recipients,
+binds the expected chain, signer, target, value, complete calldata, gas limit, per-review fee threshold, recipients,
 and requester into a deterministic fingerprint, then compares every provider candidate exactly. The
 module contains no submitter and `MAINNET_SUBMISSION_ENABLED` remains `False`.
 Launch, reward, treasury, vault, and airdrop calldata is independently reconstructed from typed token,
@@ -51,7 +51,7 @@ The approval button records consent only; it cannot submit while the manifest an
 
 Immediately before any future provider call, live revalidation repeats the exact candidate check and
 requires the pinned target runtime, active wallet authorization, an unchanged gas quote, enough signer
-balance for native value plus maximum fee, and a clean not-created provider state. ERC-4337 nonce is
+balance for native value plus the approved reapproval threshold, and a clean not-created provider state. ERC-4337 nonce is
 provider-managed; duplicate prevention uses the immutable operation ID and clean provider state.
 
 Receipt evidence is accepted only after both RPC snapshots agree on the canonical block hash and

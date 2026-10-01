@@ -28,9 +28,8 @@ function executionTerms() {
       !["connected external wallet", "creator wallet"].includes(terms.gas_payer)) {
     throw new Error("The gas or spending policy changed. Return to Discord for a new review link.");
   }
-  if (draft.network === "base-mainnet" &&
-      (!Number.isSafeInteger(terms.max_gas_fee_wei) || terms.max_gas_fee_wei <= 0)) {
-    throw new Error("The signed mainnet fee ceiling is missing or invalid.");
+  if (terms.max_gas_fee_wei !== null) {
+    throw new Error("The deployment link contains an obsolete fixed fee limit.");
   }
   return terms;
 }
@@ -168,9 +167,6 @@ Sponsorship: Not sponsored; connected wallet pays network gas`
     const txHash = await window.ethereum.request({method: "eth_sendTransaction", params: [{
       from: signer, to: FACTORY, value: "0x0",
       gas: "0x" + terms.gas_limit.toString(16),
-      ...(draft.network === "base-mainnet" ? {
-        maxFeePerGas: "0x" + (BigInt(terms.max_gas_fee_wei) / BigInt(terms.gas_limit)).toString(16)
-      } : {}),
       data: calldata(recipient)
     }]});
     commandText.value = `!tokenfactory deployment ${txHash} ${recipient}`;
@@ -220,7 +216,7 @@ copyButton.addEventListener("click", async () => {
     addDetail("Gas limit", terms.gas_limit.toLocaleString());
     addDetail("Native value", "0.00000000 ETH");
     addDetail("Network gas", draft.network === "base-mainnet"
-      ? "Creator wallet pays · signed maximum " + (Number(terms.max_gas_fee_wei) / 1e18).toFixed(6) + " ETH"
+      ? "Creator wallet pays · your wallet shows the live fee before confirmation"
       : "Not sponsored — connected external wallet pays");
     details.hidden = false; controls.hidden = false;
     status.textContent = "Protected external-wallet deployment loaded.";

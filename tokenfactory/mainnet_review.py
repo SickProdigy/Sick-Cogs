@@ -95,11 +95,8 @@ def build_mainnet_token_review(
     estimated_fee = int(estimated_gas_fee_wei if estimated_gas_fee_wei is not None else max_gas_fee_wei)
     if estimated_fee <= 0 or estimated_fee > int(max_gas_fee_wei):
         raise ValueError("The estimated gas fee exceeds the reapproval threshold.")
-    if (
-        int(max_gas_fee_wei) <= 0
-        or int(max_gas_fee_wei) > reviewed_limits["max_gas_fee_wei"]
-    ):
-        raise ValueError("The maximum gas fee exceeds the reviewed mainnet fee ceiling.")
+    if int(max_gas_fee_wei) <= 0:
+        raise ValueError("The reapproval threshold must be positive.")
     payer = str(gas_payer or "").strip()
     if payer != "creator wallet":
         raise ValueError("Base mainnet gas must be paid by the creator wallet.")

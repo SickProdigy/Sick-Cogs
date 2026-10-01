@@ -90,11 +90,8 @@ def build_mainnet_factory_review(
     if not profile_id or len(profile_id) > 160:
         raise ValueError("The reviewed wallet profile is invalid.")
     signer = normalize_owner_address(signer_address)
-    if (
-        int(max_gas_fee_wei) <= 0
-        or int(max_gas_fee_wei) > reviewed_limits["max_gas_fee_wei"]
-    ):
-        raise ValueError("The maximum gas fee exceeds the reviewed factory ceiling.")
+    if int(max_gas_fee_wei) <= 0:
+        raise ValueError("The factory reapproval threshold must be positive.")
     payer = str(gas_payer or "").strip()
     if not payer or len(payer) > 80:
         raise ValueError("The reviewed gas payer is invalid.")
@@ -191,11 +188,8 @@ def revalidate_mainnet_factory_pre_submission(
         or review.gas_limit != reviewed_limits["factory_gas_limit"]
     ):
         raise ValueError("The factory gas limit changed after review.")
-    if (
-        review.max_gas_fee_wei <= 0
-        or review.max_gas_fee_wei > reviewed_limits["max_gas_fee_wei"]
-    ):
-        raise ValueError("The factory gas maximum violates current policy.")
+    if review.max_gas_fee_wei <= 0:
+        raise ValueError("The factory reapproval threshold is invalid.")
     if int(operation.get("value_wei", -1)) != 0 or review.native_value_wei != 0:
         raise ValueError("The factory native value must remain zero.")
     expected_singleton = str(

@@ -61,11 +61,6 @@ class MainnetTokenReviewTests(unittest.TestCase):
                 "supply",
             ),
             (self.draft, 0, "gas fee"),
-            (
-                self.draft,
-                default_mainnet_limits()["max_gas_fee_wei"] + 1,
-                "gas fee",
-            ),
         ):
             with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
                 build_mainnet_token_review(
@@ -74,6 +69,14 @@ class MainnetTokenReviewTests(unittest.TestCase):
                     gas_payer="creator wallet",
                     limits=default_mainnet_limits(),
                 )
+
+    def test_large_user_approved_threshold_is_not_globally_capped(self):
+        review = build_mainnet_token_review(
+            self.draft, self.request_id, self.recipient,
+            max_gas_fee_wei=25 * 10**18, estimated_gas_fee_wei=20 * 10**18,
+            gas_payer="creator wallet", limits=default_mainnet_limits(),
+        )
+        self.assertEqual(review.max_gas_fee_wei, 25 * 10**18)
 
     def test_embed_discloses_exact_review_and_no_submit_control(self):
         review = self.review()

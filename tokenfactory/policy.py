@@ -6,7 +6,6 @@ MAINNET_LIMITS_DEFAULT = {
     "max_token_supply_atomic": 10**27,
     "factory_gas_limit": 2_000_000,
     "token_gas_limit": 1_500_000,
-    "max_gas_fee_wei": 2 * 10**15,
     "native_value_wei": 0,
 }
 
@@ -41,7 +40,10 @@ def migrate_mainnet_limits(value: Any) -> dict[str, int]:
 
     if not isinstance(value, dict):
         raise TokenFactoryPolicyError("Base mainnet TokenFactory limits are incomplete.")
-    legacy_fields = {"factory_deployments_per_day", "token_deployments_per_day"}
+    legacy_fields = {
+        "factory_deployments_per_day", "token_deployments_per_day",
+        "max_gas_fee_wei",
+    }
     unknown = set(value) - set(MAINNET_LIMITS_DEFAULT) - legacy_fields
     if unknown:
         raise TokenFactoryPolicyError(
