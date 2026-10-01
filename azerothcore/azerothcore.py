@@ -13,6 +13,14 @@ from redbot.core import Config, commands
 from redbot.core.data_manager import bundled_data_path
 from redbot.core.utils.chat_formatting import box, humanize_list, pagify
 
+from .database import (
+    TOKEN_NAMESPACE,
+    AzerothDatabase,
+    CharacterRecord,
+    DatabaseConfigurationError,
+    DatabaseUnavailable,
+)
+
 
 LEGACY_PLACEHOLDER_SOAP_URL = "http://192.168.1.1:17878/"
 LEGACY_SOAP_ENVELOPE_TEMPLATE = (
@@ -73,6 +81,10 @@ class AzerothCore(commands.Cog):
             request_timeout=20,
         )
         self.config.register_guild(allowed_roles=[])
+        self.database = AzerothDatabase(
+            lambda: self.bot.get_shared_api_tokens(TOKEN_NAMESPACE),
+            self._configured_playerbot_prefixes,
+        )
 
     async def cog_load(self):
         self.session = aiohttp.ClientSession()
@@ -84,6 +96,7 @@ class AzerothCore(commands.Cog):
     def cog_unload(self):
         if self.session and not self.session.closed:
             self.bot.loop.create_task(self.session.close())
+        self.bot.loop.create_task(self.database.close())
 
     def _render_template(self, value: Any, **replacements: Any) -> Any:
         if isinstance(value, str):
@@ -782,6 +795,76 @@ class AzerothCore(commands.Cog):
     async def _server_display_name(self) -> str:
         return await self.config.server_name() or "World of Warcraft"
 
+    @staticmethod
+    def _format_money(copper: int) -> str:
+        copper = max(0, int(copper))
+        gold, remainder = divmod(copper, 10000)
+        silver, copper = divmod(remainder, 100)
+        return f"{gold:,}g {silver}s {copper}c"
+
+    @staticmethod
+    def _format_playtime(seconds: int) -> str:
+        days, remainder = divmod(max(0, int(seconds)), 86400)
+        hours, _ = divmod(remainder, 3600)
+        return f"{days}d {hours}h"
+
+    @staticmethod
+    def _player_type_label(player_type: str) -> str:
+        return {
+            "human": "Human Player",
+            "random_ai": "Random AI Companion",
+            "account_ai": "Account AI Companion",
+            "unknown_ai": "Possible AI Companion",
+        }.get(player_type, "Unknown")
+
+    @classmethod
+    def _leaderboard_value(cls, record: CharacterRecord, stat: str) -> str:
+        if stat == "gold":
+            return cls._format_money(record.money)
+        if stat == "kills":
+            return f"{record.total_kills:,} honorable kills"
+        if stat == "quests":
+            return f"{record.quests:,} quests"
+        return f"level {record.level}"
+
+    async def _send_database_online(self, ctx: commands.Context, *, ai_only: bool = False) -> None:
+        humans = [] if ai_only else await self.database.online("humans")
+        companions = await self.database.online("ai")
+        server_name = await self._server_display_name()
+        embed = discord.Embed(title=f"{server_name} Online List", color=await ctx.embed_color())
+        await self._decorate_server_embed(embed, with_banner=True)
+
+        def bounded_lines(lines: List[str], empty: str) -> str:
+            if not lines:
+                return empty
+            visible = []
+            length = 0
+            for line in lines:
+                addition = len(line) + (1 if visible else 0)
+                if length + addition > 960:
+                    break
+                visible.append(line)
+                length += addition
+            hidden = len(lines) - len(visible)
+            if hidden:
+                visible.append(f"…and {hidden} more.")
+            return "\n".join(visible)
+
+        if not ai_only:
+            human_text = bounded_lines([record.name for record in humans], "No human players are online.")
+            embed.add_field(name=f"Players: {len(humans)}", value=human_text, inline=False)
+        companion_text = bounded_lines(
+            [f"{record.name} — {self._player_type_label(record.player_type)}" for record in companions],
+            "No AI companions are online.",
+        )
+        embed.add_field(name=f"AI Companions: {len(companions)}", value=companion_text, inline=False)
+        await self._send_embed_or_text(
+            ctx,
+            embed,
+            f"{server_name}\nPlayers: {len(humans)}\nAI Companions: {len(companions)}",
+            with_banner=True,
+        )
+
     async def _configured_playerbot_prefixes(self) -> List[str]:
         prefixes = await self.config.playerbot_account_prefixes()
         if not isinstance(prefixes, list):
@@ -1031,7 +1114,13 @@ class AzerothCore(commands.Cog):
 
     @ac.command(name="online")
     async def ac_online(self, ctx: commands.Context):
-        """Show the non-playerbot characters currently online."""
+        """Show online human players and AI companions separately."""
+        if await self.database.is_configured():
+            try:
+                return await self._send_database_online(ctx)
+            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+                return await ctx.send(str(exc))
+
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
@@ -1151,9 +1240,89 @@ class AzerothCore(commands.Cog):
 
         await ctx.send("No online player information returned.")
 
+    @ac.command(name="player", aliases=("character",))
+    async def ac_player(self, ctx: commands.Context, *, name: str):
+        """Show a public character profile from the configured read-only database."""
+        if not await self.database.is_configured():
+            return await ctx.send("The read-only AzerothCore database is not configured.")
+        try:
+            record = await self.database.character(name.strip())
+        except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+            return await ctx.send(str(exc))
+        if record is None:
+            return await ctx.send("No active character with that name was found.")
+
+        embed = discord.Embed(title=record.name, color=await ctx.embed_color())
+        embed.add_field(name="Type", value=self._player_type_label(record.player_type), inline=True)
+        embed.add_field(name="Level", value=str(record.level), inline=True)
+        embed.add_field(name="Race / Class", value=f"{record.race_name} {record.class_name}", inline=True)
+        embed.add_field(name="Online", value="Yes" if record.online else "No", inline=True)
+        embed.add_field(name="Playtime", value=self._format_playtime(record.total_time), inline=True)
+        embed.add_field(name="Money", value=self._format_money(record.money), inline=True)
+        embed.add_field(name="Honorable Kills", value=f"{record.total_kills:,}", inline=True)
+        embed.add_field(name="Rewarded Quests", value=f"{record.quests:,}", inline=True)
+        await self._send_embed_or_text(
+            ctx,
+            embed,
+            f"{record.name} — {self._player_type_label(record.player_type)}, level {record.level} "
+            f"{record.race_name} {record.class_name}",
+        )
+
+    @ac.command(name="leaderboard", aliases=("leaders", "top"))
+    async def ac_leaderboard(self, ctx: commands.Context, stat: str, audience: str = "humans"):
+        """Show level, gold, kills, or quests leaders for humans or AI."""
+        stat = stat.casefold()
+        audience = audience.casefold()
+        if stat not in {"level", "gold", "kills", "quests"}:
+            return await ctx.send("Statistic must be one of: level, gold, kills, quests.")
+        if audience not in {"humans", "ai"}:
+            return await ctx.send("Audience must be `humans` or `ai`.")
+        if not await self.database.is_configured():
+            return await ctx.send("The read-only AzerothCore database is not configured.")
+        try:
+            records = await self.database.leaderboard(stat, audience)
+        except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+            return await ctx.send(str(exc))
+        if not records:
+            return await ctx.send(f"No {audience} had a ranked {stat} value.")
+        lines = [
+            f"{index}. **{record.name}** — {self._leaderboard_value(record, stat)}"
+            for index, record in enumerate(records, start=1)
+        ]
+        embed = discord.Embed(
+            title=f"{stat.title()} Leaders — {'AI Companions' if audience == 'ai' else 'Players'}",
+            description="\n".join(lines),
+            color=await ctx.embed_color(),
+        )
+        await self._decorate_server_embed(embed)
+        await self._send_embed_or_text(ctx, embed, "\n".join(lines))
+
+    @ac.command(name="databasecheck", aliases=("dbcheck",))
+    @commands.guild_only()
+    @commands.admin_or_permissions(manage_guild=True)
+    async def ac_databasecheck(self, ctx: commands.Context):
+        """Test the configured read-only AzerothCore database connection."""
+        if not await self.database.is_configured():
+            return await ctx.send("The read-only AzerothCore database is not configured.")
+        try:
+            result = await self.database.check()
+        except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+            return await ctx.send(str(exc))
+        transport = "verified TLS" if result["tls"] else "unencrypted private-network transport"
+        await ctx.send(
+            f"Database connection succeeded with {transport}; "
+            f"the character schema contains {result['characters']:,} records."
+        )
+
     @ac.command(name="playerbots")
     async def ac_playerbots(self, ctx: commands.Context):
-        """Show online playerbot characters filtered by configured account prefixes."""
+        """Show online Playerbots or AI companions."""
+        if await self.database.is_configured():
+            try:
+                return await self._send_database_online(ctx, ai_only=True)
+            except (DatabaseConfigurationError, DatabaseUnavailable) as exc:
+                return await ctx.send(str(exc))
+
         server_name = await self._server_display_name()
         if not await self.config.use_soap():
             return await ctx.send("SOAP transport is not enabled. Configure SOAP settings to use this command.")
@@ -1373,12 +1542,17 @@ class AzerothCore(commands.Cog):
         """Configure the AzerothCore bridge and permissions."""
 
         message = (
-            "**AzerothCore Module Settings (SOAP-only)**\n\n"
+            "**AzerothCore Module Settings**\n\n"
             "**Basics**\n"
             "- `azerothcore set soap_url <ip:port>`\n"
             "- `azerothcore set soap_auth <user> <pass>`\n"
             "- `azerothcore set view`\n"
-            "- `azerothcore soapcheck`\n\n"
+            "- `azerothcore soapcheck`\n"
+            "- `azerothcore databasecheck`\n\n"
+            "**Read-only Character Database**\n"
+            "- Configure shared tokens under `azerothcore_mysql` with Red's owner-only `set api` command.\n"
+            "- Required: host, user, password, characters_database, auth_database.\n"
+            "- Optional: port, playerbots_database, tls, tls_ca, connect_timeout.\n\n"
             "**Display**\n"
             "- `azerothcore set servername <name>`\n"
             "- `azerothcore set realmlist <text>`\n"
@@ -1735,10 +1909,26 @@ class AzerothCore(commands.Cog):
         request_timeout = await self.config.request_timeout()
         allowed_roles = await self.config.guild(ctx.guild).allowed_roles()
 
-        embed = discord.Embed(title="AzerothCore Configuration (SOAP)", color=await ctx.embed_color())
+        database_tokens = await self.bot.get_shared_api_tokens(TOKEN_NAMESPACE)
+        database_configured = all(
+            str(database_tokens.get(key, "")).strip()
+            for key in ("host", "user", "password", "characters_database", "auth_database")
+        )
+        embed = discord.Embed(title="AzerothCore Configuration", color=await ctx.embed_color())
         embed.add_field(name="SOAP URL", value=self._redact_url(soap_url), inline=False)
         embed.add_field(name="SOAP Auth", value=("Set" if soap_user else "Not set"), inline=True)
         embed.add_field(name="Timeout", value=f"{request_timeout}s", inline=True)
+        embed.add_field(name="Read-only MySQL", value="Configured" if database_configured else "Not set", inline=True)
+        embed.add_field(
+            name="MySQL TLS",
+            value=(
+                "Enabled"
+                if str(database_tokens.get("tls", "")).casefold()
+                in {"1", "true", "yes", "on", "required", "verify"}
+                else "Disabled"
+            ),
+            inline=True,
+        )
         embed.add_field(name="Server Name", value=server_name or "Not set", inline=True)
         embed.add_field(name="Realmlist", value=realmlist or "Not set", inline=True)
         embed.add_field(name="Info Description", value=info_description or "Not set", inline=False)

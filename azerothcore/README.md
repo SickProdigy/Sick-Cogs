@@ -69,6 +69,83 @@ The cog also supports Basic Auth credentials embedded in the URL, but separate `
 If `azerothcore info` or `azerothcore online` times out, check that the configured IP/hostname is reachable from the Discord bot host, the SOAP port is published or available on the Docker network, and SOAP is enabled in AzerothCore.
 Use `azerothcore soapcheck` to test the configured host and port from the bot before troubleshooting SOAP credentials or command permissions.
 
+## Optional read-only character database
+
+AzerothCore 1.1 can read public character statistics directly from MariaDB/MySQL. SOAP remains
+independent and continues to handle server information and account creation. If MySQL is configured,
+`azerothcore online` shows human players and AI companions in separate sections.
+
+Commands:
+
+- `azerothcore player <name>` — show level, race/class, online state, playtime, money, honorable kills,
+  rewarded quests, and the human/AI classification.
+- `azerothcore leaderboard <level|gold|kills|quests> [humans|ai]` — show a bounded leaderboard.
+- `azerothcore databasecheck` — safely test the configured schema and connection.
+- `azerothcore playerbots` — use database classification when MySQL is configured.
+
+### Network placement
+
+Prefer placing Red and the AzerothCore database on the same private Docker network. Use the database
+service name (for example `ac-database`) and internal port `3306`; no host port needs to be published.
+For separate trusted LAN hosts, bind a unique host port to the LAN interface, restrict it to the Red
+host with a firewall, and use TLS certificate verification. A nonstandard port avoids collisions but
+is not a security control. Never expose an unrestricted database listener to the public internet.
+
+### Least-privilege account
+
+Create a dedicated account restricted to the bot container or host. Replace the example host, password,
+and schema names. These are the complete permissions required by the current adapter:
+
+```sql
+CREATE USER 'discord_readonly'@'BOT_HOST' IDENTIFIED BY 'LONG_GENERATED_PASSWORD';
+GRANT SELECT (`guid`, `account`, `name`, `race`, `class`, `gender`, `level`, `online`,
+              `totaltime`, `money`, `totalKills`, `deleteDate`)
+    ON `acore_characters`.`characters` TO 'discord_readonly'@'BOT_HOST';
+GRANT SELECT (`guid`, `active`)
+    ON `acore_characters`.`character_queststatus_rewarded` TO 'discord_readonly'@'BOT_HOST';
+GRANT SELECT (`id`, `username`)
+    ON `acore_auth`.`account` TO 'discord_readonly'@'BOT_HOST';
+GRANT SELECT (`account_id`, `account_type`)
+    ON `acore_playerbots`.`playerbots_account_type` TO 'discord_readonly'@'BOT_HOST';
+```
+
+Do not grant write, schema, file, process, or administrative privileges. For a cross-host TLS account,
+add the server-appropriate `REQUIRE SSL` or certificate requirement and configure a trusted CA below.
+
+### Red shared API tokens
+
+Use Red's owner-only shared API token command in a private channel or DM. The namespace is
+`azerothcore_mysql`. Required keys are:
+
+```text
+host
+user
+password
+characters_database
+auth_database
+```
+
+Optional keys are `port` (default `3306`), `playerbots_database`, `connect_timeout` (default `10`),
+`tls` (`true` or `false`), and `tls_ca` (a CA file path readable by Red). Example key/value layout:
+
+```text
+host ac-database port 3306 user discord_readonly password <generated password>
+characters_database acore_characters auth_database acore_auth
+playerbots_database acore_playerbots tls false
+```
+
+After saving the tokens, run `azerothcore databasecheck`. Configuration views report only whether
+MySQL and TLS are configured; they never display the host, username, password, or schema names.
+Changing shared tokens automatically retires the old connection pool and opens a new bounded pool.
+
+### AI classification limits
+
+Known random and add-class AI require agreement between the configured account prefix and Playerbots'
+`playerbots_account_type`. If only one signal identifies AI, the cog labels the character as a possible
+AI companion rather than silently treating it as human. Database data cannot reliably tell when a
+human-owned alternate character is temporarily AI-controlled; the future external connector tracked
+separately will need Playerbots runtime state for that distinction.
+
 ## Troubleshooting
 
 `azerothcore soapcheck` only tests whether the configured host and port accept a TCP connection. A passing TCP check does not prove that AzerothCore SOAP accepted the request. Use `azerothcore info` or `azerothcore online` to test the actual SOAP command path.

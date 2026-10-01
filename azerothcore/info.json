@@ -1,16 +1,28 @@
 {
-  "author": ["SickProdigy"],
-  "description": "Query an AzerothCore SOAP endpoint for server info, online players, and account creation.",
-  "disabled": false,
-  "end_user_data_statement": "This cog stores guild configuration such as API endpoint settings and allowed role IDs. It does not persist user-provided account data.",
-  "hidden": false,
-  "install_msg": "This cog contacts the configured AzerothCore SOAP service and bundles a status banner image. Configure the endpoint with `[p]azerothcore set soap_url <ip:port>`, SOAP credentials with `[p]azerothcore set soap_auth <user> <pass>`, and allowed account-creation roles with `[p]azerothcore set accountcreationrole <role...>`. Use `[p]help azerothcore set` for the remaining server settings.",
-  "min_bot_version": "3.5.0",
-  "permissions": ["embed_links"],
-  "name": "AzerothCore",
-  "requirements": ["aiohttp"],
-  "short": "Interact with an AzerothCore server through SOAP",
-  "tags": ["api", "gaming", "world-of-warcraft", "azerothcore"],
-  "type": "COG",
-  "version": "1.0.0"
+    "author": [
+        "SickProdigy"
+    ],
+    "description": "Query AzerothCore through SOAP and an optional read-only MySQL adapter for character profiles, online players, AI companions, and leaderboards.",
+    "disabled": false,
+    "end_user_data_statement": "This cog stores guild settings and reads configured public character statistics. Database credentials are kept in Red shared API tokens and are never included in Discord output.",
+    "hidden": false,
+    "install_msg": "SOAP remains optional and backward compatible. For character profiles and leaderboards, create a least-privilege read-only database account, then configure the `azerothcore_mysql` shared API tokens documented in the cog README. Run `[p]azerothcore databasecheck` before using `[p]azerothcore player` or `[p]azerothcore leaderboard`.",
+    "min_bot_version": "3.5.0",
+    "permissions": [
+        "embed_links"
+    ],
+    "name": "AzerothCore",
+    "requirements": [
+        "aiohttp",
+        "aiomysql==0.3.2"
+    ],
+    "short": "AzerothCore SOAP tools and read-only character statistics",
+    "tags": [
+        "api",
+        "gaming",
+        "world-of-warcraft",
+        "azerothcore"
+    ],
+    "type": "COG",
+    "version": "1.1.0"
 }
