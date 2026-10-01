@@ -25,6 +25,7 @@ class ReminderEntry:
     content: str
     created_at: float
     due_at: float
+    source_url: Optional[str] = None
     failed_at: Optional[float] = None
 
     @classmethod
@@ -43,10 +44,26 @@ class ReminderEntry:
         reminder_id = raw.get("id")
         if not isinstance(reminder_id, str) or not reminder_id:
             reminder_id = uuid.uuid4().hex
+        source_url = raw.get("source_url")
+        if not isinstance(source_url, str) or not source_url.startswith(
+            (
+                "https://discord.com/channels/",
+                "https://canary.discord.com/channels/",
+                "https://ptb.discord.com/channels/",
+            )
+        ):
+            source_url = None
         failed_at = raw.get("failed_at")
         if not ReminderEntry._valid_timestamp(failed_at):
             failed_at = None
-        return cls(reminder_id, content, float(created_at), float(due_at), failed_at)
+        return cls(
+            reminder_id,
+            content,
+            float(created_at),
+            float(due_at),
+            source_url=source_url,
+            failed_at=failed_at,
+        )
 
     @staticmethod
     def _valid_timestamp(value: object) -> bool:
@@ -59,6 +76,8 @@ class ReminderEntry:
             "start_time": self.created_at,
             "end_time": self.due_at,
         }
+        if self.source_url is not None:
+            raw["source_url"] = self.source_url
         if self.failed_at is not None:
             raw["failed_at"] = self.failed_at
         return raw
@@ -68,7 +87,7 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
@@ -122,7 +141,13 @@ class Reminder(commands.Cog):
             return
 
         now = time.time()
-        entry = ReminderEntry(uuid.uuid4().hex, text, now, now + seconds)
+        entry = ReminderEntry(
+            uuid.uuid4().hex,
+            text,
+            now,
+            now + seconds,
+            source_url=self.reply_source_url(ctx.message),
+        )
         self._deleted_users.discard(ctx.author.id)
         async with self.config.user(ctx.author).reminders() as saved:
             saved.append(entry.to_raw())
@@ -274,6 +299,12 @@ class Reminder(commands.Cog):
         embed = discord.Embed(
             title="Reminder", description=entry.content, color=discord.Colour.blue()
         )
+        if entry.source_url:
+            embed.add_field(
+                name="Original message",
+                value=f"[Open message]({entry.source_url})",
+                inline=False,
+            )
         try:
             await user.send(embed=embed)
         except (discord.Forbidden, discord.HTTPException) as exc:
@@ -345,6 +376,22 @@ class Reminder(commands.Cog):
         return round(offset * 4) / 4.0
 
     @staticmethod
+    def reply_source_url(message: discord.Message) -> Optional[str]:
+        """Return the jump URL for the message being replied to, if any."""
+        reference = getattr(message, "reference", None)
+        if reference is None or reference.message_id is None:
+            return None
+        resolved = getattr(reference, "resolved", None)
+        if isinstance(resolved, discord.Message):
+            return resolved.jump_url
+        guild_id = reference.guild_id
+        if guild_id is None:
+            guild = getattr(message, "guild", None)
+            guild_id = guild.id if guild is not None else "@me"
+        channel_id = reference.channel_id or message.channel.id
+        return f"https://discord.com/channels/{guild_id}/{channel_id}/{reference.message_id}"
+
+    @staticmethod
     def format_due_time(timestamp: float, offset: float) -> str:
         if offset == 0:
             return f"<t:{round(timestamp)}:F>"
@@ -383,6 +430,8 @@ class Reminder(commands.Cog):
         for number, entry in enumerate(entries, 1):
             failed = " **Delivery failed; remove or recreate.**" if entry.failed_at else ""
             content = entry.content if len(entry.content) <= 200 else f"{entry.content[:200]} […]"
+            if entry.source_url:
+                content += f"\n[Original message]({entry.source_url})"
             rows.append(
                 f"`{number:0{width}}`. {cls.format_due_time(entry.due_at, offset)}, "
                 f"<t:{round(entry.due_at)}:R>{failed}:\n{content}\n\n"
