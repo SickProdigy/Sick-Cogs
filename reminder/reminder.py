@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from math import isfinite
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 
 import discord
 
@@ -127,6 +127,7 @@ class Reminder(commands.Cog):
         self.config.register_user(reminders=[], invalid_reminders=[], offset=0)
         self._wake_scheduler = asyncio.Event()
         self._subscription_lock = asyncio.Lock()
+        self._shareable_message_ids: Set[int] = set()
         self._deleted_users = set()
         self._scheduler = asyncio.create_task(self._scheduler_loop())
 
@@ -182,6 +183,7 @@ class Reminder(commands.Cog):
         self._wake_scheduler.set()
 
         if ctx.guild is not None:
+            self._shareable_message_ids.add(ctx.message.id)
             try:
                 await ctx.message.add_reaction("👍")
                 due_timestamp = int(entry.due_at)
@@ -240,7 +242,11 @@ class Reminder(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        if str(payload.emoji) != "👍" or payload.guild_id is None:
+        if (
+            str(payload.emoji) != "👍"
+            or payload.guild_id is None
+            or payload.message_id not in self._shareable_message_ids
+        ):
             return
         bot_user = getattr(self.bot, "user", None)
         if bot_user is not None and payload.user_id == bot_user.id:
@@ -254,6 +260,7 @@ class Reminder(commands.Cog):
             users = await self.config.all_users()
             template = self.find_shared_reminder(users, payload.message_id, now)
             if template is None:
+                self._shareable_message_ids.discard(payload.message_id)
                 return
 
             user_config = self.config.user_from_id(payload.user_id)
@@ -358,6 +365,8 @@ class Reminder(commands.Cog):
 
     async def _normalize_saved_data(self) -> None:
         users = await self.config.all_users()
+        self._shareable_message_ids.clear()
+        now = time.time()
         for user_id, snapshot in users.items():
             if user_id in self._deleted_users:
                 continue
@@ -373,6 +382,12 @@ class Reminder(commands.Cog):
                     malformed.append(raw)
                 else:
                     entries.append(entry)
+                    if (
+                        entry.control_message_id is not None
+                        and entry.failed_at is None
+                        and entry.due_at > now
+                    ):
+                        self._shareable_message_ids.add(entry.control_message_id)
             user_config = self.config.user_from_id(user_id)
             if malformed:
                 quarantined = snapshot.get("invalid_reminders", [])
@@ -404,6 +419,8 @@ class Reminder(commands.Cog):
                     await self._mark_failed(user_id, due, now)
                     continue
             for entry in due:
+                if entry.control_message_id is not None:
+                    self._shareable_message_ids.discard(entry.control_message_id)
                 await self._deliver_one(user, entry)
 
 
