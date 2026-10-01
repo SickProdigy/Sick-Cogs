@@ -17,12 +17,13 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(
             set(record),
             {
-                "number", "channel_id", "owner_id", "status", "claimed_by_id",
+                "number", "channel_id", "owner_id", "mode", "status", "claimed_by_id",
                 "created_at", "updated_at", "closed_at", "closed_by_id",
                 "control_message_id",
             },
         )
         self.assertEqual(record["created_at"], 123)
+        self.assertEqual(record["mode"], "text")
         self.assertNotIn("description", record)
 
     def test_normalized_record_rejects_malformed_values(self):
@@ -33,6 +34,7 @@ class TicketModelTests(unittest.TestCase):
     def test_normalized_record_repairs_unknown_status(self):
         record = normalized_record({"number": 1, "channel_id": 2, "status": "mystery"})
         self.assertEqual(record["status"], "open")
+        self.assertEqual(record["mode"], "text")
 
     def test_open_states_and_channel_names(self):
         self.assertTrue(is_open({"status": "waiting_staff"}))
@@ -46,6 +48,7 @@ class TicketModelTests(unittest.TestCase):
     def test_defaults_and_limits_are_conservative(self):
         self.assertEqual(CONFIG_ID, 7422161104)
         self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)
+        self.assertEqual(GUILD_DEFAULTS["enabled_modes"], ["text"])
         self.assertGreaterEqual(GUILD_DEFAULTS["creation_cooldown"], 300)
         self.assertLessEqual(MAX_ACTIVE_TICKETS, 100)
         self.assertLessEqual(MAX_TRACKED_TICKETS, 500)
@@ -57,6 +60,7 @@ class PermissionValue:
         self.send_messages = values.get("send_messages", False)
         self.read_message_history = values.get("read_message_history", False)
         self.manage_channels = values.get("manage_channels", False)
+        self.connect = values.get("connect", False)
 
 
 class TicketCogTests(unittest.TestCase):
@@ -78,19 +82,19 @@ class TicketCogTests(unittest.TestCase):
 
     def test_permission_verification_accepts_private_channel(self):
         channel, requester, staff = self.make_channel()
-        self.assertTrue(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+        self.assertTrue(Tickets.verify_ticket_permissions(channel, requester, [staff], "text"))
 
     def test_permission_verification_rejects_everyone_access(self):
         channel, requester, staff = self.make_channel(everyone_view=True)
-        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff], "text"))
 
     def test_permission_verification_rejects_requester_without_reply(self):
         channel, requester, staff = self.make_channel(requester_send=False)
-        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff], "text"))
 
     def test_permission_verification_rejects_staff_without_view(self):
         channel, requester, staff = self.make_channel(staff_view=False)
-        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff], "text"))
 
     def test_control_embed_updates_status_and_claim(self):
         cog = object.__new__(Tickets)
@@ -111,11 +115,86 @@ class TicketCogTests(unittest.TestCase):
         controls = TicketControls(
             cog, 55, {"status": "open", "claimed_by_id": 0}
         )
-        self.assertIn("tickets:open", {item.custom_id for item in launcher.children})
+        self.assertEqual(
+            {item.custom_id for item in launcher.children},
+            {"tickets:open", "tickets:open:voice", "tickets:open:thread"},
+        )
+        filtered = LauncherView(cog, ["text", "voice"])
+        self.assertEqual(
+            {item.custom_id for item in filtered.children},
+            {"tickets:open", "tickets:open:voice"},
+        )
         self.assertEqual(
             {item.custom_id for item in controls.children},
             {"tickets:55:claim", "tickets:55:status", "tickets:55:close"},
         )
+
+
+class TicketModeTests(unittest.IsolatedAsyncioTestCase):
+    def make_cog(self):
+        return object.__new__(Tickets)
+
+    async def test_text_mode_creates_private_text_channel(self):
+        cog = self.make_cog()
+        destination = SimpleNamespace()
+        guild = SimpleNamespace(
+            default_role=object(),
+            me=object(),
+            create_text_channel=AsyncMock(return_value=destination),
+        )
+        owner, role, launcher, category = MagicMock(id=42), object(), object(), object()
+        result = await cog._create_destination(
+            guild, owner, 7, "text", launcher, category, [role]
+        )
+        self.assertIs(result, destination)
+        kwargs = guild.create_text_channel.await_args.kwargs
+        self.assertEqual(guild.create_text_channel.await_args.args[0], "ticket-0007")
+        self.assertIs(kwargs["category"], category)
+        self.assertFalse(kwargs["overwrites"][guild.default_role].view_channel)
+
+    async def test_voice_mode_creates_private_voice_channel(self):
+        cog = self.make_cog()
+        destination = SimpleNamespace()
+        guild = SimpleNamespace(
+            default_role=object(),
+            me=object(),
+            create_voice_channel=AsyncMock(return_value=destination),
+        )
+        owner, role, launcher, category = MagicMock(id=42), object(), object(), object()
+        result = await cog._create_destination(
+            guild, owner, 8, "voice", launcher, category, [role]
+        )
+        self.assertIs(result, destination)
+        kwargs = guild.create_voice_channel.await_args.kwargs
+        self.assertTrue(kwargs["overwrites"][owner].connect)
+        self.assertFalse(kwargs["overwrites"][guild.default_role].connect)
+
+    async def test_thread_mode_creates_private_non_invitable_thread_and_adds_owner(self):
+        cog = self.make_cog()
+        thread = SimpleNamespace(add_user=AsyncMock())
+        launcher = SimpleNamespace(create_thread=AsyncMock(return_value=thread))
+        owner = MagicMock(id=42)
+        result = await cog._create_destination(
+            SimpleNamespace(), owner, 9, "thread", launcher, None, []
+        )
+        self.assertIs(result, thread)
+        kwargs = launcher.create_thread.await_args.kwargs
+        self.assertEqual(kwargs["type"], discord.ChannelType.private_thread)
+        self.assertFalse(kwargs["invitable"])
+        thread.add_user.assert_awaited_once_with(owner)
+
+    async def test_thread_mode_rejects_unboosted_server(self):
+        cog = self.make_cog()
+        cog.config = SimpleNamespace(
+            guild=MagicMock(
+                return_value=SimpleNamespace(
+                    all=AsyncMock(return_value={"enabled_modes": ["thread"]})
+                )
+            )
+        )
+        guild = SimpleNamespace(premium_tier=1)
+        with self.assertRaisesRegex(Exception, "Level 2"):
+            await cog._validate_mode(guild, "thread", object(), None, [])
 
 
 class TicketSetupTests(unittest.IsolatedAsyncioTestCase):

@@ -7,57 +7,65 @@ class TicketError(RuntimeError):
     pass
 
 
-class OpenTicketModal(discord.ui.Modal, title="Open a support ticket"):
-    topic = discord.ui.TextInput(
-        label="Topic", placeholder="Account, technical help, purchase...", max_length=50
-    )
-    subject = discord.ui.TextInput(label="Subject", max_length=100)
-    description = discord.ui.TextInput(
-        label="How can staff help?",
-        style=discord.TextStyle.paragraph,
-        min_length=1,
-        max_length=1800,
-    )
-
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-
-    async def on_submit(self, interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            channel, number = await self.cog.create_ticket(
-                interaction,
-                topic=str(self.topic).strip(),
-                subject=str(self.subject).strip(),
-                description=str(self.description).strip(),
-            )
-        except TicketError as error:
-            await interaction.followup.send(str(error), ephemeral=True)
-            return
-        await interaction.followup.send(
-            f"Ticket #{number} is ready: {channel.mention}", ephemeral=True
-        )
-
-
 class LauncherView(discord.ui.View):
-    def __init__(self, cog):
+    MODES = {
+        "tickets:open": "text",
+        "tickets:open:voice": "voice",
+        "tickets:open:thread": "thread",
+    }
+
+    def __init__(self, cog, enabled_modes=None):
         super().__init__(timeout=None)
         self.cog = cog
+        if enabled_modes is not None:
+            enabled = set(enabled_modes)
+            for item in list(self.children):
+                if self.MODES.get(item.custom_id) not in enabled:
+                    self.remove_item(item)
 
-    @discord.ui.button(
-        label="Open ticket",
-        emoji="🎫",
-        style=discord.ButtonStyle.primary,
-        custom_id="tickets:open",
-    )
-    async def open_ticket(self, interaction, button):
+    async def _create(self, interaction, mode):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "Tickets can only be opened from a server.", ephemeral=True
             )
             return
-        await interaction.response.send_modal(OpenTicketModal(self.cog))
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            destination, number = await self.cog.create_ticket(interaction, mode=mode)
+        except TicketError as error:
+            await interaction.followup.send(str(error), ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Ticket #{number} created: {destination.mention}",
+            ephemeral=True,
+        )
+
+    @discord.ui.button(
+        label="Text ticket",
+        emoji="🎫",
+        style=discord.ButtonStyle.primary,
+        custom_id="tickets:open",
+    )
+    async def text_ticket(self, interaction, button):
+        await self._create(interaction, "text")
+
+    @discord.ui.button(
+        label="Voice ticket",
+        emoji="🔊",
+        style=discord.ButtonStyle.secondary,
+        custom_id="tickets:open:voice",
+    )
+    async def voice_ticket(self, interaction, button):
+        await self._create(interaction, "voice")
+
+    @discord.ui.button(
+        label="Private thread",
+        emoji="🧵",
+        style=discord.ButtonStyle.secondary,
+        custom_id="tickets:open:thread",
+    )
+    async def thread_ticket(self, interaction, button):
+        await self._create(interaction, "thread")
 
 
 class TicketControls(discord.ui.View):
@@ -310,21 +318,30 @@ class StaffRoleSelect(discord.ui.RoleSelect):
         )
 
 
-class LogChannelSelect(discord.ui.ChannelSelect):
+class TicketModeSelect(discord.ui.Select):
     def __init__(self, parent):
         super().__init__(
-            placeholder="Choose optional staff log channel",
+            placeholder="Choose enabled ticket modes",
             min_values=1,
-            max_values=1,
-            channel_types=[discord.ChannelType.text],
+            max_values=3,
+            options=[
+                discord.SelectOption(label="Private text channel", value="text", emoji="🎫"),
+                discord.SelectOption(label="Private voice channel", value="voice", emoji="🔊"),
+                discord.SelectOption(label="Private thread (Level 2)", value="thread", emoji="🧵"),
+            ],
             row=3,
         )
         self.parent_view = parent
 
     async def callback(self, interaction):
-        await self.parent_view.cog.config.guild(interaction.guild).log_channel_id.set(
-            self.values[0].id
-        )
+        modes = list(self.values)
+        if "thread" in modes and interaction.guild.premium_tier < 2:
+            await interaction.response.send_message(
+                "Private thread tickets require a Level 2 boosted server.",
+                ephemeral=True,
+            )
+            return
+        await self.parent_view.cog.config.guild(interaction.guild).enabled_modes.set(modes)
         await interaction.response.edit_message(
             embed=await self.parent_view.cog.settings_embed(interaction.guild),
             view=self.parent_view,
@@ -337,7 +354,7 @@ class SetupView(SetupOwnedView):
         self.add_item(LauncherChannelSelect(self))
         self.add_item(TicketCategorySelect(self))
         self.add_item(StaffRoleSelect(self))
-        self.add_item(LogChannelSelect(self))
+        self.add_item(TicketModeSelect(self))
 
     @discord.ui.button(label="Publish launcher", style=discord.ButtonStyle.success, row=4)
     async def publish(self, interaction, button):

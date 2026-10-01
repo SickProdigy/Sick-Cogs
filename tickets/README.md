@@ -1,17 +1,29 @@
 # Tickets
 
-Tickets provides private support channels for Red-DiscordBot servers without requiring Discord boosts or private threads.
+Tickets provides simple private support spaces for Red-DiscordBot servers. Pressing a launcher button immediately creates a ticket and returns an ephemeral link; members do not have to complete a modal first.
+
+## Ticket modes
+
+Administrators can enable any combination of:
+
+- **Text** — a permission-isolated text channel.
+- **Voice** — a permission-isolated voice channel whose built-in text chat contains the welcome message and controls.
+- **Thread** — a private thread under the launcher channel. Discord requires a Level 2 boosted server.
+
+Text and voice tickets may be placed under a configured category or at the top of the channel list. Thread mode requires the bot and configured support roles to have Manage Threads and Send Messages in Threads on the launcher channel. The bot also needs Create Private Threads.
 
 ## Privacy model
 
-The configured public support channel contains only an Open Ticket launcher. A requester enters the topic, subject, and support message in a modal. The bot creates a normal text channel under the configured ticket category with restrictive permission overwrites supplied during channel creation:
+For text and voice tickets, the bot supplies restrictive overwrites during creation:
 
-- everyone cannot view the channel;
-- the requester can view and reply;
-- configured staff roles can view and reply;
-- the bot can manage the channel and messages.
+- everyone cannot view or connect;
+- the requester can view and participate;
+- configured staff roles can view and participate;
+- the bot can manage the destination and its messages.
 
-The bot verifies these permissions before posting the support message. If verification fails, it deletes the empty incomplete channel and does not retain a ticket record.
+The bot verifies effective permissions before posting the welcome message. If verification fails, it deletes the incomplete destination and retains no ticket record.
+
+Private threads add only the requester. Support staff use Manage Threads on the parent launcher channel to access private tickets.
 
 ## Setup
 
@@ -19,24 +31,33 @@ Run:
 
     [p]ticketsset
 
-Use the selectors to choose a launcher channel, ticket category, staff roles, and optional staff log. Then press Publish launcher.
+Use the setup selectors for the launcher channel, optional category, staff roles, and optional staff log. Configure the enabled ticket types, then publish:
 
-Commands are also available:
+    [p]ticketsset modes text
+    [p]ticketsset modes text voice
+    [p]ticketsset modes text voice thread
+    [p]ticketsset publish
+
+Additional commands:
 
     [p]ticketsset channel <channel>
     [p]ticketsset category <category>
+    [p]ticketsset clearcategory
     [p]ticketsset staff <role>
     [p]ticketsset log [channel]
     [p]ticketsset limit <1-5>
     [p]ticketsset cooldown <30-3600>
-    [p]ticketsset publish
+
+Changing modes or placement does not alter existing tickets. Republish the launcher to update its buttons.
 
 ## Ticket use
 
-Members normally open tickets through the launcher. Staff can review the bounded queue with:
+Members receive an ephemeral link immediately after opening a ticket. The new destination asks them to describe what they need and tells them that support will respond shortly.
+
+Staff can review the bounded queue with:
 
     [p]tickets queue
 
-Each ticket has persistent controls for claim/unclaim, status, and close/reopen. Closing removes the requesters ability to send while preserving read access.
+Each ticket has persistent controls for claim/unclaim, status, and close/reopen. Closing a text ticket prevents requester messages, closing a voice ticket also prevents requester connections, and closing a thread locks and archives it.
 
-Private threads, public forum tickets, transcripts, and external help-desk services are not part of the first release.
+Transcripts, automatic retention deletion, external help-desk integrations, and DM relay are not part of this release.

@@ -17,7 +17,7 @@ MAX_ACTIVE_TICKETS = 100
 GUILD_DEFAULTS = {
     "launcher_channel_id": 0, "launcher_message_id": 0, "launcher_message_channel_id": 0, "category_id": 0,
     "staff_role_ids": [], "log_channel_id": 0, "max_open_per_user": 1,
-    "creation_cooldown": 300, "next_ticket_number": 1, "tickets": {},
+    "creation_cooldown": 300, "enabled_modes": ["text"], "next_ticket_number": 1, "tickets": {},
 }
 
 
@@ -25,7 +25,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -63,6 +63,12 @@ class Tickets(commands.Cog):
         role_ids = set(await self.config.guild(member.guild).staff_role_ids())
         return any(role.id in role_ids for role in member.roles)
 
+    @staticmethod
+    def _get_destination(guild, channel_id):
+        if hasattr(guild, "get_channel_or_thread"):
+            return guild.get_channel_or_thread(int(channel_id))
+        return guild.get_channel(int(channel_id))
+
     async def get_ticket(self, guild, channel_id):
         value = (await self.config.guild(guild).tickets()).get(str(int(channel_id)))
         return normalized_record(value)
@@ -91,7 +97,7 @@ class Tickets(commands.Cog):
         roles = [role for role in roles if role]
         embed = discord.Embed(
             title="Tickets setup",
-            description="Configure private text-channel tickets, then publish the launcher.",
+            description="Configure private text, voice, or boosted-server thread tickets, then publish the launcher.",
             color=await self.bot.get_embed_color(launcher or guild.me),
         )
         embed.add_field(name="Launcher", value=launcher.mention if launcher else "Not set")
@@ -100,6 +106,7 @@ class Tickets(commands.Cog):
         embed.add_field(name="Staff log", value=log.mention if log else "Disabled")
         embed.add_field(name="Open limit", value=str(data["max_open_per_user"]))
         embed.add_field(name="Cooldown", value=f"{data['creation_cooldown']} seconds")
+        embed.add_field(name="Ticket modes", value=", ".join(data["enabled_modes"]))
         return embed
 
     async def _configured_parts(self, guild):
@@ -107,35 +114,91 @@ class Tickets(commands.Cog):
         launcher = guild.get_channel(data["launcher_channel_id"])
         category = guild.get_channel(data["category_id"])
         roles = [guild.get_role(value) for value in data["staff_role_ids"]]
-        roles = [r for r in roles if r and r != guild.default_role and not r.managed]
+        roles = [role for role in roles if role and role != guild.default_role and not role.managed]
         if not isinstance(launcher, discord.TextChannel):
             raise TicketError("Choose a valid launcher text channel first.")
-        if not isinstance(category, discord.CategoryChannel):
-            raise TicketError("Choose a valid ticket category first.")
+        if data["category_id"] and not isinstance(category, discord.CategoryChannel):
+            raise TicketError("The configured ticket category no longer exists.")
         if not roles:
             raise TicketError("Choose at least one valid support staff role first.")
-        me = guild.me
-        category_perms = category.permissions_for(me)
-        launcher_perms = launcher.permissions_for(me)
-        if not (category_perms.view_channel and category_perms.manage_channels):
-            raise TicketError("I need View Channel and Manage Channels in the ticket category.")
-        if not (launcher_perms.view_channel and launcher_perms.send_messages and launcher_perms.embed_links):
-            raise TicketError("I need View Channel, Send Messages, and Embed Links in the launcher channel.")
+        launcher_perms = launcher.permissions_for(guild.me)
+        if not (
+            launcher_perms.view_channel
+            and launcher_perms.send_messages
+            and launcher_perms.embed_links
+        ):
+            raise TicketError(
+                "I need View Channel, Send Messages, and Embed Links in the launcher channel."
+            )
         return data, launcher, category, roles
 
+    async def _validate_mode(self, guild, mode, launcher, category, roles):
+        if mode not in {"text", "voice", "thread"}:
+            raise TicketError("That ticket mode is not supported.")
+        data = await self.config.guild(guild).all()
+        if mode not in data["enabled_modes"]:
+            raise TicketError("That ticket type is not enabled on this server.")
+        if mode in {"text", "voice"}:
+            permissions = (
+                category.permissions_for(guild.me)
+                if category
+                else guild.me.guild_permissions
+            )
+            if not permissions.manage_channels:
+                raise TicketError("I need Manage Channels where tickets will be created.")
+            return
+        if guild.premium_tier < 2:
+            raise TicketError("Private thread tickets require a Level 2 boosted server.")
+        bot_permissions = launcher.permissions_for(guild.me)
+        if not (
+            bot_permissions.create_private_threads
+            and bot_permissions.manage_threads
+            and bot_permissions.send_messages_in_threads
+        ):
+            raise TicketError(
+                "I need Create Private Threads, Manage Threads, and Send Messages in Threads "
+                "in the launcher channel."
+            )
+        missing = [
+            role.mention
+            for role in roles
+            if not (
+                launcher.permissions_for(role).manage_threads
+                and launcher.permissions_for(role).send_messages_in_threads
+            )
+        ]
+        if missing:
+            raise TicketError(
+                "Support roles need Manage Threads and Send Messages in Threads in the "
+                f"launcher channel: {', '.join(missing)}"
+            )
+
     async def publish_launcher(self, guild):
-        data, launcher, _, _ = await self._configured_parts(guild)
+        data, launcher, category, roles = await self._configured_parts(guild)
+        enabled_modes = data["enabled_modes"]
+        for mode in enabled_modes:
+            await self._validate_mode(guild, mode, launcher, category, roles)
+        labels = {
+            "text": "private text channel",
+            "voice": "private voice channel",
+            "thread": "private thread",
+        }
+        choices = ", ".join(labels[mode] for mode in enabled_modes)
         embed = discord.Embed(
             title="Need help?",
-            description="Press **Open ticket** to create a private support channel visible only to you and support staff.",
+            description=(
+                "Choose a ticket type below. The bot will create a private support space "
+                f"for you and the support team.\n\nAvailable: **{choices}**."
+            ),
             color=await self.bot.get_embed_color(launcher),
         )
         old_channel = guild.get_channel(data["launcher_message_channel_id"])
+        view = LauncherView(self, enabled_modes)
         if data["launcher_message_id"] and isinstance(old_channel, discord.TextChannel):
             try:
                 old_message = await old_channel.fetch_message(data["launcher_message_id"])
                 if old_channel == launcher:
-                    await old_message.edit(embed=embed, view=LauncherView(self))
+                    await old_message.edit(embed=embed, view=view)
                     return old_message
                 await old_message.edit(
                     content=f"The ticket launcher moved to {launcher.mention}.",
@@ -145,100 +208,192 @@ class Tickets(commands.Cog):
                 )
             except (discord.NotFound, discord.Forbidden):
                 pass
-        message = await launcher.send(embed=embed, view=LauncherView(self))
+        message = await launcher.send(embed=embed, view=view)
         await self.config.guild(guild).launcher_message_id.set(message.id)
         await self.config.guild(guild).launcher_message_channel_id.set(launcher.id)
         return message
 
     @staticmethod
-    def verify_ticket_permissions(channel, owner, roles):
-        everyone = channel.permissions_for(channel.guild.default_role)
-        requester = channel.permissions_for(owner)
-        bot = channel.permissions_for(channel.guild.me)
-        return (
+    def _ticket_overwrites(guild, owner, roles, *, voice=False):
+        common = {
+            "view_channel": True,
+            "read_message_history": True,
+            "send_messages": True,
+            "embed_links": True,
+            "attach_files": True,
+        }
+        if voice:
+            common.update(connect=True, speak=True)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=False, connect=False if voice else None
+            ),
+            owner: discord.PermissionOverwrite(**common),
+            guild.me: discord.PermissionOverwrite(
+                **common, manage_channels=True, manage_messages=True
+            ),
+        }
+        for role in roles:
+            overwrites[role] = discord.PermissionOverwrite(
+                **common, manage_messages=True
+            )
+        return overwrites
+
+    async def _create_destination(self, guild, owner, number, mode, launcher, category, roles):
+        reason = f"Support {mode} ticket #{number} opened by user {owner.id}"
+        if mode == "text":
+            return await guild.create_text_channel(
+                ticket_channel_name(number),
+                category=category,
+                overwrites=self._ticket_overwrites(guild, owner, roles),
+                reason=reason,
+            )
+        if mode == "voice":
+            return await guild.create_voice_channel(
+                ticket_channel_name(number),
+                category=category,
+                overwrites=self._ticket_overwrites(guild, owner, roles, voice=True),
+                reason=reason,
+            )
+        thread = await launcher.create_thread(
+            name=ticket_channel_name(number),
+            type=discord.ChannelType.private_thread,
+            invitable=False,
+            auto_archive_duration=1440,
+            reason=reason,
+        )
+        await thread.add_user(owner)
+        return thread
+
+    @staticmethod
+    def verify_ticket_permissions(destination, owner, roles, mode):
+        if mode == "thread":
+            return (
+                isinstance(destination, discord.Thread)
+                and destination.type == discord.ChannelType.private_thread
+                and not destination.invitable
+            )
+        everyone = destination.permissions_for(destination.guild.default_role)
+        requester = destination.permissions_for(owner)
+        bot = destination.permissions_for(destination.guild.me)
+        valid = (
             not everyone.view_channel
-            and requester.view_channel and requester.send_messages and requester.read_message_history
-            and bot.view_channel and bot.send_messages and bot.manage_channels
+            and requester.view_channel
+            and requester.send_messages
+            and requester.read_message_history
+            and bot.view_channel
+            and bot.send_messages
+            and bot.manage_channels
             and all(
-                (perms := channel.permissions_for(role)).view_channel
-                and perms.send_messages and perms.read_message_history
+                (permissions := destination.permissions_for(role)).view_channel
+                and permissions.send_messages
+                and permissions.read_message_history
                 for role in roles
             )
         )
+        if mode == "voice":
+            valid = (
+                valid
+                and not everyone.connect
+                and requester.connect
+                and bot.connect
+                and all(destination.permissions_for(role).connect for role in roles)
+            )
+        return valid
 
-    async def create_ticket(self, interaction, *, topic, subject, description):
+    async def create_ticket(self, interaction, *, mode):
         guild, owner = interaction.guild, interaction.user
         if guild is None or not isinstance(owner, discord.Member):
             raise TicketError("Tickets can only be opened from a server.")
         async with self._locks[guild.id]:
-            data, _, category, roles = await self._configured_parts(guild)
-            records = [r for value in data["tickets"].values() if (r := normalized_record(value))]
-            active = [r for r in records if is_open(r)]
-            own = [r for r in active if r["owner_id"] == owner.id]
+            data, launcher, category, roles = await self._configured_parts(guild)
+            await self._validate_mode(guild, mode, launcher, category, roles)
+            records = [
+                record
+                for value in data["tickets"].values()
+                if (record := normalized_record(value))
+            ]
+            active = [record for record in records if is_open(record)]
+            own = [record for record in active if record["owner_id"] == owner.id]
             if len(own) >= data["max_open_per_user"]:
-                mentions = ", ".join(c.mention for r in own if (c := guild.get_channel(r["channel_id"])))
-                raise TicketError(f"You already have the maximum number of open tickets.{f' {mentions}' if mentions else ''}")
+                mentions = ", ".join(
+                    destination.mention
+                    for record in own
+                    if (destination := self._get_destination(guild, record["channel_id"]))
+                )
+                suffix = f" {mentions}" if mentions else ""
+                raise TicketError(
+                    f"You already have the maximum number of open tickets.{suffix}"
+                )
             if len(active) >= MAX_ACTIVE_TICKETS:
-                raise TicketError("This server has reached its active ticket limit. Please contact staff.")
+                raise TicketError(
+                    "This server has reached its active ticket limit. Please contact staff."
+                )
             now = int(time.time())
-            remaining = data["creation_cooldown"] - (now - await self.config.member(owner).last_created_at())
+            last_created = await self.config.member(owner).last_created_at()
+            remaining = data["creation_cooldown"] - (now - last_created)
             if remaining > 0:
-                raise TicketError(f"Please wait {remaining} more seconds before opening another ticket.")
+                raise TicketError(
+                    f"Please wait {remaining} more seconds before opening another ticket."
+                )
 
             number = max(1, int(data["next_ticket_number"]))
-            allow = dict(view_channel=True, send_messages=True, read_message_history=True, embed_links=True, attach_files=True)
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                owner: discord.PermissionOverwrite(**allow),
-                guild.me: discord.PermissionOverwrite(**allow, manage_channels=True, manage_messages=True),
-            }
-            for role in roles:
-                overwrites[role] = discord.PermissionOverwrite(**allow, manage_messages=True)
-            channel = None
+            destination = None
             try:
-                channel = await guild.create_text_channel(
-                    ticket_channel_name(number), category=category, overwrites=overwrites,
-                    reason=f"Support ticket #{number} opened by user {owner.id}",
+                destination = await self._create_destination(
+                    guild, owner, number, mode, launcher, category, roles
                 )
-                if not self.verify_ticket_permissions(channel, owner, roles):
-                    raise TicketError("The private channel permission check failed; no ticket was opened.")
+                if not self.verify_ticket_permissions(destination, owner, roles, mode):
+                    raise TicketError(
+                        "The private ticket permission check failed; no ticket was opened."
+                    )
                 embed = discord.Embed(
-                    title=f"Ticket #{number}: {safe_display(subject)}",
-                    description=safe_display(description, 1800),
-                    color=await self.bot.get_embed_color(channel),
+                    title=f"Support ticket #{number}",
+                    description=(
+                        "Thanks for contacting support. Please describe what you need help "
+                        "with below. A support team member will be with you shortly."
+                    ),
+                    color=await self.bot.get_embed_color(destination),
                     timestamp=discord.utils.utcnow(),
                 )
-                embed.add_field(name="Topic", value=safe_display(topic, 50), inline=False)
                 embed.add_field(name="Requester", value=owner.mention)
+                embed.add_field(name="Type", value=mode.replace("_", " ").title())
                 embed.add_field(name="Status", value="Open")
                 embed.add_field(name="Claimed by", value="Nobody")
                 embed.set_footer(text="Use the controls below to manage this ticket.")
-                record = new_ticket_record(number, channel.id, owner.id)
-                control = await channel.send(
-                    content=owner.mention, embed=embed,
-                    view=TicketControls(self, channel.id, record),
-                    allowed_mentions=discord.AllowedMentions(users=[owner], roles=False, everyone=False),
+                record = new_ticket_record(
+                    number, destination.id, owner.id, mode=mode
+                )
+                control = await destination.send(
+                    content=owner.mention,
+                    embed=embed,
+                    view=TicketControls(self, destination.id, record),
+                    allowed_mentions=discord.AllowedMentions(
+                        users=[owner], roles=False, everyone=False
+                    ),
                 )
                 record["control_message_id"] = control.id
                 await self._save_ticket(guild, record)
                 await self.config.guild(guild).next_ticket_number.set(number + 1)
                 await self.config.member(owner).last_created_at.set(now)
             except TicketError:
-                if channel:
+                if destination:
                     try:
-                        await channel.delete(reason="Incomplete ticket failed privacy verification")
+                        await destination.delete(
+                            reason="Incomplete ticket failed privacy verification"
+                        )
                     except discord.HTTPException:
                         pass
                 raise
             except discord.HTTPException as error:
-                if channel:
+                if destination:
                     try:
-                        await channel.delete(reason="Incomplete ticket creation failed")
+                        await destination.delete(reason="Incomplete ticket creation failed")
                     except discord.HTTPException:
                         pass
                 raise TicketError(f"Discord could not create the ticket: {error}") from error
-        await self.log_event(guild, "opened", record, owner)
-        return channel, number
+        await self.log_event(guild, f"opened ({mode})", record, owner)
+        return destination, number
 
     def updated_control_embed(self, message, record):
         embed = discord.Embed.from_dict(message.embeds[0].to_dict()) if message.embeds else discord.Embed(title=f"Ticket #{record['number']}")
@@ -258,8 +413,8 @@ class Tickets(commands.Cog):
 
     async def refresh_control_message(self, guild, channel_id, record=None):
         record = record or await self.get_ticket(guild, channel_id)
-        channel = guild.get_channel(int(channel_id))
-        if not record or not isinstance(channel, discord.TextChannel) or not record["control_message_id"]:
+        channel = self._get_destination(guild, channel_id)
+        if not record or not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)) or not record["control_message_id"]:
             return
         try:
             message = await channel.fetch_message(record["control_message_id"])
@@ -305,16 +460,29 @@ class Tickets(commands.Cog):
                 raise TicketError("Only support staff can reopen a closed ticket.")
             if closed == (record["status"] == "closed"):
                 return record
-            channel, owner = guild.get_channel(int(channel_id)), guild.get_member(record["owner_id"])
-            if not isinstance(channel, discord.TextChannel):
-                raise TicketError("The ticket channel no longer exists.")
-            if owner:
-                overwrite = channel.overwrites_for(owner)
-                overwrite.send_messages = not closed
-                try:
-                    await channel.set_permissions(owner, overwrite=overwrite, reason=f"Ticket changed by user {actor.id}")
-                except discord.HTTPException as error:
-                    raise TicketError("I could not update the requester channel permissions.") from error
+            channel = self._get_destination(guild, channel_id)
+            owner = guild.get_member(record["owner_id"])
+            if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)):
+                raise TicketError("The ticket destination no longer exists.")
+            try:
+                if isinstance(channel, discord.Thread):
+                    await channel.edit(
+                        archived=closed,
+                        locked=closed,
+                        reason=f"Ticket changed by user {actor.id}",
+                    )
+                elif owner:
+                    overwrite = channel.overwrites_for(owner)
+                    overwrite.send_messages = not closed
+                    if isinstance(channel, discord.VoiceChannel):
+                        overwrite.connect = not closed
+                    await channel.set_permissions(
+                        owner,
+                        overwrite=overwrite,
+                        reason=f"Ticket changed by user {actor.id}",
+                    )
+            except discord.HTTPException as error:
+                raise TicketError("I could not update the ticket permissions.") from error
             now = int(time.time())
             record.update(
                 status="closed" if closed else "open", updated_at=now,
@@ -338,13 +506,25 @@ class Tickets(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_channel_delete(self, channel):
-        if not isinstance(channel, discord.TextChannel):
+        if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
             return
         record = await self.get_ticket(channel.guild, channel.id)
         if record:
             record.update(status="deleted", updated_at=int(time.time()), control_message_id=0)
             await self._save_ticket(channel.guild, record)
             await self.log_event(channel.guild, "channel deleted", record)
+
+    @commands.Cog.listener()
+    async def on_thread_delete(self, thread):
+        record = await self.get_ticket(thread.guild, thread.id)
+        if record:
+            record.update(
+                status="deleted",
+                updated_at=int(time.time()),
+                control_message_id=0,
+            )
+            await self._save_ticket(thread.guild, record)
+            await self.log_event(thread.guild, "thread deleted", record)
 
     @commands.hybrid_group(name="tickets", invoke_without_command=True)
     @commands.guild_only()
@@ -354,13 +534,18 @@ class Tickets(commands.Cog):
             r for value in (await self.config.guild(ctx.guild).tickets()).values()
             if (r := normalized_record(value)) and is_open(r) and r["owner_id"] == ctx.author.id
         ]
-        links = [f"Ticket #{r['number']}: {c.mention}" for r in records if (c := ctx.guild.get_channel(r["channel_id"]))]
+        links = [f"Ticket #{r['number']}: {c.mention}" for r in records if (c := self._get_destination(ctx.guild, r["channel_id"]))]
         await ctx.send("\n".join(links) if links else "You do not have an open ticket.")
 
     @tickets.command(name="open")
     async def tickets_open(self, ctx):
         """Show a temporary ticket launcher."""
-        await ctx.send("Press the button to open a private support ticket.", view=LauncherView(self), delete_after=300)
+        modes = await self.config.guild(ctx.guild).enabled_modes()
+        await ctx.send(
+            "Choose a private support ticket type.",
+            view=LauncherView(self, modes),
+            delete_after=300,
+        )
 
     @tickets.command(name="queue")
     async def tickets_queue(self, ctx):
@@ -374,7 +559,7 @@ class Tickets(commands.Cog):
         records.sort(key=lambda item: item["created_at"])
         lines = [
             f"#{r['number']} · {c.mention} · {self.status_label(r['status'])}"
-            for r in records[:25] if (c := ctx.guild.get_channel(r["channel_id"]))
+            for r in records[:25] if (c := self._get_destination(ctx.guild, r["channel_id"]))
         ]
         extra = max(0, len(records) - len(lines))
         await ctx.send(("\n".join(lines) + (f"\n…and {extra} more." if extra else "")) if lines else "The ticket queue is empty.")
@@ -394,6 +579,12 @@ class Tickets(commands.Cog):
     @ticketsset.command(name="category")
     async def set_category(self, ctx, category: discord.CategoryChannel):
         await self.config.guild(ctx.guild).category_id.set(category.id)
+        await ctx.tick()
+
+    @ticketsset.command(name="clearcategory")
+    async def clear_category(self, ctx):
+        """Create text and voice tickets at the top of the channel list."""
+        await self.config.guild(ctx.guild).category_id.set(0)
         await ctx.tick()
 
     @ticketsset.command(name="staff")
@@ -425,6 +616,32 @@ class Tickets(commands.Cog):
     async def set_cooldown(self, ctx, seconds: commands.Range[int, 30, 3600]):
         await self.config.guild(ctx.guild).creation_cooldown.set(seconds)
         await ctx.tick()
+
+    @ticketsset.command(name="modes")
+    async def set_modes(self, ctx, *, modes: str):
+        """Enable text, voice, and/or private-thread ticket modes."""
+        requested = {
+            value.strip().lower()
+            for value in modes.replace(",", " ").split()
+            if value.strip()
+        }
+        aliases = {"private_thread": "thread", "private-thread": "thread"}
+        requested = {aliases.get(value, value) for value in requested}
+        invalid = requested - {"text", "voice", "thread"}
+        if invalid or not requested:
+            await ctx.send("Choose one or more of: text, voice, thread.")
+            return
+        if "thread" in requested and ctx.guild.premium_tier < 2:
+            await ctx.send("Private thread tickets require a Level 2 boosted server.")
+            return
+        await self.config.guild(ctx.guild).enabled_modes.set(
+            [mode for mode in ("text", "voice", "thread") if mode in requested]
+        )
+        await ctx.send(
+            "Enabled ticket modes: "
+            + ", ".join(mode for mode in ("text", "voice", "thread") if mode in requested)
+            + ". Republish the launcher to apply the change."
+        )
 
     @ticketsset.command(name="publish")
     async def set_publish(self, ctx):

@@ -6,12 +6,13 @@ OPEN_STATUSES = {"open", "waiting_member", "waiting_staff"}
 ALL_STATUSES = OPEN_STATUSES | {"closed", "deleted"}
 
 
-def new_ticket_record(number, channel_id, owner_id, control_message_id=0):
+def new_ticket_record(number, channel_id, owner_id, control_message_id=0, mode="text"):
     now = int(time.time())
     return {
         "number": int(number),
         "channel_id": int(channel_id),
         "owner_id": int(owner_id),
+        "mode": mode if mode in {"text", "voice", "thread"} else "text",
         "status": "open",
         "claimed_by_id": 0,
         "created_at": now,
@@ -45,6 +46,7 @@ def normalized_record(value):
             "number": int(value["number"]),
             "channel_id": int(value["channel_id"]),
             "owner_id": int(value.get("owner_id", 0) or 0),
+            "mode": value.get("mode") if value.get("mode") in {"text", "voice", "thread"} else "text",
             "status": status,
             "claimed_by_id": int(value.get("claimed_by_id", 0) or 0),
             "created_at": int(value.get("created_at", 0) or 0),
