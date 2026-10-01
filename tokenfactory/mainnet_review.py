@@ -36,6 +36,7 @@ class MainnetTokenReview:
     gas_payer: str
     gas_sponsored: bool
     native_value_wei: int
+    estimated_gas_fee_wei: int = 0
     irreversible: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -58,6 +59,7 @@ class MainnetTokenReview:
             target_factory=normalize_owner_address(data["target_factory"]),
             calldata_sha256=str(data["calldata_sha256"]),
             gas_limit=int(data["gas_limit"]),
+            estimated_gas_fee_wei=int(data.get("estimated_gas_fee_wei", data["max_gas_fee_wei"])),
             max_gas_fee_wei=int(data["max_gas_fee_wei"]),
             gas_payer=str(data["gas_payer"]),
             gas_sponsored=data.get("gas_sponsored") is True,
@@ -81,6 +83,7 @@ def build_mainnet_token_review(
     max_gas_fee_wei: int,
     gas_payer: str,
     limits: dict,
+    estimated_gas_fee_wei: int | None = None,
 ) -> MainnetTokenReview:
     reviewed_limits = validate_mainnet_limits(limits)
     if draft.network != BASE_MAINNET_NETWORK_KEY or draft.chain_id != BASE_MAINNET_CHAIN_ID:
@@ -89,6 +92,9 @@ def build_mainnet_token_review(
         raise ValueError("The token supply exceeds the reviewed mainnet supply ceiling.")
     if not HASH_RE.fullmatch(str(request_id or "").lower()):
         raise ValueError("The mainnet request ID is invalid.")
+    estimated_fee = int(estimated_gas_fee_wei if estimated_gas_fee_wei is not None else max_gas_fee_wei)
+    if estimated_fee <= 0 or estimated_fee > int(max_gas_fee_wei):
+        raise ValueError("The estimated gas fee exceeds the reapproval threshold.")
     if (
         int(max_gas_fee_wei) <= 0
         or int(max_gas_fee_wei) > reviewed_limits["max_gas_fee_wei"]
@@ -128,6 +134,7 @@ def build_mainnet_token_review(
             bytes.fromhex(str(operation["data"])[2:])
         ).hexdigest(),
         gas_limit=int(operation["gas_limit"]),
+        estimated_gas_fee_wei=estimated_fee,
         max_gas_fee_wei=int(max_gas_fee_wei),
         gas_payer=payer,
         gas_sponsored=False,

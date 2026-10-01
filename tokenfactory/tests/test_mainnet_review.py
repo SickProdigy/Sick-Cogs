@@ -81,7 +81,8 @@ class MainnetTokenReviewTests(unittest.TestCase):
         fields = {field.name: field.value for field in embed.fields}
         for field in (
             "Network", "Token", "Fixed supply", "Recipient", "Request ID",
-            "Target factory", "Calldata SHA-256", "Gas ceiling", "Gas payer",
+            "Target factory", "Calldata SHA-256", "Estimated network fee",
+            "Reapproval threshold", "Gas payer",
             "Native value", "Review fingerprint", "Irreversible",
         ):
             self.assertIn(field, fields)

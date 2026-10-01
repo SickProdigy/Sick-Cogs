@@ -177,6 +177,12 @@ class _AsyncValue:
     async def set(self, value):
         self.value = value
 
+    async def __aenter__(self):
+        return self.value
+
+    async def __aexit__(self, *args):
+        return False
+
 
 class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -191,6 +197,7 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             network="base-mainnet",
             chain_id=8453,
         )
+        self.draft = draft
         self.review = build_mainnet_token_review(
             draft,
             "0x" + "22" * 32,
@@ -202,12 +209,18 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
         self.config = SimpleNamespace(
             mainnet_pending_review=_AsyncValue(self.review.to_dict()),
             mainnet_canary_approval=_AsyncValue(None),
+            deployment_draft=_AsyncValue(draft.to_dict()),
         )
         self.config.mainnet_operation_approval = self.config.mainnet_canary_approval
         self.config.user_from_id = lambda user_id: self.config
         self.subject = SimpleNamespace(
             config=self.config,
             has_current_mainnet_terms=AsyncMock(return_value=True),
+            _cryptowallet=lambda: SimpleNamespace(
+                estimate_base_mainnet_call_fee=AsyncMock(
+                    return_value={"fee_wei": self.review.max_gas_fee_wei + 1}
+                )
+            ),
         )
 
     async def test_exact_acknowledgement_records_short_lived_approval(self):
@@ -223,6 +236,17 @@ class MainnetProtectedApprovalFlowTests(unittest.IsolatedAsyncioTestCase):
             self.config.mainnet_canary_approval.value,
             approval.to_dict(),
         )
+
+    async def test_fee_increase_rejects_before_approval_consumption(self):
+        approval = await TokenFactory.approve_mainnet_canary_review(
+            self.subject, 7, self.review.fingerprint,
+            acknowledgement="I CREATE THIS TOKEN AND ACCEPT RESPONSIBILITY",
+        )
+        with self.assertRaisesRegex(RuntimeError, "fee rose"):
+            await TokenFactory.claim_mainnet_canary_approval(
+                self.subject, 7, self.review.fingerprint
+            )
+        self.assertEqual(self.config.mainnet_operation_approval.value, approval.to_dict())
 
     async def test_bad_acknowledgement_records_no_approval(self):
         with self.assertRaisesRegex(ValueError, "acknowledgement"):

@@ -36,9 +36,12 @@ if TYPE_CHECKING:
     from .clanker import Clanker
 
 
-def mainnet_review_embed(intent: MainnetOperationIntent) -> discord.Embed:
+def mainnet_review_embed(
+    intent: MainnetOperationIntent, estimated_fee_wei: int | None = None
+) -> discord.Embed:
     """Present one exact mainnet candidate without authorizing submission."""
     launch = intent.launch_config
+    estimated_fee = int(estimated_fee_wei or intent.max_fee_wei)
     title = (
         "Review Base mainnet Clanker launch"
         if intent.kind == "launch" else "Review Base mainnet Clanker operation"
@@ -81,15 +84,23 @@ def mainnet_review_embed(intent: MainnetOperationIntent) -> discord.Embed:
     embed.add_field(name="Contract", value=intent.to, inline=False)
     embed.add_field(
         name="Gas",
-        value=f"Signer pays; {intent.gas_limit:,} gas limit; {format_eth_wei(intent.max_fee_wei)} maximum fee",
+        value=(
+            f"Signer pays; {intent.gas_limit:,} gas limit; "
+            f"{format_eth_wei(estimated_fee)} estimated fee"
+        ),
         inline=False,
+    )
+    embed.add_field(
+        name="Reapproval threshold",
+        value=format_eth_wei(intent.max_fee_wei),
+        inline=True,
     )
     embed.add_field(name="Native value", value=format_eth_wei(intent.value), inline=True)
     embed.add_field(
-        name="Wallet debit ceiling",
+        name="Reviewed wallet debit threshold",
         value=(
             f"{format_eth_wei(intent.value + intent.max_fee_wei)} "
-            "(value + maximum gas fee)"
+            "(value + fee reapproval threshold)"
         ),
         inline=False,
     )
@@ -1552,12 +1563,14 @@ class ClankerVerifiedView(discord.ui.View):
                     return
                 launch = ClankerLaunchIntent.from_dict(self.record["intent"])
                 intent = build_mainnet_launch_operation(
-                    launch, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT,
-                    max_fee_wei=MAX_FEE_WEI,
+                    launch, gas_limit=int(self.record["operation"]["gas_limit"]),
+                    max_fee_wei=int(self.record["operation"]["max_fee_wei"]),
                 )
                 review_view = await self.cog.stage_mainnet_review(intent)
                 message = await interaction.followup.send(
-                    embed=mainnet_review_embed(intent), view=review_view,
+                    embed=mainnet_review_embed(
+                        intent, int((self.record.get("network_fee_estimate") or {}).get("estimated_fee_wei") or 0)
+                    ), view=review_view,
                     ephemeral=True, wait=True,
                 )
                 review_view.message = message
@@ -1881,10 +1894,29 @@ class ClankerDraftView(discord.ui.View):
                 self.ctx.guild, interaction.user, str(record["launch_id"])
             )
             if network == "base-mainnet":
+                estimator = getattr(wallet, "estimate_base_mainnet_call_fee", None)
+                if not callable(estimator):
+                    raise RuntimeError("CryptoWallet mainnet fee estimation is unavailable.")
+                operation = record["operation"]
+                estimate = await estimator(
+                    from_address=signer_address, to_address=operation["to"],
+                    value_wei=int(operation.get("value", 0)), data=str(operation["data"]),
+                )
+                estimated_fee = int(estimate.get("fee_wei") or 0)
+                if estimated_fee <= 0 or estimated_fee > MAX_FEE_WEI:
+                    raise RuntimeError("The current network fee exceeds Clanker policy.")
+                threshold = min(
+                    MAX_FEE_WEI, max(estimated_fee * 125 // 100, estimated_fee + 10**13)
+                )
+                launch = ClankerLaunchIntent.from_dict(record["intent"])
+                reviewed_operation = build_mainnet_launch_operation(
+                    launch, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=threshold
+                )
+                record["operation"] = reviewed_operation.canonical_payload()
+                record["execution_terms"]["max_gas_fee_wei"] = threshold
                 record["network_fee_estimate"] = {
-                    "estimated_gas": DEFAULT_LAUNCH_GAS_LIMIT,
-                    "estimated_fee_wei": MAX_FEE_WEI,
-                    "estimate_kind": "safety_ceiling",
+                    **estimate, "estimated_fee_wei": estimated_fee,
+                    "reapproval_threshold_wei": threshold, "estimate_kind": "simulation",
                 }
             else:
                 try:
@@ -1893,6 +1925,10 @@ class ClankerDraftView(discord.ui.View):
                     )
                 except (KeyError, TypeError, ValueError, RuntimeError):
                     record["network_fee_estimate"] = None
+            if network == "base-mainnet":
+                record = await self.cog.persist_verified_fee_review(
+                    self.ctx.guild, interaction.user, str(record["launch_id"]), record
+                )
             await self.cog.notify_approval_channel(
                 self.ctx.guild, self.settings, record
             )

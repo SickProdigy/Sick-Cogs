@@ -330,12 +330,19 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
                 object.__new__(TokenFactory), TokenFactory
             ),
             stage_mainnet_canary_review=AsyncMock(return_value=staged_view),
+            _cryptowallet=lambda: SimpleNamespace(
+                estimate_base_mainnet_call_fee=AsyncMock(
+                    return_value={"fee_wei": 10**12, "gas_limit": 1_500_000, "gas_price_wei": 10**9}
+                )
+            ),
         )
         review, returned_view = await TokenFactory.stage_member_mainnet_review(
             subject, self.user, draft, terms
         )
         subject.deployment_available.assert_awaited_once_with("base-mainnet")
         self.assertEqual(review.owner_discord_id, self.user.id)
+        self.assertEqual(review.estimated_gas_fee_wei, 10**12)
+        self.assertEqual(review.max_gas_fee_wei, 11 * 10**12)
         self.assertIs(returned_view, staged_view)
 
     async def test_submit_gate_uses_the_immutable_draft_network(self):

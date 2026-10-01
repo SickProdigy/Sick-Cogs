@@ -205,11 +205,30 @@ class TokenFactory(commands.Cog):
         )
         if execution_terms != expected_terms:
             raise ValueError("The mainnet TokenFactory fee policy changed.")
+        request_id = "0x" + secrets.token_hex(32)
+        operation = token_operation(
+            draft, request_id, draft.owner_address, network="base-mainnet"
+        )
+        estimator = getattr(self._cryptowallet(), "estimate_base_mainnet_call_fee", None)
+        if not callable(estimator):
+            raise RuntimeError("CryptoWallet mainnet fee estimation is unavailable.")
+        quote = await estimator(
+            from_address=draft.owner_address, to_address=operation["to"],
+            value_wei=int(operation["value_wei"]), data=str(operation["data"]),
+        )
+        estimated_fee = int(quote.get("fee_wei") or 0)
+        policy_ceiling = int(execution_terms["max_gas_fee_wei"])
+        if estimated_fee <= 0 or estimated_fee > policy_ceiling:
+            raise RuntimeError("The current network fee exceeds TokenFactory policy.")
+        threshold = min(
+            policy_ceiling, max(estimated_fee * 125 // 100, estimated_fee + 10**13)
+        )
         review = build_mainnet_token_review(
-            draft, "0x" + secrets.token_hex(32), draft.owner_address,
-            max_gas_fee_wei=int(execution_terms["max_gas_fee_wei"]),
+            draft, request_id, draft.owner_address,
+            max_gas_fee_wei=threshold,
             gas_payer=str(execution_terms["gas_payer"]),
             limits=validate_mainnet_limits(await self.config.mainnet_limits()),
+            estimated_gas_fee_wei=estimated_fee,
         )
         return review, await self.stage_mainnet_canary_review(review)
 
@@ -269,6 +288,29 @@ class TokenFactory(commands.Cog):
         """Atomically consume one approval before any future provider call."""
 
         scope = self.config.user_from_id(int(owner_discord_id))
+        try:
+            review = MainnetTokenReview.from_dict(await scope.mainnet_pending_review())
+            if not secrets.compare_digest(review.fingerprint, review_fingerprint):
+                raise ValueError("review changed")
+            draft = TokenDraft.from_dict(await scope.deployment_draft())
+            operation = token_operation(
+                draft, review.request_id, review.recipient, network="base-mainnet"
+            )
+            estimator = getattr(self._cryptowallet(), "estimate_base_mainnet_call_fee", None)
+            if not callable(estimator):
+                raise RuntimeError("CryptoWallet mainnet fee estimation is unavailable.")
+            refreshed = await estimator(
+                from_address=review.signer_address, to_address=operation["to"],
+                value_wei=int(operation["value_wei"]), data=str(operation["data"]),
+            )
+            if int(refreshed.get("fee_wei") or 0) > review.max_gas_fee_wei:
+                raise RuntimeError(
+                    "The network fee rose above the approved threshold; create a new review."
+                )
+        except RuntimeError:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("The mainnet review cannot be revalidated.") from exc
         async with scope.mainnet_operation_approval() as data:
             try:
                 approval = MainnetCanaryApproval.from_dict(data)

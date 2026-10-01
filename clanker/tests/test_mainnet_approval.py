@@ -13,6 +13,13 @@ class MainnetApprovalTests(unittest.TestCase):
             now=self.intent.created_at + 1,
         )
 
+    def test_review_distinguishes_estimate_from_reapproval_threshold(self):
+        embed = mainnet_review_embed(self.intent, estimated_fee_wei=10**12)
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("estimated fee", fields["Gas"])
+        self.assertIn("Reapproval threshold", fields)
+        self.assertNotEqual(fields["Gas"], fields["Reapproval threshold"])
+
     def test_approval_is_owner_bound_short_lived_and_restart_safe(self):
         self.assertLessEqual(self.approval.expires_at, self.intent.created_at + 601)
         self.assertEqual(
@@ -63,7 +70,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from ..clanker import Clanker
 from ..mainnet_approval import MAINNET_ACKNOWLEDGEMENT
-from ..views import MainnetApprovalView
+from ..views import MainnetApprovalView, mainnet_review_embed
 
 class _AsyncValue:
     def __init__(self, value=None):

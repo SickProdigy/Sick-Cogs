@@ -110,6 +110,15 @@ class CryptoWallet(
             "chain_id": selected.chain_id,
         }
 
+    async def estimate_base_mainnet_call_fee(
+        self, *, from_address: str, to_address: str, value_wei: int, data: str
+    ) -> dict:
+        """Return a non-signing Base mainnet call-fee estimate for integrated cogs."""
+        return await self.wallet_provider.estimate_base_mainnet_call_fee(
+            from_address=from_address, to_address=to_address,
+            value_wei=value_wei, data=data,
+        )
+
     async def tokenfactory_submit_reviewed_call(
         self, user, operation: dict, attempt_id: str, execution_terms: dict
     ) -> dict:

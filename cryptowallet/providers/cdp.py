@@ -841,6 +841,23 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not retrieve delegation status. Try again later."
             ) from exc
 
+    async def estimate_base_mainnet_call_fee(
+        self, *, from_address: str, to_address: str, value_wei: int, data: str
+    ) -> dict:
+        """Estimate one exact Base mainnet call without signing or submitting."""
+        try:
+            sender = normalize_evm_address(from_address)
+            target = normalize_evm_address(to_address)
+            value = int(value_wei)
+            calldata = str(data or "0x")
+            if value < 0 or not re.fullmatch(r"0x(?:[0-9a-fA-F]{2})*", calldata):
+                raise ValueError("invalid call")
+            return await quote_evm_call_fee(
+                BASE_MAINNET.key, sender, target, value, calldata
+            )
+        except (BaseRpcError, TypeError, ValueError) as exc:
+            raise WalletProviderError("The Base mainnet fee estimate is unavailable.") from exc
+
     async def token_factory_deployment_status(self, network: str = BASE_SEPOLIA.key) -> dict:
         """Verify the pinned singleton and deterministic TokenFactory destination."""
 

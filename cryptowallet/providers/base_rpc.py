@@ -599,7 +599,15 @@ async def quote_evm_call_fee(
         raise BaseRpcError(f"{label} returned an invalid fee estimate.") from exc
     if gas_limit <= 0 or gas_price <= 0:
         raise BaseRpcError(f"{label} returned an invalid fee estimate.")
-    return {"gas_limit": gas_limit, "gas_price_wei": gas_price, "fee_wei": gas_limit * gas_price}
+    # Include a conservative ERC-4337 verification/pre-verification allowance;
+    # eth_estimateGas covers only the target call, not the whole UserOperation.
+    user_operation_gas = gas_limit + 150_000
+    return {
+        "call_gas_limit": gas_limit,
+        "gas_limit": user_operation_gas,
+        "gas_price_wei": gas_price,
+        "fee_wei": user_operation_gas * gas_price,
+    }
 
 
 async def get_user_operation_receipt(

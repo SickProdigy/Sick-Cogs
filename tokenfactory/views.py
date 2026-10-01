@@ -66,6 +66,7 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     supply = str(whole)
     if remainder:
         supply += f".{remainder:0{review.decimals}d}".rstrip("0")
+    estimated_fee = review.estimated_gas_fee_wei / 10**18
     max_fee = review.max_gas_fee_wei / 10**18
     embed = discord.Embed(
         title="Review Base mainnet TokenFactory deployment",
@@ -95,7 +96,10 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
     )
     embed.add_field(name="Gas limit", value=f"\u0060{review.gas_limit:,}\u0060", inline=True)
     embed.add_field(
-        name="Gas ceiling", value=f"\u0060{max_fee:.8f} ETH\u0060", inline=True
+        name="Estimated network fee", value=f"\u0060{estimated_fee:.8f} ETH\u0060", inline=True
+    )
+    embed.add_field(
+        name="Reapproval threshold", value=f"\u0060{max_fee:.8f} ETH\u0060", inline=True
     )
     embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
     embed.add_field(name="Gas sponsorship", value="None · creator pays network gas", inline=False)
@@ -159,7 +163,7 @@ def mainnet_factory_review_embed(review: MainnetFactoryReview) -> discord.Embed:
     )
     embed.add_field(name="Gas limit", value=f"`{review.gas_limit:,}`", inline=True)
     embed.add_field(
-        name="Gas ceiling", value=f"`{max_fee:.8f} ETH`", inline=True
+        name="Gas policy ceiling", value=f"`{max_fee:.8f} ETH`", inline=True
     )
     embed.add_field(name="Gas payer", value=review.gas_payer, inline=False)
     embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)

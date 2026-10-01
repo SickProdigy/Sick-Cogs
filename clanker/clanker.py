@@ -439,6 +439,17 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         submitter = getattr(wallet, "clanker_submit_mainnet_operation", None)
         if not callable(submitter):
             raise RuntimeError("CryptoWallet mainnet signing support is unavailable.")
+        estimator = getattr(wallet, "estimate_base_mainnet_call_fee", None)
+        if not callable(estimator):
+            raise RuntimeError("CryptoWallet mainnet fee estimation is unavailable.")
+        refreshed_fee = await estimator(
+            from_address=intent.signer, to_address=intent.to,
+            value_wei=intent.value, data=intent.data,
+        )
+        if int(refreshed_fee.get("fee_wei") or 0) > intent.max_fee_wei:
+            raise RuntimeError(
+                "The network fee rose above the approved threshold; create a new review."
+            )
         scope = self.config.user_from_id(int(user.id))
         existing = await scope.mainnet_operation_lifecycle()
         if isinstance(existing, dict):
@@ -2415,14 +2426,15 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             payload["chainId"] = 8453 if network == "base-mainnet" else 84532
             intent = self.build_launch_intent(
                 guild.id, user.id, launch_id, payload,
-                created_at=now, expires_at=now + 900,
+                created_at=now,
+                expires_at=now + (120 if network == "base-mainnet" else 900),
                 network=network, chain_id=8453 if network == "base-mainnet" else 84532,
             )
             validate_platform_attribution(
                 intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
             )
             record["execution_created_at"] = now
-            record["execution_expires_at"] = now + 900
+            record["execution_expires_at"] = now + (120 if network == "base-mainnet" else 900)
             record["payload_hash"] = intent.payload_hash
             record["intent"] = intent.to_dict()
             operation = (
@@ -2479,6 +2491,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if payload.get("devBuy") and payload["devBuy"].get("recipient") is None:
                 payload["devBuy"]["recipient"] = signer_address
             network = str(record.get("network") or "base-sepolia")
+            if network == "base-mainnet":
+                quote_now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                record["execution_created_at"] = quote_now
+                record["execution_expires_at"] = quote_now + 120
             payload["chainId"] = 8453 if network == "base-mainnet" else 84532
             intent = self.build_launch_intent(
                 guild.id, user.id, launch_id, payload,
@@ -2538,6 +2554,23 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "estimated_fee_wei": estimated_gas * gas_price_wei,
             "estimate_kind": estimate_kind,
         }
+
+    async def persist_verified_fee_review(
+        self, guild: discord.Guild, user: Any, launch_id: str, reviewed: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist only the fee-bound operation fields for one verified draft."""
+        async with self.guild_records(guild) as audit_log:
+            matches = [item for item in audit_log if str(item.get("launch_id")) == launch_id]
+            if len(matches) != 1:
+                raise RuntimeError("The verified Clanker draft is missing or ambiguous.")
+            record = matches[0]
+            if (record.get("status") != "verified"
+                    or int(record.get("requester_id", 0)) != int(user.id)
+                    or str(reviewed.get("payload_hash")) != str(record.get("payload_hash"))):
+                raise RuntimeError("The verified Clanker fee review changed identity.")
+            for key in ("operation", "execution_terms", "network_fee_estimate"):
+                record[key] = copy.deepcopy(reviewed.get(key))
+            return copy.deepcopy(record)
 
     async def mark_draft_verified(
         self, guild: discord.Guild, user: Any, launch_id: str
