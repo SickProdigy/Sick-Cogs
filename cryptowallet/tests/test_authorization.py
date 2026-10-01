@@ -4666,6 +4666,55 @@ class ProviderCooldownTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class MainnetCallSnapshotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_snapshot_binds_public_state_without_submitting(self):
+        signer = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        target = "0x1111111111111111111111111111111111111111"
+        profile = {"profile_id": "profile-7", "provider_user_id": "profile-7",
+                   "accounts": [{"network": BASE_MAINNET.key, "address": signer}]}
+        provider = SimpleNamespace(
+            get_native_balance=AsyncMock(return_value=10**18),
+            get_delegation_status=AsyncMock(return_value={"active": True}),
+        )
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.wallet_provider = provider
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        cog.ensure_mainnet_wallet_profile = AsyncMock(return_value=profile)
+        cog.estimate_base_mainnet_call_fee = AsyncMock(return_value={"fee_wei": 10**12})
+        with patch("cryptowallet.cryptowallet.get_chain_id", AsyncMock(return_value=8453)), \
+             patch("cryptowallet.cryptowallet.get_contract_code", AsyncMock(return_value="0x6000")):
+            snapshot = await cog.base_mainnet_call_snapshot(
+                SimpleNamespace(id=7), to_address=target, value_wei=0, data="0x1234",
+                reviewed_gas_limit=200000, reviewed_fee_threshold_wei=2 * 10**12,
+            )
+        self.assertEqual(snapshot["chain_id"], 8453)
+        self.assertEqual(snapshot["signer"], signer)
+        self.assertTrue(snapshot["authorization_active"])
+        self.assertEqual(snapshot["operation_state"], "not-created")
+        self.assertEqual(snapshot["estimated_fee_wei"], 10**12)
+
+    async def test_snapshot_rejects_fee_above_reviewed_threshold(self):
+        signer = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        profile = {"profile_id": "profile-7", "provider_user_id": "profile-7",
+                   "accounts": [{"network": BASE_MAINNET.key, "address": signer}]}
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.wallet_provider = SimpleNamespace(
+            get_native_balance=AsyncMock(return_value=10**18),
+            get_delegation_status=AsyncMock(return_value={"active": True}),
+        )
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        cog.ensure_mainnet_wallet_profile = AsyncMock(return_value=profile)
+        cog.estimate_base_mainnet_call_fee = AsyncMock(return_value={"fee_wei": 3 * 10**12})
+        with patch("cryptowallet.cryptowallet.get_chain_id", AsyncMock(return_value=8453)), \
+             patch("cryptowallet.cryptowallet.get_contract_code", AsyncMock(return_value="0x6000")):
+            with self.assertRaisesRegex(RuntimeError, "exceeds"):
+                await cog.base_mainnet_call_snapshot(
+                    SimpleNamespace(id=7), to_address="0x1111111111111111111111111111111111111111",
+                    value_wei=0, data="0x1234", reviewed_gas_limit=200000,
+                    reviewed_fee_threshold_wei=2 * 10**12,
+                )
+
+
 class ClankerMainnetSignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
     def envelope(self):
         signer = "0x7930fb6e9853b3835cf047f36855993cb82d4387"

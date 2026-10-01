@@ -17,6 +17,7 @@ from .mainnet_approval import (
     consume_mainnet_canary_approval,
     create_mainnet_canary_approval,
 )
+from .mainnet_execution import prepare_mainnet_token_submission
 from .mainnet_factory import (
     MainnetFactoryReview,
     verify_mainnet_factory_evidence,
@@ -318,6 +319,75 @@ class TokenFactory(commands.Cog):
             data.clear()
             data.update(claimed.to_dict())
         return claimed
+
+    async def mainnet_member_submission_available(self) -> bool:
+        return await self.deployment_available("base-mainnet")
+
+    async def execute_approved_mainnet_token(self, user) -> dict:
+        """Gather live state and submit one exact approved member deployment."""
+        if not await self.mainnet_member_submission_available():
+            raise RuntimeError("TokenFactory Base mainnet submission remains disabled.")
+        scope = self.config.user(user)
+        review = MainnetTokenReview.from_dict(await scope.mainnet_pending_review())
+        approval = MainnetCanaryApproval.from_dict(await scope.mainnet_operation_approval())
+        draft = TokenDraft.from_dict(await scope.deployment_draft())
+        operation = token_operation(
+            draft, review.request_id, review.recipient, network="base-mainnet"
+        )
+        wallet = self._cryptowallet()
+        snapshotter = getattr(wallet, "base_mainnet_call_snapshot", None)
+        if not callable(snapshotter):
+            raise RuntimeError("CryptoWallet mainnet live-state review is unavailable.")
+        snapshot = await snapshotter(
+            user, to_address=operation["to"], value_wei=operation["value_wei"],
+            data=operation["data"], reviewed_gas_limit=review.gas_limit,
+            reviewed_fee_threshold_wei=review.max_gas_fee_wei,
+        )
+        prepare_mainnet_token_submission(
+            review, approval, operation,
+            controls={
+                "enabled": await self.config.mainnet_deployment_enabled(),
+                "paused": await self.config.mainnet_emergency_paused(),
+            },
+            live={
+                "owner_discord_id": user.id,
+                "wallet_profile_id": draft.wallet_profile_id,
+                "signer_address": snapshot["signer"],
+                "chain_id": snapshot["chain_id"],
+                "factory_code_hash": snapshot["target_runtime_sha256"],
+                "authorization_active": snapshot["authorization_active"],
+                "signer_balance_wei": snapshot["signer_balance_wei"],
+                "operation_state": snapshot["operation_state"],
+            },
+            limits=validate_mainnet_limits(await self.config.mainnet_limits()),
+            now=int(time.time()),
+        )
+        await self.claim_mainnet_canary_approval(user.id, review.fingerprint)
+        attempt_id = str(uuid.uuid4())
+        await self.stage_mainnet_canary_lifecycle(review, attempt_id)
+        await self.transition_mainnet_canary(
+            user.id, review.fingerprint, attempt_id, "processing"
+        )
+        try:
+            result = await self._submit_reviewed_call(
+                user, operation, attempt_id, {
+                    "gas_limit": review.gas_limit, "native_value_wei": 0,
+                    "gas_sponsored": False, "gas_payer": "creator wallet",
+                },
+            )
+        except Exception:
+            await self.transition_mainnet_canary(
+                user.id, review.fingerprint, attempt_id, "uncertain",
+                failure_reason="Provider submission outcome is uncertain.",
+            )
+            raise
+        await self.transition_mainnet_canary(
+            user.id, review.fingerprint, attempt_id, "submitted",
+            provider_status=result.get("provider_status"),
+            user_operation_hash=result.get("user_operation_hash"),
+            transaction_hash=result.get("transaction_hash"),
+        )
+        return result
 
     async def stage_mainnet_canary_lifecycle(
         self,

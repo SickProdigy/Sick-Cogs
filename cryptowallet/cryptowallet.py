@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import secrets
 import time
@@ -16,9 +17,11 @@ from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
 from .core.models import IntentStatus
+from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS
 from .providers import CdpWalletProvider
+from .providers.base_rpc import get_chain_id, get_contract_code
 from .providers.cdp import CLANKER_DEPLOY_GAS_LIMIT
 
 log = logging.getLogger("red.Sick-Cogs.CryptoWallet")
@@ -118,6 +121,48 @@ class CryptoWallet(
             from_address=from_address, to_address=to_address,
             value_wei=value_wei, data=data,
         )
+
+    async def base_mainnet_call_snapshot(
+        self, user, *, to_address: str, value_wei: int, data: str,
+        reviewed_gas_limit: int, reviewed_fee_threshold_wei: int,
+    ) -> dict:
+        """Return trusted read-only state for one reviewed Base mainnet call."""
+        target = normalize_evm_address(to_address).lower()
+        value = int(value_wei)
+        gas_limit = int(reviewed_gas_limit)
+        threshold = int(reviewed_fee_threshold_wei)
+        if value < 0 or gas_limit <= 0 or threshold <= 0:
+            raise RuntimeError("The reviewed Base mainnet call policy is invalid.")
+        profile = await self.get_or_create_wallet_profile(user)
+        profile = await self.ensure_mainnet_wallet_profile(user, profile)
+        account = self._account_for_network(profile, BASE_MAINNET.key)
+        signer = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+        chain_id = await get_chain_id(BASE_MAINNET.key)
+        if chain_id != BASE_MAINNET.chain_id:
+            raise RuntimeError("The live chain is not Base mainnet.")
+        code = await get_contract_code(target, BASE_MAINNET.key)
+        runtime_hash = "0x" + hashlib.sha256(bytes.fromhex(code[2:])).hexdigest()
+        balance = await self.wallet_provider.get_native_balance(signer, BASE_MAINNET.key)
+        authorization = await self.wallet_provider.get_delegation_status(
+            profile, BASE_MAINNET.key
+        )
+        quote = await self.estimate_base_mainnet_call_fee(
+            from_address=signer, to_address=target, value_wei=value, data=data
+        )
+        fee = int(quote.get("fee_wei") or 0)
+        if fee <= 0 or fee > threshold:
+            raise RuntimeError(
+                "The live network fee exceeds the approved reapproval threshold."
+            )
+        return {
+            "chain_id": chain_id, "signer": signer, "to": target,
+            "value": value, "data": str(data), "gas_limit": gas_limit,
+            "max_fee_wei": threshold, "target_runtime_sha256": runtime_hash,
+            "authorization_active": authorization.get("active") is True,
+            "signer_balance_wei": int(balance), "operation_state": "not-created",
+            "quoted_gas_limit": gas_limit, "quoted_max_fee_wei": threshold,
+            "estimated_fee_wei": fee,
+        }
 
     async def tokenfactory_submit_reviewed_call(
         self, user, operation: dict, attempt_id: str, execution_terms: dict

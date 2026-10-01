@@ -413,6 +413,30 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             data.update(claimed.to_dict())
         return claimed
 
+    async def mainnet_submission_available(self) -> bool:
+        return bool(
+            MAINNET_SUBMISSION_ENABLED
+            and await self.config.mainnet_deployment_enabled()
+            and not await self.config.mainnet_emergency_paused()
+        )
+
+    async def execute_approved_mainnet_operation(
+        self, user, intent: MainnetOperationIntent
+    ) -> dict:
+        """Gather trusted live state and execute one already-approved operation."""
+        if not await self.mainnet_submission_available():
+            raise RuntimeError("Clanker Base mainnet submission remains disabled.")
+        wallet = self.bot.get_cog("CryptoWallet")
+        snapshotter = getattr(wallet, "base_mainnet_call_snapshot", None)
+        if not callable(snapshotter):
+            raise RuntimeError("CryptoWallet mainnet live-state review is unavailable.")
+        live = await snapshotter(
+            user, to_address=intent.to, value_wei=intent.value, data=intent.data,
+            reviewed_gas_limit=intent.gas_limit,
+            reviewed_fee_threshold_wei=intent.max_fee_wei,
+        )
+        return await self.submit_mainnet_operation(user, intent, live=live)
+
     async def submit_mainnet_operation(
         self, user, intent: MainnetOperationIntent, *, live: dict
     ) -> dict:

@@ -283,6 +283,20 @@ class MainnetCanaryApprovalModal(
         self.view.disable_controls()
         if self.view.message is not None:
             await self.view.message.edit(view=self.view)
+        if await self.view.cog.mainnet_member_submission_available():
+            try:
+                result = await self.view.cog.execute_approved_mainnet_token(
+                    interaction.user
+                )
+            except (RuntimeError, ValueError) as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            await interaction.followup.send(
+                "Token deployment submitted with operation `{}`.".format(
+                    result.get("user_operation_hash") or "pending"
+                ), ephemeral=True,
+            )
+            return
         await interaction.followup.send(
             "Protected requester approval recorded for this exact review until "
             f"<t:{approval.expires_at}:R>. No transaction was submitted.",

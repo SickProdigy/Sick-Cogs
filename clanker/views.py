@@ -147,6 +147,20 @@ class MainnetApprovalModal(discord.ui.Modal, title="Approve Base mainnet launch"
         self.review_view.disable_controls()
         if self.review_view.message is not None:
             await self.review_view.message.edit(view=self.review_view)
+        if await self.review_view.cog.mainnet_submission_available():
+            try:
+                result = await self.review_view.cog.execute_approved_mainnet_operation(
+                    interaction.user, self.review_view.intent
+                )
+            except (RuntimeError, ValueError) as exc:
+                await interaction.followup.send(str(exc), ephemeral=True)
+                return
+            await interaction.followup.send(
+                "Clanker launch submitted with operation `{}`.".format(
+                    result.get("user_operation_hash") or "pending"
+                ), ephemeral=True,
+            )
+            return
         await interaction.followup.send(
             "Protected approval recorded for this exact fingerprint until "
             f"<t:{approval.expires_at}:R>. No transaction was submitted.",
