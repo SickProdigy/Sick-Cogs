@@ -239,6 +239,36 @@ class MainnetFactoryProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
             config=self.config,
         )
 
+    async def test_factory_review_uses_live_quote_without_submitting(self):
+        wallet = SimpleNamespace(
+            tokenfactory_wallet_context=AsyncMock(return_value={
+                "profile_id": "mainnet-profile-7",
+                "owner_address": "0x1111111111111111111111111111111111111111",
+            }),
+            estimate_base_mainnet_call_fee=AsyncMock(return_value={
+                "gas_limit": 900_000, "fee_wei": 1_000_000_000_000,
+            }),
+        )
+        artifact_path = (
+            Path(__file__).parents[1]
+            / "contracts" / "artifact" / "SickGamingTokenFactory.json"
+        )
+        subject = SimpleNamespace(
+            config=SimpleNamespace(mainnet_limits=_AsyncValue(default_mainnet_limits())),
+            _factory_artifact=lambda: {
+                "bytecode": json.loads(artifact_path.read_text(encoding="utf-8"))["bytecode"]
+            },
+            _cryptowallet=lambda: wallet,
+            stage_mainnet_factory_review=AsyncMock(return_value="protected-view"),
+        )
+        review, view = await TokenFactory.create_mainnet_factory_review(
+            subject, SimpleNamespace(id=7)
+        )
+        self.assertEqual(review.owner_discord_id, 7)
+        self.assertEqual(review.max_gas_fee_wei, 11_000_000_000_000)
+        self.assertEqual(view, "protected-view")
+        wallet.estimate_base_mainnet_call_fee.assert_awaited_once()
+
     async def test_exact_factory_acknowledgement_is_required(self):
         approval = await TokenFactory.approve_mainnet_factory_review(
             self.subject,

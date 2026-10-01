@@ -248,6 +248,88 @@ def build_mainnet_launch_operation(
     )
 
 
+def _build_mainnet_operation(
+    *, kind: str, operation_id: str, requester_id: int, signer: str,
+    gas_limit: int, max_fee_wei: int, token: str,
+    fee_owner: str | None = None, recipient: str | None = None,
+    allocated_amount: int | None = None, proof: tuple[str, ...] = (),
+    created_at: int | None = None, expires_at: int | None = None,
+) -> MainnetOperationIntent:
+    """Build one exact audited non-launch operation from semantic fields."""
+
+    manifest = _manifest()
+    operation = manifest["operationAllowlist"].get(kind)
+    if not operation or kind in {"launch", "creatorBuyIn"} or operation["mutability"] == "view":
+        raise ValueError("That Clanker mainnet operation is not independently callable.")
+    created = int(time.time()) if created_at is None else int(created_at)
+    expiry = created + 120 if expires_at is None else int(expires_at)
+    recipients = (recipient,) if recipient else ()
+    data = _semantic_calldata(
+        kind, str(operation["selector"]).lower(), token=token,
+        fee_owner=fee_owner, recipient=recipient, allocated_amount=allocated_amount,
+        proof=tuple(proof), launch_config=None,
+    )
+    return MainnetOperationIntent(
+        operation_id=operation_id, kind=kind, requester_id=requester_id,
+        signer=signer, to=_target(manifest, str(operation["target"])),
+        value=0, data=str(data), created_at=created, expires_at=expiry,
+        gas_limit=int(gas_limit), max_fee_wei=int(max_fee_wei),
+        recipients=recipients, token=token, fee_owner=fee_owner,
+        allocated_amount=allocated_amount, proof=tuple(proof),
+    )
+
+
+def build_mainnet_reward_collection_operation(
+    *, operation_id: str, requester_id: int, signer: str, token: str,
+    gas_limit: int, max_fee_wei: int, created_at: int | None = None,
+    expires_at: int | None = None,
+) -> MainnetOperationIntent:
+    return _build_mainnet_operation(
+        kind="rewardCollection", operation_id=operation_id, requester_id=requester_id,
+        signer=signer, token=token, gas_limit=gas_limit, max_fee_wei=max_fee_wei,
+        created_at=created_at, expires_at=expires_at,
+    )
+
+
+def build_mainnet_treasury_claim_operation(
+    *, operation_id: str, requester_id: int, signer: str, token: str,
+    fee_owner: str, gas_limit: int, max_fee_wei: int,
+    created_at: int | None = None, expires_at: int | None = None,
+) -> MainnetOperationIntent:
+    return _build_mainnet_operation(
+        kind="treasuryClaim", operation_id=operation_id, requester_id=requester_id,
+        signer=signer, token=token, fee_owner=fee_owner, recipient=fee_owner,
+        gas_limit=gas_limit, max_fee_wei=max_fee_wei,
+        created_at=created_at, expires_at=expires_at,
+    )
+
+
+def build_mainnet_vault_claim_operation(
+    *, operation_id: str, requester_id: int, signer: str, token: str,
+    gas_limit: int, max_fee_wei: int, created_at: int | None = None,
+    expires_at: int | None = None,
+) -> MainnetOperationIntent:
+    return _build_mainnet_operation(
+        kind="vaultClaim", operation_id=operation_id, requester_id=requester_id,
+        signer=signer, token=token, gas_limit=gas_limit, max_fee_wei=max_fee_wei,
+        created_at=created_at, expires_at=expires_at,
+    )
+
+
+def build_mainnet_airdrop_claim_operation(
+    *, operation_id: str, requester_id: int, signer: str, token: str,
+    recipient: str, allocated_amount: int, proof: tuple[str, ...],
+    gas_limit: int, max_fee_wei: int, created_at: int | None = None,
+    expires_at: int | None = None,
+) -> MainnetOperationIntent:
+    return _build_mainnet_operation(
+        kind="airdropClaim", operation_id=operation_id, requester_id=requester_id,
+        signer=signer, token=token, recipient=recipient,
+        allocated_amount=allocated_amount, proof=proof, gas_limit=gas_limit,
+        max_fee_wei=max_fee_wei, created_at=created_at, expires_at=expires_at,
+    )
+
+
 def validate_mainnet_candidate(
     intent: MainnetOperationIntent,
     *,

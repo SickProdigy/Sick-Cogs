@@ -20,7 +20,9 @@ from .mainnet_operations import (
     DEFAULT_LAUNCH_GAS_LIMIT, MainnetOperationIntent,
     build_mainnet_launch_operation,
 )
-from .mainnet_approval import MAINNET_ACKNOWLEDGEMENT
+from .mainnet_approval import (
+    MAINNET_ACKNOWLEDGEMENT, MAINNET_OPERATION_ACKNOWLEDGEMENT,
+)
 from .models import ClankerLaunchIntent
 from .helpers import (
     build_airdrop_merkle_tree,
@@ -113,7 +115,7 @@ def mainnet_review_embed(
     embed.add_field(
         name="Irreversible",
         value=(
-            "A confirmed launch cannot be undone. Protected approval must match "
+            "A confirmed mainnet operation cannot be undone. Protected approval must match "
             "this exact fingerprint."
         ),
         inline=False,
@@ -122,17 +124,19 @@ def mainnet_review_embed(
     return embed
 
 
-class MainnetApprovalModal(discord.ui.Modal, title="Approve Base mainnet launch"):
-    acknowledgement = discord.ui.TextInput(
-        label="Type LAUNCH ON BASE MAINNET",
-        placeholder=MAINNET_ACKNOWLEDGEMENT,
-        min_length=len(MAINNET_ACKNOWLEDGEMENT),
-        max_length=len(MAINNET_ACKNOWLEDGEMENT),
-    )
-
+class MainnetApprovalModal(discord.ui.Modal, title="Approve Base mainnet operation"):
     def __init__(self, view: "MainnetApprovalView"):
         super().__init__(timeout=120)
         self.review_view = view
+        acknowledgement = (
+            MAINNET_ACKNOWLEDGEMENT
+            if view.intent.kind == "launch" else MAINNET_OPERATION_ACKNOWLEDGEMENT
+        )
+        self.acknowledgement = discord.ui.TextInput(
+            label="Type the exact confirmation", placeholder=acknowledgement,
+            min_length=len(acknowledgement), max_length=len(acknowledgement),
+        )
+        self.add_item(self.acknowledgement)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -156,7 +160,7 @@ class MainnetApprovalModal(discord.ui.Modal, title="Approve Base mainnet launch"
                 await interaction.followup.send(str(exc), ephemeral=True)
                 return
             await interaction.followup.send(
-                "Clanker launch submitted with operation `{}`.".format(
+                "Clanker mainnet operation submitted with operation `{}`.".format(
                     result.get("user_operation_hash") or "pending"
                 ), ephemeral=True,
             )
@@ -700,6 +704,16 @@ class ClankerRewardReviewView(discord.ui.View):
             await interaction.edit_original_response(view=self)
             await interaction.followup.send(str(exc), ephemeral=True)
             return
+        if result.get("provider_status") == "review_required":
+            review_view = result["view"]
+            message = await interaction.followup.send(
+                embed=mainnet_review_embed(
+                    result["intent"], int(result["estimated_fee_wei"])
+                ),
+                view=review_view, ephemeral=True, wait=True,
+            )
+            review_view.message = message
+            return
         status = str(result.get("provider_status") or "submitted")
         operation = str(result.get("user_operation_hash") or "")
         transaction = str(result.get("transaction_hash") or "")
@@ -794,18 +808,44 @@ class ClankerClaimAllView(discord.ui.View):
         if not selected:
             await interaction.response.send_message("Select at least one token first.", ephemeral=True)
             return
+        if sum(
+            str(item.get("network") or "base-sepolia") == "base-mainnet"
+            for item in selected
+        ) > 1:
+            await interaction.response.send_message(
+                "Review one Base mainnet reward collection at a time.", ephemeral=True
+            )
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        submitted, failures = [], []
+        submitted, reviewed, failures = [], [], []
         for record in selected:
             try:
-                await self.cog.collect_launch_rewards_internal(
+                result = await self.cog.collect_launch_rewards_internal(
                     interaction.user, record,
                     int(record.get("origin_guild_id", 0) or self.guild_id),
                 )
-                submitted.append(str(record.get("launch_ref") or record.get("launch_id")))
+                reference = str(record.get("launch_ref") or record.get("launch_id"))
+                if result.get("provider_status") == "review_required":
+                    review_view = result["view"]
+                    message = await interaction.followup.send(
+                        embed=mainnet_review_embed(
+                            result["intent"], int(result["estimated_fee_wei"])
+                        ),
+                        view=review_view, ephemeral=True, wait=True,
+                    )
+                    review_view.message = message
+                    reviewed.append(reference)
+                    continue
+                submitted.append(reference)
             except (KeyError, TypeError, ValueError, RuntimeError) as exc:
                 failures.append(str(record.get("launch_ref") or record.get("launch_id")) + ": " + str(exc))
-        lines = ["Submitted: " + (", ".join(submitted) if submitted else "none")]
+        lines = []
+        if reviewed:
+            lines.append("Protected review created: " + ", ".join(reviewed))
+        if submitted:
+            lines.append("Submitted: " + ", ".join(submitted))
+        if not reviewed and not submitted:
+            lines.append("Submitted: none")
         if failures:
             lines.append("Not submitted:" + chr(10) + chr(10).join(failures))
         lines.append("Profit cannot be known before collection; exact amounts arrive from each confirmed receipt.")

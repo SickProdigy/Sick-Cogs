@@ -125,6 +125,7 @@ class CryptoWallet(
     async def base_mainnet_call_snapshot(
         self, user, *, to_address: str, value_wei: int, data: str,
         reviewed_gas_limit: int, reviewed_fee_threshold_wei: int,
+        empty_destination_address: str | None = None,
     ) -> dict:
         """Return trusted read-only state for one reviewed Base mainnet call."""
         target = normalize_evm_address(to_address).lower()
@@ -142,6 +143,12 @@ class CryptoWallet(
             raise RuntimeError("The live chain is not Base mainnet.")
         code = await get_contract_code(target, BASE_MAINNET.key)
         runtime_hash = "0x" + hashlib.sha256(bytes.fromhex(code[2:])).hexdigest()
+        destination_empty = None
+        if empty_destination_address is not None:
+            destination = normalize_evm_address(empty_destination_address).lower()
+            destination_empty = (
+                await get_contract_code(destination, BASE_MAINNET.key)
+            ) == "0x"
         balance = await self.wallet_provider.get_native_balance(signer, BASE_MAINNET.key)
         authorization = await self.wallet_provider.get_delegation_status(
             profile, BASE_MAINNET.key
@@ -161,7 +168,7 @@ class CryptoWallet(
             "authorization_active": authorization.get("active") is True,
             "signer_balance_wei": int(balance), "operation_state": "not-created",
             "quoted_gas_limit": gas_limit, "quoted_max_fee_wei": threshold,
-            "estimated_fee_wei": fee,
+            "estimated_fee_wei": fee, "destination_empty": destination_empty,
         }
 
     async def tokenfactory_submit_reviewed_call(

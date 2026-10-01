@@ -4,7 +4,9 @@ import unittest
 from ..mainnet_operations import (
     MAINNET_SUBMISSION_ENABLED,
     MainnetOperationIntent,
-    build_mainnet_launch_operation,
+    build_mainnet_airdrop_claim_operation, build_mainnet_launch_operation,
+    build_mainnet_reward_collection_operation, build_mainnet_treasury_claim_operation,
+    build_mainnet_vault_claim_operation,
     validate_mainnet_candidate,
     _mainnet_launch_calldata,
     revalidate_mainnet_pre_submission,
@@ -16,6 +18,8 @@ from ..views import mainnet_review_embed
 SIGNER = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
 TOKEN = "0x2222222222222222222222222222222222222222"
 FEE_LOCKER = "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68"
+LP_LOCKER = "0xffA37784D619F228D8B379d287a4D7282e500762"
+VAULT = "0x8E845EAd15737bF71904A30BdDD3aEE76d6ADF6C"
 AIRDROP = "0xf652B3610D75D81871bf96DB50825d9af28391E0"
 
 
@@ -124,6 +128,35 @@ class MainnetOperationTests(unittest.TestCase):
                 kind="airdropClaim", to=AIRDROP, data=data, fee_owner=None,
                 allocated_amount=amount + 1, proof=(proof,),
             )
+
+    def test_supported_claim_builders_bind_targets_and_semantics(self):
+        common = {
+            "operation_id": "claim-7", "requester_id": 7, "signer": SIGNER,
+            "token": TOKEN, "gas_limit": 200_000,
+            "max_fee_wei": 2_000_000_000_000_000,
+            "created_at": 1_700_000_000, "expires_at": 1_700_000_120,
+        }
+        collection = build_mainnet_reward_collection_operation(**common)
+        self.assertEqual(collection.to, LP_LOCKER.lower())
+        self.assertEqual(
+            collection.data, "0x5763dbd0" + TOKEN[2:].rjust(64, "0")
+        )
+        treasury = build_mainnet_treasury_claim_operation(
+            **common, fee_owner=SIGNER
+        )
+        self.assertEqual(treasury.to, FEE_LOCKER.lower())
+        self.assertEqual(treasury.recipients, (SIGNER.lower(),))
+        vault = build_mainnet_vault_claim_operation(**common)
+        self.assertEqual(vault.to, VAULT.lower())
+        proof = ("0x" + "ab" * 32,)
+        airdrop = build_mainnet_airdrop_claim_operation(
+            **common, recipient=SIGNER, allocated_amount=123, proof=proof
+        )
+        self.assertEqual(airdrop.to, AIRDROP.lower())
+        self.assertEqual(airdrop.proof, proof)
+        for operation in (collection, treasury, vault, airdrop):
+            self.assertEqual(operation.value, 0)
+            self.assertEqual(operation.requester_id, 7)
 
     def test_launch_reconstructs_every_semantic_calldata_field(self):
         launch = dataclasses.replace(

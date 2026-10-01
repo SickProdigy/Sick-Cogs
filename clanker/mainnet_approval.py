@@ -7,6 +7,7 @@ from .mainnet_operations import MainnetOperationIntent
 
 APPROVAL_LIFETIME_SECONDS = 10 * 60
 MAINNET_ACKNOWLEDGEMENT = "LAUNCH ON BASE MAINNET"
+MAINNET_OPERATION_ACKNOWLEDGEMENT = "CONFIRM BASE MAINNET OPERATION"
 
 @dataclass(frozen=True, slots=True)
 class MainnetOperationApproval:

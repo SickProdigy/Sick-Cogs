@@ -17,9 +17,11 @@ from .mainnet_approval import (
     consume_mainnet_canary_approval,
     create_mainnet_canary_approval,
 )
-from .mainnet_execution import prepare_mainnet_token_submission
+from .mainnet_execution import (
+    prepare_mainnet_factory_submission, prepare_mainnet_token_submission,
+)
 from .mainnet_factory import (
-    MainnetFactoryReview,
+    MainnetFactoryReview, build_mainnet_factory_review,
     verify_mainnet_factory_evidence,
 )
 from .mainnet_lifecycle import (
@@ -55,7 +57,7 @@ from .operations import (
 from .validation import normalize_owner_address
 from .views import (
     FactoryDeploymentView,
-    MainnetCanaryApprovalView,
+    MainnetCanaryApprovalView, mainnet_factory_review_embed,
     MainnetFactoryApprovalView,
     TokenFactoryDraftView,
     TokenFactoryTermsView,
@@ -477,6 +479,86 @@ class TokenFactory(commands.Cog):
             if existing is None:
                 await scope.mainnet_operation_evidence.set(verified)
             return verified
+
+    async def create_mainnet_factory_review(
+        self, user
+    ) -> tuple[MainnetFactoryReview, MainnetFactoryApprovalView]:
+        """Build and persist one read-only deterministic factory review."""
+        creation_code = str(self._factory_artifact()["bytecode"])
+        context = await self._cryptowallet().tokenfactory_wallet_context(user, "base-mainnet")
+        operation = factory_operation(creation_code, network="base-mainnet")
+        quote = await self._cryptowallet().estimate_base_mainnet_call_fee(
+            from_address=context["owner_address"], to_address=operation["to"],
+            value_wei=operation["value_wei"], data=operation["data"],
+        )
+        estimated_fee = int(quote.get("fee_wei") or 0)
+        if estimated_fee <= 0:
+            raise RuntimeError("The mainnet factory fee estimate is invalid.")
+        threshold = max(estimated_fee * 125 // 100, estimated_fee + 10**13)
+        review = build_mainnet_factory_review(
+            creation_code, owner_discord_id=user.id, wallet_profile_id=context["profile_id"],
+            signer_address=context["owner_address"], max_gas_fee_wei=threshold,
+            gas_payer="creator wallet",
+            limits=validate_mainnet_limits(await self.config.mainnet_limits()),
+        )
+        return review, await self.stage_mainnet_factory_review(review)
+
+    async def mainnet_factory_submission_available(self) -> bool:
+        status = mainnet_readiness()
+        return bool(await self.config.mainnet_deployment_enabled()
+                    and not await self.config.mainnet_emergency_paused()
+                    and status["factory_deployment_authorized"])
+
+    async def execute_approved_mainnet_factory(self, user) -> dict:
+        """Gather live state and submit the exact approved factory operation."""
+        if not await self.mainnet_factory_submission_available():
+            raise RuntimeError("TokenFactory Base mainnet factory submission remains disabled.")
+        review = MainnetFactoryReview.from_dict(await self.config.mainnet_factory_pending_review())
+        approval = MainnetCanaryApproval.from_dict(await self.config.mainnet_factory_approval())
+        creation_code = str(self._factory_artifact()["bytecode"])
+        operation = factory_operation(creation_code, network="base-mainnet")
+        snapshot = await self._cryptowallet().base_mainnet_call_snapshot(
+            user, to_address=operation["to"], value_wei=operation["value_wei"],
+            data=operation["data"], reviewed_gas_limit=review.gas_limit,
+            reviewed_fee_threshold_wei=review.max_gas_fee_wei,
+            empty_destination_address=review.predicted_factory_address,
+        )
+        prepare_mainnet_factory_submission(
+            review, approval, operation, controls={
+                "enabled": await self.config.mainnet_deployment_enabled(),
+                "paused": await self.config.mainnet_emergency_paused(),
+            }, live={
+                "owner_discord_id": user.id, "wallet_profile_id": review.wallet_profile_id,
+                "signer_address": snapshot["signer"], "chain_id": snapshot["chain_id"],
+                "singleton_code_sha256": snapshot["target_runtime_sha256"],
+                "destination_empty": snapshot["destination_empty"],
+                "authorization_active": snapshot["authorization_active"],
+                "operation_state": snapshot["operation_state"],
+            }, limits=validate_mainnet_limits(await self.config.mainnet_limits()),
+            now=int(time.time()),
+        )
+        await self.claim_mainnet_factory_approval(review.fingerprint)
+        attempt_id = str(uuid.uuid4())
+        await self.stage_mainnet_factory_lifecycle(review, attempt_id)
+        await self.transition_mainnet_factory(review.fingerprint, attempt_id, "processing")
+        try:
+            result = await self._submit_reviewed_call(user, operation, attempt_id, {
+                "gas_limit": review.gas_limit, "native_value_wei": 0,
+                "gas_sponsored": False, "gas_payer": "creator wallet",
+            })
+        except Exception:
+            await self.transition_mainnet_factory(
+                review.fingerprint, attempt_id, "uncertain",
+                failure_reason="Provider submission outcome is uncertain.",
+            )
+            raise
+        await self.transition_mainnet_factory(
+            review.fingerprint, attempt_id, "submitted",
+            provider_status=result.get("provider_status"),
+            user_operation_hash=result.get("user_operation_hash"),
+            transaction_hash=result.get("transaction_hash"),
+        )
+        return result
 
     async def stage_mainnet_factory_review(
         self, review: MainnetFactoryReview
@@ -1557,6 +1639,27 @@ class TokenFactory(commands.Cog):
         )
         embed.set_footer(text="Mainnet deployment remains unavailable and fail-closed")
         await ctx.send(embed=embed)
+
+    @tokenfactoryset.command(name="mainnetfactoryreview")
+    async def tokenfactoryset_mainnet_factory_review(self, ctx: commands.Context):
+        """Create the exact protected Base mainnet factory review card."""
+
+        try:
+            review, view = await self.create_mainnet_factory_review(ctx.author)
+            message = await ctx.author.send(
+                embed=mainnet_factory_review_embed(review), view=view
+            )
+            view.message = message
+        except discord.Forbidden:
+            await ctx.send("I could not DM the factory review. Enable DMs and try again.")
+            return
+        except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+            await ctx.send(f"Base mainnet factory review is unavailable: {exc}")
+            return
+        await ctx.send(
+            "I sent the protected Base mainnet factory review by DM. "
+            "No transaction was submitted."
+        )
 
     @tokenfactoryset.command(name="mainnetcontrol")
     async def tokenfactoryset_mainnet_control(self, ctx: commands.Context, mode: str):

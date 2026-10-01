@@ -37,14 +37,17 @@ from .models import (
 from .operation import clanker_deployment_operation
 from .mainnet_operations import (
     DEFAULT_LAUNCH_GAS_LIMIT, MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
-    build_mainnet_launch_operation, revalidate_mainnet_pre_submission,
+    build_mainnet_airdrop_claim_operation, build_mainnet_launch_operation,
+    build_mainnet_reward_collection_operation, build_mainnet_treasury_claim_operation,
+    build_mainnet_vault_claim_operation, revalidate_mainnet_pre_submission,
 )
 from .mainnet_lifecycle import (
     MainnetOperationLifecycle, create_mainnet_lifecycle,
     transition_mainnet_lifecycle,
 )
 from .mainnet_approval import (
-    MAINNET_ACKNOWLEDGEMENT, MainnetOperationApproval,
+    MAINNET_ACKNOWLEDGEMENT, MAINNET_OPERATION_ACKNOWLEDGEMENT,
+    MainnetOperationApproval,
     consume_mainnet_approval, create_mainnet_approval,
 )
 from .terms import (
@@ -70,7 +73,7 @@ from .views import (
     ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
     ClankerDraftView, ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTermsView, ClankerTreasuryWithdrawalView,
-    MainnetApprovalView,
+    MainnetApprovalView, mainnet_review_embed,
 )
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
@@ -379,8 +382,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         return MainnetApprovalView(self, intent)
 
     async def approve_mainnet_review(self, intent: MainnetOperationIntent, requester_id: int, *, acknowledgement: str) -> MainnetOperationApproval:
-        if acknowledgement != MAINNET_ACKNOWLEDGEMENT:
-            raise ValueError("The mainnet launch acknowledgement did not match.")
+        expected_acknowledgement = (
+            MAINNET_ACKNOWLEDGEMENT
+            if intent.kind == "launch" else MAINNET_OPERATION_ACKNOWLEDGEMENT
+        )
+        if acknowledgement != expected_acknowledgement:
+            raise ValueError("The mainnet operation acknowledgement did not match.")
         if not await self.has_current_mainnet_terms(requester_id):
             raise RuntimeError("Current Clanker mainnet terms must be accepted first.")
         scope = self.config.user_from_id(int(requester_id))
@@ -1676,6 +1683,71 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             + ("profitable from WETH alone" if profitable else "not profitable from WETH alone")), inline=False)
         return embed, claims, profitable
 
+    async def create_mainnet_claim_review(
+        self, user: Any, *, kind: str, token: str, token_admin: str,
+        fee_owner: str | None = None, allocated_amount: int | None = None,
+        proof: tuple[str, ...] = (), recipient: str | None = None,
+    ) -> Dict[str, Any]:
+        """Build and stage one live-fee-bound protected claim review."""
+        if not await self.has_current_mainnet_terms(int(user.id)):
+            raise RuntimeError(
+                "Accept the current Clanker mainnet terms with `clanker terms` first."
+            )
+        wallet = self.bot.get_cog("CryptoWallet")
+        context_loader = getattr(wallet, "wallet_context_for_token_factory", None) if wallet else None
+        estimator = getattr(wallet, "estimate_base_mainnet_call_fee", None) if wallet else None
+        if not callable(context_loader) or not callable(estimator):
+            raise RuntimeError("CryptoWallet mainnet review support is unavailable.")
+        context = await context_loader(user, network="base-mainnet")
+        signer = str(context["owner_address"]).lower()
+        if signer != str(token_admin).lower():
+            raise RuntimeError("The Base mainnet wallet does not match this token administrator.")
+        now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        operation_id = secrets.token_urlsafe(18)
+        common = {
+            "operation_id": operation_id, "requester_id": int(user.id),
+            "signer": signer, "token": token, "gas_limit": 1,
+            "max_fee_wei": 1, "created_at": now, "expires_at": now + 120,
+        }
+        if kind == "rewardCollection":
+            provisional = build_mainnet_reward_collection_operation(**common)
+            builder = build_mainnet_reward_collection_operation
+            extra: Dict[str, Any] = {}
+        elif kind == "treasuryClaim":
+            extra = {"fee_owner": str(fee_owner or "")}
+            provisional = build_mainnet_treasury_claim_operation(**common, **extra)
+            builder = build_mainnet_treasury_claim_operation
+        elif kind == "vaultClaim":
+            provisional = build_mainnet_vault_claim_operation(**common)
+            builder = build_mainnet_vault_claim_operation
+            extra = {}
+        elif kind == "airdropClaim":
+            extra = {
+                "recipient": str(recipient or ""),
+                "allocated_amount": int(allocated_amount or 0),
+                "proof": tuple(proof),
+            }
+            provisional = build_mainnet_airdrop_claim_operation(**common, **extra)
+            builder = build_mainnet_airdrop_claim_operation
+        else:
+            raise ValueError("That Clanker mainnet claim kind is unsupported.")
+        quote = await estimator(
+            from_address=signer, to_address=provisional.to,
+            value_wei=0, data=provisional.data,
+        )
+        estimated_fee = int(quote.get("fee_wei") or 0)
+        gas_limit = int(quote.get("gas_limit") or 0)
+        if estimated_fee <= 0 or gas_limit <= 0:
+            raise RuntimeError("CryptoWallet returned an invalid mainnet fee estimate.")
+        threshold = max(estimated_fee * 125 // 100, estimated_fee + 10000000000000)
+        common.update(gas_limit=gas_limit, max_fee_wei=threshold)
+        intent = builder(**common, **extra)
+        view = await self.stage_mainnet_review(intent)
+        return {
+            "provider_status": "review_required", "intent": intent,
+            "view": view, "estimated_fee_wei": estimated_fee,
+        }
+
     async def withdraw_platform_treasury_internal(
         self, user: Any, record: Dict[str, Any], claims: List[Dict[str, str]], guild_id: int
     ) -> Dict[str, Any]:
@@ -1684,6 +1756,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         platform = str(record.get("platform_treasury") or "").lower()
         if not claims or any(str(item.get("owner") or "").lower() != platform for item in claims):
             raise ValueError("Platform withdrawal cannot contain creator treasury claims.")
+        if str(record.get("network") or "base-sepolia") == "base-mainnet":
+            if len(claims) != 1:
+                raise ValueError("Review one Base mainnet treasury asset at a time.")
+            return await self.create_mainnet_claim_review(
+                user, kind="treasuryClaim", token=str(claims[0]["asset"]),
+                token_admin=str(record["token_admin"]),
+                fee_owner=str(claims[0]["owner"]),
+            )
         wallet = self.bot.get_cog("CryptoWallet")
         withdraw = getattr(wallet, "clanker_withdraw_treasuries", None) if wallet else None
         if not callable(withdraw):
@@ -1704,6 +1784,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             raise ValueError("Only the launch requester can approve this withdrawal.")
         if not claims:
             raise ValueError("No deposited treasury rewards are currently available.")
+        if str(record.get("network") or "base-sepolia") == "base-mainnet":
+            if len(claims) != 1:
+                raise ValueError("Review one Base mainnet treasury asset at a time.")
+            return await self.create_mainnet_claim_review(
+                user, kind="treasuryClaim", token=str(claims[0]["asset"]),
+                token_admin=str(record["token_admin"]),
+                fee_owner=str(claims[0]["owner"]),
+            )
         wallet = self.bot.get_cog("CryptoWallet")
         withdraw = getattr(wallet, "clanker_withdraw_treasuries", None) if wallet else None
         if not callable(withdraw):
@@ -1750,6 +1838,10 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         admin = str(record.get("token_admin") or "").lower()
         if not ADDRESS_RE.fullmatch(token) or not ADDRESS_RE.fullmatch(admin):
             raise ValueError("The confirmed launch has invalid reward bindings.")
+        if str(record.get("network") or "base-sepolia") == "base-mainnet":
+            return await self.create_mainnet_claim_review(
+                user, kind="rewardCollection", token=token, token_admin=admin,
+            )
         wallet = self.bot.get_cog("CryptoWallet")
         collect = getattr(wallet, "clanker_collect_rewards", None) if wallet else None
         if not callable(collect):

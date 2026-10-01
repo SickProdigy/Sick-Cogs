@@ -69,7 +69,7 @@ class MainnetApprovalTests(unittest.TestCase):
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from ..clanker import Clanker
-from ..mainnet_approval import MAINNET_ACKNOWLEDGEMENT
+from ..mainnet_approval import MAINNET_OPERATION_ACKNOWLEDGEMENT
 from ..views import MainnetApprovalView, mainnet_review_embed
 
 class _AsyncValue:
@@ -108,7 +108,7 @@ class MainnetProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(config.mainnet_operation_approval.value)
         approval = await Clanker.approve_mainnet_review(
             subject, operation, operation.requester_id,
-            acknowledgement=MAINNET_ACKNOWLEDGEMENT,
+            acknowledgement=MAINNET_OPERATION_ACKNOWLEDGEMENT,
         )
         self.assertEqual(config.mainnet_operation_approval.value, approval.to_dict())
         claimed = await Clanker.claim_mainnet_approval(
@@ -119,6 +119,34 @@ class MainnetProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
             await Clanker.claim_mainnet_approval(
                 subject, operation, operation.requester_id
             )
+
+    async def test_claim_review_uses_live_quote_without_submitting(self):
+        signer = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        wallet = SimpleNamespace(
+            wallet_context_for_token_factory=AsyncMock(return_value={
+                "owner_address": signer, "network": "base-mainnet", "chain_id": 8453,
+            }),
+            estimate_base_mainnet_call_fee=AsyncMock(return_value={
+                "gas_limit": 250_000, "fee_wei": 1_000_000_000_000,
+            }),
+        )
+        subject = SimpleNamespace(
+            bot=SimpleNamespace(get_cog=lambda name: wallet if name == "CryptoWallet" else None),
+            has_current_mainnet_terms=AsyncMock(return_value=True),
+            stage_mainnet_review=AsyncMock(return_value="protected-view"),
+        )
+        result = await Clanker.create_mainnet_claim_review(
+            subject, SimpleNamespace(id=7), kind="rewardCollection",
+            token="0x2222222222222222222222222222222222222222",
+            token_admin=signer,
+        )
+        operation = result["intent"]
+        self.assertEqual(result["provider_status"], "review_required")
+        self.assertEqual(operation.kind, "rewardCollection")
+        self.assertEqual(operation.gas_limit, 250_000)
+        self.assertEqual(operation.max_fee_wei, 11_000_000_000_000)
+        self.assertEqual(result["view"], "protected-view")
+        wallet.estimate_base_mainnet_call_fee.assert_awaited_once()
 
     async def test_terms_phrase_and_staged_fingerprint_fail_closed(self):
         import time
@@ -146,13 +174,13 @@ class MainnetProtectedFlowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "terms"):
             await Clanker.approve_mainnet_review(
                 subject, operation, operation.requester_id,
-                acknowledgement=MAINNET_ACKNOWLEDGEMENT,
+                acknowledgement=MAINNET_OPERATION_ACKNOWLEDGEMENT,
             )
         subject.has_current_mainnet_terms = AsyncMock(return_value=True)
         with self.assertRaisesRegex(ValueError, "changed"):
             await Clanker.approve_mainnet_review(
                 subject, operation, operation.requester_id,
-                acknowledgement=MAINNET_ACKNOWLEDGEMENT,
+                acknowledgement=MAINNET_OPERATION_ACKNOWLEDGEMENT,
             )
         self.assertIsNone(config.mainnet_operation_approval.value)
 
