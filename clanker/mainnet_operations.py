@@ -227,6 +227,27 @@ class MainnetOperationIntent:
         return "0x" + hashlib.sha256(encoded).hexdigest()
 
 
+def build_mainnet_launch_operation(
+    launch: ClankerLaunchIntent, *, gas_limit: int, max_fee_wei: int,
+) -> MainnetOperationIntent:
+    """Convert one Base-mainnet semantic launch into its audited operation."""
+
+    if launch.network != "base-mainnet" or launch.chain_id != 8453:
+        raise ValueError("A Base mainnet launch intent is required.")
+    manifest = _manifest()
+    return MainnetOperationIntent(
+        operation_id=launch.launch_id, kind="launch",
+        requester_id=launch.requester_id, signer=launch.token_admin,
+        to=str(manifest["factory"]["address"]),
+        value=launch.expected_native_value_wei,
+        data=_mainnet_launch_calldata(manifest, launch),
+        created_at=launch.created_at, expires_at=launch.expires_at,
+        gas_limit=int(gas_limit), max_fee_wei=int(max_fee_wei),
+        recipients=tuple(item.recipient for item in launch.rewards),
+        launch_config=launch,
+    )
+
+
 def validate_mainnet_candidate(
     intent: MainnetOperationIntent,
     *,

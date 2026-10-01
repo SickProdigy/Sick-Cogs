@@ -170,6 +170,9 @@ def clanker_deployment_calldata(
 def clanker_deployment_operation(intent: ClankerLaunchIntent) -> ClankerDeploymentOperation:
     """Build the complete Base Sepolia transaction operation for either wallet route."""
 
+    if intent.network != "base-sepolia" or intent.chain_id != CLANKER_CHAIN_ID:
+        raise ValueError("The Base Sepolia submitter rejects non-testnet intents.")
+
     return ClankerDeploymentOperation(
         launch_id=intent.launch_id,
         payload_hash=intent.payload_hash,
@@ -182,6 +185,9 @@ def clanker_deployment_operation(intent: ClankerLaunchIntent) -> ClankerDeployme
 
 def validate_clanker_deployment_call(intent: ClankerLaunchIntent, *, to: str, value: int, data: str) -> None:
     """Reject any provider call that differs from the immutable reviewed intent."""
+
+    if intent.network != "base-sepolia" or intent.chain_id != CLANKER_CHAIN_ID:
+        raise ValueError("The Base Sepolia submitter rejects non-testnet intents.")
 
     if to.lower() != CLANKER_FACTORY.lower() or value != intent.expected_native_value_wei:
         raise ValueError("Clanker deployment target or native value does not match the intent.")

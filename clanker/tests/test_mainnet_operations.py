@@ -4,6 +4,7 @@ import unittest
 from ..mainnet_operations import (
     MAINNET_SUBMISSION_ENABLED,
     MainnetOperationIntent,
+    build_mainnet_launch_operation,
     authorize_mainnet_submission,
     validate_mainnet_candidate,
     _mainnet_launch_calldata,
@@ -123,16 +124,20 @@ class MainnetOperationTests(unittest.TestCase):
             )
 
     def test_launch_reconstructs_every_semantic_calldata_field(self):
-        launch = launch_intent()
+        launch = dataclasses.replace(
+            launch_intent(), network="base-mainnet", chain_id=8453
+        )
         data = _mainnet_launch_calldata(__import__("clanker.mainnet_operations", fromlist=["_manifest"])._manifest(), launch)
-        operation = MainnetOperationIntent(
-            operation_id=launch.launch_id, kind="launch", requester_id=launch.requester_id,
-            signer=launch.token_admin, to="0xE85A59c628F7d27878ACeB4bf3b35733630083a9",
-            value=launch.expected_native_value_wei, data=data, created_at=launch.created_at,
-            expires_at=launch.expires_at, gas_limit=3_000_000, max_fee_wei=2_000_000_000_000_000,
-            recipients=tuple(item.recipient for item in launch.rewards), launch_config=launch,
+        operation = build_mainnet_launch_operation(
+            launch, gas_limit=3_000_000, max_fee_wei=2_000_000_000_000_000,
         )
         self.assertEqual(operation.data, data)
+        self.assertEqual(operation.launch_config.network, "base-mainnet")
+        with self.assertRaisesRegex(ValueError, "mainnet launch"):
+            build_mainnet_launch_operation(
+                launch_intent(), gas_limit=3_000_000,
+                max_fee_wei=2_000_000_000_000_000,
+            )
         embed = mainnet_review_embed(operation)
         rendered = " ".join(str(field.value) for field in embed.fields)
         self.assertIn("Base mainnet", rendered)

@@ -15,6 +15,7 @@ CLANKER_LAUNCH_VERSION = 1
 CLANKER_LAUNCH_KIND = "clanker-v4-launch"
 CLANKER_NETWORK = "base-sepolia"
 CLANKER_CHAIN_ID = 84532
+CLANKER_NETWORK_CHAIN_IDS = {"base-sepolia": 84532, "base-mainnet": 8453}
 CLANKER_FACTORY = "0xE85A59c628F7d27878ACeB4bf3b35733630083a9"
 BASE_SEPOLIA_WETH = "0x4200000000000000000000000000000000000006"
 MIN_AIRDROP_TOKENS = DEFAULT_CLANKER_SUPPLY * 25 // 10_000
@@ -259,8 +260,9 @@ class ClankerLaunchIntent:
         object.__setattr__(self, "rewards", tuple(self.rewards))
         if self.version != CLANKER_LAUNCH_VERSION or self.kind != CLANKER_LAUNCH_KIND:
             raise ValueError("Unsupported Clanker launch version or kind.")
-        if self.network != CLANKER_NETWORK or self.chain_id != CLANKER_CHAIN_ID:
-            raise ValueError("Clanker launches are restricted to Base Sepolia.")
+        if (self.network not in CLANKER_NETWORK_CHAIN_IDS
+                or self.chain_id != CLANKER_NETWORK_CHAIN_IDS[self.network]):
+            raise ValueError("Clanker launch network and chain ID do not match.")
         if self.factory != CLANKER_FACTORY.lower():
             raise ValueError("Clanker launch targets an unreviewed factory.")
         launch_id = str(self.launch_id or "").strip().lower()

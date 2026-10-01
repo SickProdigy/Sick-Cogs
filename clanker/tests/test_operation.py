@@ -41,6 +41,16 @@ class ClankerProviderTests(unittest.TestCase):
         self.assertEqual(operation.value, 0)
         self.assertEqual(operation.data, data)
         self.assertEqual(operation.payload_hash, launch.payload_hash)
+        mainnet = __import__("dataclasses").replace(
+            launch, network="base-mainnet", chain_id=8453
+        )
+        with self.assertRaisesRegex(ValueError, "rejects non-testnet"):
+            provider.clanker_deployment_operation(mainnet)
+        with self.assertRaisesRegex(ValueError, "rejects non-testnet"):
+            provider.validate_clanker_deployment_call(
+                mainnet, to=core.CLANKER_FACTORY, value=0,
+                data=provider.clanker_deployment_calldata(mainnet),
+            )
 
     def test_builds_bounded_official_developer_buy_extension(self):
         value = 10**16
