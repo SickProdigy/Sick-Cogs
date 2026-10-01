@@ -368,8 +368,60 @@ class WalletCoreCommands:
 
         Shows your wallet or another member's existing public testnet profile.
         """
+        explicit_testnet = bool(
+            getattr(ctx, "_cryptowallet_explicit_testnet", False)
+        )
+        environment_resolver = getattr(self, "_wallet_environment", None)
+        environment = (
+            await environment_resolver()
+            if callable(environment_resolver)
+            else WalletEnvironment.TESTNET
+        )
+        if environment is not WalletEnvironment.TESTNET and not explicit_testnet:
+            terms_current = await self.has_current_cryptowallet_mainnet_terms(
+                ctx.author.id
+            )
+            embed = discord.Embed(
+                title="CryptoWallet Mainnet Staging",
+                description=(
+                    "Base mainnet is selected for walkthrough testing. No mainnet "
+                    "balance, transaction, or provider call is made by this card."
+                ),
+                color=discord.Color.orange(),
+            )
+            embed.add_field(
+                name="Your setup",
+                value=(
+                    "CryptoWallet terms are current. Use "
+                    f"`{ctx.clean_prefix}wallet authorize` to review authorization."
+                    if terms_current else
+                    "Setup required · run "
+                    f"`{ctx.clean_prefix}wallet authorize` for the guided terms and "
+                    "authorization walkthrough."
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="Execution",
+                value=(
+                    "Disabled and emergency-paused. Mainnet sends remain unavailable "
+                    "until the separate reviewed release gates are complete."
+                ),
+                inline=False,
+            )
+            if environment is WalletEnvironment.MAINNET:
+                embed.add_field(
+                    name="Testnet sandbox",
+                    value=f"Use `{ctx.clean_prefix}wallet testnet`.",
+                    inline=False,
+                )
+            embed.set_footer(
+                text="Staging status only · no wallet or blockchain state changed"
+            )
+            await ctx.send(embed=embed)
+            return
         if not await testnet_path_allowed(
-            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+            self, ctx, explicit=explicit_testnet
         ):
             return
         if not await self._wallet_read_allowed(

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from ..commands.authorization import WalletAuthorizationCommands
+from ..commands.core import WalletCoreCommands
 from ..commands.views import WalletMainnetSetupView
 
 
@@ -13,6 +14,35 @@ class _Value:
 
     async def __call__(self):
         return self.value
+
+
+class MainnetRootStagingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_root_wallet_is_guided_without_provider_or_wallet_reads(self):
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), clean_prefix="!", send=AsyncMock()
+        )
+        cog = SimpleNamespace(
+            _wallet_environment=AsyncMock(
+                return_value=__import__(
+                    "cryptowallet.core.environment",
+                    fromlist=["WalletEnvironment"],
+                ).WalletEnvironment.MAINNET
+            ),
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
+            _wallet_read_allowed=AsyncMock(),
+            _wallet_profile_or_error=AsyncMock(),
+        )
+
+        await WalletCoreCommands.wallet.callback(cog, ctx)
+
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "CryptoWallet Mainnet Staging")
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("!wallet authorize", fields["Your setup"])
+        self.assertIn("emergency-paused", fields["Execution"])
+        self.assertIn("!wallet testnet", fields["Testnet sandbox"])
+        cog._wallet_read_allowed.assert_not_awaited()
+        cog._wallet_profile_or_error.assert_not_awaited()
 
 
 class MainnetSetupDeliveryTests(unittest.IsolatedAsyncioTestCase):
