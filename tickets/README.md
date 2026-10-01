@@ -75,3 +75,18 @@ Switch from the generic mode buttons to recognizable support topics by adding bu
     [p]ticketsset style custom
 
 Custom destinations use names such as `sup-mine-0007`. Adding a topic automatically enables its destination mode. Republish after changing topics or launcher style. Requester closure removes their channel access; staff can reopen a ticket or permanently delete it with confirmation.
+
+## Optional workflow controls
+
+The default ticket shows only **Close**. A confirmed close by either the requester or staff permanently deletes the destination. Administrators can enable staff workflow controls for new tickets:
+
+    [p]ticketsset claims true
+    [p]ticketsset statuses true
+
+To retain closed tickets for staff review instead of deleting immediately:
+
+    [p]ticketsset closebehavior review
+
+Review mode removes requester access when closed. Staff then see Reopen and Delete controls. Restore the simple immediate-delete behavior with:
+
+    [p]ticketsset closebehavior delete

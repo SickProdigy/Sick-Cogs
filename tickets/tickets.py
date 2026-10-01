@@ -22,6 +22,7 @@ GUILD_DEFAULTS = {
     "launcher_message": "To create a ticket, click a button below.",
     "welcome_message": "Thanks for contacting support. Please describe what you need help with below. A support team member will be with you shortly.",
     "launcher_style": "generic", "topics": {},
+    "claims_enabled": False, "statuses_enabled": False, "close_behavior": "delete",
     "next_ticket_number": 1, "tickets": {},
 }
 
@@ -30,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -118,6 +119,9 @@ class Tickets(commands.Cog):
         embed.add_field(name="Cooldown", value=f"{data['creation_cooldown']} seconds")
         embed.add_field(name="Launcher style", value=data["launcher_style"].title())
         embed.add_field(name="Ticket modes", value=", ".join(data["enabled_modes"]))
+        embed.add_field(name="Staff claims", value="Enabled" if data["claims_enabled"] else "Disabled")
+        embed.add_field(name="Ticket statuses", value="Enabled" if data["statuses_enabled"] else "Disabled")
+        embed.add_field(name="On close", value="Delete immediately" if data["close_behavior"] == "delete" else "Hide requester; staff reviews")
         return embed
 
     async def _configured_parts(self, guild):
@@ -381,7 +385,10 @@ class Tickets(commands.Cog):
                 embed.add_field(name="Claimed by", value="Nobody")
                 embed.set_footer(text="Use the controls below to manage this ticket.")
                 record = new_ticket_record(
-                    number, destination.id, owner.id, mode=mode
+                    number, destination.id, owner.id, mode=mode,
+                    claims_enabled=data["claims_enabled"],
+                    statuses_enabled=data["statuses_enabled"],
+                    close_behavior=data["close_behavior"],
                 )
                 control = await destination.send(
                     content=owner.mention,
@@ -480,6 +487,24 @@ class Tickets(commands.Cog):
             if closed == (record["status"] == "closed"):
                 return record
             channel = self._get_destination(guild, channel_id)
+            if closed and record.get("close_behavior") == "delete":
+                if channel is None:
+                    raise TicketError("The ticket destination no longer exists.")
+                try:
+                    await channel.delete(
+                        reason=f"Ticket closed and deleted by user {actor.id}"
+                    )
+                except discord.HTTPException as error:
+                    raise TicketError("I could not delete this ticket.") from error
+                record.update(
+                    status="deleted",
+                    updated_at=int(time.time()),
+                    closed_at=int(time.time()),
+                    closed_by_id=actor.id,
+                    control_message_id=0,
+                )
+                await self._save_ticket(guild, record)
+                return record
             owner = guild.get_member(record["owner_id"])
             if not isinstance(channel, (discord.TextChannel, discord.VoiceChannel, discord.Thread)):
                 raise TicketError("The ticket destination no longer exists.")
@@ -667,6 +692,32 @@ class Tickets(commands.Cog):
     async def set_cooldown(self, ctx, seconds: commands.Range[int, 30, 3600]):
         await self.config.guild(ctx.guild).creation_cooldown.set(seconds)
         await ctx.tick()
+
+    @ticketsset.command(name="claims")
+    async def set_claims(self, ctx, enabled: bool):
+        """Show or hide the staff claim control on new tickets."""
+        await self.config.guild(ctx.guild).claims_enabled.set(enabled)
+        await ctx.send(f"Staff claim controls {'enabled' if enabled else 'disabled'} for new tickets.")
+
+    @ticketsset.command(name="statuses")
+    async def set_statuses(self, ctx, enabled: bool):
+        """Show or hide ticket status controls on new tickets."""
+        await self.config.guild(ctx.guild).statuses_enabled.set(enabled)
+        await ctx.send(f"Ticket status controls {'enabled' if enabled else 'disabled'} for new tickets.")
+
+    @ticketsset.command(name="closebehavior")
+    async def set_close_behavior(self, ctx, behavior: str):
+        """Choose delete or review behavior after confirmed closure."""
+        behavior = behavior.lower()
+        if behavior not in {"delete", "review"}:
+            await ctx.send("Close behavior must be delete or review.")
+            return
+        await self.config.guild(ctx.guild).close_behavior.set(behavior)
+        await ctx.send(
+            "Closing will permanently delete tickets after confirmation."
+            if behavior == "delete"
+            else "Closing will hide the requester; staff must reopen or delete the ticket."
+        )
 
     @ticketsset.command(name="modes")
     async def set_modes(self, ctx, *, modes: str):

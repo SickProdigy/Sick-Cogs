@@ -122,6 +122,12 @@ class TicketControls(discord.ui.View):
         self.status.disabled = closed
         self.close.label = "Reopen" if closed else "Close"
         self.close.style = discord.ButtonStyle.success if closed else discord.ButtonStyle.danger
+        if not record.get("claims_enabled", True):
+            self.remove_item(self.claim)
+        if not record.get("statuses_enabled", True):
+            self.remove_item(self.status)
+        if record.get("close_behavior", "review") != "review" or not closed:
+            self.remove_item(self.delete)
 
     async def interaction_check(self, interaction):
         if interaction.guild is None or interaction.channel_id != self.channel_id:
@@ -183,10 +189,15 @@ class TicketControls(discord.ui.View):
     async def close(self, interaction, button):
         record = await self.cog.get_ticket(interaction.guild, self.channel_id)
         reopening = record.get("status") == "closed"
+        permanent = record.get("close_behavior") == "delete"
         await interaction.response.send_message(
-            "Reopen this ticket and restore requester replies?"
+            "Reopen this ticket and restore requester access?"
             if reopening
-            else "Close this ticket and prevent further requester replies?",
+            else (
+                "Permanently delete this ticket? This cannot be undone."
+                if permanent
+                else "Close this ticket and remove requester access?"
+            ),
             view=CloseConfirmation(
                 self.cog,
                 interaction.user,
@@ -271,7 +282,11 @@ class CloseConfirmation(OwnedEphemeralView):
             return
         await self.cog.refresh_control_message(interaction.guild, self.channel_id, record)
         await interaction.response.edit_message(
-            content="Ticket reopened." if self.reopening else "Ticket closed.",
+            content=(
+                "Ticket reopened."
+                if self.reopening
+                else ("Ticket permanently deleted." if record["status"] == "deleted" else "Ticket closed for staff review.")
+            ),
             view=None,
         )
         self.stop()

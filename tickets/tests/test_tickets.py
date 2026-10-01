@@ -17,7 +17,7 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(
             set(record),
             {
-                "number", "channel_id", "owner_id", "mode", "status", "claimed_by_id",
+                "number", "channel_id", "owner_id", "mode", "claims_enabled", "statuses_enabled", "close_behavior", "status", "claimed_by_id",
                 "created_at", "updated_at", "closed_at", "closed_by_id",
                 "control_message_id",
             },
@@ -50,6 +50,9 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)
         self.assertEqual(GUILD_DEFAULTS["enabled_modes"], ["text"])
         self.assertEqual(GUILD_DEFAULTS["launcher_title"], "Tickets")
+        self.assertFalse(GUILD_DEFAULTS["claims_enabled"])
+        self.assertFalse(GUILD_DEFAULTS["statuses_enabled"])
+        self.assertEqual(GUILD_DEFAULTS["close_behavior"], "delete")
         self.assertGreaterEqual(GUILD_DEFAULTS["creation_cooldown"], 300)
         self.assertLessEqual(MAX_ACTIVE_TICKETS, 100)
         self.assertLessEqual(MAX_TRACKED_TICKETS, 500)
@@ -96,6 +99,16 @@ class TicketCogTests(unittest.TestCase):
     def test_permission_verification_rejects_staff_without_view(self):
         channel, requester, staff = self.make_channel(staff_view=False)
         self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff], "text"))
+
+    def test_simple_defaults_only_show_close_control(self):
+        cog = SimpleNamespace(status_label=Tickets.status_label)
+        view = TicketControls(cog, 55, {"status": "open", "claimed_by_id": 0, "claims_enabled": False, "statuses_enabled": False, "close_behavior": "delete"})
+        self.assertEqual({item.custom_id for item in view.children}, {"tickets:55:close"})
+
+    def test_reviewed_closed_ticket_shows_staff_delete_and_reopen(self):
+        cog = SimpleNamespace(status_label=Tickets.status_label)
+        view = TicketControls(cog, 55, {"status": "closed", "claimed_by_id": 0, "claims_enabled": False, "statuses_enabled": False, "close_behavior": "review"})
+        self.assertEqual({item.custom_id for item in view.children}, {"tickets:55:close", "tickets:55:delete"})
 
     def test_control_embed_updates_status_and_claim(self):
         cog = object.__new__(Tickets)
@@ -146,7 +159,7 @@ class TicketCogTests(unittest.TestCase):
         )
         self.assertEqual(
             {item.custom_id for item in controls.children},
-            {"tickets:55:claim", "tickets:55:status", "tickets:55:close", "tickets:55:delete"},
+            {"tickets:55:claim", "tickets:55:status", "tickets:55:close"},
         )
 
 
