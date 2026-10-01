@@ -30,6 +30,53 @@ if TYPE_CHECKING:
     from .clanker import Clanker
 
 
+class ClankerTermsView(discord.ui.View):
+    """Discord-native, product-specific one-time terms acceptance."""
+
+    def __init__(self, cog: "Clanker", user_id: int, terms_url: str | None, *, current: bool):
+        super().__init__(timeout=180)
+        accept_button = self.children[0]
+        self.remove_item(accept_button)
+        if terms_url:
+            self.add_item(discord.ui.Button(
+                label="View terms", style=discord.ButtonStyle.link, url=terms_url
+            ))
+        accept_button.disabled = current
+        if current:
+            accept_button.label = "Terms accepted"
+        self.add_item(accept_button)
+        self.cog = cog
+        self.user_id = int(user_id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the account owner can accept these Clanker terms.", ephemeral=True
+        )
+        return False
+
+    @discord.ui.button(label="Accept terms", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        if await self.cog.has_current_mainnet_terms(self.user_id):
+            button.disabled = True
+            button.label = "Terms accepted"
+            await interaction.message.edit(view=self)
+            await interaction.followup.send(
+                "Your Clanker terms acceptance is already current.", ephemeral=True
+            )
+            return
+        await self.cog.accept_mainnet_terms(self.user_id)
+        button.disabled = True
+        button.label = "Terms accepted"
+        await interaction.message.edit(view=self)
+        await interaction.followup.send(
+            "Clanker mainnet terms accepted. This does not launch a token or authorize a transaction.",
+            ephemeral=True,
+        )
+
+
 _VAULT_DURATION_UNITS = {"h": 3600, "d": 86400, "w": 604800, "m": 2592000, "y": 31536000}
 
 
@@ -1255,6 +1302,14 @@ class ClankerVerifiedView(discord.ui.View):
         embed.add_field(
             name="Payload fingerprint",
             value=f"`{record['payload_hash']}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Launch acknowledgment",
+            value=(
+                "Pressing Launch confirms you reviewed this exact fingerprint and "
+                "accept responsibility for the token, its legality, and its irreversible launch."
+            ),
             inline=False,
         )
         embed.set_footer(

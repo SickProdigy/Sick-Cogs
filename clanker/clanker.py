@@ -33,6 +33,11 @@ from .models import (
     ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
 )
 from .operation import clanker_deployment_operation
+from .terms import (
+    CLANKER_MAINNET_TERMS_VERSION,
+    create_clanker_terms_acceptance,
+    is_current_clanker_terms_acceptance,
+)
 from .rewards import (
     WETH, collect_rewards_call, reconcile_collection_receipt,
     reconcile_withdrawal_receipt, reward_preflight,
@@ -50,7 +55,7 @@ from .admin import ClankerAdminMixin
 from .views import (
     ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
     ClankerDraftView, ClankerLaunchHistoryView,
-    ClankerReceiptRewardsView, ClankerTreasuryWithdrawalView,
+    ClankerReceiptRewardsView, ClankerTermsView, ClankerTreasuryWithdrawalView,
 )
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
@@ -281,7 +286,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "owner_audit_log": [],
     }
 
-    default_user = {"launch_records": []}
+    default_user = {"launch_records": [], "mainnet_terms_acceptance": None}
 
     default_guild = {
         "enabled": False,
@@ -324,6 +329,19 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             "platform_bps": int(await self.config.platform_bps()),
         })
         return settings
+
+    async def accept_mainnet_terms(
+        self, user_id: int, *, acceptance_id: str | None = None, now: int | None = None,
+    ) -> dict:
+        record = create_clanker_terms_acceptance(
+            user_id, acceptance_id=acceptance_id, now=now
+        )
+        await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance.set(record)
+        return record
+
+    async def has_current_mainnet_terms(self, user_id: int) -> bool:
+        record = await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance()
+        return is_current_clanker_terms_acceptance(record, user_id)
 
     async def cog_load(self):
         guild_data = await self.config.all_guilds()
@@ -2501,6 +2519,41 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         )
         embed.set_footer(text="Base Sepolia only · no private keys are stored by this cog")
         await ctx.send(embed=embed)
+
+    @clanker.command(name="terms")
+    async def clanker_terms(self, ctx: commands.Context):
+        """Show and accept Clanker-only mainnet terms in Discord."""
+        current = await self.has_current_mainnet_terms(ctx.author.id)
+        terms_url = None
+        wallet = self.bot.get_cog("CryptoWallet")
+        if wallet is not None:
+            base_url = str(await wallet.config.approval_base_url() or "").rstrip("/")
+            if base_url:
+                terms_url = f"{base_url}/clanker-terms.html"
+        embed = discord.Embed(
+            title="Clanker Mainnet Terms",
+            description=(
+                f"Acceptance: **{'Current' if current else 'Not accepted'}**\n"
+                "Required once per material terms version before a future Base mainnet "
+                "launch. Base Sepolia test launches are unchanged."
+            ),
+            color=discord.Color.green() if current else discord.Color.blurple(),
+        )
+        embed.add_field(name="Terms version", value=f"`{CLANKER_MAINNET_TERMS_VERSION}`")
+        embed.add_field(
+            name="In short",
+            value=(
+                "You choose and launch the token, pay the displayed value and gas, and "
+                "are responsible for its legality and use. Review the administrator, "
+                "buy-in, reward split, vault, airdrop, and immutable fingerprint."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Acceptance does not launch a token or authorize a transaction.")
+        await ctx.send(
+            embed=embed,
+            view=ClankerTermsView(self, ctx.author.id, terms_url, current=current),
+        )
 
     @clanker.command(name="card", aliases=("create",))
     async def clanker_card(self, ctx: commands.Context):
