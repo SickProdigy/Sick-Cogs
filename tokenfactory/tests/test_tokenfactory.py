@@ -435,6 +435,7 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
             {
                 "name": "Second Token", "symbol": "TWO",
                 "contract_address": "0x" + "22" * 20, "deployed_at": 200,
+                "network": "base-mainnet",
             },
         ]
         cog = SimpleNamespace(
@@ -455,7 +456,10 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         embed = ctx.send.await_args.kwargs["embed"]
         self.assertIn("2 verified", embed.description)
         self.assertEqual(embed.fields[0].name, "Second Token (TWO)")
+        self.assertIn("Base mainnet", embed.fields[0].value)
         self.assertEqual(embed.fields[1].name, "First Token (ONE)")
+        self.assertIn("Base Sepolia", embed.fields[1].value)
+        self.assertEqual(embed.footer.text, "Verified deployments only")
 
     def test_external_companion_discloses_and_binds_execution_terms(self):
         source = (

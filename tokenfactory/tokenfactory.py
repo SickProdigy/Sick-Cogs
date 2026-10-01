@@ -989,6 +989,10 @@ class TokenFactory(commands.Cog):
         if remainder:
             supply += f".{remainder:0{result['decimals']}d}".rstrip("0")
         contract = str(result["contract_address"])
+        network = str(result.get("network") or "base-sepolia")
+        mainnet = network == "base-mainnet"
+        network_label = "Base mainnet (`8453`)" if mainnet else "Base Sepolia (`84532`)"
+        explorer = "https://basescan.org" if mainnet else "https://sepolia.basescan.org"
         operation = str(result.get("user_operation_hash") or "")
         transaction = str(result.get("transaction_hash") or "")
         embed = discord.Embed(
@@ -1002,7 +1006,7 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Token", value=f"{result['name']} ({result['symbol']})", inline=False
         )
-        embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        embed.add_field(name="Network", value=network_label, inline=True)
         embed.add_field(name="Fixed supply", value=supply, inline=True)
         embed.add_field(name="Decimals", value=str(result["decimals"]), inline=True)
         embed.add_field(
@@ -1010,13 +1014,13 @@ class TokenFactory(commands.Cog):
         )
         embed.add_field(
             name="Token contract",
-            value=f"[`{contract}`](https://sepolia.basescan.org/address/{contract})",
+            value=f"[`{contract}`]({explorer}/address/{contract})",
             inline=False,
         )
         if transaction:
             embed.add_field(
                 name="Deployment transaction",
-                value=f"[`{transaction}`](https://sepolia.basescan.org/tx/{transaction})",
+                value=f"[`{transaction}`]({explorer}/tx/{transaction})",
                 inline=False,
             )
         elif operation:
@@ -1025,7 +1029,10 @@ class TokenFactory(commands.Cog):
             name="History", value=f"Run `{history}` to view verified deployments.",
             inline=False,
         )
-        embed.set_footer(text="Base Sepolia testnet · automatic confirmation")
+        embed.set_footer(text=(
+            "Base mainnet · automatic confirmation" if mainnet else
+            "Base Sepolia testnet · automatic confirmation"
+        ))
         return embed
 
     async def _watch_external_deployment(
@@ -1280,9 +1287,13 @@ class TokenFactory(commands.Cog):
             return
         if result.get("deployed"):
             history = await self.command_hint("tokenfactory tokens", ctx=ctx)
+            network_label = (
+                "Base mainnet" if result.get("network") == "base-mainnet"
+                else "Base Sepolia"
+            )
             await ctx.send(
                 f"Verified **{result['name']} ({result['symbol']})** at "
-                f"`{result['contract_address']}` on Base Sepolia. It was added to the "
+                f"`{result['contract_address']}` on {network_label}. It was added to the "
                 f"community token registry. Run `{history}` to view all of "
                 "your verified deployments."
             )
@@ -1318,7 +1329,7 @@ class TokenFactory(commands.Cog):
             title="Your TokenFactory tokens",
             description=(
                 f"{len(valid)} verified fixed-supply deployment"
-                f"{'s' if len(valid) != 1 else ''} on Base Sepolia."
+                f"{'s' if len(valid) != 1 else ''} across reviewed Base networks."
             ),
             color=await ctx.embed_color(),
         )
@@ -1328,15 +1339,17 @@ class TokenFactory(commands.Cog):
             contract = str(item.get("contract_address") or "Unavailable")
             deployed_at = int(item.get("deployed_at", 0) or 0)
             when = f" · <t:{deployed_at}:R>" if deployed_at > 0 else ""
+            network = str(item.get("network") or "base-sepolia")
+            network_label = "Base mainnet" if network == "base-mainnet" else "Base Sepolia"
             embed.add_field(
                 name=f"{name} ({symbol})",
-                value=f"`{contract}`{when}",
+                value=f"{network_label} · `{contract}`{when}",
                 inline=False,
             )
         if len(valid) > len(newest):
             embed.set_footer(text=f"Showing the latest {len(newest)} deployments")
         else:
-            embed.set_footer(text="Testnet tokens only")
+            embed.set_footer(text="Verified deployments only")
         await ctx.send(embed=embed)
 
     @tokenfactory.command(name="status")
@@ -1464,8 +1477,8 @@ class TokenFactory(commands.Cog):
         embed.add_field(
             name="Fee approval model",
             value=(
-                "Live estimate and reapproval threshold are staged. The legacy "
-                "provider-level fee gate still blocks submission."
+                "Live estimate, displayed reapproval threshold, and immediate "
+                "pre-submission refresh are implemented."
             ),
             inline=False,
         )
