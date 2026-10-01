@@ -1,0 +1,15 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Connect Discord servers to approved Gitea, GitHub, or GitLab repositories, create reviewed issues, and route repository notifications.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild forge connection metadata, repository aliases, notification channel IDs, permission policies, and bounded polling cursors. Forge access tokens are stored separately in Red shared API tokens. Issue drafts remain in memory only and expire with their Discord interaction.",
+  "hidden": false,
+  "install_msg": "The bot owner must approve self-hosted forge domains with [p]gitownerset allowhost. A server administrator can then run [p]gitset to connect a provider and register repositories.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links", "read_message_history"],
+  "requirements": [],
+  "short": "Gitea, GitHub, and GitLab issues and repository notifications",
+  "tags": ["git", "gitea", "github", "gitlab", "issues", "ci", "notifications"],
+  "type": "COG",
+  "version": "0.1.0"
+}

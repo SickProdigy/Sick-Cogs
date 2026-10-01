@@ -45,7 +45,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 
 Develop-only cogs and experiments are not part of the stable Index release.
 
-Current develop experiments include `ark`, an official ARK: Survival Ascended Steam announcement
+Current develop experiments include `gitforge`, a multi-provider Gitea, GitHub, and GitLab issue and repository monitoring bridge; `ark`, an official ARK: Survival Ascended Steam announcement
 publisher, `imagine`, a private, provider-neutral AI image generator that is disabled until the bot
 owner explicitly allowlists a server and its administrators grant access, `mybb`, a per-server bridge
 for browsing and publishing through the SickProdigy MyBB API, and `twitter`, a native X API post
