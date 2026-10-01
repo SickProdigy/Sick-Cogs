@@ -79,6 +79,29 @@ class ClankerReward:
         return {"admin": self.admin, "recipient": self.recipient, "bps": self.bps, "token": self.token}
 
 
+def validate_platform_attribution(
+    intent: "ClankerLaunchIntent", platform_address: str | None, platform_bps: int,
+) -> ClankerReward | None:
+    """Require one immutable SickGaming reward entry controlled by its treasury."""
+
+    context = json.loads(intent.context_json)
+    if context.get("interface") != "SickGamingBot" or context.get("platform") != "discord":
+        raise ValueError("Clanker platform attribution context is missing or changed.")
+    if not isinstance(platform_bps, int) or isinstance(platform_bps, bool) or not 0 <= platform_bps <= 10_000:
+        raise ValueError("Clanker platform reward bps are invalid.")
+    if platform_bps == 0:
+        return None
+    platform = _address(str(platform_address or ""), "Platform treasury")
+    touching = [
+        item for item in intent.rewards
+        if item.admin == platform or item.recipient == platform
+    ]
+    if (len(touching) != 1 or touching[0].admin != platform
+            or touching[0].recipient != platform or touching[0].bps != platform_bps):
+        raise ValueError("Clanker platform reward attribution does not match owner policy.")
+    return touching[0]
+
+
 @dataclass(frozen=True, slots=True)
 class ClankerPoolPosition:
     tick_lower: int

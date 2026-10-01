@@ -31,6 +31,7 @@ from .constants import (
 from .models import (
     BASE_SEPOLIA_WETH, ClankerAirdrop, ClankerLaunchIntent, ClankerPool,
     ClankerPoolPosition, ClankerReward, ClankerVault, standard_base_sepolia_pool,
+    validate_platform_attribution,
 )
 from .operation import clanker_deployment_operation
 from .terms import (
@@ -746,6 +747,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         platform_reward = next((item for item in reversed(rewards) if item is not creator_reward), {})
         launch_id = Clanker.new_launch_id(payload["symbol"])
         intent = Clanker.build_launch_intent(guild_id, requester.id, launch_id, payload)
+        validate_platform_attribution(
+            intent, platform_reward.get("recipient"), int(platform_reward.get("bps", 0)),
+        )
         operation = clanker_deployment_operation(intent)
         return {
             "launch_id": launch_id,
@@ -2275,6 +2279,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 guild.id, user.id, launch_id, payload,
                 created_at=now, expires_at=now + 900,
             )
+            validate_platform_attribution(
+                intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
+            )
             record["execution_created_at"] = now
             record["execution_expires_at"] = now + 900
             record["payload_hash"] = intent.payload_hash
@@ -2325,6 +2332,9 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 guild.id, user.id, launch_id, payload,
                 created_at=record.get("execution_created_at"),
                 expires_at=record.get("execution_expires_at"),
+            )
+            validate_platform_attribution(
+                intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
             )
             operation = clanker_deployment_operation(intent)
             record["payload"] = payload
@@ -2408,7 +2418,11 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             guild_id, requester_id, str(record["launch_id"]), materialized,
             created_at=int(record["execution_created_at"]),
             expires_at=int(record["execution_expires_at"]),
-        ).to_dict()
+        )
+        validate_platform_attribution(
+            intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
+        )
+        intent = intent.to_dict()
         intent["payload_hash"] = None
         if source.get("tokenAdmin") is None:
             intent["token"]["admin"] = None

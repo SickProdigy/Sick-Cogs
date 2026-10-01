@@ -16,6 +16,11 @@ sources. It is deliberately not imported by cog code, has `executionEnabled: fal
 authorize a mainnet launch. The candidate also records the current SDK's newer locker address where
 it differs from the older contracts-repository README.
 
+Platform attribution is valid only when exactly one reward entry uses the owner-configured treasury as
+both its administrator and recipient at the owner-configured immutable share, with the canonical
+`SickGamingBot`/`discord` context. Saved-draft execution revalidates that invariant before calldata
+is rebuilt; browser or stored-payload changes fail closed.
+
 Authoritative sources:
 
 - <https://github.com/clanker-devco/clanker-sdk/releases/tag/v4.2.19>

@@ -6,6 +6,7 @@ from dataclasses import FrozenInstanceError
 from ..models import (
     ClankerAirdrop, ClankerLaunchIntent, ClankerPool, ClankerPoolPosition,
     ClankerReward, ClankerVault, standard_base_sepolia_pool,
+    validate_platform_attribution,
 )
 from ..constants import DEFAULT_CLANKER_SUPPLY
 
@@ -130,6 +131,30 @@ class ClankerIntentTests(unittest.TestCase):
         payload = make_intent().canonical_payload()
         for field in ("deployment_id", "discord_application_id", "profile_id", "wallet_address"):
             self.assertNotIn(field, payload)
+
+    def test_platform_attribution_requires_exact_owner_controlled_entry(self):
+        intent = make_intent()
+        reward = validate_platform_attribution(intent, TREASURY, 2_000)
+        self.assertEqual(reward.recipient, TREASURY.lower())
+
+        mutations = (
+            make_intent(rewards=(
+                ClankerReward(WALLET, WALLET, 8_000),
+                ClankerReward(WALLET, TREASURY, 2_000),
+            )),
+            make_intent(rewards=(
+                ClankerReward(WALLET, WALLET, 8_000),
+                ClankerReward(TREASURY, WALLET, 2_000),
+            )),
+            make_intent(rewards=(
+                ClankerReward(WALLET, WALLET, 7_999),
+                ClankerReward(TREASURY, TREASURY, 2_001),
+            )),
+            make_intent(context={"interface": "Browser", "platform": "discord"}),
+        )
+        for changed in mutations:
+            with self.assertRaises(ValueError):
+                validate_platform_attribution(changed, TREASURY, 2_000)
 
     def test_standard_pool_matches_pinned_sdk_defaults(self):
         pool = standard_base_sepolia_pool()

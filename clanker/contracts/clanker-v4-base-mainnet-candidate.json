@@ -49,7 +49,7 @@
     "recipient": "mutable only by that reward index administrator",
     "administrator": "mutable only by the current reward index administrator",
     "feePreference": "mutable only by that reward index administrator",
-    "platformGuarantee": "not-yet-defined"
+    "platformGuarantee": "exactly one reward entry must match the owner-configured treasury as both administrator and recipient with the owner-configured immutable bps; SickGamingBot/discord context is mandatory"
   },
   "sourceDiscrepancies": [
     "The v4-contracts README lists the older 0x63D2... fee-conversion locker, while clanker-sdk v4.2.19 pins 0xffA377... for Base. This candidate follows the newer SDK and cannot authorize execution until the operation audit is complete."

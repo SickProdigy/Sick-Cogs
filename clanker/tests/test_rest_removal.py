@@ -400,6 +400,22 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed["payload_hash"], refreshed["intent"]["payload_hash"])
         self.assertEqual(refreshed["operation"]["payload_hash"], refreshed["payload_hash"])
 
+    async def test_saved_draft_rejects_platform_reward_redirect(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None, 0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["payload"]["rewards"]["recipients"][1]["recipient"] = WALLET
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        with self.assertRaisesRegex(ValueError, "platform reward attribution"):
+            await cog.prepare_draft_execution(
+                SimpleNamespace(id=100), SimpleNamespace(id=7), record["launch_id"], WALLET
+            )
+
 
 class VerifiedCardDisplayTests(unittest.TestCase):
     def test_card_shows_creator_and_platform_treasuries_and_shares(self):

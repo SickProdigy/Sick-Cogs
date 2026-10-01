@@ -70,7 +70,7 @@ class ClankerContractManifestTests(unittest.TestCase):
         self.assertEqual(candidate["chainId"], 8453)
         self.assertIs(candidate["rpcVerification"]["allRuntimeCodeMatched"], True)
         self.assertEqual(len(candidate["rpcVerification"]["sources"]), 2)
-        self.assertEqual(candidate["rewardMutability"]["platformGuarantee"], "not-yet-defined")
+        self.assertIn("owner-configured treasury", candidate["rewardMutability"]["platformGuarantee"])
         self.assertNotIn(
             MAINNET_CANDIDATE_PATH.name,
             (Path(__file__).parents[1] / "models.py").read_text(encoding="utf-8"),
