@@ -94,3 +94,7 @@ class TokenFactoryTermsCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("charges no TokenFactory service fee", page)
         self.assertIn("does not hold the created token supply", page)
         self.assertIn("Reading this page does not accept", page)
+        external = (Path(__file__).resolve().parents[2] / "cryptowallet" / "web" / "tokenfactory.html").read_text(encoding="utf-8")
+        self.assertIn("View TokenFactory terms", external)
+        self.assertIn("Viewing them does not accept", external)
+        self.assertIn("not required for this Base Sepolia test deployment", external)
