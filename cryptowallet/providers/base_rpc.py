@@ -578,14 +578,24 @@ async def _rpc_with_urls(rpc_urls: tuple[str, ...], method: str, params: list, n
     raise BaseRpcError(f"{network} RPC could not complete the request.") from last_error
 
 
-async def get_user_operation_receipt(address: str, user_operation_hash: str) -> dict | None:
-    """Recover a confirmed ERC-4337 operation without resubmitting it."""
+async def get_user_operation_receipt(
+    address: str, user_operation_hash: str, network: str = "base-sepolia"
+) -> dict | None:
+    """Recover a confirmed ERC-4337 operation on one explicit Base network."""
+    rpc_urls = EVM_RPC_URLS.get(network)
+    if network not in {"base-sepolia", "base-mainnet"} or rpc_urls is None:
+        raise BaseRpcError("User-operation recovery is unavailable for this network.")
+    label = "Base Mainnet" if network == "base-mainnet" else "Base Sepolia"
+
+    async def rpc(method: str, params: list):
+        return await _rpc_with_urls(rpc_urls, method, params, label)
+
     try:
-        latest_block = int(str(await _rpc("eth_blockNumber", [])), 16)
+        latest_block = int(str(await rpc("eth_blockNumber", [])), 16)
     except (TypeError, ValueError) as exc:
-        raise BaseRpcError("Base Sepolia returned an invalid block number.") from exc
+        raise BaseRpcError(f"{label} returned an invalid block number.") from exc
     address_topic = "0x" + "0" * 24 + address.lower().removeprefix("0x")
-    logs = await _rpc(
+    logs = await rpc(
         "eth_getLogs",
         [
             {
@@ -601,7 +611,7 @@ async def get_user_operation_receipt(address: str, user_operation_hash: str) -> 
         ],
     )
     if not isinstance(logs, list) or len(logs) > 1:
-        raise BaseRpcError("Base Sepolia returned invalid or ambiguous operation logs.")
+        raise BaseRpcError(f"{label} returned invalid or ambiguous operation logs.")
     if not logs:
         return None
     try:
@@ -613,7 +623,7 @@ async def get_user_operation_receipt(address: str, user_operation_hash: str) -> 
         success_word = data[64:128]
         success = int(success_word, 16) == 1
     except (KeyError, TypeError, ValueError) as exc:
-        raise BaseRpcError("Base Sepolia returned an invalid operation event.") from exc
+        raise BaseRpcError(f"{label} returned an invalid operation event.") from exc
     if (
         len(topics) < 3
         or str(topics[0]).lower() != USER_OPERATION_EVENT_TOPIC
@@ -622,7 +632,7 @@ async def get_user_operation_receipt(address: str, user_operation_hash: str) -> 
         or len(success_word) != 64
         or len(tx_hash) != 66
     ):
-        raise BaseRpcError("Base Sepolia returned a mismatched operation event.")
+        raise BaseRpcError(f"{label} returned a mismatched operation event.")
     return {
         "status": "complete" if success else "failed",
         "userOpHash": user_operation_hash.lower(),

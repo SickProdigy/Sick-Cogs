@@ -435,6 +435,72 @@ class CdpWalletProvider(WalletProvider):
         }]
         return updated
 
+    async def ensure_mainnet_account(self, profile: dict) -> dict:
+        """Attach Base mainnet only after isolated credentials prove the same smart account."""
+        accounts = [dict(item) for item in profile.get("accounts") or []]
+        test_account = next(
+            (item for item in accounts if item.get("network") == BASE_SEPOLIA.key), None
+        )
+        try:
+            expected_address = normalize_evm_address(
+                str((test_account or {}).get("address") or "")
+            ).lower()
+        except ValueError as exc:
+            raise WalletProviderError(
+                "The stored Base Sepolia smart account is invalid."
+            ) from exc
+        existing = next(
+            (item for item in accounts if item.get("network") == BASE_MAINNET.key), None
+        )
+        if existing is not None:
+            try:
+                if normalize_evm_address(str(existing.get("address") or "")) != expected_address:
+                    raise ValueError("mainnet address mismatch")
+            except ValueError as exc:
+                raise WalletProviderError(
+                    "The stored Base mainnet account does not match this wallet."
+                ) from exc
+            return profile
+        profile_id = str(profile.get("profile_id") or "")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        if not profile_id or provider_user_id != profile_id:
+            raise WalletProviderError("The stored wallet profile is incomplete.")
+        credentials = await self.credentials_for_network(BASE_MAINNET.key)
+        if credentials is None:
+            raise WalletProviderError(
+                "Base mainnet CDP credentials are not completely configured."
+            )
+        try:
+            end_user = await self._api_client(credentials).get_end_user(provider_user_id)
+            if str(end_user.get("userId") or "") != provider_user_id:
+                raise ValueError("CDP returned a different end user")
+            smart_accounts = end_user.get("evmSmartAccountObjects") or []
+            match = next(
+                (item for item in smart_accounts
+                 if normalize_evm_address(str(item.get("address") or "")).lower() == expected_address),
+                None,
+            )
+            if match is None:
+                raise ValueError("mainnet project does not contain the stored smart account")
+            # Reuse the normal owner-relationship validator against the isolated response.
+            self._delegation_addresses(
+                end_user,
+                {**profile, "accounts": [{"network": BASE_MAINNET.key,
+                                           "address": expected_address}]},
+            )
+        except (CdpApiError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "The isolated Base mainnet project does not verify this wallet account."
+            ) from exc
+        updated = dict(profile)
+        updated["accounts"] = accounts + [{
+            "address": expected_address,
+            "network": BASE_MAINNET.key,
+            "account_type": AccountType.SMART_ACCOUNT.value,
+            "provider_account_id": expected_address,
+        }]
+        return updated
+
     async def get_native_balance(self, address: str, network: str) -> int:
         configured_network = KNOWN_NETWORKS.get(network)
         if (
@@ -650,7 +716,7 @@ class CdpWalletProvider(WalletProvider):
         """Resolve stored public accounts to the addresses that own signing authority."""
         smart_accounts = end_user.get("evmSmartAccountObjects") or []
         eoa_addresses = {
-            normalize_evm_address(str(item.get("address") or ""))
+            normalize_evm_address(str(item.get("address") or "")).lower()
             for item in end_user.get("evmAccountObjects") or []
         }
         solana_addresses = {
@@ -662,14 +728,14 @@ class CdpWalletProvider(WalletProvider):
             network = account.get("network")
             address = str(account.get("address") or "")
             if network in {BASE_SEPOLIA.key, BASE_MAINNET.key}:
-                stored = normalize_evm_address(address)
+                stored = normalize_evm_address(address).lower()
                 matched = next(
                     (item for item in smart_accounts
-                     if normalize_evm_address(str(item.get("address") or "")) == stored),
+                     if normalize_evm_address(str(item.get("address") or "")).lower() == stored),
                     None,
                 )
                 owners = {
-                    normalize_evm_address(str(owner))
+                    normalize_evm_address(str(owner)).lower()
                     for owner in (matched or {}).get("ownerAddresses") or []
                 }
                 eligible = owners.intersection(eoa_addresses)
@@ -812,7 +878,7 @@ class CdpWalletProvider(WalletProvider):
             None,
         )
         try:
-            sender = normalize_evm_address(str((account or {}).get("address") or ""))
+            sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
             if kind == "fixed_supply_token":
                 recipient = normalize_evm_address(str(operation["recipient"]))
                 if sender != recipient:
@@ -907,7 +973,7 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("The stored wallet address is invalid.") from exc
         if not provider_user_id:
             raise WalletProviderError("The wallet profile is incomplete.")
-        credentials = await self.credentials()
+        credentials = await self.credentials_for_network(intent.network)
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
@@ -1413,6 +1479,8 @@ class CdpWalletProvider(WalletProvider):
         """Submit one sponsored Base Sepolia transfer through delegated signing."""
         if intent.network == SOLANA_DEVNET.key:
             return await self._submit_solana_transaction(profile, intent)
+        if intent.network == BASE_MAINNET.key:
+            return await self._submit_base_mainnet_transaction(profile, intent)
         if intent.network != BASE_SEPOLIA.key or not intent.gas_sponsored:
             raise WalletProviderError(
                 "Transaction submission is restricted to sponsored Base Sepolia."
@@ -1526,6 +1594,95 @@ class CdpWalletProvider(WalletProvider):
                 "CDP could not safely complete the sponsored Base Sepolia submission."
             ) from exc
 
+    async def _submit_base_mainnet_transaction(
+        self, profile: dict, intent: TransactionIntent
+    ) -> dict:
+        """Submit one user-funded Base mainnet transfer through the isolated project."""
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        profile_id = str(profile.get("profile_id") or "")
+        account = next(
+            (item for item in profile.get("accounts") or []
+             if item.get("network") == BASE_MAINNET.key),
+            None,
+        )
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+            recipient = normalize_evm_address(intent.to_address).lower()
+            intent_sender = normalize_evm_address(intent.from_address).lower()
+        except ValueError as exc:
+            raise WalletProviderError(
+                "The Base mainnet transaction contains an invalid wallet address."
+            ) from exc
+        if (not provider_user_id or provider_user_id != profile_id
+                or intent.profile_id != profile_id or sender != intent_sender
+                or intent.value_wei <= 0 or intent.gas_sponsored
+                or intent.max_gas_fee_wei <= 0
+                or intent.estimated_gas_fee_wei < 0
+                or intent.estimated_gas_fee_wei > intent.max_gas_fee_wei):
+            raise WalletProviderError(
+                "The Base mainnet transaction does not match this wallet or fee policy."
+            )
+        call_to = recipient
+        call_value = intent.value_wei
+        call_data = "0x"
+        if intent.asset_kind == "erc20":
+            try:
+                call_to = normalize_evm_address(intent.asset_contract or "").lower()
+                if (not intent.asset_symbol or intent.asset_decimals is None
+                        or not 0 <= intent.asset_decimals <= 255):
+                    raise ValueError("missing token metadata")
+                call_data = _erc20_transfer_data(recipient, intent.value_wei)
+            except ValueError as exc:
+                raise WalletProviderError(
+                    "The Base mainnet token intent is invalid."
+                ) from exc
+            call_value = 0
+        elif (intent.asset_kind != "native" or intent.asset_contract is not None
+              or intent.asset_symbol not in {None, BASE_MAINNET.native_symbol}
+              or intent.asset_decimals not in {None, BASE_MAINNET.native_decimals}):
+            raise WalletProviderError(
+                "The Base mainnet native asset binding is invalid."
+            )
+        credentials = await self.credentials_for_network(BASE_MAINNET.key)
+        if credentials is None:
+            raise WalletProviderError(
+                "Base mainnet CDP credentials are not completely configured."
+            )
+        key = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"sick-cogs:cdp:send:{BASE_MAINNET.key}:{profile_id}:{intent.intent_id}",
+        ))
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                provider_user_id, sender, credentials.project_id, "base", call_to,
+                call_value, key, call_data, use_cdp_paymaster=False,
+            )
+            status = str(result.get("status") or "")
+            user_op_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls") or []
+            if (str(result.get("network") or "") != "base"
+                    or status not in {"pending", "signed", "broadcast", "complete",
+                                      "dropped", "failed"}
+                    or not HASH_PATTERN.fullmatch(user_op_hash)
+                    or transaction_hash is not None
+                    and not HASH_PATTERN.fullmatch(transaction_hash)
+                    or not isinstance(calls, list) or len(calls) != 1
+                    or normalize_evm_address(str(calls[0].get("to") or "")).lower() != call_to
+                    or int(calls[0].get("value", -1)) != call_value
+                    or str(calls[0].get("data") or "").lower() != call_data.lower()):
+                raise ValueError("CDP returned mismatched Base mainnet operation data")
+            return {
+                "provider_status": status,
+                "user_operation_hash": user_op_hash.lower(),
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                "block_number": None,
+            }
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely submit the user-funded Base mainnet transfer."
+            ) from exc
+
     async def _submit_solana_transaction(
         self, profile: dict, intent: TransactionIntent
     ) -> dict:
@@ -1600,11 +1757,12 @@ class CdpWalletProvider(WalletProvider):
         """Retrieve and validate current CDP state for a submitted user operation."""
         if intent.network == SOLANA_DEVNET.key:
             return await self._get_solana_transaction_status(profile, intent)
-        if intent.network != BASE_SEPOLIA.key or not intent.user_operation_hash:
-            raise WalletProviderError("Only submitted Base Sepolia operations can be refreshed.")
+        if (intent.network not in {BASE_SEPOLIA.key, BASE_MAINNET.key}
+                or not intent.user_operation_hash):
+            raise WalletProviderError("Only submitted Base operations can be refreshed.")
         provider_user_id = str(profile.get("provider_user_id") or "")
         account = next(
-            (item for item in profile.get("accounts") or [] if item.get("network") == BASE_SEPOLIA.key),
+            (item for item in profile.get("accounts") or [] if item.get("network") == intent.network),
             None,
         )
         try:
@@ -1613,7 +1771,7 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError("The stored wallet address is invalid.") from exc
         if not provider_user_id or address != normalize_evm_address(intent.from_address):
             raise WalletProviderError("The wallet profile does not match this operation.")
-        credentials = await self.credentials()
+        credentials = await self.credentials_for_network(intent.network)
         if credentials is None:
             raise WalletProviderError("CDP credentials are not completely configured.")
         try:
@@ -1622,14 +1780,14 @@ class CdpWalletProvider(WalletProvider):
             )
         except CdpApiError as cdp_exc:
             try:
-                result = await get_user_operation_receipt(address, intent.user_operation_hash)
+                result = await get_user_operation_receipt(address, intent.user_operation_hash, intent.network)
             except BaseRpcError as rpc_exc:
                 raise WalletProviderError(
-                    "CDP and Base Sepolia could not retrieve the submitted operation status."
+                    "CDP and the selected Base network could not retrieve the submitted operation status."
                 ) from rpc_exc
             if result is None:
                 raise WalletProviderError(
-                    "CDP could not retrieve the operation and it is not confirmed on Base Sepolia yet."
+                    "CDP could not retrieve the operation and it is not confirmed on the selected Base network yet."
                 ) from cdp_exc
         try:
             provider_status = str(result.get("status") or "")
@@ -1652,7 +1810,7 @@ class CdpWalletProvider(WalletProvider):
                     block_number = int(raw_block_number)
             if provider_status == "complete":
                 public = await get_user_operation_receipt(
-                    address, intent.user_operation_hash
+                    address, intent.user_operation_hash, intent.network
                 )
                 if public is None:
                     return {

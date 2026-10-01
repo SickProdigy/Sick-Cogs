@@ -31,6 +31,7 @@ class MainnetSetupDeliveryTests(unittest.IsolatedAsyncioTestCase):
             ),
             has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
             create_authorization_handoff=AsyncMock(return_value=(token, 1_800_000_000)),
+            ensure_mainnet_wallet_profile=AsyncMock(return_value=profile),
         )
 
         expires_at = await WalletAuthorizationCommands.send_authorization_link(
@@ -99,7 +100,9 @@ class MainnetSetupConfirmationTests(unittest.IsolatedAsyncioTestCase):
         cog.accept_cryptowallet_mainnet_terms.assert_awaited_once_with(
             7, acceptance_id="acceptance-id"
         )
-        cog.wallet_provider.get_delegation_status.assert_awaited_once()
+        cog.wallet_provider.get_delegation_status.assert_awaited_once_with(
+            view.profile, "base-mainnet"
+        )
         self.assertIn("mainnet wallet setup is ready", interaction.followup.send.await_args.args[0])
         self.assertTrue(all(item.disabled for item in view.children))
 

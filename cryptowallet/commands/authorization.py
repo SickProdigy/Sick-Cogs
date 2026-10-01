@@ -140,6 +140,8 @@ class WalletAuthorizationCommands:
         mode_setting = getattr(getattr(self, "config", None), "operating_mode", None)
         mode_value = await mode_setting() if mode_setting is not None else "testnet"
         environment = parse_wallet_environment(mode_value) or WalletEnvironment.TESTNET
+        if environment is not WalletEnvironment.TESTNET:
+            profile = await self.ensure_mainnet_wallet_profile(user, profile)
         needs_terms = (
             environment is not WalletEnvironment.TESTNET
             and not await self.has_current_cryptowallet_mainnet_terms(user.id)

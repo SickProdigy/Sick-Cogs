@@ -15,14 +15,13 @@ def _require_authorization(capability: str, controls: Mapping[str, Any]) -> dict
     if (
         controls.get("enabled") is not True
         or controls.get("paused") is not False
-        or controls.get("owner_canary") is not True
         or authorization.get(capability) is not True
     ):
         raise MainnetExecutionDisabled(
             "TokenFactory Base mainnet submission remains disabled by owner controls "
             "or the pinned candidate manifest."
         )
-    if capability == "ownerCanary" and not manifest.get("factoryAddress"):
+    if capability == "memberDeployment" and not manifest.get("factoryAddress"):
         raise MainnetExecutionDisabled(
             "TokenFactory Base mainnet token submission requires a verified deployed factory."
         )
@@ -51,7 +50,7 @@ def prepare_mainnet_token_submission(
         operation_state=str(live["operation_state"]),
         limits=limits, now=now,
     )
-    manifest = _require_authorization("ownerCanary", controls)
+    manifest = _require_authorization("memberDeployment", controls)
     if str(manifest["factoryAddress"]).lower() != review.target_factory:
         raise MainnetExecutionDisabled(
             "The authorized mainnet factory does not match the reviewed token target."

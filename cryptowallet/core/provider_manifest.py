@@ -45,7 +45,7 @@ BASE_MAINNET_PROVIDER_MANIFEST = EvmProviderManifest(
     required_owner_count=1,
     exportable_account_type="evm-eoa-owner",
     smart_account_key_exportable=False,
-    paymaster_behavior="documented-automatic-but-quote-bound",
+    paymaster_behavior="explicit-selection-quote-bound",
     fee_quote_required=True,
     spend_permission_fields=(
         "network", "spender", "token", "allowance", "period", "start", "end",
@@ -93,7 +93,7 @@ def validate_evm_provider_manifest(
         errors.append("smart-account key export must be disabled")
     if not manifest.fee_quote_required:
         errors.append("fee quote is not required")
-    if manifest.paymaster_behavior != "documented-automatic-but-quote-bound":
+    if manifest.paymaster_behavior != "explicit-selection-quote-bound":
         errors.append("paymaster policy mismatch")
     expected_permission_fields = {
         "network", "spender", "token", "allowance", "period", "start", "end",

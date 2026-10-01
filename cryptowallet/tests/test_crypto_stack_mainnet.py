@@ -27,7 +27,6 @@ class CryptoStackMainnetBoundaryTests(unittest.TestCase):
         self.assertEqual(validate_base_mainnet_provider_manifest(), ())
 
         self.assertFalse(tokenfactory["factory_deployment_authorized"])
-        self.assertFalse(tokenfactory["owner_canary_authorized"])
         self.assertFalse(tokenfactory["member_deployment_authorized"])
 
         self.assertFalse(clanker["executionEnabled"])

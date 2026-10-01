@@ -88,4 +88,4 @@ class MainnetTokenReviewTests(unittest.TestCase):
         self.assertIn("8453", fields["Network"])
         self.assertIn(review.fingerprint, fields["Review fingerprint"])
         self.assertIn("cannot be undone", fields["Irreversible"])
-        self.assertIn("non-executable", embed.footer.text.lower())
+        self.assertIn("no transaction submitted", embed.footer.text.lower())

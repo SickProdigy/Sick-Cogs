@@ -7,7 +7,7 @@ from redbot.core import commands
 
 from ..core.models import IntentStatus, TransactionIntent
 from ..core.networks import (
-    BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability, resolve_network
+    BASE_MAINNET, BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability, resolve_network
 )
 from ..providers import WalletProviderError
 from ..core.validation import (
@@ -731,6 +731,17 @@ class WalletTransactionCommands:
                 ephemeral=True,
             )
             return
+
+        if intent.network == BASE_MAINNET.key:
+            reserved_value = intent.max_gas_fee_wei
+            if intent.asset_kind == "native":
+                reserved_value += intent.value_wei
+            allowed, reason = await self.reserve_base_mainnet_spend(
+                view.user_id, intent.intent_id, reserved_value, actor_is_owner=False
+            )
+            if not allowed:
+                await interaction.followup.send(reason, ephemeral=True)
+                return
 
         async with self.config.user_from_id(view.user_id).intents() as intents:
             current_data = intents.get(intent.intent_id)

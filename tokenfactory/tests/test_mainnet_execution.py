@@ -17,7 +17,7 @@ from ..policy import default_mainnet_limits
 class MainnetExecutionBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.limits = default_mainnet_limits()
-        self.controls = {"enabled": True, "paused": False, "owner_canary": True}
+        self.controls = {"enabled": True, "paused": False}
         self.draft = TokenDraft(
             creator_discord_id=7, wallet_profile_id="profile-7",
             owner_address="0x1111111111111111111111111111111111111111",

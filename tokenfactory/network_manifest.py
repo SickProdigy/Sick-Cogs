@@ -73,6 +73,6 @@ def mainnet_readiness() -> dict[str, Any]:
         "singleton_verified": bool(observations.get("singletonCodeMatched")),
         "destination_empty": bool(observations.get("factoryDestinationEmpty")),
         "independent_audit": str(manifest.get("independentAudit", {}).get("status") or "missing"),
-        "factory_deployment_authorized": False, "owner_canary_authorized": False,
-        "member_deployment_authorized": False,
+        "factory_deployment_authorized": bool(manifest["authorization"]["factoryDeployment"]),
+        "member_deployment_authorized": bool(manifest["authorization"]["memberDeployment"]),
     }

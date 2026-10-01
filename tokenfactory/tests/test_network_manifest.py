@@ -32,7 +32,6 @@ class TokenFactoryNetworkManifestTests(unittest.TestCase):
         self.assertTrue(status["singleton_verified"])
         self.assertTrue(status["destination_empty"])
         self.assertFalse(status["factory_deployment_authorized"])
-        self.assertFalse(status["owner_canary_authorized"])
         self.assertFalse(status["member_deployment_authorized"])
 
     def test_rejects_chain_drift_and_premature_authorization(self):
@@ -83,14 +82,14 @@ class TokenFactoryMainnetStatusCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fields["Network"], "Base mainnet (`8453`)")
         self.assertIn("required", fields["Required gates"])
         self.assertIn("Independent technical review", fields["Required gates"])
-        self.assertIn("Owner free-release scope attestation", fields["Required gates"])
+        self.assertIn("Free-release scope attestation", fields["Required gates"])
         self.assertIn("issue #229", fields["Required gates"])
         self.assertIn("outside counsel first (#228)", fields["Required gates"])
         self.assertNotIn("Legal review and explicit owner", fields["Required gates"])
         self.assertIn("cross-check: **complete**", fields["Required gates"])
         self.assertNotIn(r"\n", "".join(fields.values()))
         self.assertIn("not started", fields["Factory lifecycle"])
-        self.assertIn("not started", fields["Token canary lifecycle"])
+        self.assertIn("not started", fields["Token deployment lifecycle"])
         self.assertIn("unavailable", embed.footer.text)
 
 class TokenFactoryMainnetPolicyTests(unittest.IsolatedAsyncioTestCase):

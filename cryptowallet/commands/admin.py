@@ -461,7 +461,7 @@ class WalletAdminCommands:
             f"Operating mode: `{operating_mode.value}`\n"
             f"Gate: `{gate}`\n"
             f"Emergency pause: `{pause}`\n"
-            "Access: `bot owner only`\n"
+            "Access: `members when installation-wide gate is enabled`\n"
             "Release: `experimental — real funds may be permanently lost`\n"
             f"Reviewed capabilities: `{reviewed}`\n"
             f"Limits (transaction / user-day / installation-day): "
@@ -563,8 +563,9 @@ class WalletAdminCommands:
         async with self.config.base_mainnet_policy() as stored:
             stored.setdefault("capabilities", {})[requested.value] = True
         await ctx.send(
-            f"Base mainnet `{requested.value}` is policy-enabled for the bot-owner-only "
-            "experimental gate. Real funds may be permanently lost."
+            f"Base mainnet `{requested.value}` is policy-enabled installation-wide. "
+            "Each member must still pass terms, wallet authorization, limits, and exact "
+            "transaction approval. Real funds may be permanently lost."
         )
 
     @walletset_mainnet.command(name="limits")
@@ -611,7 +612,7 @@ class WalletAdminCommands:
     async def walletset_mainnet_enable(
         self, ctx: commands.Context, *, acknowledgement: str = ""
     ):
-        """Arm the owner-only experimental gate after every code-level review."""
+        """Arm the installation-wide experimental gate after every code-level review."""
         if acknowledgement.strip() != MAINNET_ENABLE_ACKNOWLEDGEMENT:
             await ctx.send(
                 "No setting changed. To acknowledge the experimental permanent-loss risk, "
@@ -627,13 +628,14 @@ class WalletAdminCommands:
         async with self.config.base_mainnet_policy() as policy:
             policy["enabled"] = True
             policy["paused"] = False
-            policy["owner_only"] = True
+            policy.pop("owner_only", None)
+            policy["access_scope"] = "members"
             policy["experimental"] = True
             policy["enabled_by"] = ctx.author.id
             policy["enabled_at"] = int(time.time())
         await self.config.operating_mode.set(WalletEnvironment.MAINNET.value)
         await ctx.send(
-            "Base mainnet experimental access is armed for bot-owner use only. "
+            "Base mainnet experimental access is armed installation-wide for members. "
             "Wallet operating mode is now `mainnet`; explicit testnet commands remain "
             "available. Real funds may be permanently lost."
         )

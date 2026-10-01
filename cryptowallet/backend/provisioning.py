@@ -19,6 +19,14 @@ class WalletProvisioningMixin:
             )
         )
 
+    async def ensure_mainnet_wallet_profile(self, user, profile: dict | None = None) -> dict:
+        """Verify and persist the same public smart account for Base mainnet."""
+        current = profile if profile is not None else await self.get_or_create_wallet_profile(user)
+        updated = await self.wallet_provider.ensure_mainnet_account(current)
+        if updated != current:
+            await self.config.user(user).profile.set(updated)
+        return updated
+
     async def get_or_create_wallet_profile(self, user) -> dict:
         existing = await self.config.user(user).profile()
         if existing is not None:

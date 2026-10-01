@@ -59,7 +59,7 @@ class TokenFactoryTermsView(discord.ui.View):
 
 
 def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
-    """Render a non-executable disclosure of one immutable owner canary."""
+    """Render one immutable requester-owned deployment disclosure."""
 
     scale = 10**review.decimals
     whole, remainder = divmod(review.supply_atomic, scale)
@@ -68,7 +68,7 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
         supply += f".{remainder:0{review.decimals}d}".rstrip("0")
     max_fee = review.max_gas_fee_wei / 10**18
     embed = discord.Embed(
-        title="Review Base mainnet TokenFactory canary",
+        title="Review Base mainnet TokenFactory deployment",
         description=(
             "This immutable review is non-executable. It prepares the exact disclosure "
             "that a separately gated protected approval must match."
@@ -119,7 +119,7 @@ def mainnet_review_embed(review: MainnetTokenReview) -> discord.Embed:
         ),
         inline=False,
     )
-    embed.set_footer(text="Owner canary staging only - non-executable")
+    embed.set_footer(text="Requester-bound review - no transaction submitted")
     return embed
 
 
@@ -253,7 +253,7 @@ class MainnetFactoryApprovalView(discord.ui.View):
 
 
 class MainnetCanaryApprovalModal(
-    discord.ui.Modal, title="Approve Base mainnet canary"
+    discord.ui.Modal, title="Approve Base mainnet deployment"
 ):
     acknowledgement = discord.ui.TextInput(
         label="Type the creator responsibility phrase",
@@ -280,14 +280,14 @@ class MainnetCanaryApprovalModal(
         if self.view.message is not None:
             await self.view.message.edit(view=self.view)
         await interaction.followup.send(
-            "Protected owner approval recorded for this exact review until "
+            "Protected requester approval recorded for this exact review until "
             f"<t:{approval.expires_at}:R>. No transaction was submitted.",
             ephemeral=True,
         )
 
 
 class MainnetCanaryApprovalView(discord.ui.View):
-    """Owner-bound Discord approval for one immutable canary review."""
+    """Requester-bound Discord approval for one immutable deployment review."""
 
     def __init__(self, cog: "TokenFactory", owner_id: int, review: MainnetTokenReview):
         super().__init__(timeout=10 * 60)
@@ -300,7 +300,7 @@ class MainnetCanaryApprovalView(discord.ui.View):
         if interaction.user.id == self.owner_id:
             return True
         await interaction.response.send_message(
-            "Only the bot owner who created this canary review can approve it.",
+            "Only the member who created this deployment review can approve it.",
             ephemeral=True,
         )
         return False

@@ -1302,7 +1302,7 @@ class TokenFactory(commands.Cog):
             name="Control state",
             value=(
                 f"Enabled: **{enabled}**\nPaused: **{paused}**\n"
-                f"Owner canary: **{canary}**"
+                f"Legacy owner-canary flag: **{canary}**"
             ),
             inline=False,
         )
@@ -1333,7 +1333,7 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Token canary lifecycle",
+            name="Token deployment lifecycle",
             value=lifecycle_text(
                 await self.config.mainnet_canary_lifecycle(),
                 await self.config.mainnet_canary_evidence(),
@@ -1341,7 +1341,7 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Canary ceilings",
+            name="Mainnet ceilings",
             value=(
                 f"Factory deployments/day: **{limits['factory_deployments_per_day']}**\n"
                 f"Token deployments/day: **{limits['token_deployments_per_day']}**\n"
@@ -1356,7 +1356,7 @@ class TokenFactory(commands.Cog):
             value=(
                 f"Independent technical review: **{status['independent_audit']}**\n"
                 "Pre-deployment RPC cross-check: **complete**\n"
-                "Owner free-release scope attestation and canary approval: **required**\n"
+                "Free-release scope attestation and develop testing approval: **required**\n"
                 "Public release acknowledgments: **tracked in issue #229**\n"
                 "Monetization or expanded financial services: **outside counsel first (#228)**"
             ),
@@ -1367,7 +1367,7 @@ class TokenFactory(commands.Cog):
 
     @tokenfactoryset.command(name="mainnetcontrol")
     async def tokenfactoryset_mainnet_control(self, ctx: commands.Context, mode: str):
-        """Pause or request enablement of the gated owner-only mainnet canary."""
+        """Pause or request installation-wide Base mainnet enablement."""
 
         choice = str(mode or "").strip().lower()
         if choice not in {"enable", "pause", "disable"}:
@@ -1379,7 +1379,7 @@ class TokenFactory(commands.Cog):
                 "Base mainnet TokenFactory enablement was rejected with no state "
                 f"change. Manifest: `{status['status']}`; independent technical review: "
                 f"**{status['independent_audit']}**. Complete every issue #203 gate "
-                "and update the reviewed manifest before requesting a canary."
+                "and update the reviewed manifest before requesting develop testing."
             )
             return
         await self.config.mainnet_deployment_enabled.set(False)

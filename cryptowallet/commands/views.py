@@ -3,7 +3,7 @@ import time
 import discord
 
 from ..core.models import IntentStatus, TransactionIntent
-from ..core.networks import BASE_SEPOLIA, NETWORKS
+from ..core.networks import BASE_MAINNET, BASE_SEPOLIA, NETWORKS
 
 
 class WalletHistoryView(discord.ui.View):
@@ -148,7 +148,7 @@ class WalletMainnetSetupView(discord.ui.View):
                     self.user_id, acceptance_id=result["acceptance_id"]
                 )
             status = await self.cog.wallet_provider.get_delegation_status(
-                self.profile, BASE_SEPOLIA.key
+                self.profile, BASE_MAINNET.key
             )
             if not status.get("active"):
                 await interaction.followup.send(

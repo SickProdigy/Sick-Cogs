@@ -388,8 +388,9 @@ class CdpApiClient:
         idempotency_key: str,
         data: str = "0x",
         override_gas_limit: int | None = None,
+        use_cdp_paymaster: bool = True,
     ) -> dict:
-        """Prepare, sign, and send one sponsored smart-account user operation."""
+        """Prepare, sign, and send one smart-account operation with explicit sponsorship."""
         path = (
             f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
             f"/evm/smart-accounts/{quote(address, safe='')}/send"
@@ -402,7 +403,7 @@ class CdpApiClient:
         body = {
             "network": network,
             "calls": [call],
-            "useCdpPaymaster": True,
+            "useCdpPaymaster": bool(use_cdp_paymaster),
         }
         return await self._request(
             "POST",

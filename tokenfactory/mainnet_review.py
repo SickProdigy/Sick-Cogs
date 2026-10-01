@@ -16,7 +16,7 @@ HASH_RE = re.compile(r"^0x[0-9a-f]{64}$")
 
 @dataclass(frozen=True, slots=True)
 class MainnetTokenReview:
-    """Immutable, non-executable disclosure for one owner canary."""
+    """Immutable disclosure for one requester-owned mainnet deployment."""
 
     network: str
     chain_id: int
@@ -86,14 +86,14 @@ def build_mainnet_token_review(
     if draft.network != BASE_MAINNET_NETWORK_KEY or draft.chain_id != BASE_MAINNET_CHAIN_ID:
         raise ValueError("The token draft is not bound to Base mainnet.")
     if draft.supply_atomic > reviewed_limits["max_token_supply_atomic"]:
-        raise ValueError("The token supply exceeds the reviewed mainnet canary ceiling.")
+        raise ValueError("The token supply exceeds the reviewed mainnet supply ceiling.")
     if not HASH_RE.fullmatch(str(request_id or "").lower()):
         raise ValueError("The mainnet request ID is invalid.")
     if (
         int(max_gas_fee_wei) <= 0
         or int(max_gas_fee_wei) > reviewed_limits["max_gas_fee_wei"]
     ):
-        raise ValueError("The maximum gas fee exceeds the reviewed canary ceiling.")
+        raise ValueError("The maximum gas fee exceeds the reviewed mainnet fee ceiling.")
     payer = str(gas_payer or "").strip()
     if payer != "creator wallet":
         raise ValueError("Base mainnet gas must be paid by the creator wallet.")

@@ -17,7 +17,7 @@ MAINNET_ENABLE_ACKNOWLEDGEMENT = "I UNDERSTAND REAL FUNDS MAY BE PERMANENTLY LOS
 BASE_MAINNET_POLICY_DEFAULT = {
     "enabled": False,
     "paused": True,
-    "owner_only": True,
+    "access_scope": "members",
     "experimental": True,
     "enabled_by": None,
     "enabled_at": 0,
@@ -40,7 +40,7 @@ BASE_MAINNET_POLICY_DEFAULT = {
 
 
 def base_mainnet_operation_allowed(
-    policy: dict, capability: str, *, actor_is_owner: bool, value_atomic: int,
+    policy: dict, capability: str, *, actor_is_owner: bool = False, value_atomic: int,
     user_daily_atomic: int = 0, installation_daily_atomic: int = 0,
 ) -> tuple[bool, str]:
     """Evaluate every production gate; missing or malformed state denies access."""
@@ -48,8 +48,10 @@ def base_mainnet_operation_allowed(
         return False, "Base mainnet is disabled."
     if policy.get("paused", True):
         return False, "Base mainnet is emergency-paused."
-    if not policy.get("owner_only", True) or not actor_is_owner:
-        return False, "Base mainnet experimental access is bot-owner-only."
+    # ``actor_is_owner`` remains accepted for compatibility with pre-2.0 callers,
+    # but product access is installation-wide once an owner enables the gate.
+    if policy.get("access_scope", "members") != "members":
+        return False, "Base mainnet access scope is invalid."
     if not policy.get("experimental", False):
         return False, "Base mainnet experimental labeling is invalid."
     capabilities = policy.get("capabilities")

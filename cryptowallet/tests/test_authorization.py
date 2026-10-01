@@ -2025,6 +2025,38 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mainnet.project_id, "main-project")
         self.assertIsNone(testnet)
 
+    async def test_mainnet_account_attachment_requires_same_isolated_smart_account(self):
+        address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        owner = "0x1111111111111111111111111111111111111111"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": address}],
+        }
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials_for_network = AsyncMock(return_value=SimpleNamespace())
+        client = SimpleNamespace(get_end_user=AsyncMock(return_value={
+            "userId": "profile-7",
+            "evmAccountObjects": [{"address": owner}],
+            "evmSmartAccountObjects": [{
+                "address": address, "ownerAddresses": [owner],
+            }],
+        }))
+        provider._api_client = lambda credentials: client
+
+        updated = await provider.ensure_mainnet_account(profile)
+
+        mainnet = [item for item in updated["accounts"]
+                   if item["network"] == BASE_MAINNET.key]
+        self.assertEqual(len(mainnet), 1)
+        self.assertEqual(mainnet[0]["address"], address.lower())
+        provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
+
+        client.get_end_user.return_value["evmSmartAccountObjects"][0]["address"] = (
+            "0xE338aDC6468484f2C6da16647B7154407661c371"
+        )
+        with self.assertRaisesRegex(WalletProviderError, "does not verify"):
+            await provider.ensure_mainnet_account(profile)
+
     async def test_mainnet_delegation_uses_only_mainnet_profile_and_credentials(self):
         main_address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         test_address = "0xE338aDC6468484f2C6da16647B7154407661c371"
@@ -2133,8 +2165,12 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             "per_user_day": "20",
             "installation_day": "30",
         }
+        allowed, reason = base_mainnet_operation_allowed(
+            policy, "send", actor_is_owner=False, value_atomic=1
+        )
+        self.assertTrue(allowed, reason)
+
         cases = (
-            ({"actor_is_owner": False, "value_atomic": 1}, "bot-owner-only"),
             ({"actor_is_owner": True, "value_atomic": 11}, "per-transaction"),
             ({"actor_is_owner": True, "value_atomic": 5, "user_daily_atomic": 16}, "per-user"),
             ({"actor_is_owner": True, "value_atomic": 5, "installation_daily_atomic": 26}, "installation-wide"),
@@ -2290,12 +2326,12 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("mainnet", message)
         self.assertIn("Only the bot owner", message)
 
-    async def test_mainnet_owner_controls_remain_fail_closed(self):
+    async def test_mainnet_installation_controls_remain_fail_closed(self):
         policy = _ApprovalStore()
         policy.data.update({
             "enabled": False,
             "paused": True,
-            "owner_only": True,
+            "access_scope": "members",
             "experimental": True,
             "capabilities": {},
         })
@@ -2310,7 +2346,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         status = ctx.send.await_args.args[0]
         self.assertIn("Gate: `disabled`", status)
         self.assertIn("Emergency pause: `active`", status)
-        self.assertIn("bot owner only", status)
+        self.assertIn("members when installation-wide", status)
         self.assertIn("permanently lost", status)
 
         await WalletAdminCommands.walletset_mainnet_enable.callback(
@@ -3783,6 +3819,41 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[5], 0)
         self.assertEqual(args[7], calldata)
 
+    async def test_provider_submits_mainnet_with_isolated_credentials_and_no_paymaster(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": BASE_MAINNET.key, "address": sender}],
+        }
+        intent = TransactionIntent(
+            intent_id="mainnet-send", profile_id="profile-7",
+            network=BASE_MAINNET.key, from_address=sender, to_address=recipient,
+            value_wei=10**12, created_at=1, expires_at=9999999999,
+            estimated_gas_fee_wei=10**10, max_gas_fee_wei=2 * 10**10,
+            gas_sponsored=False,
+        )
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={
+                "network": "base", "status": "broadcast",
+                "userOpHash": "0x" + "1" * 64,
+                "calls": [{"to": recipient.lower(), "value": str(10**12), "data": "0x"}],
+            }
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="main-project")
+        )
+        provider._api_client = lambda credentials: client
+
+        result = await provider.submit_transaction(profile, intent)
+
+        self.assertEqual(result["provider_status"], "broadcast")
+        provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
+        call = client.send_smart_account_user_operation.await_args
+        self.assertEqual(call.args[3], "base")
+        self.assertIs(call.kwargs["use_cdp_paymaster"], False)
+
     async def test_rpc_reader_collects_fragmented_json_body(self):
         class FragmentedContent:
             async def iter_chunked(self, size):
@@ -3861,6 +3932,16 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         request = client._request.await_args
         self.assertEqual(
             request.kwargs["body"]["calls"][0]["overrideGasLimit"], "2000000"
+        )
+        self.assertIs(request.kwargs["body"]["useCdpPaymaster"], True)
+
+        client._request.reset_mock()
+        await client.send_smart_account_user_operation(
+            "end-user-id", address, "project-id", "base", destination, 0,
+            "attempt-id-2", "0x1234", use_cdp_paymaster=False,
+        )
+        self.assertIs(
+            client._request.await_args.kwargs["body"]["useCdpPaymaster"], False
         )
 
     async def test_user_can_set_registered_token_as_canonical_default(self):
