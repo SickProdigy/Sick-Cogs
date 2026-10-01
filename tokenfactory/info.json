@@ -2,17 +2,17 @@
   "author": [
     "SickProdigy"
   ],
-  "description": "Protected fixed-supply ERC-20 deployments on Base Sepolia through a Discord or external wallet.",
+  "description": "Protected fixed-supply ERC-20 deployments on Base, with Sepolia enabled and a default-off mainnet release candidate.",
   "disabled": false,
   "end_user_data_statement": "This cog stores public token deployment drafts, public deployment records, and product-specific mainnet terms acceptance records linked to Discord user IDs and public wallet addresses. It never stores wallet keys, recovery material, or credentials.",
   "hidden": false,
-  "install_msg": "TokenFactory is Base Sepolia-only. Load CryptoWallet first for protected website configuration and the optional Discord Wallet route. The bot owner must verify the pinned factory and run `[p]tokenfactoryset deployment enable` before members can deploy from `[p]tokenfactory create`. Use `[p]tokenfactoryset deployment pause` as the emergency stop.",
+  "install_msg": "TokenFactory enables reviewed Base Sepolia deployments. Its Base mainnet release candidate remains default-off until the pinned factory and ordinary-member path pass acceptance. Load CryptoWallet for the optional Discord Wallet route; external-wallet deployment remains product-specific.",
   "min_bot_version": "3.5.0",
   "permissions": [
     "embed_links"
   ],
   "requirements": [],
-  "short": "Protected fixed-supply Base Sepolia token deployments",
+  "short": "Protected fixed-supply Base token deployments",
   "tags": [
     "tokens",
     "erc20",
@@ -21,5 +21,5 @@
     "wallet"
   ],
   "type": "COG",
-  "version": "1.1.19"
+  "version": "1.1.20"
 }

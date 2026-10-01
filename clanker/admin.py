@@ -58,7 +58,7 @@ class ClankerAdminMixin:
             f"Code release gate: **{MAINNET_SUBMISSION_ENABLED}**\n"
             f"Installation enabled: **{enabled}**\n"
             f"Emergency paused: **{paused}**\n"
-            "Bounded user-paid smart-account fees: **unsupported — submissions blocked**\n"
+            "Fee approval model: **live estimate + reapproval threshold staged; legacy gate blocked**\n"
             "Access when released: **requesting members with exact protected approval**"
         )
 

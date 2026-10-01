@@ -1410,12 +1410,10 @@ class TokenFactory(commands.Cog):
         limits = validate_mainnet_limits(await self.config.mainnet_limits())
         enabled = bool(await self.config.mainnet_deployment_enabled())
         paused = bool(await self.config.mainnet_emergency_paused())
-        canary = bool(await self.config.mainnet_owner_canary_enabled())
         embed.add_field(
             name="Control state",
             value=(
-                f"Enabled: **{enabled}**\nPaused: **{paused}**\n"
-                f"Legacy owner-canary flag: **{canary}**"
+                f"Enabled: **{enabled}**\nPaused: **{paused}**"
             ),
             inline=False,
         )
@@ -1465,10 +1463,10 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Provider fee enforcement",
+            name="Fee approval model",
             value=(
-                "**Blocked:** CDP smart-account submission does not expose an "
-                "enforceable total user-paid fee ceiling."
+                "Live estimate and reapproval threshold are staged. The legacy "
+                "provider-level fee gate still blocks submission."
             ),
             inline=False,
         )
