@@ -2,7 +2,7 @@ import unittest
 
 from clanker.mainnet_operations import (
     MAINNET_SUBMISSION_ENABLED, MAX_FEE_WEI, MainnetOperationIntent,
-    _manifest as clanker_manifest, authorize_mainnet_submission,
+    _manifest as clanker_manifest,
 )
 from clanker.mainnet_lifecycle import (
     MainnetOperationLifecycle, assert_same_mainnet_lifecycle,
@@ -127,22 +127,6 @@ class CryptoStackMainnetBoundaryTests(unittest.TestCase):
                 clanker_restored, clanker_intent, "token-attempt"
             )
 
-    def test_clanker_valid_shape_still_has_no_submitter(self):
-        manifest = clanker_manifest()
-        signer = "0x1111111111111111111111111111111111111111"
-        token = "0x2222222222222222222222222222222222222222"
-        target = manifest["contracts"]["feeLocker"]["address"]
-        intent = MainnetOperationIntent(
-            operation_id="integrated-disabled-check",
-            kind="treasuryClaim", requester_id=7, signer=signer, to=target,
-            value=0,
-            data="0x21c0b342" + signer[2:].rjust(64, "0") + token[2:].rjust(64, "0"),
-            created_at=1_700_000_000, expires_at=1_700_000_600,
-            gas_limit=200_000, max_fee_wei=10**15,
-            recipients=(signer,), token=token, fee_owner=signer,
-        )
-        with self.assertRaisesRegex(RuntimeError, "disabled"):
-            authorize_mainnet_submission(intent)
 
 if __name__ == "__main__":
     unittest.main()

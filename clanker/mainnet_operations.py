@@ -323,12 +323,3 @@ def revalidate_mainnet_pre_submission(
         "required_balance_wei": required_balance,
         "approval_expires_at": intent.expires_at,
     }
-
-
-def authorize_mainnet_submission(intent: MainnetOperationIntent) -> None:
-    """Keep all real submission unavailable until a later explicit release gate."""
-
-    del intent
-    if not MAINNET_SUBMISSION_ENABLED:
-        raise RuntimeError("Clanker Base mainnet submission is disabled.")
-    raise RuntimeError("No Clanker Base mainnet submitter has been implemented.")

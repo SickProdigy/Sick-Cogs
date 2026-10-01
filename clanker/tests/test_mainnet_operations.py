@@ -5,7 +5,6 @@ from ..mainnet_operations import (
     MAINNET_SUBMISSION_ENABLED,
     MainnetOperationIntent,
     build_mainnet_launch_operation,
-    authorize_mainnet_submission,
     validate_mainnet_candidate,
     _mainnet_launch_calldata,
     revalidate_mainnet_pre_submission,
@@ -194,8 +193,6 @@ class MainnetOperationTests(unittest.TestCase):
         )
         self.assertEqual(read.kind, "rewardDiscovery")
         self.assertIs(MAINNET_SUBMISSION_ENABLED, False)
-        with self.assertRaisesRegex(RuntimeError, "disabled"):
-            authorize_mainnet_submission(read)
 
 
 if __name__ == "__main__":
