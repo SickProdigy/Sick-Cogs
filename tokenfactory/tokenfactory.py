@@ -27,7 +27,7 @@ from .mainnet_lifecycle import (
     create_mainnet_canary_lifecycle,
     transition_mainnet_canary_lifecycle,
 )
-from .mainnet_review import MainnetTokenReview
+from .mainnet_review import MainnetTokenReview, build_mainnet_token_review
 from .mainnet_verification import verify_mainnet_canary_evidence
 from .models import TokenDraft
 from .network_manifest import mainnet_readiness
@@ -184,6 +184,34 @@ class TokenFactory(commands.Cog):
         return MainnetCanaryApprovalView(
             self, review.owner_discord_id, review
         )
+
+    async def stage_member_mainnet_review(
+        self, user, draft: TokenDraft, execution_terms: dict
+    ) -> tuple[MainnetTokenReview, MainnetCanaryApprovalView]:
+        """Build and persist one ordinary-member mainnet review without submitting."""
+        if draft.network != "base-mainnet" or draft.chain_id != 8453:
+            raise ValueError("A Base mainnet token draft is required.")
+        if not await self.deployment_available(draft.network):
+            raise RuntimeError(
+                "Base mainnet TokenFactory deployment is disabled or not verified."
+            )
+        stored = await self.config.user(user).deployment_draft()
+        if not isinstance(stored, dict) or TokenDraft.from_dict(stored) != draft:
+            raise RuntimeError(
+                "The saved token draft changed; reopen the card and review it."
+            )
+        expected_terms = self.execution_terms(
+            route="discord", network="base-mainnet"
+        )
+        if execution_terms != expected_terms:
+            raise ValueError("The mainnet TokenFactory fee policy changed.")
+        review = build_mainnet_token_review(
+            draft, "0x" + secrets.token_hex(32), draft.owner_address,
+            max_gas_fee_wei=int(execution_terms["max_gas_fee_wei"]),
+            gas_payer=str(execution_terms["gas_payer"]),
+            limits=validate_mainnet_limits(await self.config.mainnet_limits()),
+        )
+        return review, await self.stage_mainnet_canary_review(review)
 
     async def approve_mainnet_canary_review(
         self,
@@ -737,7 +765,7 @@ class TokenFactory(commands.Cog):
     async def submit_token_deployment(
         self, user, draft: TokenDraft, execution_terms: dict, *, guild_id=None
     ) -> dict:
-        if not await self.deployment_available():
+        if not await self.deployment_available(draft.network):
             raise RuntimeError("Token deployment is disabled or emergency-paused.")
         stored = await self.config.user(user).deployment_draft()
         if not isinstance(stored, dict) or TokenDraft.from_dict(stored) != draft:

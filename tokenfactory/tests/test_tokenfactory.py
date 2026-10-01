@@ -15,6 +15,8 @@ from ..constants import BASE_MAINNET_CHAIN_ID, BASE_MAINNET_NETWORK_KEY
 from ..models import TokenDraft
 from ..tokenfactory import TokenFactory
 from ..views import FactoryDeploymentView, TokenDeploymentConfirmView
+from ..mainnet_review import build_mainnet_token_review
+from ..policy import default_mainnet_limits
 from ..validation import (
     normalize_decimals,
     normalize_name,
@@ -250,6 +252,107 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         labels = {item.label for item in view.children if item.label}
         self.assertIn("Deploy to Discord Wallet", labels)
         self.assertIn("Deploy with External Wallet", labels)
+
+    async def test_mainnet_confirmation_stages_terms_bound_review_only(self):
+        draft = TokenDraft(
+            creator_discord_id=7, wallet_profile_id="mainnet-profile-7",
+            owner_address=self.draft.owner_address, name="Mainnet Token",
+            symbol="MAIN", decimals=18, supply_atomic=10**18,
+            network="base-mainnet", chain_id=8453,
+        )
+        terms = object.__new__(TokenFactory).execution_terms(
+            route="discord", network="base-mainnet"
+        )
+        review = build_mainnet_token_review(
+            draft, "0x" + "22" * 32, draft.owner_address,
+            max_gas_fee_wei=terms["max_gas_fee_wei"],
+            gas_payer=terms["gas_payer"], limits=default_mainnet_limits(),
+        )
+        review_view = SimpleNamespace(message=None)
+        cog = SimpleNamespace(
+            has_current_mainnet_terms=AsyncMock(return_value=True),
+            stage_member_mainnet_review=AsyncMock(
+                return_value=(review, review_view)
+            ),
+            bot=SimpleNamespace(get_cog=lambda name: None),
+        )
+        view = TokenDeploymentConfirmView(cog, self.user, draft, terms)
+        sent_message = SimpleNamespace()
+        interaction = SimpleNamespace(
+            user=self.user, guild=None, guild_id=123,
+            response=SimpleNamespace(
+                edit_message=AsyncMock(), send_message=AsyncMock()
+            ),
+            followup=SimpleNamespace(send=AsyncMock(return_value=sent_message)),
+        )
+        await view.confirm.callback(interaction)
+        cog.stage_member_mainnet_review.assert_awaited_once_with(
+            self.user, draft, terms
+        )
+        sent = interaction.followup.send.await_args.kwargs
+        self.assertEqual(sent["embed"].title, "Review Base mainnet TokenFactory deployment")
+        self.assertIs(review_view.message, sent_message)
+
+        cog.has_current_mainnet_terms.return_value = False
+        cog.stage_member_mainnet_review.reset_mock()
+        view.processing = False
+        for item in view.children:
+            item.disabled = False
+        await view.confirm.callback(interaction)
+        cog.stage_member_mainnet_review.assert_not_awaited()
+        prompt = interaction.response.send_message.await_args.kwargs
+        self.assertEqual(prompt["embed"].title, "Accept TokenFactory Mainnet Terms")
+        self.assertEqual(
+            [item.label for item in prompt["view"].children], ["Accept terms"]
+        )
+
+    async def test_member_mainnet_review_rechecks_network_and_saved_draft(self):
+        draft = TokenDraft(
+            creator_discord_id=7, wallet_profile_id="mainnet-profile-7",
+            owner_address=self.draft.owner_address, name="Mainnet Token",
+            symbol="MAIN", decimals=18, supply_atomic=10**18,
+            network="base-mainnet", chain_id=8453,
+        )
+        terms = object.__new__(TokenFactory).execution_terms(
+            route="discord", network="base-mainnet"
+        )
+        staged_view = SimpleNamespace()
+        user_scope = SimpleNamespace(
+            deployment_draft=AsyncMock(return_value=draft.to_dict())
+        )
+        subject = SimpleNamespace(
+            config=SimpleNamespace(
+                user=lambda user: user_scope,
+                mainnet_limits=AsyncMock(return_value=default_mainnet_limits()),
+            ),
+            deployment_available=AsyncMock(return_value=True),
+            execution_terms=TokenFactory.execution_terms.__get__(
+                object.__new__(TokenFactory), TokenFactory
+            ),
+            stage_mainnet_canary_review=AsyncMock(return_value=staged_view),
+        )
+        review, returned_view = await TokenFactory.stage_member_mainnet_review(
+            subject, self.user, draft, terms
+        )
+        subject.deployment_available.assert_awaited_once_with("base-mainnet")
+        self.assertEqual(review.owner_discord_id, self.user.id)
+        self.assertIs(returned_view, staged_view)
+
+    async def test_submit_gate_uses_the_immutable_draft_network(self):
+        draft = TokenDraft(
+            creator_discord_id=7, wallet_profile_id="mainnet-profile-7",
+            owner_address=self.draft.owner_address, name="Mainnet Token",
+            symbol="MAIN", decimals=18, supply_atomic=10**18,
+            network="base-mainnet", chain_id=8453,
+        )
+        subject = SimpleNamespace(
+            deployment_available=AsyncMock(return_value=False)
+        )
+        with self.assertRaisesRegex(RuntimeError, "disabled"):
+            await TokenFactory.submit_token_deployment(
+                subject, self.user, draft, {}, guild_id=123
+            )
+        subject.deployment_available.assert_awaited_once_with("base-mainnet")
 
     async def test_mixed_crypto_wallet_version_has_actionable_error(self):
         cog = SimpleNamespace(_cryptowallet=lambda: object())

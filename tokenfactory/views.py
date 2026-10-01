@@ -585,11 +585,48 @@ class TokenDeploymentConfirmView(discord.ui.View):
                 "Token deployment is already being processed.", ephemeral=True
             )
             return
+        if self.draft.network == "base-mainnet":
+            if not await self.cog.has_current_mainnet_terms(interaction.user.id):
+                terms_url = None
+                wallet = self.cog.bot.get_cog("CryptoWallet")
+                if wallet is not None:
+                    base_url = str(
+                        await wallet.config.approval_base_url() or ""
+                    ).rstrip("/")
+                    if base_url:
+                        terms_url = f"{base_url}/tokenfactory-terms.html"
+                embed = discord.Embed(
+                    title="Accept TokenFactory Mainnet Terms",
+                    description=(
+                        "Review and accept the TokenFactory-specific terms once, then "
+                        "press **Deploy token** again. Acceptance does not deploy a "
+                        "token or authorize a transaction."
+                    ),
+                    color=discord.Color.blurple(),
+                )
+                await interaction.response.send_message(
+                    embed=embed,
+                    view=TokenFactoryTermsView(
+                        self.cog, interaction.user.id, terms_url, current=False
+                    ),
+                    ephemeral=True,
+                )
+                return
         self.processing = True
         for item in self.children:
             item.disabled = True
         await interaction.response.edit_message(view=self)
         try:
+            if self.draft.network == "base-mainnet":
+                review, review_view = await self.cog.stage_member_mainnet_review(
+                    self.user, self.draft, self.execution_terms
+                )
+                message = await interaction.followup.send(
+                    embed=mainnet_review_embed(review), view=review_view,
+                    ephemeral=True, wait=True,
+                )
+                review_view.message = message
+                return
             result = await self.cog.submit_token_deployment(
                 self.user,
                 self.draft,
