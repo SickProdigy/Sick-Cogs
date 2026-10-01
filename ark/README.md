@@ -1,11 +1,12 @@
 # ARK: Survival Ascended Announcements
 
-Publish new official ARK: Survival Ascended Steam announcements in Discord. Version 1.0.0 focuses only on announcement delivery; it does not use RCON, query game servers, or require an API key.
+Publish new official ARK: Survival Ascended Steam announcements in Discord. It does not use RCON, query game servers, or require an API key.
 
 ## Setup
 
 ```text
 [p]arkset channel #ark-updates
+[p]arkset mode article
 [p]arkset role @ARK Updates
 [p]arkset autopost start 5
 ```
@@ -17,6 +18,8 @@ categories; for example, `[p]arkset categories updates events`, `[p]arkset categ
 
 When starting automatic posting, optionally add a number from 2 to 10 to publish that many recent matching posts first,
 oldest to newest: `[p]arkset autopost start 5`. Backfilled posts are spaced one second apart and do not mention the notification role. The backfill searches Steam's 100 most recent posts and respects the configured categories.
+
+Delivery defaults to `card`, a compact embed with one featured image. `article` sends regular Discord text, converts Steam trailers into native YouTube links, and uploads as many as four suitable Steam images together as a gallery. Long articles end with a Continue reading link to Steam. Use `[p]arkset preview` to test the selected mode.
 
 ## Categories
 
@@ -47,6 +50,7 @@ In-Game Event; a Steam Regular Update is not necessarily a hotfix.
 [p]arkset autopost start [recent-posts]
 [p]arkset autopost stop
 [p]arkset role [role]
+[p]arkset mode [card|article]
 [p]arkset categories [categories...]
 [p]arkset interval <minutes>
 [p]arkset preview [category]

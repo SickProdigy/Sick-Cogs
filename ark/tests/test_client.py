@@ -1,6 +1,15 @@
 import unittest
 
-from ark.client import classify_news, extract_image, new_items, plain_text, recent_items
+from ark.client import (
+    classify_news,
+    extract_image,
+    extract_images,
+    extract_youtube_urls,
+    image_dimensions,
+    new_items,
+    plain_text,
+    recent_items,
+)
 
 
 class ArkClientTests(unittest.TestCase):
@@ -28,6 +37,15 @@ class ArkClientTests(unittest.TestCase):
         source = "[h1]Patch Notes[/h1]\n[list][*][color=#fff][b]Fixed[/b][/color] bugs &amp; crashes.[/list]\n[img]https://example.com/a.png[/img]"
         self.assertEqual(plain_text(source), "Patch Notes\n• Fixed bugs & crashes.")
 
+    def test_youtube_preview_becomes_url_and_not_stale_text(self):
+        source = "Before\n[previewyoutube=gsWm02GX1zw;full]TRAILER[/previewyoutube]\nAfter"
+        self.assertEqual(extract_youtube_urls(source), ["https://youtu.be/gsWm02GX1zw"])
+        self.assertEqual(plain_text(source), "Before\n\nAfter")
+        self.assertEqual(
+            plain_text(source, youtube_links=True),
+            "Before\nWatch trailer on YouTube: https://youtu.be/gsWm02GX1zw\nAfter",
+        )
+
     def test_extracts_and_expands_steam_clan_image(self):
         source = "[img]{STEAM_CLAN_IMAGE}/12345/banner.jpg[/img]"
         self.assertEqual(
@@ -35,7 +53,11 @@ class ArkClientTests(unittest.TestCase):
             "https://clan.steamstatic.com/images/12345/banner.jpg",
         )
 
-    def test_prefers_artwork_before_full_resolution_link(self):
+    def test_reads_png_dimensions_for_gallery_filtering(self):
+        payload = b"\x89PNG\r\n\x1a\n" + (b"\x00" * 8) + (2560).to_bytes(4, "big") + (1440).to_bytes(4, "big")
+        self.assertEqual(image_dimensions(payload), (2560, 1440))
+
+    def test_card_uses_first_image_in_steam_order(self):
         source = (
             "[img]{STEAM_CLAN_IMAGE}/12345/header.png[/img]\n"
             "Introduction\n"
@@ -45,7 +67,7 @@ class ArkClientTests(unittest.TestCase):
         )
         self.assertEqual(
             extract_image(source),
-            "https://clan.steamstatic.com/images/12345/featured.jpg",
+            "https://clan.steamstatic.com/images/12345/header.png",
         )
 
     def test_recent_release_artwork_uses_direct_steam_cdn(self):
@@ -61,7 +83,16 @@ class ArkClientTests(unittest.TestCase):
         self.assertEqual(
             extract_image(source),
             "https://clan.steamstatic.com/images/44719856/"
-            "674a529bc710eb4218cb2ec321a4d5eb99776c33.png",
+            "14decb75883b079ef427a162df1a3649fe9cefc6.png",
+        )
+        self.assertEqual(
+            extract_images(source),
+            [
+                "https://clan.steamstatic.com/images/44719856/"
+                "14decb75883b079ef427a162df1a3649fe9cefc6.png",
+                "https://clan.steamstatic.com/images/44719856/"
+                "674a529bc710eb4218cb2ec321a4d5eb99776c33.png",
+            ],
         )
 
     def test_redirecting_legacy_cdn_is_canonicalized(self):
