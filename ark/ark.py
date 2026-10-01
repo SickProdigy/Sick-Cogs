@@ -127,7 +127,7 @@ class ArkAnnouncements(commands.Cog):
             return None
         return channel
 
-    def make_embed(self, item: dict) -> discord.Embed:
+    def make_embed(self, item: dict, *, image_url: Optional[str] = None) -> discord.Embed:
         category = classify_news(item)
         timestamp = datetime.datetime.fromtimestamp(
             int(item.get("date") or 0), tz=datetime.timezone.utc
@@ -143,10 +143,34 @@ class ArkAnnouncements(commands.Cog):
         )
         embed.set_author(name="ARK: Survival Ascended — Official Steam News", url=ANNOUNCEMENTS_URL)
         embed.set_footer(text=CATEGORY_LABELS.get(category, CATEGORY_LABELS["official"]))
-        image = extract_image(item.get("contents") or "")
+        image = image_url or extract_image(item.get("contents") or "")
         if image:
             embed.set_image(url=image)
         return embed
+
+    async def select_card_image(self, contents: str) -> Optional[str]:
+        """Choose the first real artwork image while skipping Steam title strips."""
+        candidates = extract_images(contents, limit=12)
+        session = await self.get_session()
+        for url in candidates:
+            if (urlparse(url).hostname or "").casefold() not in STEAM_IMAGE_HOSTS:
+                continue
+            try:
+                async with session.get(url, headers={"Range": "bytes=0-65535"}) as response:
+                    final_host = (response.url.host or "").casefold()
+                    if response.status >= 400 or final_host not in STEAM_IMAGE_HOSTS:
+                        continue
+                    header = bytearray()
+                    async for chunk in response.content.iter_chunked(16 * 1024):
+                        header.extend(chunk)
+                        if len(header) >= 64 * 1024:
+                            break
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                continue
+            dimensions = image_dimensions(bytes(header))
+            if dimensions and dimensions[0] >= 400 and dimensions[1] >= 200:
+                return url
+        return extract_image(contents)
 
     def make_article_text(self, item: dict) -> str:
         title = discord.utils.escape_markdown(
@@ -246,9 +270,10 @@ class ArkAnnouncements(commands.Cog):
             await self.send_article(channel, item, role_id)
             return
         role = channel.guild.get_role(int(role_id)) if role_id else None
+        image_url = await self.select_card_image(item.get("contents") or "")
         await channel.send(
             content=role.mention if role else None,
-            embed=self.make_embed(item),
+            embed=self.make_embed(item, image_url=image_url),
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, users=False, roles=bool(role)
             ),
