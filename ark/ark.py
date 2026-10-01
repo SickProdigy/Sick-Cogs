@@ -1,7 +1,9 @@
 import asyncio
 import datetime
+import io
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 import discord
@@ -20,6 +22,9 @@ from .client import (
     SteamNewsError,
     classify_news,
     extract_image,
+    extract_images,
+    image_dimensions,
+    optimize_gallery_image,
     item_id,
     new_items,
     plain_text,
@@ -33,6 +38,12 @@ DEFAULT_CATEGORIES = ["all"]
 MIN_INTERVAL_MINUTES = 5
 MAX_INTERVAL_MINUTES = 1440
 MAX_POSTED_IDS = 500
+DELIVERY_MODES = ("card", "article")
+ARTICLE_TEXT_LIMIT = 1400
+MAX_GALLERY_IMAGES = 4
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_GALLERY_BYTES = 5 * 1024 * 1024
+STEAM_IMAGE_HOSTS = {"clan.steamstatic.com", "clan.akamai.steamstatic.com"}
 
 
 def utc_now() -> datetime.datetime:
@@ -62,13 +73,14 @@ class ArkAnnouncements(commands.Cog):
     """Publish official ARK: Survival Ascended Steam announcements."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
 
     default_guild = {
         "enabled": False,
         "channel_id": None,
         "role_id": None,
         "categories": DEFAULT_CATEGORIES,
+        "delivery_mode": "card",
         "interval_minutes": 10,
         "posted_ids": [],
         "last_poll_at": None,
@@ -115,12 +127,12 @@ class ArkAnnouncements(commands.Cog):
             return None
         return channel
 
-    def make_embed(self, item: dict) -> discord.Embed:
+    def make_embed(self, item: dict, *, image_url: Optional[str] = None) -> discord.Embed:
         category = classify_news(item)
         timestamp = datetime.datetime.fromtimestamp(
             int(item.get("date") or 0), tz=datetime.timezone.utc
         )
-        description = plain_text(item.get("contents") or "") or "Open the official Steam announcement for details."
+        description = plain_text(item.get("contents") or "", youtube_links=True) or "Open the official Steam announcement for details."
         url = str(item.get("url") or ANNOUNCEMENTS_URL)
         embed = discord.Embed(
             title=str(item.get("title") or "ARK: Survival Ascended announcement")[:256],
@@ -131,18 +143,140 @@ class ArkAnnouncements(commands.Cog):
         )
         embed.set_author(name="ARK: Survival Ascended — Official Steam News", url=ANNOUNCEMENTS_URL)
         embed.set_footer(text=CATEGORY_LABELS.get(category, CATEGORY_LABELS["official"]))
-        image = extract_image(item.get("contents") or "")
+        image = image_url or extract_image(item.get("contents") or "")
         if image:
             embed.set_image(url=image)
         return embed
 
-    async def send_item(self, channel, item: dict, role_id: Optional[int]):
+    async def select_card_image(self, contents: str) -> Optional[str]:
+        """Choose the first real artwork image while skipping Steam title strips."""
+        candidates = extract_images(contents, limit=12)
+        session = await self.get_session()
+        for url in candidates:
+            if (urlparse(url).hostname or "").casefold() not in STEAM_IMAGE_HOSTS:
+                continue
+            try:
+                async with session.get(url, headers={"Range": "bytes=0-65535"}) as response:
+                    final_host = (response.url.host or "").casefold()
+                    if response.status >= 400 or final_host not in STEAM_IMAGE_HOSTS:
+                        continue
+                    header = bytearray()
+                    async for chunk in response.content.iter_chunked(16 * 1024):
+                        header.extend(chunk)
+                        if len(header) >= 64 * 1024:
+                            break
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                continue
+            dimensions = image_dimensions(bytes(header))
+            if dimensions and dimensions[0] >= 400 and dimensions[1] >= 200:
+                return url
+        return extract_image(contents)
+
+    def make_article_text(self, item: dict) -> str:
+        title = discord.utils.escape_markdown(
+            str(item.get("title") or "ARK: Survival Ascended announcement")[:240]
+        )
+        url = str(item.get("url") or ANNOUNCEMENTS_URL)
+        full_text = plain_text(
+            item.get("contents") or "", limit=100_000, youtube_links=True
+        )
+        truncated = len(full_text) > ARTICLE_TEXT_LIMIT
+        description = plain_text(
+            item.get("contents") or "", limit=ARTICLE_TEXT_LIMIT, youtube_links=True
+        )
+        lines = [
+            "**ARK: Survival Ascended — Official Steam News**",
+            f"## [{title}]({url})",
+        ]
+        if description:
+            lines.extend(("", description))
+        if truncated:
+            lines.extend(("", f"[Continue reading on Steam…]({url})"))
+        return "\n".join(lines)
+
+    async def download_gallery_files(self, contents: str):
+        files = []
+        gallery_bytes = 0
+        session = await self.get_session()
+        # Inspect extra candidates so small title strips do not consume gallery slots.
+        for url in extract_images(contents, limit=12):
+            if len(files) >= MAX_GALLERY_IMAGES:
+                break
+            if (urlparse(url).hostname or "").casefold() not in STEAM_IMAGE_HOSTS:
+                continue
+            try:
+                async with session.get(url) as response:
+                    final_host = (response.url.host or "").casefold()
+                    content_type = response.headers.get("Content-Type", "").casefold()
+                    content_length = int(response.headers.get("Content-Length") or 0)
+                    if (
+                        response.status >= 400
+                        or final_host not in STEAM_IMAGE_HOSTS
+                        or not content_type.startswith("image/")
+                        or content_length > MAX_IMAGE_BYTES
+                    ):
+                        continue
+                    chunks = bytearray()
+                    async for chunk in response.content.iter_chunked(64 * 1024):
+                        chunks.extend(chunk)
+                        if len(chunks) > MAX_IMAGE_BYTES:
+                            break
+                    payload = bytes(chunks)
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                log.warning("Could not download ARK article image from %s", url)
+                continue
+            dimensions = image_dimensions(payload)
+            if (
+                len(payload) > MAX_IMAGE_BYTES
+                or dimensions is None
+                or dimensions[0] < 400
+                or dimensions[1] < 200
+                or dimensions[0] > 8192
+                or dimensions[1] > 8192
+            ):
+                continue
+            try:
+                payload = await asyncio.to_thread(optimize_gallery_image, payload)
+            except ValueError:
+                log.warning("Could not resize ARK article image from %s", url)
+                continue
+            if gallery_bytes + len(payload) > MAX_GALLERY_BYTES:
+                continue
+            gallery_bytes += len(payload)
+            files.append(
+                discord.File(
+                    io.BytesIO(payload),
+                    filename=f"ark-announcement-{len(files) + 1}.jpg",
+                )
+            )
+        return files
+
+    async def send_article(self, channel, item: dict, role_id: Optional[int]):
         role = channel.guild.get_role(int(role_id)) if role_id else None
-        content = role.mention if role else None
+        article = self.make_article_text(item)
+        content = f"{role.mention}\n{article}" if role else article
+        files = await self.download_gallery_files(item.get("contents") or "")
         await channel.send(
             content=content,
-            embed=self.make_embed(item),
+            files=files,
             allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=bool(role)),
+            suppress_embeds=True,
+        )
+
+    async def send_item(
+        self, channel, item: dict, role_id: Optional[int], delivery_mode: str = "card"
+    ):
+        if delivery_mode == "article":
+            await self.send_article(channel, item, role_id)
+            return
+        role = channel.guild.get_role(int(role_id)) if role_id else None
+        image_url = await self.select_card_image(item.get("contents") or "")
+        await channel.send(
+            content=role.mention if role else None,
+            embed=self.make_embed(item, image_url=image_url),
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, users=False, roles=bool(role)
+            ),
         )
 
     async def seed_current(self, guild: discord.Guild) -> int:
@@ -190,7 +324,12 @@ class ArkAnnouncements(commands.Cog):
             category = classify_news(item)
             try:
                 if "all" in enabled_categories or category in enabled_categories:
-                    await self.send_item(channel, item, settings.get("role_id"))
+                    await self.send_item(
+                        channel,
+                        item,
+                        settings.get("role_id"),
+                        settings.get("delivery_mode", "card"),
+                    )
                     sent += 1
             except (discord.Forbidden, discord.NotFound):
                 log.warning("Could not publish ARK announcement in channel %s", channel.id)
@@ -275,7 +414,8 @@ class ArkAnnouncements(commands.Cog):
             await ctx.send("No matching official ARK announcement was found.")
             return
         latest = max(items, key=lambda item: int(item.get("date") or 0))
-        await ctx.send(embed=self.make_embed(latest))
+        mode = await self.config.guild(ctx.guild).delivery_mode()
+        await self.send_item(ctx.channel, latest, None, mode)
 
     @commands.group(name="arkset", invoke_without_command=True)
     @commands.guild_only()
@@ -294,6 +434,7 @@ class ArkAnnouncements(commands.Cog):
         embed.add_field(name="Automatic posting", value="Running" if settings["enabled"] else "Stopped")
         embed.add_field(name="Channel", value=channel.mention if channel else "Not configured")
         embed.add_field(name="Notification role", value=role.mention if role else "None")
+        embed.add_field(name="Delivery style", value=settings.get("delivery_mode", "card").title())
         embed.add_field(name="Categories", value=humanize_list(category_display_names(categories)), inline=False)
         embed.add_field(name="Polling interval", value=f"{settings['interval_minutes']} minutes")
         embed.add_field(name="Last successful check", value=settings.get("last_success_at") or "Never", inline=False)
@@ -370,7 +511,9 @@ class ArkAnnouncements(commands.Cog):
                 ]
                 selected = recent_items(matching, recent_posts)
                 for index, item in enumerate(selected):
-                    await self.send_item(channel, item, None)
+                    await self.send_item(
+                        channel, item, None, await group.delivery_mode()
+                    )
                     published += 1
                     if index < len(selected) - 1:
                         await asyncio.sleep(1)
@@ -399,6 +542,21 @@ class ArkAnnouncements(commands.Cog):
         """Set the optional role mentioned for matching announcements; omit to clear."""
         await self.config.guild(ctx.guild).role_id.set(role.id if role else None)
         await ctx.send(f"ARK announcements will mention {role.mention}." if role else "The ARK notification role was cleared.")
+
+    @arkset.command(name="mode")
+    async def arkset_mode(self, ctx: commands.Context, mode: str = ""):
+        """Choose card embeds or article-style posts with trailer and image gallery."""
+        mode = mode.casefold().strip()
+        group = self.config.guild(ctx.guild)
+        if not mode:
+            current = await group.delivery_mode()
+            await ctx.send(f"ARK announcements currently use `{current}` mode.")
+            return
+        if mode not in DELIVERY_MODES:
+            await ctx.send("Choose `card` or `article`.")
+            return
+        await group.delivery_mode.set(mode)
+        await ctx.send(f"ARK announcements will use `{mode}` mode.")
 
     @arkset.command(name="categories")
     async def arkset_categories(self, ctx: commands.Context, *, categories: str = ""):

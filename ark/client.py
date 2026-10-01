@@ -1,15 +1,18 @@
 import asyncio
 import html
+import io
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
 import aiohttp
+from PIL import Image, UnidentifiedImageError
 
 
 APP_ID = 2399830
 API_URL = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
 ANNOUNCEMENTS_URL = f"https://steamcommunity.com/app/{APP_ID}/announcements/"
-USER_AGENT = "Sick-Cogs-ArkAnnouncements/1.0.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-ArkAnnouncements/1.0.2 (+https://github.com/SickProdigy/Sick-Cogs)"
+STEAM_CLAN_IMAGE_ROOT = "https://clan.steamstatic.com/images"
 
 CATEGORIES = ("updates", "hotfixes", "community", "events", "wipes", "releases", "promotions")
 CATEGORY_LABELS = {
@@ -25,9 +28,12 @@ CATEGORY_LABELS = {
 
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)', re.IGNORECASE)
-_FULL_RESOLUTION_RE = re.compile(r"download\s+in\s+full\s+resolution", re.IGNORECASE)
+_YOUTUBE_RE = re.compile(
+    r"\[previewyoutube=([^;\]\s]+)(?:;[^\]]*)?\].*?\[/previewyoutube\]",
+    re.IGNORECASE | re.DOTALL,
+)
 _FULL_RESOLUTION_LINE_RE = re.compile(
-    r"^[ \t]*download\s+in\s+full\s+resolution[ \t]*$",
+    r"^[ \t]*download(?:\s+all\s+screenshots)?\s+in\s+full\s+resolution[ \t]*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _BB_TAG_RE = re.compile(r"\[/?[a-z*][^\]]*\]", re.IGNORECASE)
@@ -42,8 +48,10 @@ class SteamNewsError(RuntimeError):
 
 def normalize_image_url(value: str) -> Optional[str]:
     url = html.unescape(str(value or "").strip())
+    url = url.replace("{STEAM_CLAN_IMAGE}", STEAM_CLAN_IMAGE_ROOT)
     url = url.replace(
-        "{STEAM_CLAN_IMAGE}", "https://clan.cloudflare.steamstatic.com/images"
+        "https://clan.cloudflare.steamstatic.com/images",
+        STEAM_CLAN_IMAGE_ROOT,
     )
     if url.startswith("//"):
         url = f"https:{url}"
@@ -54,16 +62,6 @@ def normalize_image_url(value: str) -> Optional[str]:
 
 def extract_image(contents: str) -> Optional[str]:
     source = contents or ""
-    full_resolution = _FULL_RESOLUTION_RE.search(source)
-    if full_resolution:
-        preceding_images = [
-            match for match in _BB_IMAGE_RE.finditer(source, 0, full_resolution.start())
-        ]
-        for match in reversed(preceding_images):
-            image = normalize_image_url(match.group(1))
-            if image:
-                return image
-
     for pattern in (_BB_IMAGE_RE, _HTML_IMAGE_RE):
         for match in pattern.finditer(source):
             image = normalize_image_url(match.group(1))
@@ -72,9 +70,90 @@ def extract_image(contents: str) -> Optional[str]:
     return None
 
 
-def plain_text(contents: str, *, limit: int = 900) -> str:
+def extract_images(contents: str, *, limit: int = 4) -> List[str]:
+    """Return unique announcement images in Steam's original order."""
+    if limit <= 0:
+        return []
+    source = contents or ""
+    candidates = []
+    featured = extract_image(source)
+    if featured:
+        candidates.append(featured)
+    for pattern in (_BB_IMAGE_RE, _HTML_IMAGE_RE):
+        for match in pattern.finditer(source):
+            image = normalize_image_url(match.group(1))
+            if image and image not in candidates:
+                candidates.append(image)
+    return candidates[:limit]
+
+
+def extract_youtube_urls(contents: str, *, limit: int = 1) -> List[str]:
+    """Convert Steam previewyoutube markup into native YouTube links for Discord."""
+    if limit <= 0:
+        return []
+    urls = []
+    for match in _YOUTUBE_RE.finditer(contents or ""):
+        url = f"https://youtu.be/{match.group(1)}"
+        if url not in urls:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+def image_dimensions(payload: bytes):
+    """Read PNG or JPEG dimensions without adding an image-library dependency."""
+    if len(payload) >= 24 and payload[:8] == b"\x89PNG\r\n\x1a\n":
+        return int.from_bytes(payload[16:20], "big"), int.from_bytes(payload[20:24], "big")
+    if payload[:2] != b"\xff\xd8":
+        return None
+    position = 2
+    start_of_frame = {
+        0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+        0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+    }
+    while position + 9 <= len(payload):
+        if payload[position] != 0xFF:
+            position += 1
+            continue
+        marker = payload[position + 1]
+        position += 2
+        if marker in {0xD8, 0xD9}:
+            continue
+        if position + 2 > len(payload):
+            break
+        segment_length = int.from_bytes(payload[position : position + 2], "big")
+        if marker in start_of_frame and position + 7 <= len(payload):
+            height = int.from_bytes(payload[position + 3 : position + 5], "big")
+            width = int.from_bytes(payload[position + 5 : position + 7], "big")
+            return width, height
+        position += max(segment_length, 2)
+    return None
+
+
+def optimize_gallery_image(payload: bytes, *, max_edge: int = 1600, quality: int = 82) -> bytes:
+    """Resize a gallery image and encode it as a compact progressive JPEG."""
+    try:
+        with Image.open(io.BytesIO(payload)) as source:
+            source.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            image = source.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+            return output.getvalue()
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError("Unsupported announcement image.") from exc
+
+
+def plain_text(contents: str, *, limit: int = 900, youtube_links: bool = False) -> str:
     text = str(contents or "").replace("{STEAM_CLAN_IMAGE}", "")
     text = _BB_IMAGE_RE.sub("", text)
+    if youtube_links:
+        text = _YOUTUBE_RE.sub(
+            lambda match: f"Watch trailer on YouTube: https://youtu.be/{match.group(1)}",
+            text,
+        )
+    else:
+        text = _YOUTUBE_RE.sub("", text)
     text = re.sub(r"\[url=([^\]]+)\](.*?)\[/url\]", r"\2", text, flags=re.IGNORECASE | re.DOTALL)
     text = text.replace("[*]", "• ")
     text = _BB_TAG_RE.sub("", text)
