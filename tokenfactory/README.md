@@ -71,7 +71,9 @@ request IDs and the same pinned `createFixedSupplyToken` method. Live Discord gu
 installation's configured command prefix; documentation continues to use `[p]`.
 
 `tokenfactoryset mainnetstatus` displays the separate, non-executable Base mainnet candidate
-manifest and its unresolved gates. It cannot enable or deploy anything. See
+manifest and its unresolved gates. It cannot enable or deploy anything. The composed mainnet
+execution boundary revalidates every live binding before consulting both owner controls and the
+pinned manifest; the current candidate still rejects even an otherwise valid protected approval. See
 `contracts/MAINNET-READINESS.md` for the frozen contract behavior and release boundary.
 The safe SGBTestAgent checkpoint is documented in `docs/MAINNET-TEST-PLAN.md`.
 
