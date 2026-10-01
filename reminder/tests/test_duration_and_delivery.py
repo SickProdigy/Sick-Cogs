@@ -12,6 +12,14 @@ class DurationAndDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(Reminder.parse_duration("1m30s"))
         self.assertEqual(Reminder.parse_duration("1minute"), 60)
         self.assertEqual(Reminder.parse_duration("1month"), 2_628_000)
+    def test_reaction_control_removes_only_matching_reminder(self):
+        first = ReminderEntry("one", "First", 1.0, 2.0, control_message_id=100)
+        second = ReminderEntry("two", "Second", 1.0, 3.0, control_message_id=200)
+        retained, removed = Reminder.remove_controlled_reminder(
+            [first.to_raw(), second.to_raw()], 100
+        )
+        self.assertTrue(removed)
+        self.assertEqual([entry["id"] for entry in retained], ["two"])
 
     async def test_delivery_uses_quoted_text_and_source_button(self):
         entry = ReminderEntry(

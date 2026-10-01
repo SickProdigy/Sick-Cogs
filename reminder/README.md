@@ -13,6 +13,7 @@ restarts.
 
 Durations accept combinations such as `10min`, `1h30min`, or `2d12h`. Reminders are delivered by DM.
 Use `min` for minutes and `mo` for months; bare `m` is rejected as ambiguous.
+Successful reminder commands receive ✅ and ❌ reactions instead of a channel reply. React with ❌ to cancel that pending reminder. Invalid-duration guidance automatically disappears after a short delay.
 The configured offset only changes displayed calendar times; it does not change when a reminder is
 delivered.
 

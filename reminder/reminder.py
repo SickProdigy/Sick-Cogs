@@ -27,6 +27,7 @@ class ReminderEntry:
     due_at: float
     source_url: Optional[str] = None
     failed_at: Optional[float] = None
+    control_message_id: Optional[int] = None
 
     @classmethod
     def from_raw(cls, raw: object) -> Optional["ReminderEntry"]:
@@ -53,6 +54,13 @@ class ReminderEntry:
             )
         ):
             source_url = None
+        control_message_id = raw.get("control_message_id")
+        if (
+            not isinstance(control_message_id, int)
+            or isinstance(control_message_id, bool)
+            or control_message_id <= 0
+        ):
+            control_message_id = None
         failed_at = raw.get("failed_at")
         if not ReminderEntry._valid_timestamp(failed_at):
             failed_at = None
@@ -63,6 +71,7 @@ class ReminderEntry:
             float(due_at),
             source_url=source_url,
             failed_at=failed_at,
+            control_message_id=control_message_id,
         )
     @staticmethod
     def _valid_timestamp(value: object) -> bool:
@@ -77,6 +86,8 @@ class ReminderEntry:
         }
         if self.source_url is not None:
             raw["source_url"] = self.source_url
+        if self.control_message_id is not None:
+            raw["control_message_id"] = self.control_message_id
         if self.failed_at is not None:
             raw["failed_at"] = self.failed_at
         return raw
@@ -86,7 +97,7 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.1"
+    __version__ = "1.2.0"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
@@ -94,6 +105,8 @@ class Reminder(commands.Cog):
     )
     MAX_SECONDS = 63_080_000
     CHECK_INTERVAL = 3600.0
+    ERROR_DELETE_AFTER = 15.0
+    SUCCESS_FALLBACK_DELETE_AFTER = 10.0
     DURATION_PATTERN = re.compile(r"([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
     AMBIGUOUS_MINUTE_PATTERN = re.compile(r"[1-9][0-9]*m(?=[0-9]|$)", re.IGNORECASE)
     DURATION_UNITS: Tuple[Tuple[str, int], ...] = (
@@ -135,17 +148,22 @@ class Reminder(commands.Cog):
         compact_duration = re.sub(r"\s+", "", duration or "")
         if self.AMBIGUOUS_MINUTE_PATTERN.search(compact_duration):
             await ctx.send(
-                ":x: `m` is ambiguous. Use `min` for minutes or `mo` for months."
+                ":x: `m` is ambiguous. Use `min` for minutes or `mo` for months.",
+                delete_after=self.ERROR_DELETE_AFTER,
             )
             return
         seconds = self.parse_duration(duration)
         if seconds is None:
             await ctx.send(
-                ":x: Invalid time format. Try `10min`, `2h`, `1w`, or `1mo`."
+                ":x: Invalid time format. Try `10min`, `2h`, `1w`, or `1mo`.",
+                delete_after=self.ERROR_DELETE_AFTER,
             )
             return
         if seconds > self.MAX_SECONDS:
-            await ctx.send(":x: Too long amount of time. Maximum: 2 years")
+            await ctx.send(
+                ":x: Too long amount of time. Maximum: 2 years",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
             return
 
         now = time.time()
@@ -155,20 +173,59 @@ class Reminder(commands.Cog):
             now,
             now + seconds,
             source_url=self.reply_source_url(ctx.message),
+            control_message_id=ctx.message.id,
         )
         self._deleted_users.discard(ctx.author.id)
         async with self.config.user(ctx.author).reminders() as saved:
             saved.append(entry.to_raw())
         self._wake_scheduler.set()
 
-        if seconds > 86_400:
-            offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
-            due_text = self.format_due_time(entry.due_at, offset)
-            await ctx.send(f":white_check_mark: I will remind you of that on {due_text}.")
-        else:
+        try:
+            await ctx.message.add_reaction("✅")
+            await ctx.message.add_reaction("❌")
+        except (discord.Forbidden, discord.HTTPException):
+            if seconds > 86_400:
+                offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
+                due_text = self.format_due_time(entry.due_at, offset)
+                confirmation = f"✅ I will remind you of that on {due_text}."
+            else:
+                confirmation = (
+                    f"✅ I will remind you of that in {self.describe_duration(seconds)}."
+                )
             await ctx.send(
-                f":white_check_mark: I will remind you of that in {self.describe_duration(seconds)}."
+                confirmation, delete_after=self.SUCCESS_FALLBACK_DELETE_AFTER
             )
+
+    @staticmethod
+    def remove_controlled_reminder(raw_entries: object, message_id: int):
+        if not isinstance(raw_entries, list):
+            return [], False
+        retained = []
+        removed = False
+        for raw in raw_entries:
+            entry = ReminderEntry.from_raw(raw)
+            if entry is not None and entry.control_message_id == message_id:
+                removed = True
+                continue
+            retained.append(raw)
+        return retained, removed
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        if str(payload.emoji) != "❌":
+            return
+        bot_user = getattr(self.bot, "user", None)
+        if bot_user is not None and payload.user_id == bot_user.id:
+            return
+        user_config = self.config.user_from_id(payload.user_id)
+        async with user_config.reminders() as saved:
+            retained, removed = self.remove_controlled_reminder(
+                saved, payload.message_id
+            )
+            if removed:
+                saved[:] = retained
+        if removed:
+            self._wake_scheduler.set()
 
     @remind.group(name="forget")
     async def remind_forget(self, ctx: Context) -> None:
