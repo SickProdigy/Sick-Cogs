@@ -27,9 +27,10 @@ Private threads add only the requester. Support staff use Manage Threads on the 
 
 ## Setup
 
-Run:
+Run (`ticketset` is a shorter alias):
 
     [p]ticketsset
+    [p]ticketset
 
 Use the setup selectors for the launcher channel, optional category, staff roles, and enabled ticket modes. **Edit messages** customizes the launcher title, launcher instructions, and the welcome message posted in every new ticket. Configure the enabled ticket types, then publish:
 

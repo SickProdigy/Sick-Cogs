@@ -45,6 +45,9 @@ class TicketModelTests(unittest.TestCase):
         self.assertEqual(safe_display("@everyone", 7), "@\u200bevery")
         self.assertEqual(len(safe_display("x" * 200, 50)), 50)
 
+    def test_ticketset_singular_alias_is_registered(self):
+        self.assertIn("ticketset", Tickets.ticketsset.aliases)
+
     def test_defaults_and_limits_are_conservative(self):
         self.assertEqual(CONFIG_ID, 7422161104)
         self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)

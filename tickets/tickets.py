@@ -640,7 +640,7 @@ class Tickets(commands.Cog):
         extra = max(0, len(records) - len(lines))
         await ctx.send(("\n".join(lines) + (f"\n…and {extra} more." if extra else "")) if lines else "The ticket queue is empty.")
 
-    @commands.group(name="ticketsset", invoke_without_command=True)
+    @commands.group(name="ticketsset", aliases=["ticketset"], invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
     async def ticketsset(self, ctx):
