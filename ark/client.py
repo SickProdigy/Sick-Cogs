@@ -1,9 +1,11 @@
 import asyncio
 import html
+import io
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
 import aiohttp
+from PIL import Image, UnidentifiedImageError
 
 
 APP_ID = 2399830
@@ -127,6 +129,19 @@ def image_dimensions(payload: bytes):
             return width, height
         position += max(segment_length, 2)
     return None
+
+
+def optimize_gallery_image(payload: bytes, *, max_edge: int = 1600, quality: int = 82) -> bytes:
+    """Resize a gallery image and encode it as a compact progressive JPEG."""
+    try:
+        with Image.open(io.BytesIO(payload)) as source:
+            source.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            image = source.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=quality, optimize=True, progressive=True)
+            return output.getvalue()
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError("Unsupported announcement image.") from exc
 
 
 def plain_text(contents: str, *, limit: int = 900, youtube_links: bool = False) -> str:

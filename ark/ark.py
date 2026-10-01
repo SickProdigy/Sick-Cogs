@@ -2,7 +2,6 @@ import asyncio
 import datetime
 import io
 import logging
-from pathlib import PurePosixPath
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -26,6 +25,7 @@ from .client import (
     extract_images,
     extract_youtube_urls,
     image_dimensions,
+    optimize_gallery_image,
     item_id,
     new_items,
     plain_text,
@@ -43,6 +43,7 @@ DELIVERY_MODES = ("card", "article")
 ARTICLE_TEXT_LIMIT = 1400
 MAX_GALLERY_IMAGES = 4
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_GALLERY_BYTES = 5 * 1024 * 1024
 STEAM_IMAGE_HOSTS = {"clan.steamstatic.com", "clan.akamai.steamstatic.com"}
 
 
@@ -168,15 +169,9 @@ class ArkAnnouncements(commands.Cog):
             lines.extend(("", f"[Continue reading on Steam…]({url})"))
         return "\n".join(lines)
 
-    @staticmethod
-    def _safe_image_filename(url: str, index: int) -> str:
-        suffix = PurePosixPath(urlparse(url).path).suffix.casefold()
-        if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp"}:
-            suffix = ".jpg"
-        return f"ark-announcement-{index}{suffix}"
-
     async def download_gallery_files(self, contents: str):
         files = []
+        gallery_bytes = 0
         session = await self.get_session()
         # Inspect extra candidates so small title strips do not consume gallery slots.
         for url in extract_images(contents, limit=12):
@@ -211,12 +206,22 @@ class ArkAnnouncements(commands.Cog):
                 or dimensions is None
                 or dimensions[0] < 400
                 or dimensions[1] < 200
+                or dimensions[0] > 8192
+                or dimensions[1] > 8192
             ):
                 continue
+            try:
+                payload = await asyncio.to_thread(optimize_gallery_image, payload)
+            except ValueError:
+                log.warning("Could not resize ARK article image from %s", url)
+                continue
+            if gallery_bytes + len(payload) > MAX_GALLERY_BYTES:
+                continue
+            gallery_bytes += len(payload)
             files.append(
                 discord.File(
                     io.BytesIO(payload),
-                    filename=self._safe_image_filename(url, len(files) + 1),
+                    filename=f"ark-announcement-{len(files) + 1}.jpg",
                 )
             )
         return files

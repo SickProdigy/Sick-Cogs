@@ -6,6 +6,7 @@ from ark.client import (
     extract_images,
     extract_youtube_urls,
     image_dimensions,
+    optimize_gallery_image,
     new_items,
     plain_text,
     recent_items,
@@ -56,6 +57,18 @@ class ArkClientTests(unittest.TestCase):
     def test_reads_png_dimensions_for_gallery_filtering(self):
         payload = b"\x89PNG\r\n\x1a\n" + (b"\x00" * 8) + (2560).to_bytes(4, "big") + (1440).to_bytes(4, "big")
         self.assertEqual(image_dimensions(payload), (2560, 1440))
+
+    def test_gallery_image_is_resized_and_encoded_as_jpeg(self):
+        from PIL import Image
+        from io import BytesIO
+
+        source = BytesIO()
+        Image.new("RGB", (2560, 1440), "#315f4c").save(source, format="PNG")
+        result = optimize_gallery_image(source.getvalue())
+        with Image.open(BytesIO(result)) as resized:
+            self.assertEqual(resized.format, "JPEG")
+            self.assertEqual(resized.size, (1600, 900))
+        self.assertLess(len(result), len(source.getvalue()))
 
     def test_card_uses_first_image_in_steam_order(self):
         source = (
