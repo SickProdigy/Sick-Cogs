@@ -1,0 +1,15 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Monitor named Minecraft Java and Bedrock servers with safe status checks and transition announcements.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild-owned public Minecraft connection settings, bounded cached status data, visibility settings, and announcement configuration. It does not store linked game identities or administrative credentials.",
+  "hidden": false,
+  "install_msg": "Add a server with `[p]minecraftset add <name> <java|bedrock> <host> [port]`. Java uses SRV discovery when the port is omitted; Bedrock defaults to 19132. Private/LAN destinations require exact bot-owner approval.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["embed_links"],
+  "requirements": ["dnspython>=2.6,<3"],
+  "short": "Minecraft Java and Bedrock server status",
+  "tags": ["minecraft", "java", "bedrock", "status", "notifications"],
+  "type": "COG",
+  "version": "0.1.0"
+}
