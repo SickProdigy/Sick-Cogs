@@ -572,7 +572,8 @@ class TokenFactory(commands.Cog):
         await self.config.user(user).deployment_draft.set(draft.to_dict())
 
     async def resolve_discord_wallet_draft(self, user, draft: TokenDraft) -> TokenDraft:
-        context = await self._wallet_context_for_user(user)
+        network = await self._target_network()
+        context = await self._wallet_context_for_user(user, network)
         resolved = TokenDraft(
             creator_discord_id=draft.creator_discord_id,
             name=draft.name,
@@ -581,6 +582,8 @@ class TokenFactory(commands.Cog):
             supply_atomic=draft.supply_atomic,
             wallet_profile_id=context["profile_id"],
             owner_address=context["owner_address"],
+            network=context["network"],
+            chain_id=int(context["chain_id"]),
         )
         await self.save_draft(user, resolved)
         return resolved
@@ -706,7 +709,17 @@ class TokenFactory(commands.Cog):
                 raise
             raise RuntimeError(f"Pinned factory deployment failed: {exc}") from exc
 
-    async def deployment_available(self) -> bool:
+    async def deployment_available(self, network: str = "base-sepolia") -> bool:
+        if network == "base-mainnet":
+            status = mainnet_readiness()
+            return bool(
+                await self.config.mainnet_deployment_enabled()
+                and not await self.config.mainnet_emergency_paused()
+                and status["member_deployment_authorized"]
+                and status["factory_address"]
+            )
+        if network != "base-sepolia":
+            return False
         return bool(
             await self.config.deployment_enabled()
             and not await self.config.emergency_paused()
@@ -725,7 +738,7 @@ class TokenFactory(commands.Cog):
         if not isinstance(stored, dict) or TokenDraft.from_dict(stored) != draft:
             raise RuntimeError("The saved token draft changed; reopen the card and review it.")
         wallet = self._cryptowallet()
-        context = await wallet.tokenfactory_wallet_context(user)
+        context = await wallet.tokenfactory_wallet_context(user, draft.network)
         if (
             str(context.get("profile_id")) != draft.wallet_profile_id
             or normalize_owner_address(str(context.get("owner_address"))).lower()
@@ -757,7 +770,7 @@ class TokenFactory(commands.Cog):
                     self._schedule_discord_watcher(user.id)
                     return {**verified, "already_deployed": True}
                 status = await wallet.tokenfactory_operation_status(
-                    user, str(pending["user_operation_hash"])
+                    user, str(pending["user_operation_hash"]), draft.network
                 )
                 pending.update(status)
                 await user_config.pending_deployment.set(pending)
@@ -776,7 +789,9 @@ class TokenFactory(commands.Cog):
         else:
             request_id = "0x" + secrets.token_hex(32)
         attempt_id = str(uuid.uuid4())
-        operation = token_operation(draft, request_id, draft.owner_address)
+        operation = token_operation(
+            draft, request_id, draft.owner_address, network=draft.network
+        )
         result = await self._submit_reviewed_call(
             user, operation, attempt_id, execution_terms
         )
@@ -1035,7 +1050,7 @@ class TokenFactory(commands.Cog):
         )
         if not verified.get("deployed"):
             status = await wallet.tokenfactory_operation_status(
-                user, str(pending["user_operation_hash"])
+                user, str(pending["user_operation_hash"]), draft.network
             )
             pending.update(status)
             await user_config.pending_deployment.set(pending)
@@ -1071,12 +1086,22 @@ class TokenFactory(commands.Cog):
             await user_config.deployment_draft.set(None)
         return {"deployed": True, **record}
 
-    async def _wallet_context_for_user(self, user) -> dict:
+    async def _target_network(self) -> str:
+        wallet = self.bot.get_cog("CryptoWallet")
+        selector = getattr(wallet, "tokenfactory_default_network", None)
+        if not callable(selector):
+            return "base-sepolia"
+        network = str(await selector())
+        if network not in {"base-sepolia", "base-mainnet"}:
+            raise RuntimeError("CryptoWallet returned an unsupported TokenFactory network.")
+        return network
+
+    async def _wallet_context_for_user(self, user, network: str | None = None) -> dict:
         wallet = self.bot.get_cog("CryptoWallet")
         integration = getattr(wallet, "tokenfactory_wallet_context", None)
         if integration is None:
             raise RuntimeError("CryptoWallet must be loaded for Discord Wallet deployment.")
-        context = await integration(user)
+        context = await integration(user, network or await self._target_network())
         return {
             **context,
             "owner_address": normalize_owner_address(context["owner_address"]),
@@ -1130,18 +1155,20 @@ class TokenFactory(commands.Cog):
     @tokenfactory.command(name="create", aliases=("card",))
     async def tokenfactory_create(self, ctx: commands.Context):
         """Open the interactive fixed-supply token form."""
+        network = await self._target_network()
         stored = await self.config.user(ctx.author).deployment_draft()
         draft = None
         if isinstance(stored, dict):
             try:
                 candidate = TokenDraft.from_dict(stored)
-                if candidate.creator_discord_id == ctx.author.id:
+                if (candidate.creator_discord_id == ctx.author.id
+                        and candidate.network == network):
                     draft = candidate
             except (KeyError, TypeError, ValueError):
                 pass
         view = TokenFactoryDraftView(
-            self, ctx.author, draft,
-            deployment_available=await self.deployment_available(),
+            self, ctx.author, draft, network=network,
+            deployment_available=await self.deployment_available(network),
         )
         await ctx.send(embed=view.embed(), view=view)
 

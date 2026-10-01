@@ -72,6 +72,11 @@ class CryptoWallet(
         self.usage_flush_task.cancel()
         self.bot.loop.create_task(self.flush_provider_usage())
 
+    async def tokenfactory_default_network(self) -> str:
+        """Return the TokenFactory network selected by the wallet operating mode."""
+        mode = str(await self.config.operating_mode() or "testnet").lower()
+        return BASE_MAINNET.key if mode in {"mainnet", "mainnet-only"} else BASE_SEPOLIA.key
+
     async def tokenfactory_wallet_context(
         self, user, network: str = BASE_SEPOLIA.key
     ) -> dict:

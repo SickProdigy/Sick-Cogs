@@ -225,6 +225,22 @@ class TokenFactoryExecutionReviewTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(view.children[0].label, "Deploy token")
 
+    def test_mainnet_draft_card_is_explicit_and_fail_closed(self):
+        from ..views import TokenFactoryDraftView
+        draft = TokenDraft(
+            creator_discord_id=7, name="Mainnet", symbol="MAIN", decimals=18,
+            supply_atomic=10**18, network="base-mainnet", chain_id=8453,
+        )
+        view = TokenFactoryDraftView(
+            SimpleNamespace(), self.user, draft, network="base-mainnet",
+            deployment_available=False,
+        )
+        fields = {field.name: field.value for field in view.embed().fields}
+        self.assertEqual(fields["Network"], "Base mainnet (`8453`)")
+        self.assertTrue(view.discord_deploy.disabled)
+        self.assertTrue(view.external_deploy.disabled)
+        self.assertIn("release gate", view.embed().footer.text)
+
     def test_wallet_route_buttons_describe_the_deployment_action(self):
         from ..views import TokenFactoryDraftView
 

@@ -360,6 +360,8 @@ class TokenDetailsModal(discord.ui.Modal):
                 symbol=normalize_symbol(self.symbol_input.value),
                 decimals=decimals,
                 supply_atomic=parse_supply(self.supply_input.value, decimals),
+                network=self.view_ref.network,
+                chain_id=8453 if self.view_ref.network == "base-mainnet" else 84532,
             )
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
@@ -367,7 +369,9 @@ class TokenDetailsModal(discord.ui.Modal):
         self.view_ref.draft = draft
         enabled = self.view_ref.deployment_available
         self.view_ref.discord_deploy.disabled = not enabled
-        self.view_ref.external_deploy.disabled = not enabled
+        self.view_ref.external_deploy.disabled = not (
+            enabled and self.view_ref.network == "base-sepolia"
+        )
         await self.view_ref.cog.save_draft(self.view_ref.user, draft)
         await interaction.response.edit_message(embed=self.view_ref.embed(), view=self.view_ref)
         await interaction.followup.send("Token deployment draft saved.", ephemeral=True)
@@ -376,16 +380,19 @@ class TokenDetailsModal(discord.ui.Modal):
 class TokenFactoryDraftView(discord.ui.View):
     def __init__(
         self, cog: "TokenFactory", user, draft=None,
-        *, deployment_available: bool = False,
+        *, network: str = "base-sepolia", deployment_available: bool = False,
     ):
         super().__init__(timeout=900)
         self.cog = cog
         self.user = user
         self.user_id = user.id
         self.draft = draft
+        self.network = network
         self.deployment_available = deployment_available
         self.discord_deploy.disabled = not (deployment_available and draft is not None)
-        self.external_deploy.disabled = not (deployment_available and draft is not None)
+        self.external_deploy.disabled = not (
+            deployment_available and draft is not None and network == "base-sepolia"
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -397,9 +404,14 @@ class TokenFactoryDraftView(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="Base Sepolia token deployment draft",
+            title=("Base mainnet token deployment draft"
+                   if self.network == "base-mainnet"
+                   else "Base Sepolia token deployment draft"),
             description=(
-                "Create a fixed-supply ERC-20 test token. Completing this card does not "
+                ("Create a fixed-supply ERC-20 token. "
+                 if self.network == "base-mainnet" else
+                 "Create a fixed-supply ERC-20 test token. ")
+                + "Completing this card does not "
                 "deploy anything or move funds."
             ),
             color=discord.Color.blurple(),
@@ -418,7 +430,12 @@ class TokenFactoryDraftView(discord.ui.View):
             )
             embed.add_field(name="Fixed supply", value=display, inline=True)
             embed.add_field(name="Decimals", value=str(self.draft.decimals), inline=True)
-        embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        embed.add_field(
+            name="Network",
+            value=("Base mainnet (`8453`)" if self.network == "base-mainnet"
+                   else "Base Sepolia (`84532`)"),
+            inline=True,
+        )
         embed.add_field(
             name="Token recipient", value="Chosen with the deployment wallet", inline=False
         )
@@ -431,7 +448,11 @@ class TokenFactoryDraftView(discord.ui.View):
             ),
             inline=False,
         )
-        embed.set_footer(text="Testnet only · fixed supply · no bot mint or ownership authority")
+        embed.set_footer(text=(
+            "Mainnet disabled until every reviewed release gate is complete"
+            if self.network == "base-mainnet" else
+            "Testnet only · fixed supply · no bot mint or ownership authority"
+        ))
         return embed
 
     @discord.ui.button(label="Enter token details", style=discord.ButtonStyle.primary)
@@ -454,7 +475,7 @@ class TokenFactoryDraftView(discord.ui.View):
             await interaction.followup.send(str(exc), ephemeral=True)
             return
         confirmation = TokenDeploymentConfirmView(
-            self.cog, self.user, draft, self.cog.execution_terms(route="discord")
+            self.cog, self.user, draft, self.cog.execution_terms(route="discord", network=draft.network)
         )
         await interaction.followup.send(
             embed=confirmation.embed(), view=confirmation, ephemeral=True
@@ -507,25 +528,43 @@ class TokenDeploymentConfirmView(discord.ui.View):
         embed = discord.Embed(
             title="Confirm fixed-supply token deployment",
             description=(
-                "Review every immutable field. Confirmation submits a sponsored Base "
-                "Sepolia operation and cannot be undone after confirmation."
+                ("Review every immutable field. Confirmation submits a Base mainnet "
+                 "operation and cannot be undone after confirmation."
+                 if self.draft.network == "base-mainnet" else
+                 "Review every immutable field. Confirmation submits a sponsored Base "
+                 "Sepolia operation and cannot be undone after confirmation.")
             ),
             color=discord.Color.orange(),
         )
         embed.add_field(name="Token", value=f"{self.draft.name} ({self.draft.symbol})", inline=False)
         embed.add_field(name="Fixed supply", value=supply, inline=True)
         embed.add_field(name="Decimals", value=str(self.draft.decimals), inline=True)
-        embed.add_field(name="Network", value="Base Sepolia (`84532`)", inline=True)
+        embed.add_field(
+            name="Network",
+            value=("Base mainnet (`8453`)" if self.draft.network == "base-mainnet"
+                   else "Base Sepolia (`84532`)"),
+            inline=True,
+        )
         embed.add_field(name="Recipient", value=f"`{self.draft.owner_address}`", inline=False)
         embed.add_field(name="Gas limit", value=f"`{self.execution_terms['gas_limit']:,}`", inline=True)
         embed.add_field(name="Native value", value="`0.00000000 ETH`", inline=True)
-        embed.add_field(name="Network gas", value="Sponsorship active · paid by CDP paymaster", inline=False)
+        embed.add_field(
+            name="Network gas",
+            value=("Creator wallet pays · submission blocked until a bounded fee quote is enforceable"
+                   if self.draft.network == "base-mainnet" else
+                   "Sponsorship active · paid by CDP paymaster"),
+            inline=False,
+        )
         embed.add_field(
             name="Authority",
             value="No later minting, administrator, upgrade, or bot ownership.",
             inline=False,
         )
-        embed.set_footer(text="Testnet only · explicit confirmation · active wallet authorization required")
+        embed.set_footer(text=(
+            "Mainnet fee enforcement gate not complete · no submission available"
+            if self.draft.network == "base-mainnet" else
+            "Testnet only · explicit confirmation · active wallet authorization required"
+        ))
         return embed
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
