@@ -1,13 +1,21 @@
 import unittest
 
 from clanker.mainnet_operations import (
-    MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
+    MAINNET_SUBMISSION_ENABLED, MAX_FEE_WEI, MainnetOperationIntent,
     _manifest as clanker_manifest, authorize_mainnet_submission,
 )
 from cryptowallet.backend.config import BASE_MAINNET_POLICY_DEFAULT
 from cryptowallet.core.networks import BASE_MAINNET
-from cryptowallet.core.provider_manifest import validate_base_mainnet_provider_manifest
+from cryptowallet.core.provider_manifest import (
+    BASE_MAINNET_PROVIDER_MANIFEST, validate_base_mainnet_provider_manifest,
+)
+from cryptowallet.providers.cdp import (
+    SMART_ACCOUNT_BOUNDED_USER_PAID_FEES, _require_bounded_user_paid_fees,
+)
+from cryptowallet.providers.base import WalletProviderError
 from tokenfactory.network_manifest import mainnet_readiness
+from tokenfactory.policy import MAINNET_LIMITS_DEFAULT
+from tokenfactory.tokenfactory import TokenFactory
 
 class CryptoStackMainnetBoundaryTests(unittest.TestCase):
     def test_every_cog_agrees_on_base_mainnet_and_stays_code_disabled(self):
@@ -31,6 +39,19 @@ class CryptoStackMainnetBoundaryTests(unittest.TestCase):
 
         self.assertFalse(clanker["executionEnabled"])
         self.assertFalse(MAINNET_SUBMISSION_ENABLED)
+
+    def test_user_paid_fee_boundaries_are_explicit_and_fail_closed(self):
+        terms = object.__new__(TokenFactory).execution_terms(
+            route="external", network="base-mainnet"
+        )
+        self.assertEqual(
+            terms["max_gas_fee_wei"], MAINNET_LIMITS_DEFAULT["max_gas_fee_wei"]
+        )
+        self.assertLessEqual(terms["max_gas_fee_wei"], MAX_FEE_WEI)
+        self.assertFalse(BASE_MAINNET_PROVIDER_MANIFEST.bounded_user_paid_fee_supported)
+        self.assertFalse(SMART_ACCOUNT_BOUNDED_USER_PAID_FEES)
+        with self.assertRaisesRegex(WalletProviderError, "maximum user-paid fee"):
+            _require_bounded_user_paid_fees()
 
     def test_clanker_valid_shape_still_has_no_submitter(self):
         manifest = clanker_manifest()
