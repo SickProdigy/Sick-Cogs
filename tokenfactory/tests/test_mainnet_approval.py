@@ -68,7 +68,7 @@ class MainnetCanaryApprovalTests(unittest.TestCase):
         }
 
     def test_protected_approval_requires_matching_owner_and_confirmation(self):
-        with self.assertRaisesRegex(ValueError, "owner"):
+        with self.assertRaisesRegex(ValueError, "member"):
             create_mainnet_canary_approval(
                 self.review, 8, discord_confirmed=True, now=1_000
             )

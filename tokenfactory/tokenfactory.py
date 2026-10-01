@@ -134,6 +134,7 @@ class TokenFactory(commands.Cog):
             mainnet_deployment_enabled=False,
             mainnet_emergency_paused=True,
             mainnet_manifest_approved=False,
+            # Compatibility-only pre-release key; never grants member access.
             mainnet_owner_canary_enabled=False,
             mainnet_limits=default_mainnet_limits(),
             mainnet_pending_review=None,
@@ -177,7 +178,7 @@ class TokenFactory(commands.Cog):
         """Persist one exact review while clearing every prior approval."""
 
         if review.network != "base-mainnet" or review.chain_id != 8453:
-            raise ValueError("Only a Base mainnet canary review may be staged.")
+            raise ValueError("Only a Base mainnet deployment review may be staged.")
         scope = self.config.user_from_id(review.owner_discord_id)
         await scope.mainnet_pending_review.set(review.to_dict())
         await scope.mainnet_operation_approval.set(None)
@@ -250,13 +251,13 @@ class TokenFactory(commands.Cog):
         try:
             review = MainnetTokenReview.from_dict(data)
         except (KeyError, TypeError, ValueError) as exc:
-            raise RuntimeError("The mainnet canary review is missing or invalid.") from exc
+            raise RuntimeError("The mainnet deployment review is missing or invalid.") from exc
         if (
             int(owner_discord_id) != review.owner_discord_id
             or not secrets.compare_digest(review_fingerprint, review.fingerprint)
         ):
             raise ValueError(
-                "The mainnet canary review changed or belongs to another owner."
+                "The mainnet deployment review changed or belongs to another owner."
             )
         if not await self.has_current_mainnet_terms(owner_discord_id):
             raise RuntimeError(
@@ -267,11 +268,11 @@ class TokenFactory(commands.Cog):
             current = MainnetTokenReview.from_dict(current_data)
         except (KeyError, TypeError, ValueError) as exc:
             raise RuntimeError(
-                "The mainnet canary review changed during verification."
+                "The mainnet deployment review changed during verification."
             ) from exc
         if not secrets.compare_digest(current.fingerprint, review.fingerprint):
             raise RuntimeError(
-                "The mainnet canary review changed during verification."
+                "The mainnet deployment review changed during verification."
             )
         approval = create_mainnet_canary_approval(
             current,
@@ -316,7 +317,7 @@ class TokenFactory(commands.Cog):
                 approval = MainnetCanaryApproval.from_dict(data)
             except (KeyError, TypeError, ValueError) as exc:
                 raise RuntimeError(
-                    "No valid protected mainnet canary approval is available."
+                    "No valid protected mainnet deployment approval is available."
                 ) from exc
             claimed = consume_mainnet_canary_approval(
                 approval, review_fingerprint, now=int(time.time())
@@ -332,7 +333,7 @@ class TokenFactory(commands.Cog):
         *,
         now: int | None = None,
     ) -> MainnetCanaryLifecycle:
-        """Persist one immutable canary attempt without replacing prior history."""
+        """Persist one immutable deployment attempt without replacing prior history."""
 
         async with self.mainnet_lifecycle_lock:
             scope = self.config.user_from_id(review.owner_discord_id)
@@ -380,7 +381,7 @@ class TokenFactory(commands.Cog):
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise RuntimeError(
-                    "The mainnet canary lifecycle transition was rejected."
+                    "The mainnet deployment lifecycle transition was rejected."
                 ) from exc
             await scope.mainnet_operation_lifecycle.set(updated.to_dict())
             return updated
@@ -403,12 +404,12 @@ class TokenFactory(commands.Cog):
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 raise RuntimeError(
-                    "The mainnet canary verification evidence was rejected."
+                    "The mainnet deployment verification evidence was rejected."
                 ) from exc
             existing = await scope.mainnet_operation_evidence()
             if existing is not None and existing != verified:
                 raise RuntimeError(
-                    "Different mainnet canary evidence is already recorded."
+                    "Different mainnet deployment evidence is already recorded."
                 )
             if existing is None:
                 await scope.mainnet_operation_evidence.set(verified)

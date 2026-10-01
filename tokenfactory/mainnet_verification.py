@@ -27,7 +27,7 @@ def _snapshot_values(
     if int(snapshot.get("chain_id", -1)) != BASE_MAINNET_CHAIN_ID:
         raise ValueError("Verification evidence is not from Base mainnet.")
     if snapshot.get("receipt_success") is not True:
-        raise ValueError("The canary deployment receipt was not successful.")
+        raise ValueError("The deployment receipt was not successful.")
     transaction_hash = _hash(snapshot.get("transaction_hash"), "transaction")
     if transaction_hash != lifecycle.transaction_hash:
         raise ValueError("The receipt transaction does not match the lifecycle.")
@@ -36,7 +36,7 @@ def _snapshot_values(
     if _hash(snapshot.get("calldata_sha256"), "calldata") != review.calldata_sha256:
         raise ValueError("The receipt calldata does not match the review.")
     if int(snapshot.get("native_value_wei", -1)) != 0:
-        raise ValueError("The canary transaction unexpectedly transferred native value.")
+        raise ValueError("The deployment transaction unexpectedly transferred native value.")
     if normalize_owner_address(snapshot.get("signer_address")) != review.signer_address:
         raise ValueError("The receipt signer does not match the review.")
     factory_hash = _hash(snapshot.get("factory_runtime_code_hash"), "factory runtime")
@@ -109,9 +109,9 @@ def verify_mainnet_canary_evidence(
     """Require two independently collected, identical mainnet verification snapshots."""
 
     if lifecycle.status != "confirmed":
-        raise ValueError("Mainnet canary evidence requires a confirmed lifecycle.")
+        raise ValueError("Mainnet deployment evidence requires a confirmed lifecycle.")
     if lifecycle.review_fingerprint != review.fingerprint:
-        raise ValueError("The confirmed lifecycle does not match the reviewed canary.")
+        raise ValueError("The confirmed lifecycle does not match the reviewed deployment.")
     manifest = load_network_manifest(BASE_MAINNET_NETWORK_KEY)
     first = _snapshot_values(primary, review, lifecycle, manifest)
     second = _snapshot_values(secondary, review, lifecycle, manifest)

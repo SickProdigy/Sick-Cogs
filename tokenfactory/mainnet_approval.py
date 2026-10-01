@@ -49,10 +49,10 @@ def create_mainnet_canary_approval(
 ) -> MainnetCanaryApproval:
     timestamp = int(time.time() if now is None else now)
     if int(owner_discord_id) != review.owner_discord_id:
-        raise ValueError("The approving owner does not match the reviewed canary.")
+        raise ValueError("The approving member does not match the reviewed deployment.")
     if discord_confirmed is not True:
         raise ValueError(
-            "Discord confirmation is required for the mainnet canary."
+            "Discord confirmation is required for the mainnet deployment."
         )
     return MainnetCanaryApproval(
         owner_discord_id=int(owner_discord_id),
@@ -73,13 +73,13 @@ def consume_mainnet_canary_approval(
 
     timestamp = int(time.time() if now is None else now)
     if approval.consumed_at is not None:
-        raise ValueError("The protected canary approval was already consumed.")
+        raise ValueError("The protected mainnet approval was already consumed.")
     if timestamp < approval.approved_at or timestamp >= approval.expires_at:
-        raise ValueError("The protected canary approval has expired.")
+        raise ValueError("The protected mainnet approval has expired.")
     if not secrets.compare_digest(
         approval.review_fingerprint, str(review_fingerprint)
     ):
-        raise ValueError("The protected canary approval fingerprint changed.")
+        raise ValueError("The protected mainnet approval fingerprint changed.")
     return MainnetCanaryApproval(
         owner_discord_id=approval.owner_discord_id,
         review_fingerprint=approval.review_fingerprint,
@@ -106,17 +106,17 @@ def revalidate_mainnet_pre_submission(
     limits: dict[str, Any],
     now: int | None = None,
 ) -> dict[str, Any]:
-    """Revalidate every immutable canary binding immediately before submission."""
+    """Revalidate every immutable deployment binding immediately before submission."""
 
     timestamp = int(time.time() if now is None else now)
     reviewed_limits = validate_mainnet_limits(limits)
     manifest = load_network_manifest(BASE_MAINNET_NETWORK_KEY)
     if approval.discord_confirmed is not True or approval.consumed_at is not None:
         raise ValueError(
-            "The protected canary approval is missing or already consumed."
+            "The protected mainnet approval is missing or already consumed."
         )
     if timestamp < approval.approved_at or timestamp >= approval.expires_at:
-        raise ValueError("The protected canary approval has expired.")
+        raise ValueError("The protected mainnet approval has expired.")
     if (
         int(owner_discord_id) != review.owner_discord_id
         or approval.owner_discord_id != review.owner_discord_id
@@ -125,7 +125,7 @@ def revalidate_mainnet_pre_submission(
     if not secrets.compare_digest(
         approval.review_fingerprint, review.fingerprint
     ):
-        raise ValueError("The approved canary fingerprint no longer matches.")
+        raise ValueError("The approved deployment fingerprint no longer matches.")
     if str(wallet_profile_id) != review.wallet_profile_id:
         raise ValueError("The wallet profile changed after review.")
     if normalize_owner_address(signer_address) != review.signer_address:

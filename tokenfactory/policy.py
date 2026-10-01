@@ -34,9 +34,9 @@ def validate_mainnet_limits(value: Any) -> dict[str, int]:
             )
         normalized[key] = current
     if normalized["factory_deployments_per_day"] != 1:
-        raise TokenFactoryPolicyError("The one-time factory canary limit must remain one.")
+        raise TokenFactoryPolicyError("The one-time factory deployment limit must remain one.")
     if normalized["token_deployments_per_day"] != 1:
-        raise TokenFactoryPolicyError("The owner token canary limit must remain one per day.")
+        raise TokenFactoryPolicyError("The staged token deployment limit must remain one per day.")
     if normalized["native_value_wei"] != 0:
         raise TokenFactoryPolicyError("TokenFactory native value must remain zero.")
     return normalized

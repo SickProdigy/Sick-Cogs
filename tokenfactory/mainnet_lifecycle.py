@@ -57,10 +57,10 @@ class MainnetCanaryLifecycle:
     def from_dict(cls, data: Mapping[str, Any]) -> "MainnetCanaryLifecycle":
         status = str(data["status"])
         if status not in ALL_STATES:
-            raise ValueError("The mainnet canary lifecycle status is invalid.")
+            raise ValueError("The mainnet deployment lifecycle status is invalid.")
         attempt_id = str(data["attempt_id"])
         if not attempt_id or len(attempt_id) > 128:
-            raise ValueError("The mainnet canary attempt ID is invalid.")
+            raise ValueError("The mainnet deployment attempt ID is invalid.")
         return cls(
             review_fingerprint=_hash(data["review_fingerprint"], required=True),
             owner_discord_id=int(data["owner_discord_id"]),
@@ -94,7 +94,7 @@ def create_mainnet_canary_lifecycle(
     now: int,
 ) -> MainnetCanaryLifecycle:
     if not attempt_id or len(str(attempt_id)) > 128:
-        raise ValueError("A bounded mainnet canary attempt ID is required.")
+        raise ValueError("A bounded mainnet deployment attempt ID is required.")
     return MainnetCanaryLifecycle(
         review_fingerprint=review.fingerprint,
         owner_discord_id=review.owner_discord_id,
@@ -121,7 +121,7 @@ def transition_mainnet_canary_lifecycle(
     target = str(status)
     if target not in ALLOWED_TRANSITIONS[current.status]:
         raise ValueError(
-            f"Mainnet canary lifecycle cannot move from {current.status} to {target}."
+            f"Mainnet deployment lifecycle cannot move from {current.status} to {target}."
         )
     operation_hash = _hash(user_operation_hash) or current.user_operation_hash
     transaction = _hash(transaction_hash) or current.transaction_hash
@@ -181,4 +181,4 @@ def assert_same_mainnet_lifecycle(
         )
         or not secrets.compare_digest(stored.attempt_id, str(attempt_id))
     ):
-        raise ValueError("The mainnet canary lifecycle binding changed.")
+        raise ValueError("The mainnet deployment lifecycle binding changed.")
