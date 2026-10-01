@@ -358,7 +358,7 @@ class LauncherChannelSelect(discord.ui.ChannelSelect):
 class TicketCategorySelect(discord.ui.ChannelSelect):
     def __init__(self, parent):
         super().__init__(
-            placeholder="Choose ticket category (optional)",
+            placeholder="Ticket category (blank = top of server)",
             min_values=1,
             max_values=1,
             channel_types=[discord.ChannelType.category],

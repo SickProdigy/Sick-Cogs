@@ -130,6 +130,12 @@ class TicketCogTests(unittest.TestCase):
         self.assertEqual(fields["Status"], "Waiting on member")
         self.assertEqual(fields["Claimed by"], "<@42>")
 
+    def test_category_selector_explains_blank_default(self):
+        owner = SimpleNamespace(id=42)
+        view = SetupView(object(), owner)
+        placeholders = {getattr(item, "placeholder", None) for item in view.children}
+        self.assertIn("Ticket category (blank = top of server)", placeholders)
+
     def test_setup_branches_into_classic_and_custom_workflows(self):
         owner = SimpleNamespace(id=42)
         main = SetupView(object(), owner)

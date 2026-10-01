@@ -31,7 +31,7 @@ class Tickets(commands.Cog):
     """Private, server-owned support ticket channels."""
 
     __author__ = "SickProdigy"
-    __version__ = "0.4.1"
+    __version__ = "0.4.2"
 
     def __init__(self, bot):
         self.bot = bot
@@ -112,7 +112,10 @@ class Tickets(commands.Cog):
             color=await self.bot.get_embed_color(launcher or guild.me),
         )
         embed.add_field(name="Launcher", value=launcher.mention if launcher else "Not set")
-        embed.add_field(name="Category", value=category.name if category else "Not set")
+        embed.add_field(
+            name="Ticket category",
+            value=category.name if category else "Top of server (default)",
+        )
         embed.add_field(name="Staff roles", value=", ".join(r.mention for r in roles) or "Not set", inline=False)
         embed.add_field(name="Staff log", value=log.mention if log else "Disabled")
         embed.add_field(name="Open limit", value=str(data["max_open_per_user"]))
