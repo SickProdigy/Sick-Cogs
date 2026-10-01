@@ -10,6 +10,7 @@ from ..core.networks import (
     BASE_MAINNET, BASE_SEPOLIA, NETWORKS, SOLANA_DEVNET, ChainFamily, NetworkCapability, resolve_network
 )
 from ..providers import WalletProviderError
+from ..core.environment import WalletEnvironment
 from ..core.validation import (
     format_atomic_amount,
     normalize_address_for_network,
@@ -565,6 +566,13 @@ class WalletTransactionCommands:
         if profile is None or intent.profile_id != str(profile.get("profile_id") or ""):
             await interaction.followup.send("The wallet profile no longer matches this intent.", ephemeral=True)
             return
+        if intent.network == BASE_MAINNET.key:
+            if not await self.has_current_cryptowallet_mainnet_terms(view.user_id):
+                await interaction.followup.send(
+                    "Current CryptoWallet mainnet terms are required. Nothing was submitted.",
+                    ephemeral=True,
+                )
+                return
         try:
             authorization = await self.wallet_provider.get_delegation_status(
                 profile, intent.network
@@ -857,9 +865,48 @@ class WalletTransactionCommands:
         A recipient can be a wallet address or a non-bot server-member mention.
         Run this command without arguments for examples and your current default.
         """
-        if not await testnet_path_allowed(
-            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
-        ):
+        explicit_testnet = bool(
+            getattr(ctx, "_cryptowallet_explicit_testnet", False)
+        )
+        environment_resolver = getattr(self, "_wallet_environment", None)
+        environment = (
+            await environment_resolver()
+            if callable(environment_resolver)
+            else WalletEnvironment.TESTNET
+        )
+        mainnet_path = (
+            environment is not WalletEnvironment.TESTNET and not explicit_testnet
+        )
+        if mainnet_path:
+            if (
+                not BASE_MAINNET.supports(NetworkCapability.SEND)
+                or not self.wallet_provider.supports(
+                    BASE_MAINNET.key, NetworkCapability.SEND
+                )
+            ):
+                await ctx.send(
+                    "Base mainnet sends remain code-disabled until the finished "
+                    "release candidate completes security and legal review."
+                )
+                return
+            policy = await self.config.base_mainnet_policy()
+            if (
+                not isinstance(policy, dict)
+                or policy.get("enabled") is not True
+                or policy.get("paused", True) is not False
+                or (policy.get("capabilities") or {}).get("send") is not True
+            ):
+                await ctx.send(
+                    "Base mainnet sending is disabled or emergency-paused by the bot owner."
+                )
+                return
+            if not await self.has_current_cryptowallet_mainnet_terms(ctx.author.id):
+                await ctx.send(
+                    "Complete the guided mainnet wallet setup first with "
+                    f"`{ctx.clean_prefix}wallet authorize`."
+                )
+                return
+        elif not await testnet_path_allowed(self, ctx, explicit=explicit_testnet):
             return
         if not await self._wallet_sensitive_allowed(ctx):
             return
@@ -875,7 +922,28 @@ class WalletTransactionCommands:
             )
             return
         asset_selector = None
-        if len(arguments) == 2:
+        if mainnet_path and len(arguments) == 2:
+            to_address, amount = arguments
+            network = BASE_MAINNET
+            asset_selector = "native"
+        elif mainnet_path and len(arguments) == 3:
+            selector, to_address, amount = arguments
+            if selector.strip().lower() not in {
+                "base", "base-mainnet", "mainnet", "eth", "native"
+            }:
+                await ctx.send(
+                    "Base mainnet currently supports native ETH sends only."
+                )
+                return
+            network = BASE_MAINNET
+            asset_selector = "native"
+        elif mainnet_path:
+            await ctx.send(
+                "Base mainnet currently supports `wallet send <recipient> <amount>` "
+                "for native ETH only."
+            )
+            return
+        elif len(arguments) == 2:
             to_address, amount = arguments
             default_asset = await self.config.user(ctx.author).default_send_asset()
             if isinstance(default_asset, dict):
@@ -899,17 +967,25 @@ class WalletTransactionCommands:
         else:
             asset_selector, network_value, to_address, amount = arguments
             network = self._send_network(network_value)
-        if (network is None or not network.testnet
+        if (network is None or network.testnet == mainnet_path
                 or not network.supports(NetworkCapability.SEND)
                 or not self.wallet_provider.supports(network.key, NetworkCapability.SEND)):
             if network is None:
                 await ctx.send(f"That wallet network is unknown. Use `{ctx.clean_prefix}wallet networks` to list testnets.")
             else:
-                await ctx.send(f"Sending is not enabled for {network.name}. Only capability-reviewed testnet send paths are available.")
+                await ctx.send(
+                    f"Sending is not enabled for {network.name} in this wallet mode."
+                )
             return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
+        if mainnet_path:
+            try:
+                profile = await self.ensure_mainnet_wallet_profile(ctx.author, profile)
+            except (RuntimeError, WalletProviderError) as exc:
+                await ctx.send(str(exc))
+                return
         account = self._account_for_network(profile, network.key)
         if account is None:
             await ctx.send(f"Your wallet profile has no account for {network.name}.")

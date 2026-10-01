@@ -467,7 +467,7 @@ class WalletAdminCommands:
             "Access: `members when installation-wide gate is enabled`\n"
             "Release: `experimental — real funds may be permanently lost`\n"
             f"Reviewed capabilities: `{reviewed}`\n"
-            "Fee approval model: `live estimate + reapproval threshold staged; legacy gate blocked`\n"
+            "Fee approval model: `live estimate + displayed reapproval threshold + final refresh`\n"
             f"Limits (transaction / user-day / installation-day): "
             f"`{limit_values[0]} / {limit_values[1]} / {limit_values[2]} ETH`"
         )
@@ -503,7 +503,7 @@ class WalletAdminCommands:
             f"Provider contract: `v{BASE_MAINNET_PROVIDER_MANIFEST.schema_version} / "
             f"{BASE_MAINNET_PROVIDER_MANIFEST.fingerprint[:12]}` "
             f"(`{'passed' if diagnostic.get('stage') != 'provider_contract' else 'failed'}`)\n"
-            "Fee approval model: `live estimate + reapproval threshold staged; legacy gate blocked`\n"
+            "Fee approval model: `live estimate + displayed reapproval threshold + final refresh`\n"
             "Transaction submission: `disabled`\n"
             "No wallet, policy, delegation, or transaction was created."
         )

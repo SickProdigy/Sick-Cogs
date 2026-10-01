@@ -1765,6 +1765,58 @@ class ApprovalSubmissionBoundaryTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+    async def test_mainnet_approval_rechecks_current_product_terms(self):
+        now = int(time.time())
+        intent = TransactionIntent(
+            intent_id="mainnet-terms", profile_id="profile-7",
+            network=BASE_MAINNET.key,
+            from_address="0x7930fB6E9853B3835Cf047f36855993cb82d4387",
+            to_address="0xE338aDC6468484f2C6da16647B7154407661c371",
+            value_wei=10**12, created_at=now, expires_at=now + 120,
+            asset_kind="native", asset_symbol="ETH", asset_decimals=18,
+            estimated_gas_fee_wei=10**12, max_gas_fee_wei=2 * 10**12,
+            gas_sponsored=False,
+        )
+        user_scope = SimpleNamespace(
+            security_locked=AsyncMock(return_value=False),
+            profile=AsyncMock(return_value={"profile_id": "profile-7"}),
+        )
+        provider = SimpleNamespace(get_delegation_status=AsyncMock())
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                provider_paused=AsyncMock(return_value=False),
+                user_from_id=lambda user_id: user_scope,
+            ),
+            wallet_provider=provider,
+            _stored_intent=AsyncMock(return_value=intent),
+            _mainnet_intent_disclosure_error=lambda intent, network: None,
+            _intent_quote=WalletTransactionCommands._intent_quote,
+            has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
+        )
+        view = SimpleNamespace(
+            user_id=7, intent_id=intent.intent_id,
+            quote=WalletTransactionCommands._intent_quote(intent),
+        )
+        interaction = SimpleNamespace(
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+
+        with patch.dict(
+            "cryptowallet.commands.transactions.NETWORKS",
+            {BASE_MAINNET.key: BASE_MAINNET}, clear=False,
+        ):
+            await WalletTransactionCommands.approve_intent_interaction(
+                cog, interaction, view
+            )
+
+        self.assertIn(
+            "Current CryptoWallet mainnet terms are required",
+            interaction.followup.send.await_args.args[0],
+        )
+        provider.get_delegation_status.assert_not_awaited()
+
+
 class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
     async def test_uncertain_intent_with_txid_reconciles_without_resubmission(self):
         signature = "1" * 64
@@ -2312,6 +2364,21 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         cog.config.operating_mode.value = "testnet"
         self.assertTrue(await testnet_path_allowed(cog, ctx))
+
+    async def test_mainnet_send_route_remains_closed_at_code_boundary(self):
+        cog = SimpleNamespace(
+            _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
+            wallet_provider=SimpleNamespace(supports=lambda network, capability: True),
+        )
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=7), clean_prefix="!", send=AsyncMock()
+        )
+
+        await WalletTransactionCommands.wallet_send.callback(
+            cog, ctx, "0xE338aDC6468484f2C6da16647B7154407661c371", "0.000001"
+        )
+
+        self.assertIn("code-disabled", ctx.send.await_args.args[0])
 
     async def test_crypto_product_defaults_follow_operating_mode(self):
         cog = SimpleNamespace(
