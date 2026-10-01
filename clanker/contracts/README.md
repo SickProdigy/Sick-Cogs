@@ -30,6 +30,9 @@ and owner withdrawals are explicitly excluded from user operations.
 binds the expected chain, signer, target, value, complete calldata, gas limit, fee ceiling, recipients,
 and requester into a deterministic fingerprint, then compares every provider candidate exactly. The
 module contains no submitter and `MAINNET_SUBMISSION_ENABLED` remains `False`.
+Reward, treasury, vault, and airdrop calldata is independently reconstructed from typed token,
+fee-owner, recipient, amount, and Merkle-proof fields; opaque calldata cannot disagree with the
+review data.
 
 Authoritative sources:
 

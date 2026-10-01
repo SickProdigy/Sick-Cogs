@@ -53,6 +53,51 @@ def _target(manifest: dict[str, Any], target_name: str) -> str:
     return str(manifest["contracts"][target_name]["address"]).lower()
 
 
+def _word(value: int) -> str:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0 or value >= 1 << 256:
+        raise ValueError("Mainnet ABI integer is invalid.")
+    return value.to_bytes(32, "big").hex()
+
+
+def _address_word(value: str, label: str) -> str:
+    return _address(value, label)[2:].rjust(64, "0")
+
+
+def _proof_word(value: str) -> str:
+    normalized = str(value or "").lower()
+    if not re.fullmatch(r"0x[0-9a-f]{64}", normalized):
+        raise ValueError("Airdrop proof entries must be bytes32 values.")
+    return normalized[2:]
+
+
+def _semantic_calldata(
+    kind: str, selector: str, *, token: str | None, fee_owner: str | None,
+    recipient: str | None, allocated_amount: int | None, proof: tuple[str, ...],
+) -> str | None:
+    if kind == "launch":
+        return None
+    if not token:
+        raise ValueError("This mainnet operation requires a token address.")
+    token_word = _address_word(token, "Mainnet token")
+    if kind in {"rewardCollection", "rewardConfiguration", "vaultDiscovery", "vaultClaim"}:
+        return selector + token_word
+    if kind in {"rewardDiscovery", "treasuryClaim"}:
+        if not fee_owner:
+            raise ValueError("This mainnet operation requires a fee owner.")
+        return selector + _address_word(fee_owner, "Mainnet fee owner") + token_word
+    if kind in {"airdropDiscovery", "airdropClaim"}:
+        if not recipient:
+            raise ValueError("This mainnet operation requires an airdrop recipient.")
+        if allocated_amount is None:
+            raise ValueError("This mainnet operation requires an allocated amount.")
+        head = token_word + _address_word(recipient, "Airdrop recipient") + _word(allocated_amount)
+        if kind == "airdropDiscovery":
+            return selector + head
+        proof_data = _word(len(proof)) + "".join(_proof_word(item) for item in proof)
+        return selector + head + _word(128) + proof_data
+    raise ValueError("That mainnet operation has no semantic calldata policy.")
+
+
 @dataclass(frozen=True, slots=True)
 class MainnetOperationIntent:
     """One immutable, expiring transaction candidate under the audited allowlist."""
@@ -69,6 +114,10 @@ class MainnetOperationIntent:
     gas_limit: int
     max_fee_wei: int
     recipients: tuple[str, ...] = ()
+    token: str | None = None
+    fee_owner: str | None = None
+    allocated_amount: int | None = None
+    proof: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         manifest = _manifest()
@@ -83,11 +132,24 @@ class MainnetOperationIntent:
         object.__setattr__(self, "to", _address(self.to, "Mainnet target"))
         object.__setattr__(self, "data", _data(self.data))
         object.__setattr__(self, "recipients", tuple(_address(item, "Mainnet recipient") for item in self.recipients))
+        object.__setattr__(self, "token", _address(self.token, "Mainnet token") if self.token else None)
+        object.__setattr__(self, "fee_owner", _address(self.fee_owner, "Mainnet fee owner") if self.fee_owner else None)
+        object.__setattr__(self, "proof", tuple(str(item).lower() for item in self.proof))
         expected_target = _target(manifest, str(operation["target"]))
         if self.to != expected_target:
             raise ValueError("Mainnet target does not match the audited operation.")
         if self.data[:10] != str(operation["selector"]).lower():
             raise ValueError("Mainnet selector does not match the audited operation.")
+        semantic_recipient = self.recipients[0] if len(self.recipients) == 1 else None
+        if self.kind == "treasuryClaim" and self.recipients != (self.fee_owner,):
+            raise ValueError("Treasury claim recipient must equal the recorded fee owner.")
+        expected_data = _semantic_calldata(
+            self.kind, str(operation["selector"]).lower(), token=self.token,
+            fee_owner=self.fee_owner, recipient=semantic_recipient,
+            allocated_amount=self.allocated_amount, proof=self.proof,
+        )
+        if expected_data is not None and self.data != expected_data:
+            raise ValueError("Mainnet calldata arguments do not match the recorded operation fields.")
         if not isinstance(self.value, int) or isinstance(self.value, bool) or self.value < 0:
             raise ValueError("Mainnet native value is invalid.")
         if operation["mutability"] != "payable" and self.value != 0:
@@ -116,6 +178,10 @@ class MainnetOperationIntent:
             "gas_limit": self.gas_limit,
             "max_fee_wei": str(self.max_fee_wei),
             "recipients": list(self.recipients),
+            "token": self.token,
+            "fee_owner": self.fee_owner,
+            "allocated_amount": str(self.allocated_amount) if self.allocated_amount is not None else None,
+            "proof": list(self.proof),
         }
 
     @property

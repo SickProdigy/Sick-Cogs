@@ -12,6 +12,7 @@ from ..mainnet_operations import (
 SIGNER = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
 TOKEN = "0x2222222222222222222222222222222222222222"
 FEE_LOCKER = "0xF3622742b1E446D92e45E22923Ef11C2fcD55D68"
+AIRDROP = "0xf652B3610D75D81871bf96DB50825d9af28391E0"
 
 
 def intent(**overrides):
@@ -28,6 +29,8 @@ def intent(**overrides):
         "gas_limit": 200_000,
         "max_fee_wei": 2_000_000_000_000_000,
         "recipients": (SIGNER,),
+        "token": TOKEN,
+        "fee_owner": SIGNER,
     }
     values.update(overrides)
     return MainnetOperationIntent(**values)
@@ -86,6 +89,34 @@ class MainnetOperationTests(unittest.TestCase):
         for changed in invalid:
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 intent(**changed)
+
+    def test_semantic_fields_are_independently_bound_to_calldata(self):
+        operation = intent()
+        for changed in (
+            {"token": "0x3333333333333333333333333333333333333333"},
+            {"fee_owner": TOKEN},
+            {"recipients": (TOKEN,)},
+        ):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "calldata arguments|recipient"):
+                intent(**changed)
+
+        proof = "0x" + "ab" * 32
+        amount = 123 * 10**18
+        data = (
+            "0xfabed412" + TOKEN[2:].rjust(64, "0") + SIGNER[2:].rjust(64, "0")
+            + amount.to_bytes(32, "big").hex() + (128).to_bytes(32, "big").hex()
+            + (1).to_bytes(32, "big").hex() + proof[2:]
+        )
+        claim = intent(
+            kind="airdropClaim", to=AIRDROP, data=data, fee_owner=None,
+            allocated_amount=amount, proof=(proof,),
+        )
+        self.assertEqual(claim.allocated_amount, amount)
+        with self.assertRaisesRegex(ValueError, "calldata arguments"):
+            intent(
+                kind="airdropClaim", to=AIRDROP, data=data, fee_owner=None,
+                allocated_amount=amount + 1, proof=(proof,),
+            )
 
     def test_read_only_operation_is_modeled_but_submission_stays_disabled(self):
         read = intent(
