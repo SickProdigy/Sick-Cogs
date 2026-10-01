@@ -26,6 +26,10 @@ CATEGORY_LABELS = {
 _BB_IMAGE_RE = re.compile(r"\[img\](.+?)\[/img\]", re.IGNORECASE | re.DOTALL)
 _HTML_IMAGE_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)', re.IGNORECASE)
 _FULL_RESOLUTION_RE = re.compile(r"download\s+in\s+full\s+resolution", re.IGNORECASE)
+_FULL_RESOLUTION_LINE_RE = re.compile(
+    r"^[ \t]*download\s+in\s+full\s+resolution[ \t]*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 _BB_TAG_RE = re.compile(r"\[/?[a-z*][^\]]*\]", re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"[ \t]+")
@@ -76,6 +80,7 @@ def plain_text(contents: str, *, limit: int = 900) -> str:
     text = _BB_TAG_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
     text = html.unescape(text).replace("\r\n", "\n").replace("\r", "\n")
+    text = _FULL_RESOLUTION_LINE_RE.sub("", text)
     text = "\n".join(_SPACE_RE.sub(" ", line).strip() for line in text.splitlines())
     text = _BLANK_RE.sub("\n\n", text).strip()
     if len(text) <= limit:
