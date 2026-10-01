@@ -44,6 +44,29 @@
     "feeDynamicHookV2": {"address": "0xd60D6B218116cFd801E28F78d011a203D2b068Cc", "runtimeCodeBytes": 20230, "runtimeCodeSha256": "07b9d755a28a9a8c234bf2d3a91c85529ea86d636e3b49fd2bc6578e992b7968"},
     "quoteTokenWeth": {"address": "0x4200000000000000000000000000000000000006", "runtimeCodeBytes": 2041, "runtimeCodeSha256": "667c900c2c6da80d452501a9c6332e046384a0c438c3334ce6f71c86dd7b8735"}
   },
+  "operationAllowlist": {
+    "launch": {"target": "factory", "signature": "deployToken(((address,string,string,bytes32,string,string,string,uint256),(address,address,int24,int24,bytes),(address,address[],address[],uint16[],int24[],int24[],uint16[],bytes),(address,bytes),(address,uint256,uint16,bytes)[]))", "selector": "0xdf40224a", "mutability": "payable", "successEvent": "TokenCreated(address,address,address,string,string,string,string,string,int24,address,bytes32,address,address,address,uint256,address[])", "successTopic": "0x9299d1d1a88d8e1abdc591ae7a167a6bc63a8f17d695804e9091ee33aa89fb67"},
+    "creatorBuyIn": {"kind": "launch-extension-only", "target": "devbuy", "standaloneCallAllowed": false},
+    "rewardDiscovery": {"target": "feeLocker", "signature": "availableFees(address,address)", "selector": "0x8296535a", "mutability": "view"},
+    "rewardCollection": {"target": "locker", "signature": "collectRewards(address)", "selector": "0x5763dbd0", "mutability": "nonpayable", "successEvent": "ClaimedRewards(address,uint256,uint256,uint256[],uint256[])", "successTopic": "0x21d15f71483b597e8f0009e83b90b2117f6f98c185d7173857dddcae5eb8546a"},
+    "rewardConfiguration": {"target": "locker", "signature": "tokenRewards(address)", "selector": "0x30bd3eeb", "mutability": "view"},
+    "treasuryClaim": {"target": "feeLocker", "signature": "claim(address,address)", "selector": "0x21c0b342", "mutability": "nonpayable", "successEvent": "ClaimTokens(address,address,uint256)", "successTopic": "0xf98eaa9c1f790e5c18b1f227bd5bade62600f9f3e3587c7644b90c50b9bf13c5"},
+    "vaultDiscovery": {"target": "vault", "signature": "amountAvailableToClaim(address)", "selector": "0x482501ba", "mutability": "view"},
+    "vaultClaim": {"target": "vault", "signature": "claim(address)", "selector": "0x1e83409a", "mutability": "nonpayable", "successEvent": "AllocationClaimed(address,uint256,uint256)", "successTopic": "0x2ab4392cda0fd42f52cf96615f7267094b2da30a49c57e995b59317097bc463e"},
+    "airdropDiscovery": {"target": "airdrop", "signature": "amountAvailableToClaim(address,address,uint256)", "selector": "0x2c7eb5a3", "mutability": "view"},
+    "airdropClaim": {"target": "airdrop", "signature": "claim(address,address,uint256,bytes32[])", "selector": "0xfabed412", "mutability": "nonpayable", "successEvent": "AirdropClaimed(address,address,uint256,uint256)", "successTopic": "0xd399c6e7fad358fc300beda3f056717c94a04c7233ce92683de6500ba509022e"}
+  },
+  "explicitlyExcludedFunctions": [
+    "updateRewardRecipient(address,uint256,address)",
+    "updateRewardAdmin(address,uint256,address)",
+    "updateFeePreference(address,uint256,uint8)",
+    "editAllocationAdmin(address,address)",
+    "updateAdmin(address,address)",
+    "updateMerkleRoot(address,bytes32)",
+    "adminClaim(address,address)",
+    "withdrawERC20(address,address)",
+    "withdrawETH(address)"
+  ],
   "rewardMutability": {
     "shares": "immutable after launch",
     "recipient": "mutable only by that reward index administrator",

@@ -21,6 +21,11 @@ both its administrator and recipient at the owner-configured immutable share, wi
 `SickGamingBot`/`discord` context. Saved-draft execution revalidates that invariant before calldata
 is rebuilt; browser or stored-payload changes fail closed.
 
+The candidate operation allowlist records exact function signatures, four-byte selectors, state
+mutability, target contracts, and required success-event topics. Creator buy-in is permitted only as
+part of the immutable launch extension; reward, vault, and airdrop administrative mutation functions
+and owner withdrawals are explicitly excluded from user operations.
+
 Authoritative sources:
 
 - <https://github.com/clanker-devco/clanker-sdk/releases/tag/v4.2.19>

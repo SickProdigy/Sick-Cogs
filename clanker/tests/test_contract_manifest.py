@@ -3,6 +3,8 @@ import re
 import unittest
 from pathlib import Path
 
+from ..helpers import keccak256
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "contracts" / "clanker-v4-base-sepolia.json"
@@ -61,6 +63,28 @@ class ClankerContractManifestTests(unittest.TestCase):
             {"status", "network", "chainId", "protocol", "sdk", "factory", "relatedContracts"},
         )
         self.assertTrue(raw.endswith(b"\n"))
+
+    def test_mainnet_operation_allowlist_pins_signatures_selectors_and_events(self):
+        candidate = json.loads(MAINNET_CANDIDATE_PATH.read_text(encoding="utf-8"))
+        operations = candidate["operationAllowlist"]
+        self.assertEqual(set(operations), {
+            "launch", "creatorBuyIn", "rewardDiscovery", "rewardCollection",
+            "rewardConfiguration", "treasuryClaim", "vaultDiscovery", "vaultClaim",
+            "airdropDiscovery", "airdropClaim",
+        })
+        self.assertIs(operations["creatorBuyIn"]["standaloneCallAllowed"], False)
+        for name, operation in operations.items():
+            if name == "creatorBuyIn":
+                continue
+            expected_selector = "0x" + keccak256(operation["signature"].encode("ascii"))[:4].hex()
+            self.assertEqual(operation["selector"], expected_selector, name)
+            target = operation["target"]
+            self.assertTrue(target == "factory" or target in candidate["contracts"], name)
+            if "successEvent" in operation:
+                expected_topic = "0x" + keccak256(operation["successEvent"].encode("ascii")).hex()
+                self.assertEqual(operation["successTopic"], expected_topic, name)
+        self.assertIn("updateRewardRecipient(address,uint256,address)", candidate["explicitlyExcludedFunctions"])
+        self.assertIn("withdrawETH(address)", candidate["explicitlyExcludedFunctions"])
 
     def test_mainnet_candidate_is_non_executable_audit_evidence(self):
         candidate = json.loads(MAINNET_CANDIDATE_PATH.read_text(encoding="utf-8"))
