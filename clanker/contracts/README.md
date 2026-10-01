@@ -26,6 +26,11 @@ mutability, target contracts, and required success-event topics. Creator buy-in 
 part of the immutable launch extension; reward, vault, and airdrop administrative mutation functions
 and owner withdrawals are explicitly excluded from user operations.
 
+`mainnet_operations.py` turns those audited entries into immutable, expiring operation intents. It
+binds the expected chain, signer, target, value, complete calldata, gas limit, fee ceiling, recipients,
+and requester into a deterministic fingerprint, then compares every provider candidate exactly. The
+module contains no submitter and `MAINNET_SUBMISSION_ENABLED` remains `False`.
+
 Authoritative sources:
 
 - <https://github.com/clanker-devco/clanker-sdk/releases/tag/v4.2.19>
