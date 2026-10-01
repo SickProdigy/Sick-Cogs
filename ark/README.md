@@ -19,7 +19,7 @@ categories; for example, `[p]arkset categories updates events`, `[p]arkset categ
 When starting automatic posting, optionally add a number from 2 to 10 to publish that many recent matching posts first,
 oldest to newest: `[p]arkset autopost start 5`. Backfilled posts are spaced one second apart and do not mention the notification role. The backfill searches Steam's 100 most recent posts and respects the configured categories.
 
-Delivery defaults to `card`, a compact embed with one featured image. `article` sends regular Discord text, converts Steam trailers into native YouTube links, and uploads as many as four suitable Steam images together as a gallery. Gallery images are resized to a maximum 1600-pixel edge and compressed before upload, with a 5 MB combined cap. Long articles end with a Continue reading link to Steam. Use `[p]arkset preview` to test the selected mode.
+Delivery defaults to `card`, a compact embed with one featured image. `article` sends one regular Discord message containing the article text, a native YouTube trailer link, and as many as four suitable Steam images uploaded together as a gallery. Discord displays the video preview and image gallery after the message text. Gallery images are resized to a maximum 1600-pixel edge and compressed before upload, with a 5 MB combined cap. Long articles end with a Continue reading link to Steam. Use `[p]arkset preview` to test the selected mode.
 
 ## Categories
 

@@ -229,22 +229,16 @@ class ArkAnnouncements(commands.Cog):
     async def send_article(self, channel, item: dict, role_id: Optional[int]):
         role = channel.guild.get_role(int(role_id)) if role_id else None
         article = self.make_article_text(item)
+        trailers = extract_youtube_urls(item.get("contents") or "")
+        if trailers:
+            article = f"{article}\n\n{' '.join(trailers)}"
         content = f"{role.mention}\n{article}" if role else article
         files = await self.download_gallery_files(item.get("contents") or "")
         await channel.send(
             content=content,
+            files=files,
             allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=bool(role)),
         )
-        for youtube_url in extract_youtube_urls(item.get("contents") or ""):
-            try:
-                await channel.send(youtube_url, allowed_mentions=discord.AllowedMentions.none())
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                log.exception("Could not publish ARK article trailer in channel %s", channel.id)
-        if files:
-            try:
-                await channel.send(files=files, allowed_mentions=discord.AllowedMentions.none())
-            except (discord.Forbidden, discord.NotFound, discord.HTTPException):
-                log.exception("Could not publish ARK article gallery in channel %s", channel.id)
 
     async def send_item(
         self, channel, item: dict, role_id: Optional[int], delivery_mode: str = "card"
