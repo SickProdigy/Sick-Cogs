@@ -7,6 +7,7 @@ import aiohttp
 
 from ..core.validation import (
     BASE58_ALPHABET,
+    normalize_evm_address,
     normalize_solana_address,
     normalize_solana_signature,
 )

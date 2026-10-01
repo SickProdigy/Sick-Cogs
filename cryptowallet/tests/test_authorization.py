@@ -136,6 +136,7 @@ from ..providers.base_rpc import (
     _read_bounded_content,
     EVM_RPC_URLS,
     get_chain_id,
+    quote_evm_call_fee,
     build_solana_transfer_message,
     serialize_unsigned_solana_transfer,
 )
@@ -2003,6 +2004,23 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             [],
             BASE_MAINNET.key,
         )
+
+    async def test_base_mainnet_call_fee_quote_normalizes_and_adds_aa_overhead(self):
+        sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
+        recipient = "0xe85a59c628f7d27878aceb4bf3b35733630083a9"
+        with patch(
+            "cryptowallet.providers.base_rpc._rpc_with_urls",
+            new=AsyncMock(side_effect=("0x5208", "0x3b9aca00")),
+        ) as rpc:
+            quote = await quote_evm_call_fee(
+                BASE_MAINNET.key, sender, recipient, 0, "0x"
+            )
+
+        self.assertEqual(quote["call_gas_limit"], 21_000)
+        self.assertEqual(quote["gas_limit"], 171_000)
+        self.assertEqual(quote["gas_price_wei"], 1_000_000_000)
+        self.assertEqual(quote["fee_wei"], 171_000_000_000_000)
+        self.assertEqual(rpc.await_count, 2)
 
     async def test_mainnet_credentials_use_an_isolated_secret_namespace(self):
         token_sets = {
