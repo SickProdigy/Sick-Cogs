@@ -131,7 +131,12 @@ EXTENSION_CONFIG = TupleType(("address", "uint256", "uint16", "bytes"))
 DEPLOYMENT_CONFIG = TupleType((TOKEN_CONFIG, POOL_CONFIG, LOCKER_CONFIG, MEV_CONFIG, ArrayType(EXTENSION_CONFIG)))
 
 
-def clanker_deployment_calldata(intent: ClankerLaunchIntent) -> str:
+def clanker_deployment_calldata(
+    intent: ClankerLaunchIntent, *, chain_id: int = CLANKER_CHAIN_ID,
+    locker: str = LOCKER, vault: str = VAULT, airdrop: str = AIRDROP,
+    devbuy: str = DEVBUY, mev_module: str = MEV_MODULE,
+    static_fee_hook_v2: str = STATIC_FEE_HOOK_V2,
+) -> str:
     """Return the only reviewed ``deployToken`` calldata shape for an immutable intent."""
 
     fee_data = _abi_encode(("uint24", "uint24"), (intent.pool.clanker_fee_bps * 100, intent.pool.paired_fee_bps * 100))
@@ -139,24 +144,24 @@ def clanker_deployment_calldata(intent: ClankerLaunchIntent) -> str:
     locker_data = _abi_encode((TupleType((ArrayType("uint8"),)),), ((tuple(FEE_PREFERENCE[item.token] for item in intent.rewards),),))
     extensions = []
     if intent.vault:
-        extensions.append((VAULT, 0, intent.vault.percentage * 100, _abi_encode(("address", "uint256", "uint256"), (intent.vault.recipient, intent.vault.lockup_seconds, intent.vault.vesting_seconds))))
+        extensions.append((vault, 0, intent.vault.percentage * 100, _abi_encode(("address", "uint256", "uint256"), (intent.vault.recipient, intent.vault.lockup_seconds, intent.vault.vesting_seconds))))
     if intent.airdrop:
         amount_atomic = intent.airdrop.amount_tokens * 10**18
         supply_atomic = DEFAULT_CLANKER_SUPPLY * 10**18
         bps = (amount_atomic * 10_000 + supply_atomic - 1) // supply_atomic
-        extensions.append((AIRDROP, 0, bps, _abi_encode(("address", "bytes32", "uint256", "uint256"), (intent.airdrop.admin, intent.airdrop.merkle_root, intent.airdrop.lockup_seconds, intent.airdrop.vesting_seconds))))
+        extensions.append((airdrop, 0, bps, _abi_encode(("address", "bytes32", "uint256", "uint256"), (intent.airdrop.admin, intent.airdrop.merkle_root, intent.airdrop.lockup_seconds, intent.airdrop.vesting_seconds))))
     if intent.expected_native_value_wei:
         pool_key = (ZERO_ADDRESS, ZERO_ADDRESS, 0, 0, ZERO_ADDRESS)
         devbuy_data = _abi_encode(
             (TupleType((TupleType(("address", "address", "uint24", "int24", "address")), "uint256", "address")),),
             ((pool_key, 0, intent.token_admin),),
         )
-        extensions.append((DEVBUY, intent.expected_native_value_wei, 0, devbuy_data))
+        extensions.append((devbuy, intent.expected_native_value_wei, 0, devbuy_data))
     config = (
-        (intent.token_admin, intent.name, intent.symbol, intent.salt, intent.image, intent.metadata_json, intent.context_json, CLANKER_CHAIN_ID),
-        (STATIC_FEE_HOOK_V2, intent.pool.paired_token, intent.pool.tick_if_token0_is_clanker, intent.pool.tick_spacing, pool_data),
-        (LOCKER, tuple(item.admin for item in intent.rewards), tuple(item.recipient for item in intent.rewards), tuple(item.bps for item in intent.rewards), tuple(item.tick_lower for item in intent.pool.positions), tuple(item.tick_upper for item in intent.pool.positions), tuple(item.position_bps for item in intent.pool.positions), locker_data),
-        (MEV_MODULE, b""),
+        (intent.token_admin, intent.name, intent.symbol, intent.salt, intent.image, intent.metadata_json, intent.context_json, chain_id),
+        (static_fee_hook_v2, intent.pool.paired_token, intent.pool.tick_if_token0_is_clanker, intent.pool.tick_spacing, pool_data),
+        (locker, tuple(item.admin for item in intent.rewards), tuple(item.recipient for item in intent.rewards), tuple(item.bps for item in intent.rewards), tuple(item.tick_lower for item in intent.pool.positions), tuple(item.tick_upper for item in intent.pool.positions), tuple(item.position_bps for item in intent.pool.positions), locker_data),
+        (mev_module, b""),
         tuple(extensions),
     )
     return "0x" + DEPLOY_TOKEN_SELECTOR + _abi_encode((DEPLOYMENT_CONFIG,), (config,)).hex()

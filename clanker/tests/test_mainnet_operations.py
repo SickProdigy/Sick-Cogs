@@ -6,7 +6,10 @@ from ..mainnet_operations import (
     MainnetOperationIntent,
     authorize_mainnet_submission,
     validate_mainnet_candidate,
+    _mainnet_launch_calldata,
 )
+from .test_operation import intent as launch_intent
+from ..views import mainnet_review_embed
 
 
 SIGNER = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
@@ -116,6 +119,38 @@ class MainnetOperationTests(unittest.TestCase):
             intent(
                 kind="airdropClaim", to=AIRDROP, data=data, fee_owner=None,
                 allocated_amount=amount + 1, proof=(proof,),
+            )
+
+    def test_launch_reconstructs_every_semantic_calldata_field(self):
+        launch = launch_intent()
+        data = _mainnet_launch_calldata(__import__("clanker.mainnet_operations", fromlist=["_manifest"])._manifest(), launch)
+        operation = MainnetOperationIntent(
+            operation_id=launch.launch_id, kind="launch", requester_id=launch.requester_id,
+            signer=launch.token_admin, to="0xE85A59c628F7d27878ACeB4bf3b35733630083a9",
+            value=launch.expected_native_value_wei, data=data, created_at=launch.created_at,
+            expires_at=launch.expires_at, gas_limit=3_000_000, max_fee_wei=2_000_000_000_000_000,
+            recipients=tuple(item.recipient for item in launch.rewards), launch_config=launch,
+        )
+        self.assertEqual(operation.data, data)
+        embed = mainnet_review_embed(operation)
+        rendered = " ".join(str(field.value) for field in embed.fields)
+        self.assertIn("Base mainnet", rendered)
+        self.assertIn(launch.token_admin, rendered)
+        self.assertIn(operation.fingerprint, rendered)
+        self.assertIn("submission disabled", embed.footer.text.lower())
+        with self.assertRaisesRegex(ValueError, "calldata arguments"):
+            dataclasses.replace(operation, data=data[:-2] + ("00" if data[-2:] != "00" else "01"))
+        with self.assertRaisesRegex(ValueError, "recipients"):
+            dataclasses.replace(operation, recipients=(TOKEN,))
+        with self.assertRaisesRegex(ValueError, "identity"):
+            dataclasses.replace(operation, requester_id=launch.requester_id + 1)
+        with self.assertRaisesRegex(ValueError, "semantics"):
+            MainnetOperationIntent(
+                operation_id=launch.launch_id, kind="launch", requester_id=launch.requester_id,
+                signer=launch.token_admin, to=operation.to, value=0, data=data,
+                created_at=launch.created_at, expires_at=launch.expires_at,
+                gas_limit=3_000_000, max_fee_wei=2_000_000_000_000_000,
+                recipients=operation.recipients,
             )
 
     def test_read_only_operation_is_modeled_but_submission_stays_disabled(self):

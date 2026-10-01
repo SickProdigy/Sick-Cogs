@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .models import ClankerLaunchIntent
+from .operation import clanker_deployment_calldata
+
 
 MANIFEST_PATH = Path(__file__).with_name("contracts") / "clanker-v4-base-mainnet-candidate.json"
 MAINNET_SUBMISSION_ENABLED = False
@@ -70,12 +73,28 @@ def _proof_word(value: str) -> str:
     return normalized[2:]
 
 
+def _mainnet_launch_calldata(manifest: dict[str, Any], launch: ClankerLaunchIntent) -> str:
+    contracts = manifest["contracts"]
+    return clanker_deployment_calldata(
+        launch, chain_id=8453,
+        locker=contracts["locker"]["address"],
+        vault=contracts["vault"]["address"],
+        airdrop=contracts["airdrop"]["address"],
+        devbuy=contracts["devbuy"]["address"],
+        mev_module=contracts["mevModuleV2"]["address"],
+        static_fee_hook_v2=contracts["feeStaticHookV2"]["address"],
+    ).lower()
+
+
 def _semantic_calldata(
     kind: str, selector: str, *, token: str | None, fee_owner: str | None,
     recipient: str | None, allocated_amount: int | None, proof: tuple[str, ...],
+    launch_config: ClankerLaunchIntent | None,
 ) -> str | None:
     if kind == "launch":
-        return None
+        if launch_config is None:
+            raise ValueError("Mainnet launch semantics are required.")
+        return _mainnet_launch_calldata(_manifest(), launch_config)
     if not token:
         raise ValueError("This mainnet operation requires a token address.")
     token_word = _address_word(token, "Mainnet token")
@@ -118,6 +137,7 @@ class MainnetOperationIntent:
     fee_owner: str | None = None
     allocated_amount: int | None = None
     proof: tuple[str, ...] = ()
+    launch_config: ClankerLaunchIntent | None = None
 
     def __post_init__(self) -> None:
         manifest = _manifest()
@@ -135,6 +155,19 @@ class MainnetOperationIntent:
         object.__setattr__(self, "token", _address(self.token, "Mainnet token") if self.token else None)
         object.__setattr__(self, "fee_owner", _address(self.fee_owner, "Mainnet fee owner") if self.fee_owner else None)
         object.__setattr__(self, "proof", tuple(str(item).lower() for item in self.proof))
+        if self.kind == "launch":
+            launch = self.launch_config
+            if launch is None:
+                raise ValueError("Mainnet launch semantics are required.")
+            if (self.operation_id != launch.launch_id or self.requester_id != launch.requester_id
+                    or self.signer != launch.token_admin or self.value != launch.expected_native_value_wei
+                    or self.created_at != launch.created_at or self.expires_at != launch.expires_at):
+                raise ValueError("Mainnet launch identity does not match its immutable semantics.")
+            expected_recipients = tuple(item.recipient for item in launch.rewards)
+            if self.recipients != expected_recipients:
+                raise ValueError("Mainnet launch recipients do not match reward semantics.")
+        elif self.launch_config is not None:
+            raise ValueError("Only a launch operation may carry launch semantics.")
         expected_target = _target(manifest, str(operation["target"]))
         if self.to != expected_target:
             raise ValueError("Mainnet target does not match the audited operation.")
@@ -147,6 +180,7 @@ class MainnetOperationIntent:
             self.kind, str(operation["selector"]).lower(), token=self.token,
             fee_owner=self.fee_owner, recipient=semantic_recipient,
             allocated_amount=self.allocated_amount, proof=self.proof,
+            launch_config=self.launch_config,
         )
         if expected_data is not None and self.data != expected_data:
             raise ValueError("Mainnet calldata arguments do not match the recorded operation fields.")
@@ -182,6 +216,7 @@ class MainnetOperationIntent:
             "fee_owner": self.fee_owner,
             "allocated_amount": str(self.allocated_amount) if self.allocated_amount is not None else None,
             "proof": list(self.proof),
+            "launch_payload_hash": self.launch_config.payload_hash if self.launch_config else None,
         }
 
     @property

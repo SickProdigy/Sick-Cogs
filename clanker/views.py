@@ -16,6 +16,7 @@ from .constants import (
     MIN_VAULT_LOCKUP_SECONDS,
     SYMBOL_RE,
 )
+from .mainnet_operations import MainnetOperationIntent
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -28,6 +29,58 @@ from .helpers import (
 
 if TYPE_CHECKING:
     from .clanker import Clanker
+
+
+def mainnet_review_embed(intent: MainnetOperationIntent) -> discord.Embed:
+    """Present one exact mainnet candidate without authorizing submission."""
+    launch = intent.launch_config
+    title = (
+        "Review Base mainnet Clanker launch"
+        if intent.kind == "launch" else "Review Base mainnet Clanker operation"
+    )
+    embed = discord.Embed(
+        title=title,
+        description=(
+            "Review these frozen values before protected approval. "
+            "No mainnet submission path is enabled."
+        ),
+        color=discord.Color.red(),
+    )
+    embed.add_field(name="Network", value="Base mainnet (8453)", inline=True)
+    embed.add_field(name="Operation", value=intent.kind, inline=True)
+    if launch is not None:
+        embed.add_field(name="Token", value=f"{launch.name} ({launch.symbol})", inline=False)
+        embed.add_field(name="Token administrator", value=launch.token_admin, inline=False)
+        rewards = "\n".join(
+            f"{item.bps} bps to {item.recipient}" for item in launch.rewards
+        )
+        embed.add_field(name="Rewards", value=rewards, inline=False)
+    embed.add_field(name="Signer", value=intent.signer, inline=False)
+    embed.add_field(name="Contract", value=intent.to, inline=False)
+    embed.add_field(
+        name="Wallet debit ceiling",
+        value=(
+            f"{format_eth_wei(intent.value + intent.max_fee_wei)} "
+            "(value + maximum gas fee)"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Approval expires", value=f"<t:{intent.expires_at}:R>", inline=True
+    )
+    embed.add_field(
+        name="Review fingerprint", value=intent.fingerprint, inline=False
+    )
+    embed.add_field(
+        name="Irreversible",
+        value=(
+            "A confirmed launch cannot be undone. Protected approval must match "
+            "this exact fingerprint."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Mainnet staging only - submission disabled")
+    return embed
 
 
 class ClankerTermsView(discord.ui.View):

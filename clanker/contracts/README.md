@@ -6,14 +6,14 @@ This directory records reviewed external contract surfaces used by Clanker. The 
 configuration. The source tag resolves to commit `4f4d2bbf41c7f10543559dc043c85f443a6d452e`.
 The factory bytecode hash was independently read from Base Sepolia at the pinned address.
 
-The Clanker capability remains a prototype. Clanker must reject every other
-network, factory, selector, ABI shape, and extension address, and it must require protected user
-approval before submission. Mainnet support is intentionally absent.
+The Clanker capability remains a prototype. Clanker rejects every unreviewed network, factory,
+selector, ABI shape, and extension address. Mainnet staging is read-only and must require protected
+user approval before any future submission; the real submitter remains intentionally absent.
 
 `clanker-v4-base-mainnet-candidate.json` is read-only audit evidence for issue #204. It records the
 current official SDK's Base deployment map and matching runtime bytecode from two independent RPC
-sources. It is deliberately not imported by cog code, has `executionEnabled: false`, and does not
-authorize a mainnet launch. The candidate also records the current SDK's newer locker address where
+sources. It is loaded only by the fail-closed validation and evidence modules, has
+`executionEnabled: false`, and does not authorize a mainnet launch. The candidate also records the current SDK's newer locker address where
 it differs from the older contracts-repository README.
 
 Platform attribution is valid only when exactly one reward entry uses the owner-configured treasury as
@@ -30,7 +30,7 @@ and owner withdrawals are explicitly excluded from user operations.
 binds the expected chain, signer, target, value, complete calldata, gas limit, fee ceiling, recipients,
 and requester into a deterministic fingerprint, then compares every provider candidate exactly. The
 module contains no submitter and `MAINNET_SUBMISSION_ENABLED` remains `False`.
-Reward, treasury, vault, and airdrop calldata is independently reconstructed from typed token,
+Launch, reward, treasury, vault, and airdrop calldata is independently reconstructed from typed token,
 fee-owner, recipient, amount, and Merkle-proof fields; opaque calldata cannot disagree with the
 review data.
 
@@ -40,3 +40,8 @@ Authoritative sources:
 - <https://github.com/clanker-devco/clanker-sdk/blob/v4.2.19/src/utils/clankers.ts>
 - <https://github.com/clanker-devco/clanker-sdk/blob/v4.2.19/src/abi/v4/Clanker.ts>
 - <https://github.com/clanker-devco/clanker-sdk/blob/v4.2.19/src/config/clankerTokenV4.ts>
+
+`mainnet_lifecycle.py` persists immutable attempt bindings across restarts, rejects changed provider
+identifiers and invalid transitions, and requires matching receipt/state evidence from two independent
+RPC observations. Runtime code, transaction fields, success events, and launch administrator are
+checked against the reviewed intent and manifest before evidence is accepted.
