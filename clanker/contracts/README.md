@@ -49,3 +49,8 @@ checked against the reviewed intent and manifest before evidence is accepted.
 Protected mainnet approval is requester-bound, terms-gated, fingerprint-bound, limited to ten minutes
 or the shorter intent lifetime, persisted in the existing Red namespace, and atomically consumable once.
 The approval button records consent only; it cannot submit while the manifest and submitter remain disabled.
+
+Immediately before any future provider call, live revalidation repeats the exact candidate check and
+requires the pinned target runtime, active wallet authorization, an unchanged gas quote, enough signer
+balance for native value plus maximum fee, and a clean not-created provider state. ERC-4337 nonce is
+provider-managed; duplicate prevention uses the immutable operation ID and clean provider state.

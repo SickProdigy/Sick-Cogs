@@ -266,6 +266,43 @@ def validate_mainnet_candidate(
         raise ValueError("Mainnet transaction candidate does not match the immutable intent.")
 
 
+def revalidate_mainnet_pre_submission(
+    intent: MainnetOperationIntent, *, chain_id: int, signer: str,
+    to: str, value: int, data: str, gas_limit: int, max_fee_wei: int,
+    live_target_runtime_sha256: str, authorization_active: bool,
+    signer_balance_wei: int, operation_state: str,
+    quoted_gas_limit: int, quoted_max_fee_wei: int, now: int | None = None,
+) -> dict[str, Any]:
+    """Recheck live bindings immediately before any future provider call."""
+    validate_mainnet_candidate(
+        intent, chain_id=chain_id, signer=signer, to=to, value=value, data=data,
+        gas_limit=gas_limit, max_fee_wei=max_fee_wei, now=now,
+    )
+    manifest = _manifest()
+    operation = manifest["operationAllowlist"][intent.kind]
+    target_name = operation["target"]
+    target = manifest["factory"] if target_name == "factory" else manifest["contracts"][target_name]
+    expected_hash = "0x" + str(target["runtimeCodeSha256"]).removeprefix("0x").lower()
+    if str(live_target_runtime_sha256 or "").lower() != expected_hash:
+        raise ValueError("The live Clanker target runtime does not match the audited manifest.")
+    if authorization_active is not True:
+        raise ValueError("The protected wallet authorization is not active.")
+    if operation_state != "not-created":
+        raise ValueError("A provider operation or public transaction already exists.")
+    if quoted_gas_limit != intent.gas_limit or quoted_max_fee_wei != intent.max_fee_wei:
+        raise ValueError("The live Clanker gas quote changed after approval.")
+    required_balance = intent.value + intent.max_fee_wei
+    if int(signer_balance_wei) < required_balance:
+        raise ValueError("The signer balance cannot cover value plus the approved maximum fee.")
+    return {
+        "intent_fingerprint": intent.fingerprint,
+        "target_runtime_sha256": expected_hash,
+        "operation_state": "not-created",
+        "required_balance_wei": required_balance,
+        "approval_expires_at": intent.expires_at,
+    }
+
+
 def authorize_mainnet_submission(intent: MainnetOperationIntent) -> None:
     """Keep all real submission unavailable until a later explicit release gate."""
 

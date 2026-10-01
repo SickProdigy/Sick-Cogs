@@ -7,6 +7,7 @@ from ..mainnet_operations import (
     authorize_mainnet_submission,
     validate_mainnet_candidate,
     _mainnet_launch_calldata,
+    revalidate_mainnet_pre_submission,
 )
 from .test_operation import intent as launch_intent
 from ..views import mainnet_review_embed
@@ -155,6 +156,31 @@ class MainnetOperationTests(unittest.TestCase):
                 gas_limit=3_000_000, max_fee_wei=2_000_000_000_000_000,
                 recipients=operation.recipients,
             )
+
+    def test_immediate_live_revalidation_rejects_every_state_mutation(self):
+        operation = intent()
+        runtime_hash = "0x28b11075028fbd4a9969484ce9d99e46f68aacc2185744f15bed6c827525f49c"
+        values = {
+            "chain_id": 8453, "signer": operation.signer, "to": operation.to,
+            "value": operation.value, "data": operation.data,
+            "gas_limit": operation.gas_limit, "max_fee_wei": operation.max_fee_wei,
+            "live_target_runtime_sha256": runtime_hash, "authorization_active": True,
+            "signer_balance_wei": operation.value + operation.max_fee_wei,
+            "operation_state": "not-created", "quoted_gas_limit": operation.gas_limit,
+            "quoted_max_fee_wei": operation.max_fee_wei, "now": operation.created_at + 1,
+        }
+        result = revalidate_mainnet_pre_submission(operation, **values)
+        self.assertEqual(result["intent_fingerprint"], operation.fingerprint)
+        for field, changed, message in (
+            ("live_target_runtime_sha256", "0x" + "00" * 32, "runtime"),
+            ("authorization_active", False, "authorization"),
+            ("operation_state", "submitted", "already exists"),
+            ("quoted_gas_limit", operation.gas_limit + 1, "quote"),
+            ("quoted_max_fee_wei", operation.max_fee_wei + 1, "quote"),
+            ("signer_balance_wei", operation.max_fee_wei - 1, "balance"),
+        ):
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, message):
+                revalidate_mainnet_pre_submission(operation, **{**values, field: changed})
 
     def test_read_only_operation_is_modeled_but_submission_stays_disabled(self):
         read = intent(
