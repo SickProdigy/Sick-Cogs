@@ -2380,6 +2380,30 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("code-disabled", ctx.send.await_args.args[0])
 
+    async def test_mainnet_balance_route_remains_closed_at_code_boundary(self):
+        cog = SimpleNamespace(
+            _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
+            config=SimpleNamespace(base_mainnet_policy=_Value({})),
+            wallet_provider=SimpleNamespace(supports=lambda network, capability: True),
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletCoreCommands.wallet_balance.callback(cog, ctx)
+
+        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+
+    async def test_mainnet_history_route_remains_closed_at_code_boundary(self):
+        cog = SimpleNamespace(
+            _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
+            config=SimpleNamespace(base_mainnet_policy=_Value({})),
+            wallet_provider=SimpleNamespace(supports=lambda network, capability: True),
+        )
+        ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
+
+        await WalletActivityCommands.wallet_transactions.callback(cog, ctx, "base")
+
+        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+
     async def test_crypto_product_defaults_follow_operating_mode(self):
         cog = SimpleNamespace(
             config=SimpleNamespace(operating_mode=_MutableValue("testnet"))

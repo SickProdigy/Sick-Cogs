@@ -8,6 +8,7 @@ from redbot.core import commands
 
 from ..core.environment import WalletEnvironment, parse_wallet_environment
 from ..core.networks import (
+    BASE_MAINNET,
     BASE_SEPOLIA,
     ETHEREUM_SEPOLIA,
     KNOWN_NETWORKS,
@@ -149,7 +150,9 @@ class WalletCoreCommands:
         target = user or ctx.author
         display_name = discord.utils.escape_markdown(target.display_name)
         embed = discord.Embed(title="Crypto Wallet", color=discord.Color.green())
-        embed.description = f"{display_name}’s public testnet wallet portfolio."
+        is_mainnet = network is not None and not network.testnet
+        environment_label = "mainnet wallet" if is_mainnet else "testnet wallet portfolio"
+        embed.description = f"{display_name}’s public {environment_label}."
         registry = await self.config.token_registry()
         network_emojis = await self.config.network_emojis()
         networks = [network] if network is not None else [
@@ -290,10 +293,15 @@ class WalletCoreCommands:
 
 
         if not embed.fields:
-            embed.description += " No enabled testnet accounts are available."
-        embed.set_footer(
-            text="Testnet assets only · Token names may be spoofed; verify contract addresses"
-        )
+            embed.description += (
+                " No Base mainnet account is available."
+                if is_mainnet else " No enabled testnet accounts are available."
+            )
+        embed.set_footer(text=(
+            "Base mainnet · Real assets · Verify addresses and contracts"
+            if is_mainnet else
+            "Testnet assets only · Token names may be spoofed; verify contract addresses"
+        ))
         return embed
 
     @staticmethod
@@ -378,14 +386,62 @@ class WalletCoreCommands:
             else WalletEnvironment.TESTNET
         )
         if environment is not WalletEnvironment.TESTNET and not explicit_testnet:
+            policy_setting = getattr(
+                getattr(self, "config", None), "base_mainnet_policy", None
+            )
+            policy = await policy_setting() if callable(policy_setting) else {}
+            code_ready = (
+                BASE_MAINNET.supports(NetworkCapability.BALANCE)
+                and self.wallet_provider.supports(
+                    BASE_MAINNET.key, NetworkCapability.BALANCE
+                )
+            )
+            read_enabled = (
+                code_ready
+                and isinstance(policy, dict)
+                and policy.get("enabled") is True
+                and policy.get("paused", True) is False
+                and (policy.get("capabilities") or {}).get("balance") is True
+            )
+            if read_enabled:
+                if not await self._wallet_read_allowed(
+                    ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
+                ):
+                    return
+                if await self.config.provider_paused():
+                    await ctx.send(
+                        "CryptoWallet provider processing is paused by the bot owner."
+                    )
+                    return
+                target = member or ctx.author
+                if target.id == ctx.author.id:
+                    profile = await self._wallet_profile_or_error(ctx)
+                    if profile is None:
+                        return
+                    try:
+                        profile = await self.ensure_mainnet_wallet_profile(
+                            target, profile
+                        )
+                    except (RuntimeError, WalletProviderError) as exc:
+                        await ctx.send(str(exc))
+                        return
+                else:
+                    profile = await self.config.user(target).profile()
+                    if profile is None:
+                        await ctx.send("That member has no public wallet profile.")
+                        return
+                await ctx.send(embed=await self._wallet_embed(
+                    ctx, profile, target, network=BASE_MAINNET
+                ))
+                return
             terms_current = await self.has_current_cryptowallet_mainnet_terms(
                 ctx.author.id
             )
             embed = discord.Embed(
                 title="CryptoWallet Mainnet Staging",
                 description=(
-                    "Base mainnet is selected for walkthrough testing. No mainnet "
-                    "balance, transaction, or provider call is made by this card."
+                    "Base mainnet is selected, but its real-asset read and send "
+                    "capabilities remain unavailable."
                 ),
                 color=discord.Color.orange(),
             )
@@ -404,8 +460,8 @@ class WalletCoreCommands:
             embed.add_field(
                 name="Execution",
                 value=(
-                    "Disabled and emergency-paused. Mainnet sends remain unavailable "
-                    "until the separate reviewed release gates are complete."
+                    "Code-disabled or emergency-paused. No mainnet balance or "
+                    "transaction provider call was made."
                 ),
                 inline=False,
             )
@@ -415,9 +471,7 @@ class WalletCoreCommands:
                     value=f"Use `{ctx.clean_prefix}wallet testnet`.",
                     inline=False,
                 )
-            embed.set_footer(
-                text="Staging status only · no wallet or blockchain state changed"
-            )
+            embed.set_footer(text="Staging status only · no blockchain state changed")
             await ctx.send(embed=embed)
             return
         if not await testnet_path_allowed(
@@ -541,9 +595,31 @@ class WalletCoreCommands:
 
         Shows all testnet assets or details for one enabled testnet.
         """
-        if not await testnet_path_allowed(
-            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
-        ):
+        explicit_testnet = bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        environment = await self._wallet_environment()
+        mainnet_path = environment is not WalletEnvironment.TESTNET and not explicit_testnet
+        if mainnet_path:
+            policy_setting = getattr(
+                getattr(self, "config", None), "base_mainnet_policy", None
+            )
+            policy = await policy_setting() if callable(policy_setting) else {}
+            if (
+                not BASE_MAINNET.supports(NetworkCapability.BALANCE)
+                or not self.wallet_provider.supports(
+                    BASE_MAINNET.key, NetworkCapability.BALANCE
+                )
+            ):
+                await ctx.send("Base mainnet balances remain code-disabled pending review.")
+                return
+            if (
+                not isinstance(policy, dict)
+                or policy.get("enabled") is not True
+                or policy.get("paused", True) is not False
+                or (policy.get("capabilities") or {}).get("balance") is not True
+            ):
+                await ctx.send("Base mainnet balances are disabled or emergency-paused.")
+                return
+        elif not await testnet_path_allowed(self, ctx, explicit=explicit_testnet):
             return
         if not await self._wallet_read_allowed(
             ctx, "summary", WALLET_SUMMARY_COOLDOWN_SECONDS
@@ -552,8 +628,14 @@ class WalletCoreCommands:
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
-        network = None
-        if network_key is not None:
+        network = BASE_MAINNET if mainnet_path else None
+        if mainnet_path:
+            try:
+                profile = await self.ensure_mainnet_wallet_profile(ctx.author, profile)
+            except (RuntimeError, WalletProviderError) as exc:
+                await ctx.send(str(exc))
+                return
+        elif network_key is not None:
             network = resolve_network(network_key)
             if network is None or not network.testnet:
                 await ctx.send(

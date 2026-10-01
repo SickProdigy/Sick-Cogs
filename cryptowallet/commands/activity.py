@@ -4,7 +4,11 @@ import discord
 from redbot.core import commands
 
 from ..core.models import TransactionIntent
-from ..core.networks import BASE_SEPOLIA, ChainFamily, NetworkCapability, resolve_network
+from ..core.environment import WalletEnvironment
+from ..core.networks import (
+    BASE_MAINNET, BASE_SEPOLIA, NETWORKS, ChainFamily, NetworkCapability,
+    resolve_network,
+)
 from ..providers import WalletProviderError
 from ..providers.base_rpc import BaseRpcError, get_solana_transaction, get_transaction
 from ..core.validation import (
@@ -377,13 +381,46 @@ class WalletActivityCommands:
 
         Browses indexed incoming and outgoing blockchain activity for your wallet.
         """
-        if not await testnet_path_allowed(
-            self, ctx, explicit=bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
-        ):
+        explicit_testnet = bool(getattr(ctx, "_cryptowallet_explicit_testnet", False))
+        environment_resolver = getattr(self, "_wallet_environment", None)
+        environment = (
+            await environment_resolver()
+            if callable(environment_resolver)
+            else WalletEnvironment.TESTNET
+        )
+        mainnet_path = environment is not WalletEnvironment.TESTNET and not explicit_testnet
+        if mainnet_path:
+            policy_setting = getattr(
+                getattr(self, "config", None), "base_mainnet_policy", None
+            )
+            policy = await policy_setting() if callable(policy_setting) else {}
+            if (
+                not BASE_MAINNET.supports(NetworkCapability.HISTORY)
+                or not self.wallet_provider.supports(
+                    BASE_MAINNET.key, NetworkCapability.HISTORY
+                )
+            ):
+                await ctx.send("Base mainnet history remains code-disabled pending review.")
+                return
+            if (
+                not isinstance(policy, dict)
+                or policy.get("enabled") is not True
+                or policy.get("paused", True) is not False
+                or (policy.get("capabilities") or {}).get("history") is not True
+            ):
+                await ctx.send("Base mainnet history is disabled or emergency-paused.")
+                return
+        elif not await testnet_path_allowed(self, ctx, explicit=explicit_testnet):
             return
         profile = await self._wallet_profile_or_error(ctx)
         if profile is None:
             return
+        if mainnet_path:
+            try:
+                profile = await self.ensure_mainnet_wallet_profile(ctx.author, profile)
+            except (RuntimeError, WalletProviderError) as exc:
+                await ctx.send(str(exc))
+                return
         if network_key is None:
             embed = discord.Embed(
                 title="Recent Wallet Transactions",
@@ -395,9 +432,11 @@ class WalletActivityCommands:
                 ),
                 color=discord.Color.blurple(),
             )
-            for network in NETWORKS.values():
-                if not network.testnet:
-                    continue
+            visible_networks = (
+                (BASE_MAINNET,) if mainnet_path else
+                tuple(network for network in NETWORKS.values() if network.testnet)
+            )
+            for network in visible_networks:
                 account = self._account_for_network(profile, network.key)
                 if account is None:
                     continue
@@ -410,7 +449,15 @@ class WalletActivityCommands:
             embed.set_footer(text="Explorer links do not use CDP history requests")
             await ctx.send(embed=embed)
             return
-        network = self._activity_network(network_key)
+        if mainnet_path:
+            if str(network_key).strip().lower() not in {
+                "base", "base-mainnet", "mainnet", "eth"
+            }:
+                await ctx.send("Choose `base` for Base mainnet transaction history.")
+                return
+            network = BASE_MAINNET
+        else:
+            network = self._activity_network(network_key)
         if network is None or not network.supports(NetworkCapability.HISTORY):
             await ctx.send("Choose `base`, `eth`, or `sol` for recent transaction history.")
             return
