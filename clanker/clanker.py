@@ -8,6 +8,7 @@ import logging
 import re
 import secrets
 import socket
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote, urlparse
@@ -34,7 +35,14 @@ from .models import (
     validate_platform_attribution,
 )
 from .operation import clanker_deployment_operation
-from .mainnet_operations import MainnetOperationIntent
+from .mainnet_operations import (
+    MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
+    revalidate_mainnet_pre_submission,
+)
+from .mainnet_lifecycle import (
+    MainnetOperationLifecycle, create_mainnet_lifecycle,
+    transition_mainnet_lifecycle,
+)
 from .mainnet_approval import (
     MAINNET_ACKNOWLEDGEMENT, MainnetOperationApproval,
     consume_mainnet_approval, create_mainnet_approval,
@@ -293,11 +301,14 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "owner_audit_log": [],
         "mainnet_pending_review": None,
         "mainnet_operation_approval": None,
+        "mainnet_deployment_enabled": False,
+        "mainnet_emergency_paused": True,
     }
 
     default_user = {
         "launch_records": [], "mainnet_terms_acceptance": None,
         "mainnet_pending_review": None, "mainnet_operation_approval": None,
+        "mainnet_operation_lifecycle": None, "mainnet_operation_evidence": None,
     }
 
     default_guild = {
@@ -401,6 +412,71 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             data.clear()
             data.update(claimed.to_dict())
         return claimed
+
+    async def submit_mainnet_operation(
+        self, user, intent: MainnetOperationIntent, *, live: dict
+    ) -> dict:
+        """Consume one requester approval and submit the exact reviewed operation."""
+        if (not MAINNET_SUBMISSION_ENABLED
+                or not await self.config.mainnet_deployment_enabled()
+                or await self.config.mainnet_emergency_paused()):
+            raise RuntimeError("Clanker Base mainnet submission remains disabled.")
+        if int(user.id) != intent.requester_id:
+            raise RuntimeError("The Clanker mainnet operation belongs to another member.")
+        revalidate_mainnet_pre_submission(
+            intent, chain_id=int(live["chain_id"]), signer=str(live["signer"]),
+            to=str(live["to"]), value=int(live["value"]), data=str(live["data"]),
+            gas_limit=int(live["gas_limit"]), max_fee_wei=int(live["max_fee_wei"]),
+            live_target_runtime_sha256=str(live["target_runtime_sha256"]),
+            authorization_active=live.get("authorization_active") is True,
+            signer_balance_wei=int(live["signer_balance_wei"]),
+            operation_state=str(live["operation_state"]),
+            quoted_gas_limit=int(live["quoted_gas_limit"]),
+            quoted_max_fee_wei=int(live["quoted_max_fee_wei"]),
+            now=int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+        )
+        wallet = self.bot.get_cog("CryptoWallet")
+        submitter = getattr(wallet, "clanker_submit_mainnet_operation", None)
+        if not callable(submitter):
+            raise RuntimeError("CryptoWallet mainnet signing support is unavailable.")
+        scope = self.config.user_from_id(int(user.id))
+        existing = await scope.mainnet_operation_lifecycle()
+        if isinstance(existing, dict):
+            lifecycle = MainnetOperationLifecycle.from_dict(existing)
+            if lifecycle.intent_fingerprint != intent.fingerprint:
+                raise RuntimeError("Another Clanker mainnet operation is already active.")
+            if lifecycle.status not in {"failed", "dropped", "replaced"}:
+                raise RuntimeError(
+                    f"This Clanker mainnet operation is already {lifecycle.status}."
+                )
+        attempt_id = str(uuid.uuid4())
+        now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        lifecycle = create_mainnet_lifecycle(intent, attempt_id, now=now)
+        lifecycle = transition_mainnet_lifecycle(lifecycle, "processing", now=now)
+        await scope.mainnet_operation_lifecycle.set(lifecycle.to_dict())
+        await self.claim_mainnet_approval(intent, int(user.id))
+        try:
+            result = await submitter(
+                user, envelope={"payload": intent.canonical_payload(),
+                                "fingerprint": intent.fingerprint},
+                attempt_id=attempt_id,
+            )
+        except Exception:
+            uncertain = transition_mainnet_lifecycle(
+                lifecycle, "uncertain", now=int(datetime.datetime.now(
+                    datetime.timezone.utc).timestamp()),
+                failure_reason="Provider submission outcome is uncertain.",
+            )
+            await scope.mainnet_operation_lifecycle.set(uncertain.to_dict())
+            raise
+        submitted = transition_mainnet_lifecycle(
+            lifecycle, "submitted",
+            now=int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+            user_operation_hash=result.get("user_operation_hash"),
+            transaction_hash=result.get("transaction_hash"),
+        )
+        await scope.mainnet_operation_lifecycle.set(submitted.to_dict())
+        return {**result, "attempt_id": attempt_id, "status": submitted.status}
 
     async def cog_load(self):
         guild_data = await self.config.all_guilds()

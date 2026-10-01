@@ -143,6 +143,20 @@ class CryptoWallet(
             profile, user_operation_hash, network
         )
 
+    async def clanker_submit_mainnet_operation(
+        self, user, *, envelope: dict, attempt_id: str
+    ) -> dict:
+        """Submit one exact Clanker mainnet envelope through the narrow signer."""
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        profile = await self.get_or_create_wallet_profile(user)
+        profile = await self.ensure_mainnet_wallet_profile(user, profile)
+        return await self.wallet_provider.submit_reviewed_clanker_mainnet_operation(
+            profile, envelope, attempt_id
+        )
+
     async def clanker_collect_rewards(
         self, user, *, token: str, token_admin: str, attempt_id: str
     ) -> dict:

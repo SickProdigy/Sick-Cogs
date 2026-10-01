@@ -13,6 +13,7 @@ from .constants import (
     MERKLE_ROOT_RE,
     MIN_AIRDROP_LOCKUP_SECONDS,
 )
+from .mainnet_operations import MAINNET_SUBMISSION_ENABLED
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -46,6 +47,44 @@ class ClankerAdminMixin:
         """Enable or disable Clanker launch requests."""
         await self.config.guild(ctx.guild).enabled.set(enabled)
         await ctx.send(f"Clanker launch requests are now {'enabled' if enabled else 'disabled'}.")
+
+    @clankerset.command(name="mainnetstatus")
+    async def clankerset_mainnet_status(self, ctx: commands.Context):
+        """Show the fail-closed installation-wide Base mainnet gate."""
+        enabled = bool(await self.config.mainnet_deployment_enabled())
+        paused = bool(await self.config.mainnet_emergency_paused())
+        await ctx.send(
+            "**Clanker Base mainnet**\n"
+            f"Code release gate: **{MAINNET_SUBMISSION_ENABLED}**\n"
+            f"Installation enabled: **{enabled}**\n"
+            f"Emergency paused: **{paused}**\n"
+            "Access when released: **requesting members with exact protected approval**"
+        )
+
+    @clankerset.command(name="mainnetcontrol")
+    async def clankerset_mainnet_control(self, ctx: commands.Context, mode: str):
+        """Pause or enable the installation-wide Clanker mainnet path."""
+        choice = str(mode or "").strip().lower()
+        if choice in {"pause", "disable"}:
+            await self.config.mainnet_deployment_enabled.set(False)
+            await self.config.mainnet_emergency_paused.set(True)
+            await ctx.send("Clanker Base mainnet is disabled and emergency-paused.")
+            return
+        if choice != "enable":
+            await ctx.send("Use `mainnetcontrol enable`, `pause`, or `disable`.")
+            return
+        if not MAINNET_SUBMISSION_ENABLED:
+            await ctx.send(
+                "Clanker Base mainnet remains code-disabled pending the reviewed release gate. "
+                "No state changed."
+            )
+            return
+        await self.config.mainnet_deployment_enabled.set(True)
+        await self.config.mainnet_emergency_paused.set(False)
+        await ctx.send(
+            "Clanker Base mainnet is enabled installation-wide. Members still need "
+            "current terms and exact requester-bound approval."
+        )
 
     @clankerset.command(name="treasury")
     async def clankerset_treasury(self, ctx: commands.Context, treasury_address: str):

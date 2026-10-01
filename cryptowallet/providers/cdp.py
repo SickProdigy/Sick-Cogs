@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import uuid
@@ -79,6 +80,13 @@ TOKEN_FACTORY_DEPLOY_GAS_LIMIT = 2_000_000
 TOKEN_DEPLOY_GAS_LIMIT = 1_500_000
 CLANKER_DEPLOY_GAS_LIMIT = 8_000_000
 TOKEN_CREATE_SELECTOR = "8b08cf96"
+CLANKER_MAINNET_CALLS = {
+    "launch": ("0xe85a59c628f7d2787aceb4bf3b35733630083a9", "0xdf40224a", True),
+    "rewardCollection": ("0xffa37784d619f228d8b379d287a4d7282e500762", "0x5763dbd0", False),
+    "treasuryClaim": ("0xf3622742b1e446d92e45e22923ef11c2fcd55d68", "0x21c0b342", False),
+    "vaultClaim": ("0x8e845ead15737bf71904a30bddd3aee76d6adf6c", "0x1e83409a", False),
+    "airdropClaim": ("0xf652b3610d75d81871bf96db50825d9af28391e0", "0xfabed412", False),
+}
 
 
 def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
@@ -1004,6 +1012,84 @@ class CdpWalletProvider(WalletProvider):
         except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
             raise WalletProviderError(
                 "CDP could not retrieve the factory deployment operation."
+            ) from exc
+
+    async def submit_reviewed_clanker_mainnet_operation(
+        self, profile: dict, envelope: dict, attempt_id: str
+    ) -> dict:
+        """Submit one fingerprint-bound Clanker call from the reviewed mainnet allowlist."""
+        if not isinstance(envelope, dict) or set(envelope) != {"payload", "fingerprint"}:
+            raise WalletProviderError("The reviewed Clanker envelope is invalid.")
+        payload = envelope.get("payload")
+        if not isinstance(payload, dict):
+            raise WalletProviderError("The reviewed Clanker payload is invalid.")
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+        fingerprint = "0x" + sha256(encoded).hexdigest()
+        if fingerprint != str(envelope.get("fingerprint") or "").lower():
+            raise WalletProviderError("The reviewed Clanker fingerprint changed.")
+        try:
+            kind = str(payload["kind"])
+            target, selector, payable = CLANKER_MAINNET_CALLS[kind]
+            signer = normalize_evm_address(str(payload["signer"])).lower()
+            to = normalize_evm_address(str(payload["to"])).lower()
+            value = int(payload["value"])
+            data = str(payload["data"]).lower()
+            gas_limit = int(payload["gas_limit"])
+            max_fee = int(payload["max_fee_wei"])
+            requester_id = int(payload["requester_id"])
+            if (int(payload["chain_id"]) != BASE_MAINNET.chain_id
+                    or to != target or not data.startswith(selector)
+                    or value < 0 or (not payable and value != 0)
+                    or not 0 < gas_limit <= CLANKER_DEPLOY_GAS_LIMIT
+                    or not 0 < max_fee <= 10**16 or requester_id <= 0
+                    or not attempt_id):
+                raise ValueError("Clanker mainnet operation exceeds its allowlist")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WalletProviderError("The reviewed Clanker operation is invalid.") from exc
+        account = next((item for item in profile.get("accounts") or []
+                        if item.get("network") == BASE_MAINNET.key), None)
+        try:
+            address = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+        except ValueError as exc:
+            raise WalletProviderError("The Base mainnet wallet account is invalid.") from exc
+        if (not profile.get("provider_user_id") or signer != address):
+            raise WalletProviderError("The Clanker signer does not match this wallet.")
+        delegation = await self.get_delegation_status(profile, BASE_MAINNET.key)
+        if not delegation.get("active"):
+            raise WalletProviderError("Active Base mainnet wallet authorization is required.")
+        credentials = await self.credentials_for_network(BASE_MAINNET.key)
+        if credentials is None:
+            raise WalletProviderError("Base mainnet CDP credentials are incomplete.")
+        key = str(uuid.uuid5(
+            uuid.NAMESPACE_URL,
+            f"sick-cogs:clanker:mainnet:{fingerprint}:{attempt_id}",
+        ))
+        try:
+            result = await self._api_client(credentials).send_smart_account_user_operation(
+                str(profile["provider_user_id"]), signer, credentials.project_id,
+                "base", to, value, key, data, override_gas_limit=gas_limit,
+                use_cdp_paymaster=False,
+            )
+            status = str(result.get("status") or "")
+            operation_hash = str(result.get("userOpHash") or "")
+            transaction_hash = str(result.get("transactionHash") or "") or None
+            calls = result.get("calls") or []
+            if (status not in {"pending", "signed", "broadcast", "complete"}
+                    or not HASH_PATTERN.fullmatch(operation_hash)
+                    or transaction_hash is not None and not HASH_PATTERN.fullmatch(transaction_hash)
+                    or not isinstance(calls, list) or len(calls) != 1
+                    or normalize_evm_address(str(calls[0].get("to") or "")).lower() != to
+                    or int(calls[0].get("value", -1)) != value
+                    or str(calls[0].get("data") or "").lower() != data):
+                raise ValueError("CDP returned mismatched Clanker mainnet data")
+            return {"provider_status": status, "user_operation_hash": operation_hash.lower(),
+                    "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+                    "fingerprint": fingerprint}
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not safely submit the reviewed Clanker mainnet operation."
             ) from exc
 
     async def submit_clanker_reward_collection(

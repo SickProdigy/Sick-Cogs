@@ -1,6 +1,8 @@
 from pathlib import Path
 import base64
 import copy
+import hashlib
+import json
 import time
 from dataclasses import replace
 import unittest
@@ -4471,6 +4473,65 @@ class ProviderCooldownTests(unittest.IsolatedAsyncioTestCase):
                 admin_harness, admin_ctx, "wallet", 10
             )
         )
+
+
+class ClankerMainnetSignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    def envelope(self):
+        signer = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        token = "0x2222222222222222222222222222222222222222"
+        payload = {
+            "operation_id": "claim-7", "kind": "treasuryClaim",
+            "chain_id": 8453, "requester_id": "7", "signer": signer,
+            "to": "0xf3622742b1e446d92e45e22923ef11c2fcd55d68",
+            "value": "0", "data": "0x21c0b342" + signer[2:].rjust(64, "0")
+            + token[2:].rjust(64, "0"), "created_at": 1, "expires_at": 600,
+            "gas_limit": 200000, "max_fee_wei": str(10**15),
+            "recipients": [signer], "token": token, "fee_owner": signer,
+            "allocated_amount": None, "proof": [], "launch_payload_hash": None,
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                             allow_nan=False).encode("utf-8")
+        return {"payload": payload,
+                "fingerprint": "0x" + hashlib.sha256(encoded).hexdigest()}
+
+    async def test_exact_allowlisted_call_uses_isolated_unsponsored_submission(self):
+        envelope = self.envelope()
+        payload = envelope["payload"]
+        client = SimpleNamespace(send_smart_account_user_operation=AsyncMock(
+            return_value={"status": "broadcast", "userOpHash": "0x" + "77" * 32,
+                          "calls": [{"to": payload["to"], "value": "0",
+                                     "data": payload["data"]}]}
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="main-project")
+        )
+        provider._api_client = lambda credentials: client
+        profile = {"profile_id": "profile-7", "provider_user_id": "profile-7",
+                   "accounts": [{"network": BASE_MAINNET.key,
+                                 "address": payload["signer"]}]}
+
+        result = await provider.submit_reviewed_clanker_mainnet_operation(
+            profile, envelope, "attempt-7"
+        )
+
+        self.assertEqual(result["fingerprint"], envelope["fingerprint"])
+        call = client.send_smart_account_user_operation.await_args
+        self.assertEqual(call.args[3], "base")
+        self.assertIs(call.kwargs["use_cdp_paymaster"], False)
+
+    async def test_payload_mutation_and_unlisted_selector_fail_before_provider(self):
+        envelope = self.envelope()
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials_for_network = AsyncMock()
+        changed = copy.deepcopy(envelope)
+        changed["payload"]["data"] = "0xdeadbeef"
+        with self.assertRaisesRegex(WalletProviderError, "fingerprint changed"):
+            await provider.submit_reviewed_clanker_mainnet_operation(
+                {}, changed, "attempt-7"
+            )
+        provider.credentials_for_network.assert_not_awaited()
 
 
 if __name__ == "__main__":
