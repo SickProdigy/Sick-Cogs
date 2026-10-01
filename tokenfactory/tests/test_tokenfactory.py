@@ -1,6 +1,7 @@
 import discord
 import json
 import unittest
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -452,25 +453,54 @@ class TokenFactoryWatcherTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(user_config.pending_deployment.value)
         self.assertIsNone(user_config.deployment_draft.value)
 
-    async def test_terminal_provider_failure_keeps_recoverable_pending_state(self):
+    async def test_terminal_provider_states_keep_recoverable_pending_state(self):
+        for status in ("failed", "dropped", "ambiguous"):
+            with self.subTest(status=status):
+                pending = {
+                    "route": "discord",
+                    "request_id": "request-" + status,
+                    "submitted_at": 100,
+                    "guild_id": 123,
+                }
+                cog, user, user_config = self.make_cog(pending, prefixes=("-",))
+                cog.DISCORD_WATCH_SECONDS = 10_000_000_000
+                cog.verify_token_deployment = AsyncMock(return_value={
+                    "deployed": False, "provider_status": status,
+                })
+
+                await cog._watch_discord_deployment(7)
+
+                sent = user.send.await_args.args[0]
+                self.assertIn("-tokenfactory deployment", sent)
+                self.assertIn(f"(**{status}**)", sent)
+                self.assertEqual(
+                    user_config.pending_deployment.value["watcher_notice_kind"],
+                    "fallback",
+                )
+                self.assertEqual(
+                    user_config.pending_deployment.value["request_id"],
+                    "request-" + status,
+                )
+
+    async def test_verification_failure_keeps_recoverable_pending_state(self):
         pending = {
-            "route": "discord",
-            "request_id": "request",
-            "submitted_at": 100,
-            "guild_id": 123,
+            "route": "discord", "request_id": "request",
+            "submitted_at": int(time.time()), "guild_id": 123,
         }
-        cog, user, user_config = self.make_cog(pending, prefixes=("-",))
-        cog.DISCORD_WATCH_SECONDS = 10_000_000_000
-        cog.verify_token_deployment = AsyncMock(return_value={
-            "deployed": False, "provider_status": "failed",
-        })
+        cog, user, user_config = self.make_cog(pending)
+        cog.DISCORD_WATCH_SECONDS = 0
+        cog.verify_token_deployment = AsyncMock(
+            side_effect=RuntimeError("temporary verification failure")
+        )
 
         await cog._watch_discord_deployment(7)
 
-        sent = user.send.await_args.args[0]
-        self.assertIn("-tokenfactory deployment", sent)
+        self.assertIn("(**verification-failed**)", user.send.await_args.args[0])
         self.assertEqual(
             user_config.pending_deployment.value["watcher_notice_kind"], "fallback"
+        )
+        self.assertEqual(
+            user_config.pending_deployment.value["request_id"], "request"
         )
 
     async def test_timeout_keeps_pending_and_closed_dms_do_not_raise(self):
