@@ -4232,6 +4232,22 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         provider.get_native_balance.assert_awaited_once_with(sender, BASE_SEPOLIA.key)
         provider.prepare_transaction.assert_awaited_once()
 
+    async def test_mainnet_send_limit_uses_dedicated_policy(self):
+        cog = SimpleNamespace(config=SimpleNamespace(
+            base_mainnet_policy=_Value({
+                "limits_atomic": {"per_transaction": str(10**15)}
+            }),
+            send_limits_atomic=AsyncMock(),
+        ))
+        ctx = SimpleNamespace(send=AsyncMock())
+
+        allowed = await WalletTransactionCommands._send_value_allowed(
+            cog, ctx, BASE_MAINNET, 10**14
+        )
+
+        self.assertTrue(allowed)
+        cog.config.send_limits_atomic.assert_not_awaited()
+
     async def test_empty_send_shows_effective_default_without_provider_read(self):
         user_config = SimpleNamespace(default_send_asset=_Value(None))
         cog = object.__new__(WalletTransactionCommands)

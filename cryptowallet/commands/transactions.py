@@ -132,8 +132,17 @@ class WalletTransactionCommands:
 
     async def _send_value_allowed(self, ctx, network, value_atomic: int) -> bool:
         """Enforce configured ceilings and require explicit limits for production."""
-        limits = await self.config.send_limits_atomic()
-        raw_limit = limits.get(network.key)
+        if network.key == BASE_MAINNET.key:
+            policy = await self.config.base_mainnet_policy()
+            limits = policy.get("limits_atomic") if isinstance(policy, dict) else None
+            raw_limit = (
+                limits.get("per_transaction")
+                if isinstance(limits, dict)
+                else None
+            )
+        else:
+            limits = await self.config.send_limits_atomic()
+            raw_limit = limits.get(network.key)
         if raw_limit is None:
             if network.testnet:
                 return True
@@ -1078,6 +1087,21 @@ class WalletTransactionCommands:
         if asset_kind == "native" and value_wei + intent.estimated_gas_fee_wei > balance_wei:
             await ctx.send(f"Insufficient {network.name} balance for the amount and network fee.")
             return
+        if mainnet_path:
+            policy_limits = policy.get("limits_atomic") or {}
+            try:
+                transaction_limit = int(policy_limits.get("per_transaction", 0))
+            except (TypeError, ValueError):
+                transaction_limit = 0
+            reserved_value = intent.max_gas_fee_wei
+            if intent.asset_kind == "native":
+                reserved_value += intent.value_wei
+            if transaction_limit <= 0 or reserved_value > transaction_limit:
+                await ctx.send(
+                    "This transfer plus its displayed fee threshold exceeds the "
+                    "Base mainnet per-transaction limit."
+                )
+                return
         async with self.config.user(ctx.author).intents() as intents:
             intents[intent.intent_id] = intent.to_dict()
         await self.expire_and_trim_intents(ctx.author)
