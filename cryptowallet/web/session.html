@@ -13,6 +13,10 @@
     <p id="session-status">Loading verified session details…</p>
     <dl id="session-details" hidden></dl>
     <div id="authorization-controls" hidden>
+      <section id="mainnet-setup-controls" hidden>
+        <p><a href="wallet-terms.html" target="_blank" rel="noopener">View CryptoWallet terms</a></p>
+        <label><input id="mainnet-terms-understood" type="checkbox"> I have read and accept the CryptoWallet mainnet terms.</label>
+      </section>
       <label for="authorization-days">How long should the bot stay authorized?</label>
       <input id="authorization-days" type="number" inputmode="numeric" step="1" min="1" required aria-describedby="authorization-duration-help">
       <p id="authorization-duration-help"></p>

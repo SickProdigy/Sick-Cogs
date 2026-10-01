@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import re
 import secrets
 import time
 
@@ -156,12 +157,14 @@ class JwtAuthMixin:
         return token, expires_at
 
     async def create_authorization_handoff(
-        self, discord_user_id: int, profile: dict, *, delegation_days: int | None = None
+        self, discord_user_id: int, profile: dict, *, delegation_days: int | None = None,
+        terms: dict | None = None,
     ) -> tuple[str, int]:
         """Create a short-lived CDP custom-auth token for wallet authorization."""
         return await self._create_wallet_handoff(
             discord_user_id, profile, purpose="authorize",
             delegation_default_days=delegation_days,
+            terms=terms,
         )
 
     async def create_recovery_handoff(
@@ -272,6 +275,7 @@ class JwtAuthMixin:
     async def _create_wallet_handoff(
         self, discord_user_id: int, profile: dict, *, purpose: str,
         delegation_default_days: int | None = None,
+        terms: dict | None = None,
     ) -> tuple[str, int]:
         if purpose not in {"authorize", "recovery"}:
             raise ValueError("Unsupported wallet handoff purpose")
@@ -335,6 +339,17 @@ class JwtAuthMixin:
             "sickwallet_accounts": expected_accounts,
             "sickwallet_purpose": purpose,
         }
+        if terms is not None:
+            expected_terms = {"product", "version", "result_handle"}
+            if (
+                purpose != "authorize" or not isinstance(terms, dict)
+                or set(terms) != expected_terms
+                or terms.get("product") != CRYPTOWALLET_TERMS_PRODUCT
+                or terms.get("version") != CRYPTOWALLET_MAINNET_TERMS_VERSION
+                or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", str(terms.get("result_handle") or ""))
+            ):
+                raise ValueError("The wallet terms setup binding is invalid")
+            claims["sickwallet_terms"] = terms
         if purpose == "authorize":
             configured_days = int(await self.config.delegation_duration_days() or 0)
             delegation_days = (

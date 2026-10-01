@@ -1,14 +1,22 @@
 from datetime import datetime
+import secrets
 from urllib.parse import quote
 
 import discord
 from redbot.core import commands
 
+from ..core.environment import WalletEnvironment, parse_wallet_environment
 from ..core.networks import BASE_SEPOLIA
+from ..backend.terms import (
+    CRYPTOWALLET_MAINNET_TERMS_VERSION,
+    CRYPTOWALLET_TERMS_PRODUCT,
+)
 from ..providers import WalletProviderError
 from .constants import WALLET_PROVIDER_COOLDOWN_SECONDS
 from .core import WalletCoreCommands
-from .views import WalletAuthorizationView, WalletRevocationView
+from .views import (
+    WalletAuthorizationView, WalletMainnetSetupView, WalletRevocationView,
+)
 
 
 class WalletAuthorizationCommands:
@@ -68,6 +76,17 @@ class WalletAuthorizationCommands:
                 profile, BASE_SEPOLIA.key
             )
             if status["active"]:
+                mode_setting = getattr(getattr(self, "config", None), "operating_mode", None)
+                mode_value = await mode_setting() if mode_setting is not None else "testnet"
+                environment = parse_wallet_environment(mode_value) or WalletEnvironment.TESTNET
+                if (environment is not WalletEnvironment.TESTNET
+                        and not await self.has_current_cryptowallet_mainnet_terms(ctx.author.id)):
+                    expires_at = await self._send_wallet_terms_acceptance(ctx.author)
+                    await ctx.send(
+                        "Your limited wallet authorization is already active. I sent the "
+                        f"remaining protected mainnet terms step by DM; it expires <t:{expires_at}:R>."
+                    )
+                    return
                 expiry = datetime.fromisoformat(
                     status["expires_at"].replace("Z", "+00:00")
                 )
@@ -104,7 +123,7 @@ class WalletAuthorizationCommands:
         self, user, profile: dict, *, renewal: bool = False,
         requested_days: int | None = None,
     ) -> int:
-        """DM a short-lived authorization link and return its expiry."""
+        """DM the existing authorization flow or one guided mainnet setup."""
         if await self.config.user_from_id(user.id).security_locked():
             raise RuntimeError(
                 "This wallet is emergency-locked; new authorization is blocked until "
@@ -118,22 +137,74 @@ class WalletAuthorizationCommands:
             raise RuntimeError(
                 f"Authorization duration must be from 1 through {maximum_days} days."
             )
-        token, expires_at = await self.create_authorization_handoff(
-            user.id, profile, delegation_days=recommended_days
+        mode_setting = getattr(getattr(self, "config", None), "operating_mode", None)
+        mode_value = await mode_setting() if mode_setting is not None else "testnet"
+        environment = parse_wallet_environment(mode_value) or WalletEnvironment.TESTNET
+        needs_terms = (
+            environment is not WalletEnvironment.TESTNET
+            and not await self.has_current_cryptowallet_mainnet_terms(user.id)
         )
+        result_handle = secrets.token_urlsafe(32) if needs_terms else None
+        terms = ({
+            "product": CRYPTOWALLET_TERMS_PRODUCT,
+            "version": CRYPTOWALLET_MAINNET_TERMS_VERSION,
+            "result_handle": result_handle,
+        } if needs_terms else None)
+        if needs_terms:
+            token, expires_at = await self.create_authorization_handoff(
+                user.id, profile, delegation_days=recommended_days, terms=terms
+            )
+        else:
+            token, expires_at = await self.create_authorization_handoff(
+                user.id, profile, delegation_days=recommended_days
+            )
         link = f"{approval_base_url}/session.html#handoff={quote(token, safe='')}"
+        if needs_terms:
+            embed = discord.Embed(
+                title="Set Up Mainnet Wallet",
+                description=(
+                    "Use the protected page to review and accept the CryptoWallet terms, "
+                    "then create the existing time-limited wallet authorization. Return "
+                    "here and press **Confirm setup** when both steps are complete."
+                ),
+                color=discord.Color.blurple(),
+            )
+            embed.add_field(
+                name="What this does",
+                value=(
+                    "Records CryptoWallet terms acceptance and enables limited signing for "
+                    "your wallet profile. It does not send funds or approve a transaction."
+                ),
+                inline=False,
+            )
+            embed.add_field(name="Terms version", value=f"`{CRYPTOWALLET_MAINNET_TERMS_VERSION}`")
+            embed.add_field(name="Link expires", value=f"<t:{expires_at}:R>")
+            embed.add_field(
+                name="Authorization duration",
+                value=f"Defaults to {recommended_days} days; maximum {maximum_days} days.",
+                inline=False,
+            )
+            embed.set_footer(text="Do not share or forward this protected setup.")
+            view = WalletMainnetSetupView(
+                self, user.id, profile, link, result_handle, expires_at
+            )
+            try:
+                message = await user.send(embed=embed, view=view)
+                view.message = message
+            except discord.HTTPException as exc:
+                raise RuntimeError(
+                    "Discord could not deliver the protected wallet link. "
+                    "Enable direct messages and try again."
+                ) from exc
+            return expires_at
         embed = discord.Embed(
-            title=(
-                "Renew Crypto Wallet Authorization"
-                if renewal
-                else "Authorize Crypto Wallet"
-            ),
+            title="Renew Crypto Wallet Authorization" if renewal else "Authorize Crypto Wallet",
             description=(
-                "Create a new time-limited signing grant for every account in this "
-                "test wallet profile. The existing authorization remains unchanged until "
-                "you complete this protected approval."
-                if renewal
-                else "Grant the bot limited signing access to every account in this test wallet profile."
+                "Create a new time-limited signing grant for every account in this wallet "
+                "profile. The existing authorization remains unchanged until you complete "
+                "this protected approval."
+                if renewal else
+                "Grant the bot limited signing access to every account in this wallet profile."
             ),
             color=discord.Color.blurple(),
         )
@@ -150,13 +221,10 @@ class WalletAuthorizationCommands:
             inline=True,
         )
         embed.add_field(name="Scope", value="All current wallet accounts", inline=False)
-        embed.set_footer(
-            text=(
-                "Renewal is optional. Do not share or forward this authorization."
-                if renewal
-                else "Do not share or forward this authorization."
-            )
-        )
+        embed.set_footer(text=(
+            "Renewal is optional. Do not share or forward this authorization."
+            if renewal else "Do not share or forward this authorization."
+        ))
         try:
             await user.send(embed=embed)
         except discord.HTTPException as exc:

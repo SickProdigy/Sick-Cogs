@@ -83,6 +83,97 @@ class WalletTermsReferenceView(discord.ui.View):
         )
 
 
+class WalletMainnetSetupView(discord.ui.View):
+    """Verify the two independent outcomes from one guided mainnet setup page."""
+
+    def __init__(
+        self, cog, user_id: int, profile: dict, setup_url: str,
+        result_handle: str, expires_at: int,
+    ):
+        super().__init__(timeout=max(1.0, expires_at - time.time()))
+        confirm_button = self.children[0]
+        self.remove_item(confirm_button)
+        self.add_item(discord.ui.Button(
+            label="Set Up Mainnet Wallet", style=discord.ButtonStyle.link, url=setup_url
+        ))
+        self.add_item(confirm_button)
+        self.cog = cog
+        self.user_id = int(user_id)
+        self.profile = profile
+        self.result_handle = result_handle
+        self.expires_at = int(expires_at)
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.user_id:
+            return True
+        await interaction.response.send_message(
+            "Only the wallet owner can complete this mainnet setup.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_controls()
+        if self.message is not None:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(label="Confirm setup", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        if int(time.time()) >= self.expires_at:
+            await interaction.followup.send(
+                "This setup link expired. Start mainnet wallet setup again.", ephemeral=True
+            )
+            return
+        try:
+            if not await self.cog.has_current_cryptowallet_mainnet_terms(self.user_id):
+                result = await self.cog.poll_wallet_terms_result(self.result_handle)
+                if result is None:
+                    await interaction.followup.send(
+                        "Complete the protected setup page first, then press Confirm setup.",
+                        ephemeral=True,
+                    )
+                    return
+                from ..backend.terms import (
+                    CRYPTOWALLET_MAINNET_TERMS_VERSION, CRYPTOWALLET_TERMS_PRODUCT,
+                )
+                if (result.get("product") != CRYPTOWALLET_TERMS_PRODUCT
+                        or result.get("version") != CRYPTOWALLET_MAINNET_TERMS_VERSION):
+                    raise ValueError("The terms result binding is invalid")
+                await self.cog.accept_cryptowallet_mainnet_terms(
+                    self.user_id, acceptance_id=result["acceptance_id"]
+                )
+            status = await self.cog.wallet_provider.get_delegation_status(
+                self.profile, BASE_SEPOLIA.key
+            )
+            if not status.get("active"):
+                await interaction.followup.send(
+                    "Terms are recorded, but wallet authorization is not active yet. "
+                    "Return to the protected page and finish authorization.",
+                    ephemeral=True,
+                )
+                return
+        except (KeyError, RuntimeError, ValueError):
+            await interaction.followup.send(
+                "Mainnet wallet setup could not be verified. No transaction was authorized.",
+                ephemeral=True,
+            )
+            return
+        self.disable_controls()
+        self.stop()
+        if self.message is not None:
+            await self.message.edit(view=self)
+        await interaction.followup.send(
+            "Your mainnet wallet setup is ready. CryptoWallet terms are current and "
+            "limited wallet authorization is active. No funds were sent.",
+            ephemeral=True,
+        )
+
+
 class WalletTermsAcceptanceView(discord.ui.View):
     """Owner-bound confirmation of one protected CryptoWallet terms acceptance."""
 
