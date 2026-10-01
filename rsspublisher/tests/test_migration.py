@@ -22,3 +22,19 @@ class RSSMigrationTests(unittest.TestCase):
         migrated, _ = migrate_feed_data({"url": "https://example.test/feed", "template": "$title"})
         self.assertEqual(migrated["template"], "$title")
         self.assertIn("last_success_at", migrated)
+        self.assertIsNone(migrated["repository_provider"])
+        self.assertIsNone(migrated["repository_name"])
+        self.assertIsNone(migrated["repository_branch"])
+        self.assertIsNone(migrated["repository_url"])
+
+    def test_repository_metadata_survives_in_place_migration(self):
+        source = {
+            "url": "https://github.com/owner/repo/commits/main.atom",
+            "repository_provider": "github",
+            "repository_name": "owner/repo",
+            "repository_branch": "main",
+            "repository_url": "https://github.com/owner/repo",
+        }
+        migrated, _ = migrate_feed_data(source)
+        for key, value in source.items():
+            self.assertEqual(migrated[key], value)

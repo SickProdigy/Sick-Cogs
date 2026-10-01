@@ -17,6 +17,11 @@ from .fetcher import MAX_PAGE_BYTES, NoFeedContent, UnsafeFeedURL, fetch_limited
 from .models import FeedMode, feed_delivery_style, feed_filter_summary, feed_summary, migrate_feed_data, normalize_author, normalize_mode
 from .models import INTERNAL_TAGS, TagType
 from .renderer import TemplateValidationError, validate_template
+from .repositories import (
+    RepositoryURLValidationError,
+    build_repository_feed,
+    repository_metadata,
+)
 
 log = logging.getLogger("red.sick-cogs.RSSPublisher")
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
@@ -33,6 +38,134 @@ class RSSCommands:
         Use `[p]help rss <command>` for syntax and details.
         """
         await ctx.send_help(ctx.command)
+
+    @commands.guild_only()
+    @commands.group(
+        name="repoupdates",
+        aliases=["repowatch"],
+        invoke_without_command=True,
+    )
+    @checks.mod_or_permissions(manage_channels=True)
+    async def repo_updates(self, ctx):
+        """Manage server-owned repository branch update subscriptions.
+
+        Use [p]help repoupdates <command> for syntax and details.
+        """
+        await ctx.send_help(ctx.command)
+
+    @repo_updates.command(name="add", brief="Follow one public repository branch.")
+    async def _repo_updates_add(
+        self,
+        ctx,
+        name: str,
+        channel: GuildMessageable,
+        branch: str,
+        *,
+        repository_url: str,
+    ):
+        """Follow commits from a public GitHub, GitLab, or Gitea branch.
+
+        Example: [p]repoupdates add sickcogs #updates main https://gitea.example/owner/repo
+        """
+        if not await self._check_channel_permissions(ctx, channel):
+            return
+        try:
+            repository = build_repository_feed(repository_url, branch)
+        except RepositoryURLValidationError as exc:
+            await ctx.send(f"That repository subscription is invalid: {exc}")
+            return
+
+        async with ctx.typing():
+            try:
+                valid_url = await self._valid_url(repository.feed_url)
+            except NoFeedContent as exc:
+                await ctx.send(f"Could not read that repository branch feed: {exc}")
+                return
+            if not valid_url:
+                await ctx.send("The repository branch feed is unavailable.")
+                return
+            await self._add_feed(
+                ctx,
+                name.casefold(),
+                channel,
+                repository.feed_url,
+                metadata={
+                    "repository_provider": repository.provider,
+                    "repository_name": repository.repository,
+                    "repository_branch": repository.branch,
+                    "repository_url": repository.repository_url,
+                },
+            )
+
+    @repo_updates.command(name="list", brief="List repository subscriptions.")
+    async def _repo_updates_list(
+        self, ctx, channel: Optional[GuildMessageable] = None
+    ):
+        """List repository subscriptions in one channel."""
+        channel = channel or ctx.channel
+        if not await self._check_channel_permissions(
+            ctx, channel, addl_send_messages_check=False
+        ):
+            return
+        feeds = await self.config.channel(channel).feeds()
+        entries = []
+        for name, raw_feed in sorted(feeds.items()):
+            metadata = repository_metadata(raw_feed)
+            if metadata is None:
+                continue
+            state = "Paused" if raw_feed.get("paused", False) else "Active"
+            entries.append(
+                f"{name}: {metadata['provider'].title()} "
+                f"{metadata['repository']}@{metadata['branch']} ({state})"
+            )
+        message = (
+            f"[ Repository updates for #{channel.name} ]\n\n"
+            + ("\n".join(entries) if entries else "None.")
+            + f"\n\nUse {ctx.clean_prefix}rss view <name> <channel> for health and settings."
+        )
+        for page in pagify(message, delims=["\n"], page_length=1800):
+            await ctx.send(box(page, lang="ini"))
+
+    @repo_updates.command(name="remove", aliases=["delete"], brief="Stop following a branch.")
+    async def _repo_updates_remove(
+        self, ctx, name: str, channel: Optional[GuildMessageable] = None
+    ):
+        """Remove one repository subscription."""
+        channel = channel or ctx.channel
+        if not await self._check_channel_permissions(
+            ctx, channel, addl_send_messages_check=False
+        ):
+            return
+        feed_name = name.casefold()
+        raw_feed = await self.config.channel(channel).feeds.get_raw(
+            feed_name, default=None
+        )
+        if repository_metadata(raw_feed) is None:
+            await ctx.send("That repository subscription was not found.")
+            return
+        await self._delete_feed(ctx, feed_name, channel)
+        await ctx.send("Repository subscription deleted.")
+
+    @repo_updates.command(
+        name="force",
+        aliases=["test", "preview"],
+        brief="Preview the newest commit.",
+    )
+    async def _repo_updates_force(
+        self, ctx, name: str, channel: Optional[GuildMessageable] = None
+    ):
+        """Preview the newest commit without advancing the saved marker."""
+        channel = channel or ctx.channel
+        if not await self._check_channel_permissions(ctx, channel):
+            return
+        feed_name = name.casefold()
+        raw_feed = await self.config.channel(channel).feeds.get_raw(
+            feed_name, default=None
+        )
+        if repository_metadata(raw_feed) is None:
+            await ctx.send("That repository subscription was not found.")
+            return
+        await self.get_current_feed(channel, feed_name, raw_feed, force=True)
 
     @rss.command(name="migrationstatus", brief="Show migration status.")
     @commands.is_owner()
@@ -1088,8 +1221,16 @@ class RSSCommands:
         """Show the RSS version."""
         await ctx.send(f"RSS version {RSS_VERSION}")
 
-    async def _add_feed(self, ctx, feed_name: str, channel: GuildMessageable, url: str):
-        """Helper for rss add."""
+    async def _add_feed(
+        self,
+        ctx,
+        feed_name: str,
+        channel: GuildMessageable,
+        url: str,
+        *,
+        metadata: Optional[dict] = None,
+    ):
+        """Helper for rss and repository subscription creation."""
         rss_exists = await self._check_feed_existing(ctx, feed_name, channel)
         if not rss_exists:
             feedparser_obj = await self._fetch_feedparser_object(url)
@@ -1109,13 +1250,22 @@ class RSSCommands:
             feedparser_plus_obj = await self._add_to_feedparser_object(sorted_feed_by_post_time[0], url)
             rss_object = await self._convert_feedparser_to_rssfeed(feed_name, feedparser_plus_obj, url)
 
+            stored_feed = rss_object.to_json()
+            if metadata:
+                stored_feed.update(metadata)
             async with self.config.channel(channel).feeds() as feed_data:
-                feed_data[feed_name] = rss_object.to_json()
-            msg = (
-                f"Feed `{feed_name}` added in channel: {channel.mention}\n"
-                f"List the template tags with `{ctx.prefix}rsspublisher listtags` "
-                f"and modify the template using `{ctx.prefix}rsspublisher template`."
-            )
+                feed_data[feed_name] = stored_feed
+            if repository_metadata(stored_feed):
+                msg = (
+                    f"Repository subscription `{feed_name}` added in {channel.mention}. "
+                    "Existing commits were seeded and will not be reposted."
+                )
+            else:
+                msg = (
+                    f"Feed `{feed_name}` added in channel: {channel.mention}\n"
+                    f"List the template tags with `{ctx.prefix}rsspublisher listtags` "
+                    f"and modify the template using `{ctx.prefix}rsspublisher template`."
+                )
             await ctx.send(msg)
         else:
             await ctx.send(f"There is already an existing feed named {bold(feed_name)} in {channel.mention}.")

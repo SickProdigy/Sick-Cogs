@@ -40,7 +40,7 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 - `navidrome` - Per-server Navidrome connections, linked users, and album announcements.
 - `nsfw` - NSFW-channel-only mature media with configurable external providers.
 - `reminder` - Persistent personal reminders with restart recovery and timezone-aware display.
-- `rsspublisher` - Configurable RSS and Atom feed publishing and notification tools.
+- `rsspublisher` - Configurable RSS/Atom publishing and public repository branch updates.
 - `runescape` - RuneScape/OSRS player hiscores and interactive wiki lookups.
 
 Develop-only cogs and experiments are not part of the stable Index release.

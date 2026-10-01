@@ -14,6 +14,25 @@ Install and load the cog, then add a feed from the channel where it should post:
 RSSPublisher makes outbound requests to administrator-configured feed URLs. Feed URLs,
 channel destinations, templates, and delivery state are stored in Red's Config system.
 
+## Repository branch updates
+
+Server moderators can follow commits from a public GitHub, GitLab, or Gitea repository branch.
+The destination is owned by the Discord server; individual members do not connect forge accounts.
+
+    [p]repoupdates add sickcogs #updates main https://gitea.rcs1.top/sickprodigy/Sick-Cogs
+    [p]repoupdates list #updates
+    [p]repoupdates force sickcogs #updates
+    [p]repoupdates remove sickcogs #updates
+
+`repowatch` is an alias for `repoupdates`. Adding a subscription seeds its newest commit so
+existing history is not dumped into Discord. Repository subscriptions reuse RSSPublisher's
+deduplication, restart persistence, network protections, mention suppression, settings, and health
+commands. Use `[p]rss view <name> <channel>` for complete health and delivery settings.
+
+The first release supports public branch commits only. Private repository credentials, inbound
+webhooks, issues, pull or merge requests, releases, CI events, and forge account linking are
+deferred.
+
 ## Common commands
 
 ```text

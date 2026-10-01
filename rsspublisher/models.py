@@ -34,6 +34,10 @@ FEED_DEFAULTS = {
     "last_success_at": None,
     "last_error": None,
     "consecutive_failures": 0,
+    "repository_provider": None,
+    "repository_name": None,
+    "repository_branch": None,
+    "repository_url": None,
 }
 
 def normalize_mode(value: Any) -> str:

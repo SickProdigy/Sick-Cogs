@@ -16,3 +16,12 @@ class RSSHelpTests(unittest.TestCase):
         self.assertLess(sum(len(command.name) + len(command.brief) + 7 for command in visible), 900)
         self.assertIsNotNone(root.get_command("add"))
         self.assertIsNotNone(root.get_command("view"))
+
+    def test_repository_update_group_exposes_bounded_commands(self):
+        group = RSSCommands.repo_updates
+        self.assertTrue(group.invoke_without_command)
+        self.assertEqual(group.aliases, ["repowatch"])
+        self.assertEqual(
+            {command.name for command in group.commands},
+            {"add", "list", "remove", "force"},
+        )
