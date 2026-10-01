@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from math import isfinite
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Set, Tuple
 
 import discord
 
@@ -25,7 +25,9 @@ class ReminderEntry:
     content: str
     created_at: float
     due_at: float
+    source_url: Optional[str] = None
     failed_at: Optional[float] = None
+    control_message_id: Optional[int] = None
 
     @classmethod
     def from_raw(cls, raw: object) -> Optional["ReminderEntry"]:
@@ -43,11 +45,34 @@ class ReminderEntry:
         reminder_id = raw.get("id")
         if not isinstance(reminder_id, str) or not reminder_id:
             reminder_id = uuid.uuid4().hex
+        source_url = raw.get("source_url")
+        if not isinstance(source_url, str) or not source_url.startswith(
+            (
+                "https://discord.com/channels/",
+                "https://canary.discord.com/channels/",
+                "https://ptb.discord.com/channels/",
+            )
+        ):
+            source_url = None
+        control_message_id = raw.get("control_message_id")
+        if (
+            not isinstance(control_message_id, int)
+            or isinstance(control_message_id, bool)
+            or control_message_id <= 0
+        ):
+            control_message_id = None
         failed_at = raw.get("failed_at")
         if not ReminderEntry._valid_timestamp(failed_at):
             failed_at = None
-        return cls(reminder_id, content, float(created_at), float(due_at), failed_at)
-
+        return cls(
+            reminder_id,
+            content,
+            float(created_at),
+            float(due_at),
+            source_url=source_url,
+            failed_at=failed_at,
+            control_message_id=control_message_id,
+        )
     @staticmethod
     def _valid_timestamp(value: object) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
@@ -59,6 +84,10 @@ class ReminderEntry:
             "start_time": self.created_at,
             "end_time": self.due_at,
         }
+        if self.source_url is not None:
+            raw["source_url"] = self.source_url
+        if self.control_message_id is not None:
+            raw["control_message_id"] = self.control_message_id
         if self.failed_at is not None:
             raw["failed_at"] = self.failed_at
         return raw
@@ -68,15 +97,20 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.0.0"
+    __version__ = "1.2.1"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
         "860872570416775575021079665631013972557943647633665882074464969932193856474375"
     )
+    MIN_SECONDS = 60
     MAX_SECONDS = 63_080_000
+    MAX_PENDING_REMINDERS = 25
     CHECK_INTERVAL = 3600.0
+    ERROR_DELETE_AFTER = 15.0
+    SUCCESS_FALLBACK_DELETE_AFTER = 10.0
     DURATION_PATTERN = re.compile(r"([1-9][0-9]*)([a-z]+)", re.IGNORECASE)
+    AMBIGUOUS_MINUTE_PATTERN = re.compile(r"[1-9][0-9]*m(?=[0-9]|$)", re.IGNORECASE)
     DURATION_UNITS: Tuple[Tuple[str, int], ...] = (
         ("seconds", 1),
         ("minutes", 60),
@@ -94,6 +128,8 @@ class Reminder(commands.Cog):
         )
         self.config.register_user(reminders=[], invalid_reminders=[], offset=0)
         self._wake_scheduler = asyncio.Event()
+        self._subscription_lock = asyncio.Lock()
+        self._shareable_message_ids: Set[int] = set()
         self._deleted_users = set()
         self._scheduler = asyncio.create_task(self._scheduler_loop())
 
@@ -111,31 +147,166 @@ class Reminder(commands.Cog):
         self._wake_scheduler.set()
 
     @commands.group(name="remind", aliases=["remindme"], invoke_without_command=True)
+    @commands.cooldown(3, 60.0, commands.BucketType.user)
     async def remind(self, ctx: Context, duration: str, *, text: str) -> None:
-        """Create a reminder. Durations may be combined, for example `1h30m`."""
+        """Create a reminder. Durations may be combined, for example `1h30min`."""
+        compact_duration = re.sub(r"\s+", "", duration or "")
+        if self.AMBIGUOUS_MINUTE_PATTERN.search(compact_duration):
+            await ctx.send(
+                ":x: `m` is ambiguous. Use `min` for minutes or `mo` for months.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
+            return
         seconds = self.parse_duration(duration)
         if seconds is None:
-            await ctx.send(":x: Invalid time format.")
+            await ctx.send(
+                ":x: Invalid time format. Try `10min`, `2h`, `1w`, or `1mo`.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
+            return
+        if seconds < self.MIN_SECONDS:
+            await ctx.send(
+                ":x: Reminders must be at least 1 minute.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
             return
         if seconds > self.MAX_SECONDS:
-            await ctx.send(":x: Too long amount of time. Maximum: 2 years")
+            await ctx.send(
+                ":x: Too long amount of time. Maximum: 2 years",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
             return
 
         now = time.time()
-        entry = ReminderEntry(uuid.uuid4().hex, text, now, now + seconds)
+        entry = ReminderEntry(
+            uuid.uuid4().hex,
+            text,
+            now,
+            now + seconds,
+            source_url=self.reply_source_url(ctx.message),
+            control_message_id=ctx.message.id,
+        )
         self._deleted_users.discard(ctx.author.id)
+        limit_reached = False
         async with self.config.user(ctx.author).reminders() as saved:
-            saved.append(entry.to_raw())
+            if self.pending_reminder_count(saved) >= self.MAX_PENDING_REMINDERS:
+                limit_reached = True
+            else:
+                saved.append(entry.to_raw())
+        if limit_reached:
+            await ctx.send(
+                f":x: You already have the maximum of "
+                f"{self.MAX_PENDING_REMINDERS} pending reminders. "
+                f"Use `{ctx.clean_prefix}remind forget` to remove one.",
+                delete_after=self.ERROR_DELETE_AFTER,
+            )
+            return
         self._wake_scheduler.set()
 
-        if seconds > 86_400:
-            offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
-            due_text = self.format_due_time(entry.due_at, offset)
-            await ctx.send(f":white_check_mark: I will remind you of that on {due_text}.")
-        else:
+        if ctx.guild is not None:
+            self._shareable_message_ids.add(ctx.message.id)
+            try:
+                await ctx.message.add_reaction("👍")
+                due_timestamp = int(entry.due_at)
+                await ctx.reply(
+                    f"⏰ Reminder set for <t:{due_timestamp}:F> "
+                    f"(<t:{due_timestamp}:R>). Anyone else who wants this reminder "
+                    "can react to your message with 👍 (up to 25 pending reminders per user).",
+                    mention_author=False,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            else:
+                return
+
+        try:
+            if seconds > 86_400:
+                offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
+                due_text = self.format_due_time(entry.due_at, offset)
+                confirmation = f"👍 I will remind you of that on {due_text}."
+            else:
+                confirmation = (
+                    f"👍 I will remind you of that in {self.describe_duration(seconds)}."
+                )
             await ctx.send(
-                f":white_check_mark: I will remind you of that in {self.describe_duration(seconds)}."
+                confirmation, delete_after=self.SUCCESS_FALLBACK_DELETE_AFTER
             )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    @classmethod
+    def pending_reminder_count(cls, raw_entries: object) -> int:
+        return len(cls._valid_entries(raw_entries))
+
+    @staticmethod
+    def has_shared_reminder(raw_entries: object, message_id: int) -> bool:
+        if not isinstance(raw_entries, list):
+            return False
+        return any(
+            entry is not None and entry.control_message_id == message_id
+            for entry in (ReminderEntry.from_raw(raw) for raw in raw_entries)
+        )
+
+    @classmethod
+    def find_shared_reminder(
+        cls, users: object, message_id: int, now: float
+    ) -> Optional[ReminderEntry]:
+        if not isinstance(users, dict):
+            return None
+        for snapshot in users.values():
+            if not isinstance(snapshot, dict):
+                continue
+            for entry in cls._valid_entries(snapshot.get("reminders", [])):
+                if (
+                    entry.control_message_id == message_id
+                    and entry.failed_at is None
+                    and entry.due_at > now
+                ):
+                    return entry
+        return None
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
+        if (
+            str(payload.emoji) != "👍"
+            or payload.guild_id is None
+            or payload.message_id not in self._shareable_message_ids
+        ):
+            return
+        bot_user = getattr(self.bot, "user", None)
+        if bot_user is not None and payload.user_id == bot_user.id:
+            return
+        member = getattr(payload, "member", None)
+        if member is not None and member.bot:
+            return
+
+        async with self._subscription_lock:
+            now = time.time()
+            users = await self.config.all_users()
+            template = self.find_shared_reminder(users, payload.message_id, now)
+            if template is None:
+                self._shareable_message_ids.discard(payload.message_id)
+                return
+
+            user_config = self.config.user_from_id(payload.user_id)
+            async with user_config.reminders() as saved:
+                if (
+                    self.has_shared_reminder(saved, payload.message_id)
+                    or self.pending_reminder_count(saved) >= self.MAX_PENDING_REMINDERS
+                ):
+                    return
+                saved.append(
+                    ReminderEntry(
+                        uuid.uuid4().hex,
+                        template.content,
+                        now,
+                        template.due_at,
+                        source_url=template.source_url,
+                        control_message_id=payload.message_id,
+                    ).to_raw()
+                )
+            self._deleted_users.discard(payload.user_id)
+            self._wake_scheduler.set()
 
     @remind.group(name="forget")
     async def remind_forget(self, ctx: Context) -> None:
@@ -222,6 +393,8 @@ class Reminder(commands.Cog):
 
     async def _normalize_saved_data(self) -> None:
         users = await self.config.all_users()
+        self._shareable_message_ids.clear()
+        now = time.time()
         for user_id, snapshot in users.items():
             if user_id in self._deleted_users:
                 continue
@@ -237,6 +410,12 @@ class Reminder(commands.Cog):
                     malformed.append(raw)
                 else:
                     entries.append(entry)
+                    if (
+                        entry.control_message_id is not None
+                        and entry.failed_at is None
+                        and entry.due_at > now
+                    ):
+                        self._shareable_message_ids.add(entry.control_message_id)
             user_config = self.config.user_from_id(user_id)
             if malformed:
                 quarantined = snapshot.get("invalid_reminders", [])
@@ -268,14 +447,39 @@ class Reminder(commands.Cog):
                     await self._mark_failed(user_id, due, now)
                     continue
             for entry in due:
+                if entry.control_message_id is not None:
+                    self._shareable_message_ids.discard(entry.control_message_id)
                 await self._deliver_one(user, entry)
 
-    async def _deliver_one(self, user: discord.User, entry: ReminderEntry) -> None:
+
+    @staticmethod
+    def build_delivery(entry: ReminderEntry):
+        quoted = "\n".join(f"> {line}" for line in entry.content.splitlines())
         embed = discord.Embed(
-            title="Reminder", description=entry.content, color=discord.Colour.blue()
+            title="⏰ Reminder",
+            description=f"You asked me to remember:\n\n{quoted}",
+            color=discord.Colour.blue(),
+            timestamp=datetime.datetime.fromtimestamp(
+                entry.due_at, tz=datetime.timezone.utc
+            ),
         )
+        embed.set_footer(text="Reminder due")
+        view = None
+        if entry.source_url:
+            view = discord.ui.View()
+            view.add_item(
+                discord.ui.Button(
+                    label="View original message",
+                    style=discord.ButtonStyle.link,
+                    url=entry.source_url,
+                )
+            )
+        return embed, view
+
+    async def _deliver_one(self, user: discord.User, entry: ReminderEntry) -> None:
+        embed, view = self.build_delivery(entry)
         try:
-            await user.send(embed=embed)
+            await user.send(embed=embed, view=view)
         except (discord.Forbidden, discord.HTTPException) as exc:
             log.warning("Could not deliver reminder %s to user %s: %s", entry.reminder_id, user.id, exc)
             await self._mark_failed(user.id, [entry], time.time())
@@ -307,7 +511,6 @@ class Reminder(commands.Cog):
         if next_due is None:
             return self.CHECK_INTERVAL
         return max(0.05, min(self.CHECK_INTERVAL, next_due - now))
-
     @staticmethod
     def _valid_entries(raw_entries: object) -> List[ReminderEntry]:
         if not isinstance(raw_entries, list):
@@ -325,6 +528,8 @@ class Reminder(commands.Cog):
         for match in matches:
             amount = int(match.group(1))
             abbreviation = match.group(2).lower()
+            if abbreviation == "m":
+                return None
             unit = next(
                 (multiplier for name, multiplier in cls.DURATION_UNITS if name.startswith(abbreviation)),
                 None,
@@ -333,7 +538,6 @@ class Reminder(commands.Cog):
                 return None
             seconds += amount * unit
         return seconds or None
-
     @staticmethod
     def validate_offset(value: object) -> Optional[float]:
         try:
@@ -343,7 +547,21 @@ class Reminder(commands.Cog):
         if not isfinite(offset) or not -23.75 <= offset <= 23.75:
             return None
         return round(offset * 4) / 4.0
-
+    @staticmethod
+    def reply_source_url(message: discord.Message) -> Optional[str]:
+        """Return the jump URL for the message being replied to, if any."""
+        reference = getattr(message, "reference", None)
+        if reference is None or reference.message_id is None:
+            return None
+        resolved = getattr(reference, "resolved", None)
+        if isinstance(resolved, discord.Message):
+            return resolved.jump_url
+        guild_id = reference.guild_id
+        if guild_id is None:
+            guild = getattr(message, "guild", None)
+            guild_id = guild.id if guild is not None else "@me"
+        channel_id = reference.channel_id or message.channel.id
+        return f"https://discord.com/channels/{guild_id}/{channel_id}/{reference.message_id}"
     @staticmethod
     def format_due_time(timestamp: float, offset: float) -> str:
         if offset == 0:
@@ -359,7 +577,6 @@ class Reminder(commands.Cog):
             f"{local_time:%Y-%m-%d %H:%M} "
             f"(UTC{sign}{offset_hours:02d}:{offset_minutes:02d})"
         )
-
     @staticmethod
     def describe_duration(seconds: int) -> str:
         hours, remainder = divmod(seconds, 3600)
@@ -383,6 +600,8 @@ class Reminder(commands.Cog):
         for number, entry in enumerate(entries, 1):
             failed = " **Delivery failed; remove or recreate.**" if entry.failed_at else ""
             content = entry.content if len(entry.content) <= 200 else f"{entry.content[:200]} […]"
+            if entry.source_url:
+                content += f"\n[Original message]({entry.source_url})"
             rows.append(
                 f"`{number:0{width}}`. {cls.format_due_time(entry.due_at, offset)}, "
                 f"<t:{round(entry.due_at)}:R>{failed}:\n{content}\n\n"
