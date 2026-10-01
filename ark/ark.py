@@ -23,7 +23,6 @@ from .client import (
     classify_news,
     extract_image,
     extract_images,
-    extract_youtube_urls,
     image_dimensions,
     optimize_gallery_image,
     item_id,
@@ -155,9 +154,13 @@ class ArkAnnouncements(commands.Cog):
         )
         url = str(item.get("url") or ANNOUNCEMENTS_URL)
         category = CATEGORY_LABELS.get(classify_news(item), CATEGORY_LABELS["official"])
-        full_text = plain_text(item.get("contents") or "", limit=100_000)
+        full_text = plain_text(
+            item.get("contents") or "", limit=100_000, youtube_links=True
+        )
         truncated = len(full_text) > ARTICLE_TEXT_LIMIT
-        description = plain_text(item.get("contents") or "", limit=ARTICLE_TEXT_LIMIT)
+        description = plain_text(
+            item.get("contents") or "", limit=ARTICLE_TEXT_LIMIT, youtube_links=True
+        )
         lines = [
             "**ARK: Survival Ascended — Official Steam News**",
             f"## [{title}]({url})",
@@ -229,15 +232,13 @@ class ArkAnnouncements(commands.Cog):
     async def send_article(self, channel, item: dict, role_id: Optional[int]):
         role = channel.guild.get_role(int(role_id)) if role_id else None
         article = self.make_article_text(item)
-        trailers = extract_youtube_urls(item.get("contents") or "")
-        if trailers:
-            article = f"{article}\n\n{' '.join(trailers)}"
         content = f"{role.mention}\n{article}" if role else article
         files = await self.download_gallery_files(item.get("contents") or "")
         await channel.send(
             content=content,
             files=files,
             allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=bool(role)),
+            suppress_embeds=True,
         )
 
     async def send_item(
