@@ -1,0 +1,15 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Private, permission-isolated support tickets with persistent launcher and staff controls.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores ticket channel IDs, ticket numbers, requester and staff Discord IDs, status timestamps, launcher configuration, support-role IDs, and per-member creation cooldown timestamps. Ticket message content remains in Discord channels and is not copied into Red configuration. User-data deletion anonymizes stored requester and claimant IDs and clears cooldown data; it cannot remove Discord messages or administrator-retained logs.",
+  "hidden": false,
+  "install_msg": "Run [p]ticketsset with Manage Server to choose the launcher channel, private ticket category, and support roles, then publish the Open Ticket panel.",
+  "min_bot_version": "3.5.0",
+  "permissions": ["manage_channels", "view_channel", "send_messages", "read_message_history", "embed_links", "attach_files"],
+  "requirements": [],
+  "short": "Private support tickets for members and server staff",
+  "tags": ["tickets", "support", "helpdesk", "moderation", "private"],
+  "type": "COG",
+  "version": "0.1.0"
+}

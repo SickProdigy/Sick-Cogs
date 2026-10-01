@@ -1,0 +1,132 @@
+import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import discord
+
+from tickets import setup
+from tickets.models import is_open, new_ticket_record, normalized_record, safe_display, ticket_channel_name
+from tickets.tickets import CONFIG_ID, GUILD_DEFAULTS, MAX_ACTIVE_TICKETS, MAX_TRACKED_TICKETS, Tickets
+from tickets.views import LauncherView, TicketControls
+
+
+class TicketModelTests(unittest.TestCase):
+    def test_new_record_has_bounded_metadata_only(self):
+        with patch("tickets.models.time.time", return_value=123):
+            record = new_ticket_record(7, 22, 33, 44)
+        self.assertEqual(
+            set(record),
+            {
+                "number", "channel_id", "owner_id", "status", "claimed_by_id",
+                "created_at", "updated_at", "closed_at", "closed_by_id",
+                "control_message_id",
+            },
+        )
+        self.assertEqual(record["created_at"], 123)
+        self.assertNotIn("description", record)
+
+    def test_normalized_record_rejects_malformed_values(self):
+        self.assertIsNone(normalized_record(None))
+        self.assertIsNone(normalized_record({"number": "bad", "channel_id": 2}))
+        self.assertIsNone(normalized_record({"number": 1}))
+
+    def test_normalized_record_repairs_unknown_status(self):
+        record = normalized_record({"number": 1, "channel_id": 2, "status": "mystery"})
+        self.assertEqual(record["status"], "open")
+
+    def test_open_states_and_channel_names(self):
+        self.assertTrue(is_open({"status": "waiting_staff"}))
+        self.assertFalse(is_open({"status": "closed"}))
+        self.assertEqual(ticket_channel_name(12), "ticket-0012")
+
+    def test_display_text_neutralizes_mentions_and_limits_size(self):
+        self.assertEqual(safe_display("@everyone", 7), "@\u200bevery")
+        self.assertEqual(len(safe_display("x" * 200, 50)), 50)
+
+    def test_defaults_and_limits_are_conservative(self):
+        self.assertEqual(CONFIG_ID, 7422161104)
+        self.assertEqual(GUILD_DEFAULTS["max_open_per_user"], 1)
+        self.assertGreaterEqual(GUILD_DEFAULTS["creation_cooldown"], 300)
+        self.assertLessEqual(MAX_ACTIVE_TICKETS, 100)
+        self.assertLessEqual(MAX_TRACKED_TICKETS, 500)
+
+
+class PermissionValue:
+    def __init__(self, **values):
+        self.view_channel = values.get("view_channel", False)
+        self.send_messages = values.get("send_messages", False)
+        self.read_message_history = values.get("read_message_history", False)
+        self.manage_channels = values.get("manage_channels", False)
+
+
+class TicketCogTests(unittest.TestCase):
+    def make_channel(self, *, everyone_view=False, requester_send=True, staff_view=True):
+        everyone, requester, bot, staff = object(), object(), object(), object()
+        channel = SimpleNamespace(guild=SimpleNamespace(default_role=everyone, me=bot))
+        permissions = {
+            everyone: PermissionValue(view_channel=everyone_view),
+            requester: PermissionValue(
+                view_channel=True, send_messages=requester_send, read_message_history=True
+            ),
+            bot: PermissionValue(view_channel=True, send_messages=True, manage_channels=True),
+            staff: PermissionValue(
+                view_channel=staff_view, send_messages=True, read_message_history=True
+            ),
+        }
+        channel.permissions_for = lambda target: permissions[target]
+        return channel, requester, staff
+
+    def test_permission_verification_accepts_private_channel(self):
+        channel, requester, staff = self.make_channel()
+        self.assertTrue(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+
+    def test_permission_verification_rejects_everyone_access(self):
+        channel, requester, staff = self.make_channel(everyone_view=True)
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+
+    def test_permission_verification_rejects_requester_without_reply(self):
+        channel, requester, staff = self.make_channel(requester_send=False)
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+
+    def test_permission_verification_rejects_staff_without_view(self):
+        channel, requester, staff = self.make_channel(staff_view=False)
+        self.assertFalse(Tickets.verify_ticket_permissions(channel, requester, [staff]))
+
+    def test_control_embed_updates_status_and_claim(self):
+        cog = object.__new__(Tickets)
+        embed = discord.Embed(title="Ticket #1")
+        embed.add_field(name="Status", value="Open")
+        embed.add_field(name="Claimed by", value="Nobody")
+        message = SimpleNamespace(embeds=[embed])
+        updated = cog.updated_control_embed(
+            message, {"number": 1, "status": "waiting_member", "claimed_by_id": 42}
+        )
+        fields = {field.name: field.value for field in updated.fields}
+        self.assertEqual(fields["Status"], "Waiting on member")
+        self.assertEqual(fields["Claimed by"], "<@42>")
+
+    def test_persistent_views_have_stable_custom_ids(self):
+        cog = SimpleNamespace(status_label=Tickets.status_label)
+        launcher = LauncherView(cog)
+        controls = TicketControls(
+            cog, 55, {"status": "open", "claimed_by_id": 0}
+        )
+        self.assertIn("tickets:open", {item.custom_id for item in launcher.children})
+        self.assertEqual(
+            {item.custom_id for item in controls.children},
+            {"tickets:55:claim", "tickets:55:status", "tickets:55:close"},
+        )
+
+
+class TicketSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_setup_adds_cog(self):
+        bot = SimpleNamespace(add_cog=AsyncMock())
+        with patch("tickets.tickets.Config.get_conf") as get_conf:
+            get_conf.return_value = MagicMock()
+            await setup(bot)
+        bot.add_cog.assert_awaited_once()
+        self.assertIsInstance(bot.add_cog.await_args.args[0], Tickets)
+
+
+if __name__ == "__main__":
+    unittest.main()
