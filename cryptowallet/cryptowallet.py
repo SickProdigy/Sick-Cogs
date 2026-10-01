@@ -77,6 +77,11 @@ class CryptoWallet(
         mode = str(await self.config.operating_mode() or "testnet").lower()
         return BASE_MAINNET.key if mode in {"mainnet", "mainnet-only"} else BASE_SEPOLIA.key
 
+    async def clanker_default_network(self) -> str:
+        """Return the Clanker network selected by the wallet operating mode."""
+        mode = str(await self.config.operating_mode() or "testnet").lower()
+        return BASE_MAINNET.key if mode in {"mainnet", "mainnet-only"} else BASE_SEPOLIA.key
+
     async def tokenfactory_wallet_context(
         self, user, network: str = BASE_SEPOLIA.key
     ) -> dict:

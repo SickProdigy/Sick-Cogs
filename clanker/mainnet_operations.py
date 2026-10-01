@@ -24,6 +24,7 @@ HEX_DATA_RE = re.compile(r"^0x(?:[0-9a-fA-F]{2})+$")
 ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
 MAX_NATIVE_VALUE_WEI = 10**18
 MAX_GAS_LIMIT = 10_000_000
+DEFAULT_LAUNCH_GAS_LIMIT = 8_000_000
 MAX_FEE_WEI = 10**16
 
 

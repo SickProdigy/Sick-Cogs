@@ -36,8 +36,8 @@ from .models import (
 )
 from .operation import clanker_deployment_operation
 from .mainnet_operations import (
-    MAINNET_SUBMISSION_ENABLED, MainnetOperationIntent,
-    revalidate_mainnet_pre_submission,
+    DEFAULT_LAUNCH_GAS_LIMIT, MAINNET_SUBMISSION_ENABLED, MAX_FEE_WEI, MainnetOperationIntent,
+    build_mainnet_launch_operation, revalidate_mainnet_pre_submission,
 )
 from .mainnet_lifecycle import (
     MainnetOperationLifecycle, create_mainnet_lifecycle,
@@ -808,6 +808,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     def build_launch_intent(
         guild_id: int, requester_id: int, launch_id: str, payload: Dict[str, Any],
         *, created_at: Optional[int] = None, expires_at: Optional[int] = None,
+        network: str = "base-sepolia", chain_id: int = 84532,
     ) -> ClankerLaunchIntent:
         pool_data = payload["pool"]
         fee_data = payload["fees"]
@@ -857,6 +858,7 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             pool=pool, rewards=rewards, vault=vault, airdrop=airdrop,
             expected_native_value_wei=int((payload.get("devBuy") or {}).get("ethAmountWei") or 0),
             created_at=created_at, expires_at=expires_at,
+            network=network, chain_id=chain_id,
         )
 
     @staticmethod
@@ -2409,9 +2411,12 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             if not isinstance(payload, dict):
                 raise RuntimeError("The verified Clanker draft has no immutable payload.")
             now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            network = str(record.get("network") or "base-sepolia")
+            payload["chainId"] = 8453 if network == "base-mainnet" else 84532
             intent = self.build_launch_intent(
                 guild.id, user.id, launch_id, payload,
                 created_at=now, expires_at=now + 900,
+                network=network, chain_id=8453 if network == "base-mainnet" else 84532,
             )
             validate_platform_attribution(
                 intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
@@ -2420,7 +2425,18 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             record["execution_expires_at"] = now + 900
             record["payload_hash"] = intent.payload_hash
             record["intent"] = intent.to_dict()
-            record["operation"] = clanker_deployment_operation(intent).to_dict()
+            operation = (
+                build_mainnet_launch_operation(
+                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=MAX_FEE_WEI
+                )
+                if network == "base-mainnet"
+                else clanker_deployment_operation(intent)
+            )
+            record["operation"] = (
+                operation.canonical_payload()
+                if isinstance(operation, MainnetOperationIntent)
+                else operation.to_dict()
+            )
             return copy.deepcopy(record)
 
     async def prepare_draft_execution(
@@ -2462,22 +2478,35 @@ class Clanker(ClankerAdminMixin, commands.Cog):
                 payload["airdrop"]["admin"] = signer_address
             if payload.get("devBuy") and payload["devBuy"].get("recipient") is None:
                 payload["devBuy"]["recipient"] = signer_address
+            network = str(record.get("network") or "base-sepolia")
+            payload["chainId"] = 8453 if network == "base-mainnet" else 84532
             intent = self.build_launch_intent(
                 guild.id, user.id, launch_id, payload,
                 created_at=record.get("execution_created_at"),
                 expires_at=record.get("execution_expires_at"),
+                network=network, chain_id=8453 if network == "base-mainnet" else 84532,
             )
             validate_platform_attribution(
                 intent, record.get("platform_treasury"), int(record.get("platform_bps", 0)),
             )
-            operation = clanker_deployment_operation(intent)
+            operation = (
+                build_mainnet_launch_operation(
+                    intent, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT, max_fee_wei=MAX_FEE_WEI
+                )
+                if network == "base-mainnet"
+                else clanker_deployment_operation(intent)
+            )
             record["payload"] = payload
             record["token_admin"] = payload["tokenAdmin"]
             creator_reward = next((item for item in recipients if not (str(item.get("admin") or "").lower() == platform_treasury and str(item.get("recipient") or "").lower() == platform_treasury)), {})
             record["creator_reward_recipient"] = creator_reward.get("recipient")
             record["payload_hash"] = intent.payload_hash
             record["intent"] = intent.to_dict()
-            record["operation"] = operation.to_dict()
+            record["operation"] = (
+                operation.canonical_payload()
+                if isinstance(operation, MainnetOperationIntent)
+                else operation.to_dict()
+            )
             return dict(record)
 
     async def estimate_launch_network_fee(

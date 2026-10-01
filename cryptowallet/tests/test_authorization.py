@@ -2295,6 +2295,28 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         cog.config.operating_mode.value = "testnet"
         self.assertTrue(await testnet_path_allowed(cog, ctx))
 
+    async def test_crypto_product_defaults_follow_operating_mode(self):
+        cog = SimpleNamespace(
+            config=SimpleNamespace(operating_mode=_MutableValue("testnet"))
+        )
+        self.assertEqual(
+            await CryptoWallet.tokenfactory_default_network(cog), "base-sepolia"
+        )
+        self.assertEqual(
+            await CryptoWallet.clanker_default_network(cog), "base-sepolia"
+        )
+        cog.config.operating_mode.value = "mainnet"
+        self.assertEqual(
+            await CryptoWallet.tokenfactory_default_network(cog), "base-mainnet"
+        )
+        self.assertEqual(
+            await CryptoWallet.clanker_default_network(cog), "base-mainnet"
+        )
+        cog.config.operating_mode.value = "mainnet-only"
+        self.assertEqual(
+            await CryptoWallet.clanker_default_network(cog), "base-mainnet"
+        )
+
     async def test_owner_operating_mode_control_is_fail_closed(self):
         mode = _MutableValue("testnet")
         policy = _Value({"enabled": False, "paused": True})

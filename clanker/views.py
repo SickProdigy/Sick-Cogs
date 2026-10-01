@@ -16,8 +16,12 @@ from .constants import (
     MIN_VAULT_LOCKUP_SECONDS,
     SYMBOL_RE,
 )
-from .mainnet_operations import MainnetOperationIntent
+from .mainnet_operations import (
+    DEFAULT_LAUNCH_GAS_LIMIT, MAX_FEE_WEI, MainnetOperationIntent,
+    build_mainnet_launch_operation,
+)
 from .mainnet_approval import MAINNET_ACKNOWLEDGEMENT
+from .models import ClankerLaunchIntent
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -1287,6 +1291,8 @@ class ClankerVerifiedView(discord.ui.View):
         self.draft = copy.deepcopy(draft)
         self.user_id = ctx.author.id
         self.processing = False
+        if str(record.get("network") or "base-sepolia") == "base-mainnet":
+            self.launch_internal.label = "Review Mainnet Launch"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.user_id:
@@ -1319,7 +1325,9 @@ class ClankerVerifiedView(discord.ui.View):
         embed.add_field(
             name="Token", value=f"{record['name']} (${record['symbol']})", inline=False
         )
-        embed.add_field(name="Network", value="Base Sepolia", inline=True)
+        network = str(record.get("network") or "base-sepolia")
+        network_name = "Base mainnet" if network == "base-mainnet" else "Base Sepolia"
+        embed.add_field(name="Network", value=network_name, inline=True)
         embed.add_field(name="Supply", value=format_tokens(DEFAULT_CLANKER_SUPPLY), inline=True)
         embed.add_field(name="Token administrator", value=payload["tokenAdmin"], inline=False)
         terms = record["execution_terms"]
@@ -1433,7 +1441,7 @@ class ClankerVerifiedView(discord.ui.View):
         status_labels = {
             "verified": "Verified and not submitted",
             "internal_submitted": "Submitted through CryptoWallet — awaiting confirmation",
-            "internal_confirmed": "Confirmed on Base Sepolia",
+            "internal_confirmed": f"Confirmed on {network_name}",
             "internal_failed": "Submission failed",
             "internal_uncertain": "Submission outcome unknown — automatic recovery active",
         }
@@ -1456,7 +1464,7 @@ class ClankerVerifiedView(discord.ui.View):
             inline=False,
         )
         embed.set_footer(
-            text="Immutable review · Base Sepolia only · launching cannot be undone"
+            text=f"Immutable review · {network_name} · launching cannot be undone"
         )
         if payload.get("image"):
             embed.set_thumbnail(url=payload["image"])
@@ -1515,6 +1523,19 @@ class ClankerVerifiedView(discord.ui.View):
         self.processing = True
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            if str(self.record.get("network") or "base-sepolia") == "base-mainnet":
+                launch = ClankerLaunchIntent.from_dict(self.record["intent"])
+                intent = build_mainnet_launch_operation(
+                    launch, gas_limit=DEFAULT_LAUNCH_GAS_LIMIT,
+                    max_fee_wei=MAX_FEE_WEI,
+                )
+                review_view = await self.cog.stage_mainnet_review(intent)
+                message = await interaction.followup.send(
+                    embed=mainnet_review_embed(intent), view=review_view,
+                    ephemeral=True, wait=True,
+                )
+                review_view.message = message
+                return
             result = await self.cog.launch_verified_internal(interaction.user, self.record)
             await self.cog.mark_verified_internal_result(
                 self.ctx.guild, str(self.record["launch_id"]), result
@@ -1788,20 +1809,38 @@ class ClankerDraftView(discord.ui.View):
             if not callable(resolve_address):
                 raise RuntimeError("CryptoWallet public-address resolution is unavailable.")
             signer_address = await resolve_address(interaction.user)
-            get_balance = getattr(wallet, "clanker_spendable_balance", None)
-            if not callable(get_balance):
-                raise RuntimeError("CryptoWallet balance review is unavailable.")
-            wallet_balance = await get_balance(interaction.user)
-            if str(wallet_balance.get("address") or "").lower() != signer_address.lower():
-                raise RuntimeError("CryptoWallet balance does not match the launch signer.")
-            record["wallet_balance_wei"] = int(wallet_balance["balance_wei"])
-            get_terms = getattr(wallet, "clanker_execution_terms", None)
-            if not callable(get_terms):
-                raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
-            execution_terms = get_terms(int((payload.get("devBuy") or {}).get("ethAmountWei") or 0))
-            if not isinstance(execution_terms, dict):
-                raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
-            record["execution_terms"] = execution_terms
+            select_network = getattr(wallet, "clanker_default_network", None)
+            network = await select_network() if callable(select_network) else "base-sepolia"
+            if network not in {"base-sepolia", "base-mainnet"}:
+                raise RuntimeError("CryptoWallet returned an unsupported Clanker network.")
+            record["network"] = network
+            payload["chainId"] = 8453 if network == "base-mainnet" else 84532
+            record["payload"]["chainId"] = payload["chainId"]
+            native_value = int((payload.get("devBuy") or {}).get("ethAmountWei") or 0)
+            if network == "base-mainnet":
+                record["wallet_balance_wei"] = None
+                record["execution_terms"] = {
+                    "gas_limit": DEFAULT_LAUNCH_GAS_LIMIT,
+                    "max_gas_fee_wei": MAX_FEE_WEI,
+                    "native_value_wei": native_value,
+                    "gas_sponsored": False,
+                    "gas_payer": "creator wallet",
+                }
+            else:
+                get_balance = getattr(wallet, "clanker_spendable_balance", None)
+                if not callable(get_balance):
+                    raise RuntimeError("CryptoWallet balance review is unavailable.")
+                wallet_balance = await get_balance(interaction.user)
+                if str(wallet_balance.get("address") or "").lower() != signer_address.lower():
+                    raise RuntimeError("CryptoWallet balance does not match the launch signer.")
+                record["wallet_balance_wei"] = int(wallet_balance["balance_wei"])
+                get_terms = getattr(wallet, "clanker_execution_terms", None)
+                if not callable(get_terms):
+                    raise RuntimeError("CryptoWallet Clanker spending policy is unavailable.")
+                execution_terms = get_terms(native_value)
+                if not isinstance(execution_terms, dict):
+                    raise RuntimeError("CryptoWallet returned an invalid Clanker spending policy.")
+                record["execution_terms"] = execution_terms
             if self.saved_record:
                 record = await self.cog.replace_saved_draft(
                     self.ctx.guild, interaction.user,
@@ -1815,12 +1854,19 @@ class ClankerDraftView(discord.ui.View):
             record = await self.cog.mark_draft_verified(
                 self.ctx.guild, interaction.user, str(record["launch_id"])
             )
-            try:
-                record["network_fee_estimate"] = await self.cog.estimate_launch_network_fee(
-                    record["operation"], signer_address
-                )
-            except (KeyError, TypeError, ValueError, RuntimeError):
-                record["network_fee_estimate"] = None
+            if network == "base-mainnet":
+                record["network_fee_estimate"] = {
+                    "estimated_gas": DEFAULT_LAUNCH_GAS_LIMIT,
+                    "estimated_fee_wei": MAX_FEE_WEI,
+                    "estimate_kind": "safety_ceiling",
+                }
+            else:
+                try:
+                    record["network_fee_estimate"] = await self.cog.estimate_launch_network_fee(
+                        record["operation"], signer_address
+                    )
+                except (KeyError, TypeError, ValueError, RuntimeError):
+                    record["network_fee_estimate"] = None
             await self.cog.notify_approval_channel(
                 self.ctx.guild, self.settings, record
             )

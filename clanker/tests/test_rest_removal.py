@@ -14,6 +14,7 @@ from ..views import (ClankerApprovalResumeView, ClankerDeleteDraftsView,
                      draft_values_from_record, format_vault_duration,
                      parse_vault_duration)
 from ..constants import BASE_CHAIN_ID, BASE_SEPOLIA_CHAIN_ID, DEFAULT_CLANKER_SUPPLY, MIN_VAULT_LOCKUP_SECONDS
+from ..mainnet_operations import DEFAULT_LAUNCH_GAS_LIMIT, MAX_FEE_WEI
 
 
 WALLET = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
@@ -399,6 +400,67 @@ class ClankerDraftExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(refreshed["intent"]["expires_at"], refreshed["intent"]["created_at"])
         self.assertEqual(refreshed["payload_hash"], refreshed["intent"]["payload_hash"])
         self.assertEqual(refreshed["operation"]["payload_hash"], refreshed["payload_hash"])
+
+    async def test_mainnet_mode_builds_member_review_without_submission(self):
+        payload = Clanker.build_payload(
+            "TEST", "Test Token", WALLET, TREASURY, 2000, False, None,
+            0, 86400, 0, None, 7,
+        )
+        record = Clanker.build_audit_record(SimpleNamespace(id=7), payload, 100)
+        record["network"] = "base-mainnet"
+        records = [record]
+        cog = Clanker.__new__(Clanker)
+        cog.config = SimpleNamespace(
+            guild=lambda guild: SimpleNamespace(audit_log=lambda: AsyncAuditLog(records))
+        )
+        prepared = await cog.prepare_draft_execution(
+            SimpleNamespace(id=100), SimpleNamespace(id=7),
+            record["launch_id"], WALLET,
+        )
+        self.assertEqual(prepared["intent"]["network"], "base-mainnet")
+        self.assertEqual(prepared["intent"]["chain_id"], 8453)
+        self.assertEqual(prepared["payload"]["chainId"], 8453)
+        self.assertEqual(prepared["operation"]["chain_id"], 8453)
+        self.assertEqual(prepared["operation"]["gas_limit"], DEFAULT_LAUNCH_GAS_LIMIT)
+        self.assertEqual(int(prepared["operation"]["max_fee_wei"]), MAX_FEE_WEI)
+
+        prepared["status"] = "verified"
+        prepared["execution_terms"] = {
+            "gas_limit": DEFAULT_LAUNCH_GAS_LIMIT,
+            "max_gas_fee_wei": MAX_FEE_WEI,
+            "native_value_wei": 0, "gas_sponsored": False,
+            "gas_payer": "creator wallet",
+        }
+        prepared["network_fee_estimate"] = {
+            "estimated_gas": DEFAULT_LAUNCH_GAS_LIMIT,
+            "estimated_fee_wei": MAX_FEE_WEI,
+            "estimate_kind": "safety_ceiling",
+        }
+        review_view = SimpleNamespace(message=None)
+        view_cog = SimpleNamespace(
+            stage_mainnet_review=AsyncMock(return_value=review_view)
+        )
+        view = ClankerVerifiedView(
+            view_cog, SimpleNamespace(author=SimpleNamespace(id=7)),
+            prepared, {}, {},
+        )
+        fields = {field.name: field.value for field in view.embed().fields}
+        self.assertEqual(fields["Network"], "Base mainnet")
+        self.assertIn("maximum", fields["Gas fee"])
+        self.assertEqual(view.launch_internal.label, "Review Mainnet Launch")
+
+        sent_message = SimpleNamespace()
+        interaction = SimpleNamespace(
+            user=SimpleNamespace(id=7),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock(return_value=sent_message)),
+        )
+        await view.launch_internal.callback(interaction)
+        view_cog.stage_mainnet_review.assert_awaited_once()
+        staged_intent = view_cog.stage_mainnet_review.await_args.args[0]
+        self.assertEqual(staged_intent.requester_id, 7)
+        self.assertEqual(staged_intent.canonical_payload(), prepared["operation"])
+        self.assertIs(review_view.message, sent_message)
 
     async def test_saved_draft_rejects_platform_reward_redirect(self):
         payload = Clanker.build_payload(
