@@ -45,3 +45,7 @@ Authoritative sources:
 identifiers and invalid transitions, and requires matching receipt/state evidence from two independent
 RPC observations. Runtime code, transaction fields, success events, and launch administrator are
 checked against the reviewed intent and manifest before evidence is accepted.
+
+Protected mainnet approval is requester-bound, terms-gated, fingerprint-bound, limited to ten minutes
+or the shorter intent lifetime, persisted in the existing Red namespace, and atomically consumable once.
+The approval button records consent only; it cannot submit while the manifest and submitter remain disabled.

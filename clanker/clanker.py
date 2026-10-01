@@ -34,6 +34,11 @@ from .models import (
     validate_platform_attribution,
 )
 from .operation import clanker_deployment_operation
+from .mainnet_operations import MainnetOperationIntent
+from .mainnet_approval import (
+    MAINNET_ACKNOWLEDGEMENT, MainnetOperationApproval,
+    consume_mainnet_approval, create_mainnet_approval,
+)
 from .terms import (
     CLANKER_MAINNET_TERMS_VERSION,
     create_clanker_terms_acceptance,
@@ -57,6 +62,7 @@ from .views import (
     ClankerClaimAllView, ClankerDeleteDraftsView, ClankerDraftHistoryView,
     ClankerDraftView, ClankerLaunchHistoryView,
     ClankerReceiptRewardsView, ClankerTermsView, ClankerTreasuryWithdrawalView,
+    MainnetApprovalView,
 )
 
 log = logging.getLogger("red.Sick-Cogs.Clanker")
@@ -285,6 +291,8 @@ class Clanker(ClankerAdminMixin, commands.Cog):
         "blocked_guild_ids": [],
         "max_outstanding_per_user": 5,
         "owner_audit_log": [],
+        "mainnet_pending_review": None,
+        "mainnet_operation_approval": None,
     }
 
     default_user = {"launch_records": [], "mainnet_terms_acceptance": None}
@@ -343,6 +351,50 @@ class Clanker(ClankerAdminMixin, commands.Cog):
     async def has_current_mainnet_terms(self, user_id: int) -> bool:
         record = await self.config.user_from_id(int(user_id)).mainnet_terms_acceptance()
         return is_current_clanker_terms_acceptance(record, user_id)
+
+    async def stage_mainnet_review(self, intent: MainnetOperationIntent) -> MainnetApprovalView:
+        """Persist one exact review and invalidate every older approval."""
+        await self.config.mainnet_pending_review.set({
+            "requester_id": intent.requester_id,
+            "operation_id": intent.operation_id,
+            "fingerprint": intent.fingerprint,
+            "expires_at": intent.expires_at,
+        })
+        await self.config.mainnet_operation_approval.set(None)
+        return MainnetApprovalView(self, intent)
+
+    async def approve_mainnet_review(self, intent: MainnetOperationIntent, requester_id: int, *, acknowledgement: str) -> MainnetOperationApproval:
+        if acknowledgement != MAINNET_ACKNOWLEDGEMENT:
+            raise ValueError("The mainnet launch acknowledgement did not match.")
+        if not await self.has_current_mainnet_terms(requester_id):
+            raise RuntimeError("Current Clanker mainnet terms must be accepted first.")
+        pending = await self.config.mainnet_pending_review()
+        expected = {
+            "requester_id": intent.requester_id, "operation_id": intent.operation_id,
+            "fingerprint": intent.fingerprint, "expires_at": intent.expires_at,
+        }
+        if pending != expected:
+            raise ValueError("The protected mainnet review changed or is no longer current.")
+        approval = create_mainnet_approval(
+            intent, requester_id, discord_confirmed=True,
+            now=int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+        )
+        await self.config.mainnet_operation_approval.set(approval.to_dict())
+        return approval
+
+    async def claim_mainnet_approval(self, intent: MainnetOperationIntent, requester_id: int) -> MainnetOperationApproval:
+        async with self.config.mainnet_operation_approval() as data:
+            try:
+                approval = MainnetOperationApproval.from_dict(data)
+                claimed = consume_mainnet_approval(
+                    approval, intent, requester_id=requester_id,
+                    now=int(datetime.datetime.now(datetime.timezone.utc).timestamp()),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError("No valid protected Clanker mainnet approval is available.") from exc
+            data.clear()
+            data.update(claimed.to_dict())
+        return claimed
 
     async def cog_load(self):
         guild_data = await self.config.all_guilds()

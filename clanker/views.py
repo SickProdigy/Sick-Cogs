@@ -17,6 +17,7 @@ from .constants import (
     SYMBOL_RE,
 )
 from .mainnet_operations import MainnetOperationIntent
+from .mainnet_approval import MAINNET_ACKNOWLEDGEMENT
 from .helpers import (
     build_airdrop_merkle_tree,
     format_tokens,
@@ -81,6 +82,72 @@ def mainnet_review_embed(intent: MainnetOperationIntent) -> discord.Embed:
     )
     embed.set_footer(text="Mainnet staging only - submission disabled")
     return embed
+
+
+class MainnetApprovalModal(discord.ui.Modal, title="Approve Base mainnet launch"):
+    acknowledgement = discord.ui.TextInput(
+        label="Type LAUNCH ON BASE MAINNET",
+        placeholder=MAINNET_ACKNOWLEDGEMENT,
+        min_length=len(MAINNET_ACKNOWLEDGEMENT),
+        max_length=len(MAINNET_ACKNOWLEDGEMENT),
+    )
+
+    def __init__(self, view: "MainnetApprovalView"):
+        super().__init__(timeout=120)
+        self.review_view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            approval = await self.review_view.cog.approve_mainnet_review(
+                self.review_view.intent, interaction.user.id,
+                acknowledgement=str(self.acknowledgement.value),
+            )
+        except (RuntimeError, ValueError) as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        self.review_view.disable_controls()
+        if self.review_view.message is not None:
+            await self.review_view.message.edit(view=self.review_view)
+        await interaction.followup.send(
+            "Protected approval recorded for this exact fingerprint until "
+            f"<t:{approval.expires_at}:R>. No transaction was submitted.",
+            ephemeral=True,
+        )
+
+
+class MainnetApprovalView(discord.ui.View):
+    """One owner-bound control for a staged immutable mainnet review."""
+
+    def __init__(self, cog: "Clanker", intent: MainnetOperationIntent):
+        super().__init__(timeout=max(1, intent.expires_at - int(__import__("time").time())))
+        self.cog = cog
+        self.intent = intent
+        self.owner_id = intent.requester_id
+        self.message = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(
+            "Only the owner of this Clanker intent can approve it.", ephemeral=True
+        )
+        return False
+
+    def disable_controls(self) -> None:
+        for item in self.children:
+            item.disabled = True
+
+    async def on_timeout(self) -> None:
+        self.disable_controls()
+        if self.message is not None:
+            await self.message.edit(view=self)
+
+    @discord.ui.button(label="Protected approval", style=discord.ButtonStyle.danger)
+    async def approve(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await interaction.response.send_modal(MainnetApprovalModal(self))
 
 
 class ClankerTermsView(discord.ui.View):
