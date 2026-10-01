@@ -107,9 +107,9 @@ Before treating the CryptoWallet route as accepted, use a newly created draft an
 
 For each route, retain only public evidence: launch ID, execution route, transaction hash, deployed token address, block number, and final status. Confirm the transaction is on chain ID 84532, calls the pinned factory with zero value and exact stored calldata, emits one matching `TokenCreated` event for the stored admin, and leaves deployed bytecode at the reported token address. Do not record approval URLs, browser handles, provider credentials, private keys, or recovery material. A failed, rejected, expired, replayed, wrong-user, wrong-wallet, wrong-network, or mutated attempt must not become confirmed.
 
-## Prototype boundary
+## Release-candidate boundary
 
-- Base Sepolia only; mainnet and real assets remain out of scope.
+- Base Sepolia is enabled. Base mainnet remains default-off behind code and installation-wide pause gates until ordinary-member develop acceptance.
 - No private keys, seed phrases, wallet credentials, partner API tokens, or provider secrets are stored by this cog.
 - Discord commands describe launch intent; they are not blockchain authorization.
-- The generic REST submit route will not return. Only the reviewed CryptoWallet signer may execute a launch during the prototype.
+- The generic REST submit route will not return. Only the reviewed CryptoWallet signer may execute an enabled launch; browser or generic REST parameters cannot bypass the pinned operation.

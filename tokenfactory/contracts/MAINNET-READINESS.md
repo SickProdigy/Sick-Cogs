@@ -58,14 +58,14 @@ block, and the absence of ownership or upgrade authority.
 A separate persistent lifecycle permits only reviewed transitions across prepared, processing,
 submitted, uncertain, timed-out, confirmed, failed, dropped, and replaced states. The review
 fingerprint, request ID, attempt ID, provider operation, and transaction identifiers cannot drift
-during recovery. A confirmed canary is not considered verified until two independently collected
+during recovery. A confirmed deployment is not considered verified until two independently collected
 Base mainnet RPC snapshots agree on the successful receipt, transaction and block, factory and token
 runtime hashes, token metadata, fixed supply, recipient balance, creation event, and factory registry
 record. Differing evidence fails closed and a different verification record cannot overwrite the
 first accepted record.
 
-An independent technical review appropriate to this single owner-only canary, an explicit owner
-free-release scope attestation, explicit owner canary approval, source verification, evidence
+An independent technical review appropriate to the finished ordinary-member release candidate, an explicit owner
+free-release scope attestation, explicit maintainer approval for controlled develop testing, source verification, evidence
 recording, and combined test-bot validation remain gates. The attestation confirms that SickGaming
 does not sell, promote, endorse, list, trade, provide liquidity for, or promise returns on created
 tokens and charges no TokenFactory fee. Issue #229 tracks the concise acknowledgments required before

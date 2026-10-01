@@ -1,6 +1,6 @@
 # Independent technical review handoff
 
-This package supports the independent technical review required before the single owner-only canary
+This package supports the independent technical review required before the finished ordinary-member release candidate
 in issue #203. It does not represent a formal audit and does not authorize deployment, provide
 credentials, or enable a mainnet command. Review depth must be reassessed as usage or value at risk grows; issue #228
 separately requires outside counsel before monetization or expanded financial services.
@@ -62,11 +62,11 @@ The report must explicitly address:
    service, front-running, replay across chains, and gas exhaustion risks are acceptable.
 7. Compiler, optimizer, metadata, dependency, ABI, creation bytecode, and runtime bytecode pins are
    reproducible.
-8. The deployment and token-canary approval/lifecycle boundaries described in
+8. The deployment and token-operation approval/lifecycle boundaries described in
    `MAINNET-READINESS.md` fail closed and do not create hidden contract authority.
 9. Every finding includes severity, exploit preconditions, affected artifact, recommendation, and
    resolution status.
-10. The conclusion clearly states either approved for the single owner canary under the documented
+10. The conclusion clearly states either approved for controlled develop acceptance and ordinary-member use under the documented
     limits or not approved.
 
 ## Deliverables

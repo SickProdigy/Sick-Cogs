@@ -20,7 +20,7 @@ Status: required reading for any Base mainnet review. This describes the current
 | PHP/MySQL relay | Exchange one-time handoffs and bounded ciphertext | Plaintext TOTP seed/code, CDP credentials, wallet private keys |
 | Coinbase CDP | Provision identities/accounts and execute authorized provider operations | Authority to bypass bot policy or Discord intent binding |
 | RPC/explorer | Supply public chain state | Identity, policy, or authorization decisions |
-| Bot owner | Pause, lock, recover, configure, and approve bounded future canaries | User signer private keys or TOTP seed |
+| Bot owner | Pause, lock, recover, configure, and approve bounded develop smoke tests | User signer private keys or TOTP seed |
 
 The user controls exported owner keys and the consequences of sharing them. CDP controls provider infrastructure and current smart-account behavior. The bot controls restricted application credentials and local policy. Smart-account upgrade and recovery authority must be re-verified against current provider documentation before mainnet.
 
@@ -56,4 +56,4 @@ Exact acknowledgements, owner-only commands, capability gates, emergency pause, 
 
 ## Mainnet release blockers
 
-Base mainnet remains unavailable until issue 202 verifies provider ownership/export behavior, legal review, environment separation, final chain and nonce revalidation, monitoring and reconciliation, restart and provider-failure tests, migration/restart testing, and a separately approved owner-only low-value canary.
+Base mainnet remains unavailable until issue 202 verifies provider ownership/export behavior, legal review, environment separation, final chain and nonce revalidation, monitoring and reconciliation, restart and provider-failure tests, migration/restart testing, complete ordinary-member develop acceptance, and a separately approved low-value smoke test.

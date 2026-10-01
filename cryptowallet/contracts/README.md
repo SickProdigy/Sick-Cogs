@@ -7,9 +7,9 @@ allowlist input, not authorization to sign or submit a transaction.
 configuration. The source tag resolves to commit `4f4d2bbf41c7f10543559dc043c85f443a6d452e`.
 The factory bytecode hash was independently read from Base Sepolia at the pinned address.
 
-The Clanker capability remains a prototype. Code consuming this manifest must reject every other
+The Clanker capability remains a default-off release candidate. Code consuming this manifest must reject every other
 network, factory, selector, ABI shape, and extension address, and it must require protected user
-approval before submission. Mainnet support is intentionally absent.
+approval before submission. The reviewed mainnet adapter is staged behind closed code and installation gates.
 
 Authoritative sources:
 

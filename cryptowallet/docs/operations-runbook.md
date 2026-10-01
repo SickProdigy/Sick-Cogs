@@ -59,6 +59,6 @@ Review walletset view, walletset usage, pending and uncertain intents, provider 
 
 An operation that may have reached the provider is not failed merely because the bot timed out. Keep it uncertain, reconcile by original attempt and public identifiers, and never create a replacement until non-submission is established.
 
-## Mainnet canary boundary
+## Mainnet acceptance boundary
 
-Any future pre-2.0 canary requires separate explicit approval, bot-owner-only access, tiny disposable funds, complete disclosures, configured limits, monitoring, and acceptance that permanent loss is possible. Public mainnet remains prohibited.
+The first develop smoke tests require explicit maintainer approval, tiny disposable funds, complete disclosures, configured limits, monitoring, and acceptance that permanent loss is possible. They exercise the same ordinary-member flow intended for release; they are not an owner-only product mode. Public release remains prohibited until the finished candidate passes acceptance and outside review.

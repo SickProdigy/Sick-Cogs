@@ -6,9 +6,8 @@ This directory records reviewed external contract surfaces used by Clanker. The 
 configuration. The source tag resolves to commit `4f4d2bbf41c7f10543559dc043c85f443a6d452e`.
 The factory bytecode hash was independently read from Base Sepolia at the pinned address.
 
-The Clanker capability remains a prototype. Clanker rejects every unreviewed network, factory,
-selector, ABI shape, and extension address. Mainnet staging is read-only and must require protected
-user approval before any future submission; the real submitter remains intentionally absent.
+The Clanker capability remains a default-off release candidate. Clanker rejects every unreviewed network, factory,
+selector, ABI shape, and extension address. Mainnet staging requires protected requester approval, a fresh fee estimate, and immediate revalidation before any enabled submission; the code and installation gates remain closed during review.
 
 `clanker-v4-base-mainnet-candidate.json` is read-only audit evidence for issue #204. It records the
 current official SDK's Base deployment map and matching runtime bytecode from two independent RPC
