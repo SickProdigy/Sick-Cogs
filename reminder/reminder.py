@@ -97,7 +97,7 @@ class Reminder(commands.Cog):
     """Create private reminders that survive cog reloads and bot restarts."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
 
     CONFIG_IDENTIFIER = int(
         "1348292267606297903903568219578370169450187613858557601832253276183023563385"
@@ -126,6 +126,7 @@ class Reminder(commands.Cog):
         )
         self.config.register_user(reminders=[], invalid_reminders=[], offset=0)
         self._wake_scheduler = asyncio.Event()
+        self._subscription_lock = asyncio.Lock()
         self._deleted_users = set()
         self._scheduler = asyncio.create_task(self._scheduler_loop())
 
@@ -180,51 +181,96 @@ class Reminder(commands.Cog):
             saved.append(entry.to_raw())
         self._wake_scheduler.set()
 
+        if ctx.guild is not None:
+            try:
+                await ctx.message.add_reaction("👍")
+                due_timestamp = int(entry.due_at)
+                await ctx.reply(
+                    f"⏰ Reminder set for <t:{due_timestamp}:F> "
+                    f"(<t:{due_timestamp}:R>). Anyone else who wants this reminder "
+                    "can react to your message with 👍.",
+                    mention_author=False,
+                )
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            else:
+                return
+
         try:
-            await ctx.message.add_reaction("✅")
-            await ctx.message.add_reaction("❌")
-        except (discord.Forbidden, discord.HTTPException):
             if seconds > 86_400:
                 offset = self.validate_offset(await self.config.user(ctx.author).offset()) or 0.0
                 due_text = self.format_due_time(entry.due_at, offset)
-                confirmation = f"✅ I will remind you of that on {due_text}."
+                confirmation = f"👍 I will remind you of that on {due_text}."
             else:
                 confirmation = (
-                    f"✅ I will remind you of that in {self.describe_duration(seconds)}."
+                    f"👍 I will remind you of that in {self.describe_duration(seconds)}."
                 )
             await ctx.send(
                 confirmation, delete_after=self.SUCCESS_FALLBACK_DELETE_AFTER
             )
+        except (discord.Forbidden, discord.HTTPException):
+            pass
 
     @staticmethod
-    def remove_controlled_reminder(raw_entries: object, message_id: int):
+    def has_shared_reminder(raw_entries: object, message_id: int) -> bool:
         if not isinstance(raw_entries, list):
-            return [], False
-        retained = []
-        removed = False
-        for raw in raw_entries:
-            entry = ReminderEntry.from_raw(raw)
-            if entry is not None and entry.control_message_id == message_id:
-                removed = True
+            return False
+        return any(
+            entry is not None and entry.control_message_id == message_id
+            for entry in (ReminderEntry.from_raw(raw) for raw in raw_entries)
+        )
+
+    @classmethod
+    def find_shared_reminder(
+        cls, users: object, message_id: int, now: float
+    ) -> Optional[ReminderEntry]:
+        if not isinstance(users, dict):
+            return None
+        for snapshot in users.values():
+            if not isinstance(snapshot, dict):
                 continue
-            retained.append(raw)
-        return retained, removed
+            for entry in cls._valid_entries(snapshot.get("reminders", [])):
+                if (
+                    entry.control_message_id == message_id
+                    and entry.failed_at is None
+                    and entry.due_at > now
+                ):
+                    return entry
+        return None
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
-        if str(payload.emoji) != "❌":
+        if str(payload.emoji) != "👍" or payload.guild_id is None:
             return
         bot_user = getattr(self.bot, "user", None)
         if bot_user is not None and payload.user_id == bot_user.id:
             return
-        user_config = self.config.user_from_id(payload.user_id)
-        async with user_config.reminders() as saved:
-            retained, removed = self.remove_controlled_reminder(
-                saved, payload.message_id
-            )
-            if removed:
-                saved[:] = retained
-        if removed:
+        member = getattr(payload, "member", None)
+        if member is not None and member.bot:
+            return
+
+        async with self._subscription_lock:
+            now = time.time()
+            users = await self.config.all_users()
+            template = self.find_shared_reminder(users, payload.message_id, now)
+            if template is None:
+                return
+
+            user_config = self.config.user_from_id(payload.user_id)
+            async with user_config.reminders() as saved:
+                if self.has_shared_reminder(saved, payload.message_id):
+                    return
+                saved.append(
+                    ReminderEntry(
+                        uuid.uuid4().hex,
+                        template.content,
+                        now,
+                        template.due_at,
+                        source_url=template.source_url,
+                        control_message_id=payload.message_id,
+                    ).to_raw()
+                )
+            self._deleted_users.discard(payload.user_id)
             self._wake_scheduler.set()
 
     @remind.group(name="forget")
