@@ -54,3 +54,7 @@ Immediately before any future provider call, live revalidation repeats the exact
 requires the pinned target runtime, active wallet authorization, an unchanged gas quote, enough signer
 balance for native value plus maximum fee, and a clean not-created provider state. ERC-4337 nonce is
 provider-managed; duplicate prevention uses the immutable operation ID and clean provider state.
+
+Receipt evidence is accepted only after both RPC snapshots agree on the canonical block hash and
+report at least 12 confirmations. Lifecycle tests cover uncertain and timed-out recovery, dropped and
+replacement terminals, identifier mutation, and rejection of every transition out of terminal state.

@@ -112,6 +112,10 @@ def _snapshot(intent: MainnetOperationIntent, lifecycle: MainnetOperationLifecyc
     block_number = int(evidence.get("block_number", -1))
     if block_number != lifecycle.block_number:
         raise ValueError("Receipt block changed.")
+    latest_block_number = int(evidence.get("latest_block_number", -1))
+    confirmation_depth = latest_block_number - block_number + 1
+    if confirmation_depth < 12:
+        raise ValueError("Clanker mainnet evidence has not reached 12-block finality.")
     manifest = _manifest()
     operation = manifest["operationAllowlist"][intent.kind]
     target_name = operation["target"]
@@ -122,6 +126,7 @@ def _snapshot(intent: MainnetOperationIntent, lifecycle: MainnetOperationLifecyc
     result = {
         "chain_id": 8453, "transaction_hash": transaction_hash,
         "block_number": block_number, "block_hash": _hash(evidence.get("block_hash"), "block", True),
+        "latest_block_number": latest_block_number, "confirmation_depth": confirmation_depth,
         "signer": intent.signer, "to": intent.to, "value": str(intent.value), "data": intent.data,
     }
     result["target_runtime_code_hash"] = expected_runtime_hash
