@@ -1958,6 +1958,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manifest.exportable_account_type, "evm-eoa-owner")
         self.assertFalse(manifest.smart_account_key_exportable)
         self.assertTrue(manifest.fee_quote_required)
+        self.assertFalse(manifest.bounded_user_paid_fee_supported)
         self.assertEqual(manifest.executable_capabilities, ())
         self.assertEqual(len(manifest.fingerprint), 64)
         int(manifest.fingerprint, 16)
@@ -1968,6 +1969,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             replace(BASE_MAINNET_PROVIDER_MANIFEST, required_owner_count=2),
             replace(BASE_MAINNET_PROVIDER_MANIFEST, smart_account_key_exportable=True),
             replace(BASE_MAINNET_PROVIDER_MANIFEST, fee_quote_required=False),
+            replace(BASE_MAINNET_PROVIDER_MANIFEST, bounded_user_paid_fee_supported=True),
             replace(BASE_MAINNET_PROVIDER_MANIFEST, operation_statuses=("complete",)),
             replace(BASE_MAINNET_PROVIDER_MANIFEST, executable_capabilities=("send",)),
         )
@@ -3261,9 +3263,10 @@ class TokenFactorySignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             "accounts": [{"network": BASE_MAINNET.key, "address": recipient}],
         }
 
-        result = await provider.submit_reviewed_tokenfactory_call(
-            profile, operation, "mainnet-dry-run"
-        )
+        with patch("cryptowallet.providers.cdp.SMART_ACCOUNT_BOUNDED_USER_PAID_FEES", True):
+            result = await provider.submit_reviewed_tokenfactory_call(
+                profile, operation, "mainnet-dry-run"
+            )
 
         self.assertEqual(result["provider_status"], "broadcast")
         provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
@@ -3838,6 +3841,18 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[5], 0)
         self.assertEqual(args[7], calldata)
 
+    async def test_mainnet_smart_account_rejects_unbounded_user_paid_fee(self):
+        provider = CdpWalletProvider(SimpleNamespace())
+        intent = TransactionIntent(
+            intent_id="blocked-mainnet", profile_id="profile-7",
+            network=BASE_MAINNET.key, from_address="0x" + "11" * 20,
+            to_address="0x" + "22" * 20, value_wei=1, created_at=1,
+            expires_at=9999999999, estimated_gas_fee_wei=1,
+            max_gas_fee_wei=2, gas_sponsored=False,
+        )
+        with self.assertRaisesRegex(WalletProviderError, "maximum user-paid fee"):
+            await provider.submit_transaction({}, intent)
+
     async def test_provider_submits_mainnet_with_isolated_credentials_and_no_paymaster(self):
         sender = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         recipient = "0xE338aDC6468484f2C6da16647B7154407661c371"
@@ -3865,7 +3880,8 @@ class TokenSendTests(unittest.IsolatedAsyncioTestCase):
         )
         provider._api_client = lambda credentials: client
 
-        result = await provider.submit_transaction(profile, intent)
+        with patch("cryptowallet.providers.cdp.SMART_ACCOUNT_BOUNDED_USER_PAID_FEES", True):
+            result = await provider.submit_transaction(profile, intent)
 
         self.assertEqual(result["provider_status"], "broadcast")
         provider.credentials_for_network.assert_awaited_once_with(BASE_MAINNET.key)
@@ -4512,9 +4528,10 @@ class ClankerMainnetSignerBoundaryTests(unittest.IsolatedAsyncioTestCase):
                    "accounts": [{"network": BASE_MAINNET.key,
                                  "address": payload["signer"]}]}
 
-        result = await provider.submit_reviewed_clanker_mainnet_operation(
-            profile, envelope, "attempt-7"
-        )
+        with patch("cryptowallet.providers.cdp.SMART_ACCOUNT_BOUNDED_USER_PAID_FEES", True):
+            result = await provider.submit_reviewed_clanker_mainnet_operation(
+                profile, envelope, "attempt-7"
+            )
 
         self.assertEqual(result["fingerprint"], envelope["fingerprint"])
         call = client.send_smart_account_user_operation.await_args

@@ -1390,6 +1390,14 @@ class TokenFactory(commands.Cog):
             inline=False,
         )
         embed.add_field(
+            name="Provider fee enforcement",
+            value=(
+                "**Blocked:** CDP smart-account submission does not expose an "
+                "enforceable total user-paid fee ceiling."
+            ),
+            inline=False,
+        )
+        embed.add_field(
             name="Required gates",
             value=(
                 f"Independent technical review: **{status['independent_audit']}**\n"

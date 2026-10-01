@@ -88,6 +88,20 @@ CLANKER_MAINNET_CALLS = {
     "airdropClaim": ("0xf652b3610d75d81871bf96db50825d9af28391e0", "0xfabed412", False),
 }
 
+# CDP documents opting a smart-account UserOperation out of sponsorship, but
+# not an enforceable total user-paid fee ceiling on that endpoint. Keep every
+# real-value smart-account path closed until the provider exposes one or the
+# adapter is replaced with a reviewed UserOperation builder/bundler.
+SMART_ACCOUNT_BOUNDED_USER_PAID_FEES = False
+
+
+def _require_bounded_user_paid_fees() -> None:
+    if not SMART_ACCOUNT_BOUNDED_USER_PAID_FEES:
+        raise WalletProviderError(
+            "Base mainnet smart-account submission is unavailable because the "
+            "provider cannot enforce the reviewed maximum user-paid fee."
+        )
+
 
 def _erc20_transfer_data(recipient: str, amount_atomic: int) -> str:
     """Encode only ERC-20 transfer(address,uint256); arbitrary calldata is forbidden."""
@@ -867,6 +881,8 @@ class CdpWalletProvider(WalletProvider):
             raise WalletProviderError(
                 "The reviewed TokenFactory operation is invalid."
             ) from exc
+        if network == BASE_MAINNET.key:
+            _require_bounded_user_paid_fees()
         state = await self.token_factory_deployment_status(network)
         if kind == "factory" and state["deployed"]:
             return {**state, "provider_status": "complete", "already_deployed": True}
@@ -1048,6 +1064,7 @@ class CdpWalletProvider(WalletProvider):
                 raise ValueError("Clanker mainnet operation exceeds its allowlist")
         except (KeyError, TypeError, ValueError) as exc:
             raise WalletProviderError("The reviewed Clanker operation is invalid.") from exc
+        _require_bounded_user_paid_fees()
         account = next((item for item in profile.get("accounts") or []
                         if item.get("network") == BASE_MAINNET.key), None)
         try:
@@ -1565,6 +1582,7 @@ class CdpWalletProvider(WalletProvider):
         if intent.network == SOLANA_DEVNET.key:
             return await self._submit_solana_transaction(profile, intent)
         if intent.network == BASE_MAINNET.key:
+            _require_bounded_user_paid_fees()
             return await self._submit_base_mainnet_transaction(profile, intent)
         if intent.network != BASE_SEPOLIA.key or not intent.gas_sponsored:
             raise WalletProviderError(

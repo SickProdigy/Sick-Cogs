@@ -22,6 +22,7 @@ class EvmProviderManifest:
     smart_account_key_exportable: bool
     paymaster_behavior: str
     fee_quote_required: bool
+    bounded_user_paid_fee_supported: bool
     spend_permission_fields: tuple[str, ...]
     operation_statuses: tuple[str, ...]
     operation_identifiers: tuple[str, ...]
@@ -34,7 +35,7 @@ class EvmProviderManifest:
 
 
 BASE_MAINNET_PROVIDER_MANIFEST = EvmProviderManifest(
-    schema_version=1,
+    schema_version=2,
     network_key="base-mainnet",
     provider_network="base",
     chain_id=8453,
@@ -45,8 +46,9 @@ BASE_MAINNET_PROVIDER_MANIFEST = EvmProviderManifest(
     required_owner_count=1,
     exportable_account_type="evm-eoa-owner",
     smart_account_key_exportable=False,
-    paymaster_behavior="explicit-selection-quote-bound",
+    paymaster_behavior="optional-sponsorship-unbounded-user-paid",
     fee_quote_required=True,
+    bounded_user_paid_fee_supported=False,
     spend_permission_fields=(
         "network", "spender", "token", "allowance", "period", "start", "end",
         "salt", "extraData", "paymasterUrl",
@@ -65,7 +67,7 @@ def validate_evm_provider_manifest(
     """Return every drift reason; an empty tuple is the only passing result."""
 
     errors = []
-    if manifest.schema_version != 1:
+    if manifest.schema_version != 2:
         errors.append("unsupported manifest schema")
     if manifest.network_key != network.key:
         errors.append("network key mismatch")
@@ -93,8 +95,10 @@ def validate_evm_provider_manifest(
         errors.append("smart-account key export must be disabled")
     if not manifest.fee_quote_required:
         errors.append("fee quote is not required")
-    if manifest.paymaster_behavior != "explicit-selection-quote-bound":
+    if manifest.paymaster_behavior != "optional-sponsorship-unbounded-user-paid":
         errors.append("paymaster policy mismatch")
+    if manifest.bounded_user_paid_fee_supported:
+        errors.append("unsupported bounded user-paid fee capability enabled")
     expected_permission_fields = {
         "network", "spender", "token", "allowance", "period", "start", "end",
         "salt", "extraData", "paymasterUrl",
