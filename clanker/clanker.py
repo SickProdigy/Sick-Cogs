@@ -2693,8 +2693,22 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             companion_url = await self.companion_session_url()
         except RuntimeError:
             companion_url = "Not configured"
+        network = "base-sepolia"
+        wallet = self.bot.get_cog("CryptoWallet")
+        select_network = getattr(wallet, "clanker_default_network", None)
+        if select_network is not None:
+            try:
+                network = str(await select_network() or network)
+            except (RuntimeError, TypeError, ValueError):
+                network = "base-sepolia"
+        mainnet_selected = network == "base-mainnet"
         embed = discord.Embed(title="Clanker status", color=discord.Color.blue())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
+        embed.add_field(
+            name="Selected network",
+            value="Base mainnet" if mainnet_selected else "Base Sepolia",
+            inline=True,
+        )
         embed.add_field(name="Execution", value="Protected CryptoWallet signing", inline=False)
         embed.add_field(name="Platform treasury", value=settings["treasury_address"] or "Not set", inline=False)
         embed.add_field(name="Platform split", value=f"{settings['platform_bps']} bps", inline=True)
@@ -2727,7 +2741,13 @@ class Clanker(ClankerAdminMixin, commands.Cog):
             ),
             inline=True,
         )
-        embed.set_footer(text="Base Sepolia only · no private keys are stored by this cog")
+        embed.set_footer(
+            text=(
+                "Base mainnet staging · execution remains code-disabled · no private keys stored"
+                if mainnet_selected
+                else "Base Sepolia · no private keys are stored by this cog"
+            )
+        )
         await ctx.send(embed=embed)
 
     @clanker.command(name="terms")

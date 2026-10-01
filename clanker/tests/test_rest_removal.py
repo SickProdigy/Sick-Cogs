@@ -1513,6 +1513,30 @@ class ClankerRecordListingTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("No saved Clanker draft of yours matched that ID.")
 
 
+class ClankerStatusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_status_reports_selected_mainnet_as_staging(self):
+        settings = copy.deepcopy(Clanker.default_guild)
+        settings.update(Clanker.default_global)
+        settings["treasury_address"] = TREASURY
+        wallet = SimpleNamespace(clanker_default_network=AsyncMock(return_value="base-mainnet"))
+        cog = Clanker.__new__(Clanker)
+        cog.bot = SimpleNamespace(get_cog=lambda name: wallet if name == "CryptoWallet" else None)
+        cog.settings_for_guild = AsyncMock(return_value=settings)
+        cog.companion_session_url = AsyncMock(return_value="https://wallet.example/session")
+        guild = SimpleNamespace(
+            get_channel=lambda channel_id: None, get_role=lambda role_id: None
+        )
+        ctx = SimpleNamespace(guild=guild, send=AsyncMock())
+
+        await Clanker.clanker_status.callback(cog, ctx)
+
+        embed = ctx.send.await_args.kwargs["embed"]
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["Selected network"], "Base mainnet")
+        self.assertIn("staging", embed.footer.text)
+        self.assertIn("code-disabled", embed.footer.text)
+
+
 class InternalWalletAdapterTests(unittest.IsolatedAsyncioTestCase):
     async def test_external_route_uses_cryptowallet_companion_url(self):
         approval_base_url = AsyncMock(return_value="https://wallet.example/cryptowallet/")
