@@ -13,10 +13,6 @@ from cryptowallet.core.networks import BASE_MAINNET
 from cryptowallet.core.provider_manifest import (
     BASE_MAINNET_PROVIDER_MANIFEST, validate_base_mainnet_provider_manifest,
 )
-from cryptowallet.providers.cdp import (
-    SMART_ACCOUNT_BOUNDED_USER_PAID_FEES, _require_bounded_user_paid_fees,
-)
-from cryptowallet.providers.base import WalletProviderError
 from tokenfactory.network_manifest import mainnet_readiness
 from tokenfactory.mainnet_lifecycle import (
     MainnetCanaryLifecycle, assert_same_mainnet_lifecycle as assert_same_token_lifecycle,
@@ -59,9 +55,11 @@ class CryptoStackMainnetBoundaryTests(unittest.TestCase):
         )
         self.assertLessEqual(terms["max_gas_fee_wei"], MAX_FEE_WEI)
         self.assertFalse(BASE_MAINNET_PROVIDER_MANIFEST.bounded_user_paid_fee_supported)
-        self.assertFalse(SMART_ACCOUNT_BOUNDED_USER_PAID_FEES)
-        with self.assertRaisesRegex(WalletProviderError, "maximum user-paid fee"):
-            _require_bounded_user_paid_fees()
+        self.assertTrue(BASE_MAINNET_PROVIDER_MANIFEST.fee_quote_required)
+        self.assertEqual(
+            BASE_MAINNET_PROVIDER_MANIFEST.paymaster_behavior,
+            "optional-sponsorship-unbounded-user-paid",
+        )
 
     def test_restart_recovery_bindings_cannot_cross_products_or_attempts(self):
         draft = TokenDraft(
