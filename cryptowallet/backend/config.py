@@ -114,6 +114,7 @@ def create_config(cog) -> Config:
         selected_environment="testnet",
         claimed_at=0,
         intents={},
+        integration_intents={},
         notifications_enabled=True,
         default_send_asset=None,
         security_locked=False,
@@ -223,4 +224,12 @@ class WalletConfigMixin:
             )
             intents.clear()
             intents.update(ordered[:MAX_STORED_INTENTS])
-            return dict(intents)
+            retained = dict(intents)
+        async with self.config.user(user).integration_intents() as integrations:
+            if not isinstance(integrations, dict):
+                integrations.clear()
+            else:
+                for intent_id in tuple(integrations):
+                    if intent_id not in retained:
+                        integrations.pop(intent_id, None)
+        return retained

@@ -2343,6 +2343,122 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class PolymarketDepositIntentTests(unittest.IsolatedAsyncioTestCase):
+    class _AllValues:
+        def __init__(self, values):
+            self.values = values
+
+        async def __aenter__(self):
+            return self.values
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    def _cog(self, *, enabled=True):
+        user = SimpleNamespace(id=7)
+        values = {"intents": {}, "integration_intents": {}}
+        integrations = SimpleNamespace(get_raw=AsyncMock(return_value=None))
+        user_config = SimpleNamespace(
+            security_locked=_Value(False),
+            integration_intents=integrations,
+            all=lambda: self._AllValues(values),
+        )
+        policy = {
+            "enabled": enabled, "paused": not enabled,
+            "capabilities": {"send": enabled},
+            "limits_atomic": {"per_transaction": str(10**18)},
+        }
+        sender = "0x" + "1" * 40
+        profile = {
+            "profile_id": "profile-7",
+            "accounts": [{"network": BASE_MAINNET.key, "address": sender}],
+        }
+        provider = SimpleNamespace(
+            supports=lambda network, capability: True,
+            get_native_balance=AsyncMock(return_value=10**18),
+            prepare_transaction=AsyncMock(side_effect=lambda intent: replace(
+                intent, estimated_gas_fee_wei=10**10,
+                max_gas_fee_wei=2 * 10**10,
+            )),
+        )
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.config = SimpleNamespace(
+            provider_paused=_Value(False), operating_mode=_Value("mainnet"),
+            base_mainnet_policy=_Value(policy),
+            user=lambda requested: user_config,
+        )
+        cog.wallet_provider = provider
+        cog.has_current_cryptowallet_mainnet_terms = AsyncMock(return_value=True)
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        cog.ensure_mainnet_wallet_profile = AsyncMock(return_value=profile)
+        cog._stored_intent = AsyncMock(return_value=None)
+        cog.expire_and_trim_intents = AsyncMock(return_value={})
+        return cog, user, values, user_config, provider
+
+    async def test_disabled_gate_stops_before_wallet_or_provider_access(self):
+        cog, user, _, _, provider = self._cog(enabled=False)
+        with self.assertRaisesRegex(RuntimeError, "disabled or paused"):
+            await cog.polymarket_prepare_deposit_intent(
+                user, deposit_id="deposit-1", binding_fingerprint="a" * 64,
+                recipient="0x" + "2" * 40, amount_atomic=10**15,
+            )
+        cog.get_or_create_wallet_profile.assert_not_awaited()
+        provider.get_native_balance.assert_not_awaited()
+
+    async def test_prepare_persists_exact_intent_and_product_binding(self):
+        cog, user, values, _, provider = self._cog()
+        evidence = await cog.polymarket_prepare_deposit_intent(
+            user, deposit_id="deposit-1", binding_fingerprint="a" * 64,
+            recipient="0x" + "2" * 40, amount_atomic=10**15,
+        )
+        self.assertEqual(evidence["intent_id"], "poly-deposit-1")
+        self.assertEqual(evidence["network"], BASE_MAINNET.key)
+        self.assertEqual(evidence["to_address"], "0x" + "2" * 40)
+        self.assertEqual(evidence["value_atomic"], 10**15)
+        self.assertEqual(evidence["status"], IntentStatus.PENDING.value)
+        stored = TransactionIntent.from_dict(values["intents"]["poly-deposit-1"])
+        binding = values["integration_intents"]["poly-deposit-1"]
+        self.assertEqual(binding, {
+            "product": "polymarket_deposit",
+            "binding_fingerprint": "a" * 64,
+            "intent_fingerprint": stored.approval_fingerprint(),
+        })
+        provider.prepare_transaction.assert_awaited_once()
+        cog.expire_and_trim_intents.assert_awaited_once_with(user)
+
+    async def test_retry_is_idempotent_and_binding_drift_fails_closed(self):
+        cog, user, _, user_config, provider = self._cog()
+        intent = TransactionIntent(
+            intent_id="poly-deposit-1", profile_id="profile-7",
+            network=BASE_MAINNET.key, from_address="0x" + "1" * 40,
+            to_address="0x" + "2" * 40, value_wei=10**15,
+            created_at=100, expires_at=220, asset_kind="native",
+            asset_symbol="ETH", asset_decimals=18,
+            estimated_gas_fee_wei=10**10, max_gas_fee_wei=2 * 10**10,
+        )
+        cog._stored_intent.return_value = intent
+        user_config.integration_intents.get_raw.return_value = {
+            "product": "polymarket_deposit",
+            "binding_fingerprint": "a" * 64,
+            "intent_fingerprint": intent.approval_fingerprint(),
+        }
+        evidence = await cog.polymarket_prepare_deposit_intent(
+            user, deposit_id="deposit-1", binding_fingerprint="a" * 64,
+            recipient=intent.to_address, amount_atomic=intent.value_atomic,
+        )
+        self.assertEqual(evidence["approval_fingerprint"],
+                         intent.approval_fingerprint())
+        provider.get_native_balance.assert_not_awaited()
+        user_config.integration_intents.get_raw.return_value[
+            "binding_fingerprint"
+        ] = "b" * 64
+        with self.assertRaisesRegex(RuntimeError, "binding changed"):
+            await cog.polymarket_prepare_deposit_intent(
+                user, deposit_id="deposit-1", binding_fingerprint="a" * 64,
+                recipient=intent.to_address, amount_atomic=intent.value_atomic,
+            )
+
+
 class PolymarketSignerContextTests(unittest.IsolatedAsyncioTestCase):
     async def test_provider_resolves_exact_stored_smart_account_owner(self):
         smart = "0x7930fb6e9853b3835cf047f36855993cb82d4387"

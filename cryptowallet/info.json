@@ -2,7 +2,7 @@
   "author": ["SickProdigy"],
   "description": "Provider-backed multichain wallet integration with reviewed testnet operation and a default-off Base mainnet release candidate.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores wallet profile identifiers, linked platform identifiers, public wallet addresses, public transaction metadata, notification preferences, emergency-lock status, and optional encrypted authenticator enrollment state. It never stores private keys, recovery phrases, wallet passwords, or one-time authentication codes.",
+  "end_user_data_statement": "This cog stores wallet profile identifiers, linked platform identifiers, public wallet addresses, public transaction metadata, purpose-bound integrated-product intent fingerprints, notification preferences, emergency-lock status, and optional encrypted authenticator enrollment state. It never stores private keys, recovery phrases, wallet passwords, or one-time authentication codes.",
   "hidden": false,
   "install_msg": "CryptoWallet enables reviewed testnet operation. Base mainnet remains default-off and emergency-paused while the release candidate is completed and tested. The companion site handles protected authorization, recovery, export, and account security; ordinary public-address provisioning remains bot-first.",
   "min_bot_version": "3.5.0",
@@ -11,5 +11,5 @@
   "short": "Protected multichain wallet integration",
   "tags": ["wallet", "crypto", "base", "ethereum", "solana", "smart-wallet", "testnet"],
   "type": "COG",
-  "version": "1.2.50"
+  "version": "1.2.51"
 }

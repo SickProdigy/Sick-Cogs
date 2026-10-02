@@ -31,6 +31,34 @@ class DepositState(str, Enum):
     EXPIRED = "expired"
 
 
+def funding_request_fingerprint(
+    *, deposit_id: str, discord_user_id: int, profile_id: str,
+    account_wallet_address: str, bridge_address: str, asset: BridgeAsset,
+    amount_atomic: int, quote: BridgeQuote, created_at: int, expires_at: int,
+) -> str:
+    """Bind the exact Bridge request before a CryptoWallet intent exists."""
+
+    values = {
+        "deposit_id": deposit_id, "discord_user_id": discord_user_id,
+        "profile_id": profile_id, "account_wallet_address": account_wallet_address,
+        "bridge_address": bridge_address, "asset": asset,
+        "amount_atomic": amount_atomic, "quote": quote,
+        "wallet_intent_id": "validation",
+        "wallet_intent_fingerprint": "0" * 64,
+        "created_at": created_at, "expires_at": expires_at,
+    }
+    record = BridgeDeposit.create(**values).to_record()
+    for key in (
+        "wallet_intent_id", "wallet_intent_fingerprint", "state",
+        "wallet_transaction_hash", "bridge_status",
+        "bridge_transaction_hash", "failure_digest",
+    ):
+        record.pop(key)
+    return hashlib.sha256(json.dumps(
+        record, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class BridgeDeposit:
     deposit_id: str

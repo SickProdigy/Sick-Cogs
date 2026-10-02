@@ -1,6 +1,7 @@
 import hashlib
 import json
 import secrets
+from decimal import Decimal, InvalidOperation
 import time
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -14,6 +15,8 @@ from .account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from .collateral import CollateralPlanError, collateral_plan
+from .bridge import BridgeAsset, BridgeQuote, NATIVE_EVM_TOKEN, PolymarketBridgeClient
+from .deposit_lifecycle import BridgeDeposit, DepositState, funding_request_fingerprint
 from .deposit_wallet import DepositWalletCreationPlan, DepositWalletCreationState
 from .handoff import MarketSnapshot, MarketSnapshotError
 from .identity_verifier import PolygonAccountIdentityVerifier
@@ -62,7 +65,7 @@ from .terms import (
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
     "account_connect", "deposit_wallet_create", "session", "eligibility",
-    "collateral", "order", "cancel", "redeem",
+    "collateral", "deposit", "order", "cancel", "redeem",
 )
 ONBOARDING_ENABLE_ACKNOWLEDGEMENT = (
     "I understand protected Polymarket onboarding uses Polygon mainnet "
@@ -153,7 +156,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.31"
+    __version__ = "0.2.32"
 
     def __init__(self, bot):
         self.bot = bot
@@ -179,9 +182,11 @@ class Polymarket(commands.Cog):
             replacement_encrypted_session_credentials=None,
             session_lifecycle_history=[], session_approval=None,
             bot_first_account=None, deposit_wallet_creation=None,
-            final_confirmation_required=True
+            final_confirmation_required=True, bridge_deposit=None,
+            bridge_deposit_history=[]
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
+        self.bridge_client = PolymarketBridgeClient()
         self.session_transport = SessionKeyTransport()
 
     async def initialize(self) -> None:
@@ -1487,9 +1492,10 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
+        embed.add_field(name="Fund Polymarket", value=f"DM-only `{prefix}poly deposit <ETH amount>` prepares a CryptoWallet approval card or resumes deposit status. Production gates remain default-off.", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` automatically derives the CryptoWallet-owned Deposit Wallet. `{prefix}poly session` starts protected session authorization. Existing-account `connect`/`confirm` is compatibility-only. `{prefix}poly confirmations [on|off]` controls the default-on second approval check. Never send secrets in Discord.", inline=False)
-        embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
+        embed.set_footer(text="Public discovery is read-only; production actions remain default-off.")
         await ctx.send(embed=embed)
 
     @polymarket.command(name="markets", aliases=["browse"])
@@ -1782,6 +1788,270 @@ class Polymarket(commands.Cog):
             details.append("Liquidity: " + str(market["liquidity"]))
         embed.set_footer(text=" · ".join(details) or "Read-only Polymarket data")
         await ctx.send(embed=embed)
+
+    def _deposit_status_embed(self, deposit: BridgeDeposit) -> discord.Embed:
+        colors = {
+            DepositState.COMPLETED: discord.Color.green(),
+            DepositState.FAILED: discord.Color.red(),
+            DepositState.REJECTED: discord.Color.red(),
+            DepositState.EXPIRED: discord.Color.red(),
+            DepositState.WALLET_UNCERTAIN: discord.Color.orange(),
+        }
+        embed = discord.Embed(
+            title="Polymarket deposit",
+            color=colors.get(deposit.state, discord.Color.blurple()),
+        )
+        embed.add_field(name="Status", value=deposit.state.value.replace("_", " ").title())
+        embed.add_field(
+            name="Base amount",
+            value=(f"{deposit.source_amount_atomic // 10**18}."
+                   f"{deposit.source_amount_atomic % 10**18:018d}").rstrip("0").rstrip(".") + " ETH",
+        )
+        embed.add_field(
+            name="Quoted pUSD",
+            value=(f"{deposit.quoted_pusd_atomic // 1_000_000}."
+                   f"{deposit.quoted_pusd_atomic % 1_000_000:06d} pUSD"),
+        )
+        embed.add_field(
+            name="Polymarket account",
+            value=f"`{deposit.account_wallet_address}`", inline=False,
+        )
+        embed.add_field(
+            name="Bridge address", value=f"`{deposit.bridge_address}`", inline=False,
+        )
+        if deposit.wallet_transaction_hash:
+            embed.add_field(
+                name="Base transaction",
+                value=f"`{deposit.wallet_transaction_hash}`", inline=False,
+            )
+        if deposit.bridge_transaction_hash:
+            embed.add_field(
+                name="Bridge transaction",
+                value=f"`{deposit.bridge_transaction_hash}`", inline=False,
+            )
+        if deposit.state is DepositState.COMPLETED:
+            embed.add_field(
+                name="Credit evidence",
+                value=(
+                    "Bridge reports completion. The displayed pUSD amount is the "
+                    "original quote, not a separately observed account balance."
+                ),
+                inline=False,
+            )
+        elif deposit.state is DepositState.WALLET_UNCERTAIN:
+            embed.add_field(
+                name="Action",
+                value=(
+                    "The wallet submission outcome is uncertain. No replacement will "
+                    "be created until CryptoWallet reconciles this intent."
+                ),
+                inline=False,
+            )
+        embed.set_footer(text=f"Deposit ID: {deposit.deposit_id}")
+        return embed
+
+    async def _reconcile_bridge_deposit(self, user) -> BridgeDeposit:
+        record = await self.config.user(user).bridge_deposit()
+        if not record:
+            raise AccountConnectionError("No Polymarket deposit is recorded.")
+        deposit = BridgeDeposit.from_record(record)
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        evidence_reader = getattr(
+            cryptowallet, "polymarket_deposit_intent_evidence", None
+        )
+        if not callable(evidence_reader):
+            raise AccountConnectionError("CryptoWallet deposit status is unavailable.")
+        binding = funding_request_fingerprint(
+            deposit_id=deposit.deposit_id,
+            discord_user_id=deposit.discord_user_id,
+            profile_id=deposit.profile_id,
+            account_wallet_address=deposit.account_wallet_address,
+            bridge_address=deposit.bridge_address,
+            asset=BridgeAsset(
+                deposit.source_chain_id, "Base", "Ether",
+                deposit.source_symbol, deposit.source_token_address,
+                deposit.source_decimals, Decimal(deposit.minimum_usd),
+            ),
+            amount_atomic=deposit.source_amount_atomic,
+            quote=BridgeQuote(
+                deposit.quote_id, Decimal(deposit.quoted_input_usd),
+                Decimal(deposit.quoted_output_usd), deposit.quoted_pusd_atomic,
+                Decimal(deposit.minimum_received_usd), Decimal("0"),
+                Decimal("0"), Decimal("0"), Decimal("0"), 1,
+            ),
+            created_at=deposit.created_at, expires_at=deposit.expires_at,
+        )
+        if deposit.state in {
+            DepositState.AWAITING_WALLET_APPROVAL,
+            DepositState.WALLET_PROCESSING,
+            DepositState.WALLET_UNCERTAIN,
+        }:
+            try:
+                evidence = await evidence_reader(
+                    user, intent_id=deposit.wallet_intent_id,
+                    binding_fingerprint=binding, reconcile=True,
+                )
+            except RuntimeError as exc:
+                raise AccountConnectionError(
+                    "CryptoWallet could not reconcile this deposit."
+                ) from exc
+            deposit = deposit.reconcile_wallet_intent(
+                evidence, now=int(time.time())
+            )
+            await self.config.user(user).bridge_deposit.set(deposit.to_record())
+        if deposit.state in {
+            DepositState.BRIDGE_PENDING, DepositState.BRIDGING,
+        }:
+            transactions = await self.bridge_client.status(deposit.bridge_address)
+            deposit = deposit.reconcile_bridge(
+                transactions, now_ms=int(time.time() * 1000)
+            )
+            await self.config.user(user).bridge_deposit.set(deposit.to_record())
+        return deposit
+
+    @polymarket.command(name="deposit")
+    @commands.dm_only()
+    async def polymarket_deposit(self, ctx: commands.Context, amount: str = ""):
+        """Fund the caller's Polymarket account from CryptoWallet Base ETH."""
+
+        capabilities = await self.config.production_capabilities()
+        if (not await self.config.production_enabled()
+                or await self.config.production_paused()
+                or not bool(capabilities.get("deposit"))):
+            await ctx.send(
+                "Polymarket deposits are disabled or emergency-paused. Nothing moved."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        existing_record = await user_config.bridge_deposit()
+        if existing_record:
+            try:
+                existing = BridgeDeposit.from_record(existing_record)
+                if existing.state not in {
+                    DepositState.COMPLETED, DepositState.FAILED,
+                    DepositState.REJECTED, DepositState.EXPIRED,
+                } or not amount:
+                    current = await self._reconcile_bridge_deposit(ctx.author)
+                    await ctx.send(embed=self._deposit_status_embed(current))
+                    return
+                async with user_config.bridge_deposit_history() as history:
+                    history.append(existing.to_record())
+                    del history[:-10]
+            except (AccountConnectionError, RuntimeError, TypeError, ValueError):
+                await ctx.send(
+                    "The existing deposit could not be reconciled. No replacement "
+                    "was created; keep its deposit ID for owner review."
+                )
+                return
+        if not amount:
+            await ctx.send(
+                f"Use `{ctx.clean_prefix}poly deposit <ETH amount>` to prepare a "
+                "CryptoWallet funding card."
+            )
+            return
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"`{ctx.clean_prefix}poly terms`."
+            )
+            return
+        try:
+            decimal_amount = Decimal(amount)
+            atomic_decimal = decimal_amount * Decimal(10**18)
+            if (not decimal_amount.is_finite() or decimal_amount <= 0
+                    or atomic_decimal != atomic_decimal.to_integral_value()):
+                raise ValueError
+            amount_atomic = int(atomic_decimal)
+        except (InvalidOperation, TypeError, ValueError):
+            await ctx.send("Enter a positive ETH amount with at most 18 decimals.")
+            return
+
+        try:
+            binding = await self._bot_first_account(ctx.author)
+            await PolygonAccountIdentityVerifier(self._polygon_rpc).verify(
+                signer_address=binding.signer_address,
+                account_wallet_address=binding.account_wallet_address,
+                wallet_type=WalletType.DEPOSIT_WALLET,
+            )
+            assets = await self.bridge_client.supported_assets()
+            matches = [
+                item for item in assets
+                if item.chain_id == 8453
+                and item.token_address == NATIVE_EVM_TOKEN
+                and item.symbol == "ETH" and item.decimals == 18
+            ]
+            if len(matches) != 1:
+                raise AccountConnectionError(
+                    "Bridge Base ETH support is unavailable or ambiguous."
+                )
+            asset = matches[0]
+            quote_result = await self.bridge_client.quote(
+                amount_atomic=amount_atomic, source_chain_id=asset.chain_id,
+                source_token=asset.token_address,
+                recipient=binding.account_wallet_address,
+            )
+            if quote_result.input_usd < asset.minimum_usd:
+                raise AccountConnectionError(
+                    f"The live Bridge minimum is ${asset.minimum_usd}."
+                )
+            addresses = await self.bridge_client.deposit_addresses(
+                binding.account_wallet_address
+            )
+            now = int(time.time())
+            deposit_id = secrets.token_urlsafe(12)
+            expires_at = now + 120
+            request_fingerprint = funding_request_fingerprint(
+                deposit_id=deposit_id, discord_user_id=ctx.author.id,
+                profile_id=binding.profile_id,
+                account_wallet_address=binding.account_wallet_address,
+                bridge_address=addresses.evm, asset=asset,
+                amount_atomic=amount_atomic, quote=quote_result,
+                created_at=now, expires_at=expires_at,
+            )
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            prepare = getattr(
+                cryptowallet, "polymarket_prepare_deposit_intent", None
+            )
+            card = getattr(
+                cryptowallet, "polymarket_deposit_approval_card", None
+            )
+            if not callable(prepare) or not callable(card):
+                raise AccountConnectionError("CryptoWallet deposit approval is unavailable.")
+            evidence = await prepare(
+                ctx.author, deposit_id=deposit_id,
+                binding_fingerprint=request_fingerprint,
+                recipient=addresses.evm, amount_atomic=amount_atomic,
+            )
+            deposit = BridgeDeposit.create(
+                deposit_id=deposit_id, discord_user_id=ctx.author.id,
+                profile_id=binding.profile_id,
+                account_wallet_address=binding.account_wallet_address,
+                bridge_address=addresses.evm, asset=asset,
+                amount_atomic=amount_atomic, quote=quote_result,
+                wallet_intent_id=evidence["intent_id"],
+                wallet_intent_fingerprint=evidence["approval_fingerprint"],
+                created_at=now, expires_at=evidence["expires_at"],
+            )
+            if deposit.expires_at != expires_at:
+                raise AccountConnectionError("CryptoWallet deposit expiry changed.")
+            await user_config.bridge_deposit.set(deposit.to_record())
+            embed, view, card_evidence = await card(
+                ctx.author, intent_id=deposit.wallet_intent_id,
+                binding_fingerprint=request_fingerprint,
+                quoted_pusd_atomic=deposit.quoted_pusd_atomic,
+                minimum_received_usd=deposit.minimum_received_usd,
+                color=await ctx.embed_color(),
+            )
+            if card_evidence["approval_fingerprint"] != deposit.wallet_intent_fingerprint:
+                raise AccountConnectionError("CryptoWallet approval card changed.")
+            view.message = await ctx.send(embed=embed, view=view)
+        except (AccountConnectionError, RuntimeError, KeyError, TypeError, ValueError) as exc:
+            await ctx.send(
+                f"The deposit preview could not be prepared: {exc} "
+                "No approval was granted and no transaction was submitted."
+            )
 
     @polymarket.command(name="status")
     async def polymarket_status(self, ctx: commands.Context):

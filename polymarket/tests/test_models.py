@@ -24,7 +24,9 @@ from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.bridge import (
     BridgeAsset, BridgeQuote, BridgeTransaction, NATIVE_EVM_TOKEN, PolymarketBridgeClient,
 )
-from polymarket.deposit_lifecycle import BridgeDeposit, DepositState
+from polymarket.deposit_lifecycle import (
+    BridgeDeposit, DepositState, funding_request_fingerprint,
+)
 from polymarket.deposit_wallet import (
     DepositWalletCreationPlan, DepositWalletCreationState, RELAYER_REQUEST_TYPE,
 )
@@ -1078,6 +1080,21 @@ class BridgeDepositLifecycleTests(unittest.TestCase):
         self.assertEqual(restored, deposit)
         self.assertEqual(restored.fingerprint, deposit.fingerprint)
         self.assertEqual(restored.quoted_pusd_atomic, 24750000)
+        request_fingerprint = funding_request_fingerprint(
+            deposit_id=deposit.deposit_id, discord_user_id=deposit.discord_user_id,
+            profile_id=deposit.profile_id,
+            account_wallet_address=deposit.account_wallet_address,
+            bridge_address=deposit.bridge_address,
+            asset=BridgeAsset(8453, "Base", "Ether", "ETH",
+                              NATIVE_EVM_TOKEN, 18, Decimal("2")),
+            amount_atomic=deposit.source_amount_atomic,
+            quote=BridgeQuote(deposit.quote_id, Decimal("25"), Decimal("24.75"),
+                              24750000, Decimal("24.50"), Decimal("1"),
+                              Decimal("0.25"), Decimal("0.01"),
+                              Decimal("0.5"), 27000),
+            created_at=deposit.created_at, expires_at=deposit.expires_at,
+        )
+        self.assertRegex(request_fingerprint, r"^[0-9a-f]{64}$")
 
     def test_wallet_intent_requires_exact_immutable_identity(self):
         deposit = self._deposit()
@@ -2593,7 +2610,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "session", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "session", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral", "deposit"):
             self.assertIn(command, fields)
 
     async def test_session_command_creates_exact_protected_eligibility_card(self):
@@ -3101,6 +3118,96 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Revoke: set value to 0", fields["Approval 1: pUSD"])
         self.assertIn("Revoke: set value to false", fields["Approval 2: Outcome tokens"])
         self.assertIn("Disclosure only", fields["Execution"])
+
+    async def test_deposit_default_gate_stops_before_bridge_or_wallet_access(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog.bridge_client = SimpleNamespace(supported_assets=AsyncMock())
+        await Polymarket.polymarket_deposit.callback(cog, ctx, amount="0.01")
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        cog.bridge_client.supported_assets.assert_not_awaited()
+
+    async def test_deposit_builds_exact_cryptowallet_approval_card_and_persists(self):
+        author = SimpleNamespace(id=7)
+        message = SimpleNamespace()
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock(return_value=message),
+            embed_color=AsyncMock(return_value=None),
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        asset = BridgeAsset(
+            8453, "Base", "Ether", "ETH", NATIVE_EVM_TOKEN, 18, Decimal("2")
+        )
+        quote_result = BridgeQuote(
+            "0x" + "a" * 64, Decimal("25"), Decimal("24.75"),
+            24750000, Decimal("24.50"), Decimal("1"), Decimal("0.25"),
+            Decimal("0.01"), Decimal("0.5"), 27000,
+        )
+        bridge = SimpleNamespace(
+            supported_assets=AsyncMock(return_value=(asset,)),
+            quote=AsyncMock(return_value=quote_result),
+            deposit_addresses=AsyncMock(return_value=SimpleNamespace(
+                evm="0x" + "3" * 40
+            )),
+        )
+        view = SimpleNamespace(message=None)
+        cryptowallet = SimpleNamespace(
+            polymarket_prepare_deposit_intent=AsyncMock(return_value={
+                "intent_id": "poly-fixed-deposit",
+                "approval_fingerprint": "b" * 64,
+                "expires_at": 220,
+            }),
+            polymarket_deposit_approval_card=AsyncMock(return_value=(
+                SimpleNamespace(title="Fund Polymarket account"), view,
+                {"approval_fingerprint": "b" * 64},
+            )),
+        )
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: cryptowallet if name == "CryptoWallet" else None
+        ))
+        cog.bridge_client = bridge
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({"deposit": True})
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(7, now=100, acceptance_id="terms-7")
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.secrets.token_urlsafe",
+                  return_value="fixed-deposit"),
+            patch("polymarket.polymarket.PolygonAccountIdentityVerifier") as verifier,
+        ):
+            verifier.return_value.verify = AsyncMock(
+                return_value=SimpleNamespace(block_number=99)
+            )
+            await Polymarket.polymarket_deposit.callback(
+                cog, ctx, amount="0.01"
+            )
+
+        bridge.quote.assert_awaited_once_with(
+            amount_atomic=10**16, source_chain_id=8453,
+            source_token=NATIVE_EVM_TOKEN,
+            recipient=binding.account_wallet_address,
+        )
+        prepared = cryptowallet.polymarket_prepare_deposit_intent.await_args.kwargs
+        self.assertEqual(prepared["deposit_id"], "fixed-deposit")
+        self.assertEqual(prepared["recipient"], "0x" + "3" * 40)
+        self.assertRegex(prepared["binding_fingerprint"], r"^[0-9a-f]{64}$")
+        stored = BridgeDeposit.from_record(await user_config.bridge_deposit())
+        self.assertEqual(stored.wallet_intent_id, "poly-fixed-deposit")
+        self.assertEqual(stored.wallet_intent_fingerprint, "b" * 64)
+        self.assertEqual(stored.quoted_pusd_atomic, 24750000)
+        self.assertIs(view.message, message)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title,
+                         "Fund Polymarket account")
 
     async def test_status_reports_valid_default_off_deposit_wallet_boundary(self):
         ctx = Context()

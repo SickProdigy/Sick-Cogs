@@ -17,15 +17,16 @@ from .backend.provisioning import WalletProvisioningMixin
 from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
-from .core.models import IntentStatus
+from .core.models import IntentStatus, TransactionIntent
 from .core.polymarket import (
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
 )
 from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
-from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS
+from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS, NetworkCapability
 from .providers import CdpWalletProvider
+from .commands.views import WalletIntentView
 from .providers.base_rpc import get_chain_id, get_contract_code
 from .providers.cdp import CLANKER_DEPLOY_GAS_LIMIT
 
@@ -200,6 +201,193 @@ class CryptoWallet(
             profile, user.id, owner, wallet, session, action, valid_until,
             typed_data, f"polymarket-session-{action}-{approval_fingerprint}",
         )
+
+    @staticmethod
+    def _polymarket_deposit_intent_evidence(intent) -> dict:
+        return {
+            "intent_id": intent.intent_id, "profile_id": intent.profile_id,
+            "network": intent.network, "from_address": intent.from_address,
+            "to_address": intent.to_address, "value_atomic": intent.value_atomic,
+            "asset_kind": intent.asset_kind, "asset_symbol": intent.asset_symbol,
+            "asset_decimals": intent.asset_decimals,
+            "approval_fingerprint": intent.approval_fingerprint(),
+            "status": intent.status.value,
+            "transaction_hash": intent.transaction_hash,
+            "expires_at": intent.expires_at,
+            "estimated_fee_atomic": intent.estimated_fee_atomic,
+            "max_gas_fee_wei": intent.max_gas_fee_wei,
+        }
+
+    async def polymarket_prepare_deposit_intent(
+        self, user, *, deposit_id: str, binding_fingerprint: str,
+        recipient: str, amount_atomic: int,
+    ) -> dict:
+        """Create one idempotent protected Base ETH transfer for Polymarket funding."""
+
+        if (re.fullmatch(r"[A-Za-z0-9_-]{1,80}", str(deposit_id or "")) is None
+                or re.fullmatch(r"[0-9a-f]{64}", str(binding_fingerprint or "")) is None):
+            raise RuntimeError("Polymarket deposit binding is invalid.")
+        try:
+            amount = int(amount_atomic)
+            destination = normalize_evm_address(recipient).lower()
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Polymarket deposit transfer is invalid.") from exc
+        if amount <= 0:
+            raise RuntimeError("Polymarket deposit amount is invalid.")
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        mode = str(await self.config.operating_mode() or "testnet").lower()
+        policy = await self.config.base_mainnet_policy()
+        if (mode not in {"mainnet", "mainnet-only"} or not isinstance(policy, dict)
+                or policy.get("enabled") is not True
+                or policy.get("paused", True) is not False
+                or (policy.get("capabilities") or {}).get("send") is not True):
+            raise RuntimeError("CryptoWallet Base mainnet sending is disabled or paused.")
+        if not BASE_MAINNET.supports(NetworkCapability.SEND) or not self.wallet_provider.supports(
+            BASE_MAINNET.key, NetworkCapability.SEND
+        ):
+            raise RuntimeError("CryptoWallet Base mainnet sending is unavailable.")
+        if not await self.has_current_cryptowallet_mainnet_terms(user.id):
+            raise RuntimeError("Current CryptoWallet mainnet terms are required.")
+
+        profile = await self.get_or_create_wallet_profile(user)
+        profile = await self.ensure_mainnet_wallet_profile(user, profile)
+        account = self._account_for_network(profile, BASE_MAINNET.key)
+        try:
+            sender = normalize_evm_address(str((account or {}).get("address") or "")).lower()
+        except ValueError as exc:
+            raise RuntimeError("The Base mainnet wallet account is invalid.") from exc
+        profile_id = str(profile.get("profile_id") or "")
+        if not profile_id:
+            raise RuntimeError("The CryptoWallet profile is incomplete.")
+
+        intent_id = f"poly-{deposit_id}"
+        existing = await self._stored_intent(user.id, intent_id)
+        integration = await self.config.user(user).integration_intents.get_raw(
+            intent_id, default=None
+        )
+        if existing is not None or integration is not None:
+            expected = {
+                "product": "polymarket_deposit",
+                "binding_fingerprint": binding_fingerprint,
+                "intent_fingerprint": (
+                    existing.approval_fingerprint() if existing is not None else ""
+                ),
+            }
+            if (existing is None or integration != expected
+                    or existing.profile_id != profile_id
+                    or existing.network != BASE_MAINNET.key
+                    or existing.from_address.lower() != sender
+                    or existing.to_address.lower() != destination
+                    or existing.value_atomic != amount
+                    or existing.asset_kind != "native"
+                    or existing.asset_symbol != "ETH"
+                    or existing.asset_decimals != 18):
+                raise RuntimeError("Stored Polymarket deposit intent binding changed.")
+            return self._polymarket_deposit_intent_evidence(existing)
+
+        balance = int(await self.wallet_provider.get_native_balance(
+            sender, BASE_MAINNET.key
+        ))
+        if amount > balance:
+            raise RuntimeError("Insufficient Base ETH balance for this deposit.")
+        now = int(time.time())
+        intent = TransactionIntent(
+            intent_id=intent_id, profile_id=profile_id,
+            network=BASE_MAINNET.key, from_address=sender,
+            to_address=destination, value_wei=amount,
+            created_at=now, expires_at=now + 120,
+            asset_kind="native", asset_symbol="ETH", asset_decimals=18,
+            estimated_gas_fee_wei=0, gas_sponsored=False,
+        )
+        intent = await self.wallet_provider.prepare_transaction(intent)
+        disclosure = self._mainnet_intent_disclosure_error(intent, BASE_MAINNET)
+        if disclosure is not None:
+            raise RuntimeError(f"Polymarket deposit preview is incomplete: {disclosure}")
+        if intent.value_atomic + intent.estimated_fee_atomic > balance:
+            raise RuntimeError("Insufficient Base ETH balance for the amount and fee.")
+        limits = policy.get("limits_atomic") or {}
+        try:
+            transaction_limit = int(limits.get("per_transaction", 0))
+        except (TypeError, ValueError):
+            transaction_limit = 0
+        reserved = intent.value_atomic + intent.max_gas_fee_wei
+        if transaction_limit <= 0 or reserved > transaction_limit:
+            raise RuntimeError(
+                "This deposit plus its fee threshold exceeds the Base mainnet limit."
+            )
+
+        async with self.config.user(user).all() as values:
+            intents = values.get("intents")
+            integrations = values.get("integration_intents")
+            if not isinstance(intents, dict) or not isinstance(integrations, dict):
+                raise RuntimeError("CryptoWallet intent storage is unavailable.")
+            if intent_id in intents or intent_id in integrations:
+                raise RuntimeError("Polymarket deposit intent changed while it was prepared.")
+            intents[intent_id] = intent.to_dict()
+            integrations[intent_id] = {
+                "product": "polymarket_deposit",
+                "binding_fingerprint": binding_fingerprint,
+                "intent_fingerprint": intent.approval_fingerprint(),
+            }
+        await self.expire_and_trim_intents(user)
+        return self._polymarket_deposit_intent_evidence(intent)
+
+    async def polymarket_deposit_intent_evidence(
+        self, user, *, intent_id: str, binding_fingerprint: str,
+        reconcile: bool = False,
+    ) -> dict:
+        """Return authenticated public status for one bound Polymarket transfer."""
+
+        integration = await self.config.user(user).integration_intents.get_raw(
+            intent_id, default=None
+        )
+        if (not isinstance(integration, dict)
+                or integration.get("product") != "polymarket_deposit"
+                or integration.get("binding_fingerprint") != binding_fingerprint):
+            raise RuntimeError("Polymarket deposit intent binding is unavailable.")
+        intent = await self._stored_intent(user.id, intent_id)
+        if intent is None:
+            raise RuntimeError("The CryptoWallet deposit intent is unavailable.")
+        if reconcile and intent.status in {IntentStatus.SUBMITTED, IntentStatus.UNCERTAIN}:
+            intent = await self._refresh_submitted_intent(user.id, intent_id)
+        evidence = self._polymarket_deposit_intent_evidence(intent)
+        if integration.get("intent_fingerprint") != evidence["approval_fingerprint"]:
+            raise RuntimeError("The CryptoWallet deposit intent changed.")
+        return evidence
+
+    async def polymarket_deposit_approval_card(
+        self, user, *, intent_id: str, binding_fingerprint: str,
+        quoted_pusd_atomic: int, minimum_received_usd: str, color,
+    ):
+        """Build the standard CryptoWallet approval card for a bound deposit intent."""
+
+        evidence = await self.polymarket_deposit_intent_evidence(
+            user, intent_id=intent_id, binding_fingerprint=binding_fingerprint
+        )
+        intent = await self._stored_intent(user.id, intent_id)
+        if intent is None or intent.status is not IntentStatus.PENDING:
+            raise RuntimeError("The CryptoWallet deposit intent is not pending.")
+        embed = self._intent_embed(intent, BASE_MAINNET, color)
+        embed.title = "Fund Polymarket account"
+        embed.add_field(
+            name="Estimated Polymarket credit",
+            value=(f"{int(quoted_pusd_atomic) // 1_000_000}."
+                   f"{int(quoted_pusd_atomic) % 1_000_000:06d} pUSD"),
+            inline=True,
+        )
+        embed.add_field(
+            name="Bridge minimum received", value=f"${minimum_received_usd}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Credit status",
+            value="Estimate only; credited only after Bridge completion evidence.",
+            inline=False,
+        )
+        return embed, WalletIntentView(self, user.id, intent), evidence
 
     async def estimate_base_mainnet_call_fee(
         self, *, from_address: str, to_address: str, value_wei: int, data: str
