@@ -11,6 +11,10 @@ from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
+from polymarket.deposit_wallet import (
+    DepositWalletCreationPlan, DepositWalletCreationState, RELAYER_METADATA,
+    RELAYER_REQUEST_TYPE,
+)
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 from polymarket.identity_verifier import (
     AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
@@ -649,6 +653,101 @@ class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedA
         verify.assert_not_awaited()
 
 
+
+
+class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preflight_uses_current_beacon_target_and_requires_empty_code(self):
+        async def rpc(method, params):
+            if method == "eth_chainId":
+                return "0x89"
+            if method == "eth_blockNumber":
+                return "0x1234"
+            if method == "eth_getCode":
+                return "0x"
+            raise AssertionError(method)
+
+        verifier = PolygonAccountIdentityVerifier(rpc)
+        evidence = await verifier.verify_deposit_wallet_creation_target("0x" + "1" * 40)
+        self.assertEqual(
+            evidence.deposit_wallet_address,
+            "0x574548bc296a44a39a7828343fc262244f37a7e5",
+        )
+        self.assertEqual(evidence.chain_id, 137)
+        self.assertEqual(evidence.source, "polygon_predeployment_read")
+
+        async def deployed(method, params):
+            return "0x6000" if method == "eth_getCode" else await rpc(method, params)
+
+        with self.assertRaisesRegex(AccountConnectionError, "already deployed"):
+            await PolygonAccountIdentityVerifier(
+                deployed
+            ).verify_deposit_wallet_creation_target("0x" + "1" * 40)
+
+    def test_plan_pins_official_request_and_reconciles_exact_transaction(self):
+        plan = DepositWalletCreationPlan(
+            creation_id="c" * 32, discord_user_id=7,
+            signer_address="0x" + "1" * 40,
+            deposit_wallet_address="0x574548bc296a44a39a7828343fc262244f37a7e5",
+            idempotency_key="i" * 32, owner_approval_fingerprint="a" * 64,
+            eligibility_fingerprint="b" * 64, target_evidence_digest="c" * 64,
+            created_at=100, expires_at=400,
+        )
+        self.assertEqual(plan.request_type, RELAYER_REQUEST_TYPE)
+        self.assertEqual(plan.metadata, RELAYER_METADATA)
+        self.assertEqual(plan.request_to, POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower())
+        self.assertEqual(plan.relayer_request(), {
+            "from": "0x" + "1" * 40,
+            "metadata": "Deploy Deposit Wallet",
+            "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
+            "type": "WALLET_CREATE",
+        })
+        self.assertEqual(plan.builder_auth_location, "server_only")
+        self.assertTrue(plan.user_controlled_approval)
+        self.assertFalse(plan.executable)
+        submitting = plan.begin_submission(now=150)
+        recovered = DepositWalletCreationPlan.from_record(
+            submitting.to_record()
+        ).recover_after_restart()
+        self.assertEqual(recovered.state, DepositWalletCreationState.UNKNOWN)
+        with self.assertRaises(AccountConnectionError):
+            recovered.begin_submission(now=151)
+        submitted = submitting.record_submission({
+            "transaction_id": "relayer-1", "transaction_hash": None,
+        })
+        self.assertEqual(submitted.state, DepositWalletCreationState.SUBMITTED)
+        confirmed = submitted.reconcile({
+            "state": "STATE_CONFIRMED", "transaction_id": "relayer-1",
+            "transaction_hash": "0x" + "d" * 64,
+        })
+        self.assertEqual(confirmed.state, DepositWalletCreationState.CONFIRMED)
+        self.assertEqual(confirmed.transaction_hash, "0x" + "d" * 64)
+        with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
+            submitted.reconcile({
+                "state": "STATE_CONFIRMED", "transaction_id": "relayer-2",
+                "transaction_hash": "0x" + "d" * 64,
+            })
+
+    def test_malformed_submission_stays_reconcilable_and_failures_store_only_digest(self):
+        plan = DepositWalletCreationPlan(
+            creation_id="c" * 32, discord_user_id=7,
+            signer_address="0x" + "1" * 40,
+            deposit_wallet_address="0x574548bc296a44a39a7828343fc262244f37a7e5",
+            idempotency_key="i" * 32, owner_approval_fingerprint="a" * 64,
+            eligibility_fingerprint="b" * 64, target_evidence_digest="c" * 64,
+            created_at=100, expires_at=400,
+        ).begin_submission(now=150)
+        unknown = plan.record_submission({
+            "transaction_id": "relayer-1", "transaction_hash": "bad",
+        })
+        self.assertEqual(unknown.state, DepositWalletCreationState.UNKNOWN)
+        self.assertEqual(unknown.relayer_transaction_id, "relayer-1")
+        failed = unknown.reconcile({
+            "state": "STATE_INVALID", "transaction_id": "relayer-1",
+            "error_msg": "provider detail must not persist",
+        })
+        self.assertEqual(failed.state, DepositWalletCreationState.FAILED)
+        self.assertEqual(len(failed.failure_digest), 64)
+        self.assertNotIn("provider detail", repr(failed))
 class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def _rpc(self, method, params):
         if method == "eth_chainId":

@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 from eth_hash.auto import keccak
 
 from .account_connection import AccountConnectionError, WalletType, normalize_evm_address
+from .deposit_wallet import DepositWalletTargetEvidence
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST,
     PolymarketProductionManifest,
@@ -165,6 +166,45 @@ class PolygonAccountIdentityVerifier:
             WalletType.GNOSIS_SAFE: (safe_wallet,),
             WalletType.DEPOSIT_WALLET: (uups_wallet, beacon_wallet),
         }
+
+    async def verify_deposit_wallet_creation_target(
+        self, signer_address: str,
+    ) -> DepositWalletTargetEvidence:
+        """Confirm the current beacon-derived Deposit Wallet target is undeployed."""
+
+        signer = normalize_evm_address(signer_address, "signer_address")
+        wallet = (await self.derive_wallets(signer))[WalletType.DEPOSIT_WALLET][-1]
+        chain_id_raw = await self.rpc("eth_chainId", [])
+        block_raw = await self.rpc("eth_blockNumber", [])
+        code = await self.rpc("eth_getCode", [wallet, "latest"])
+        try:
+            chain_id = int(str(chain_id_raw), 16)
+            block_number = int(str(block_raw), 16)
+        except (TypeError, ValueError) as exc:
+            raise AccountConnectionError(
+                "Polygon RPC returned invalid chain metadata."
+            ) from exc
+        if chain_id != self.manifest.chain_id:
+            raise AccountConnectionError("Polygon RPC chain ID does not match.")
+        if not isinstance(code, str) or not HEX_DATA.fullmatch(code):
+            raise AccountConnectionError("Polygon RPC returned invalid wallet bytecode.")
+        if code not in {"0x", "0x00"}:
+            raise AccountConnectionError("Deposit Wallet target is already deployed.")
+        empty_code_hash = "0x" + (await self._keccak(b"")).hex()
+        values = {
+            "block_number": block_number, "chain_id": chain_id,
+            "deposit_wallet_address": wallet, "empty_code_hash": empty_code_hash,
+            "signer_address": signer, "source": "polygon_predeployment_read",
+            "wallet_type": WalletType.DEPOSIT_WALLET.value,
+        }
+        digest = hashlib.sha256(
+            json.dumps(values, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        return DepositWalletTargetEvidence(
+            signer_address=signer, deposit_wallet_address=wallet,
+            block_number=block_number, empty_code_hash=empty_code_hash,
+            evidence_digest=digest,
+        )
 
     async def verify(
         self,
