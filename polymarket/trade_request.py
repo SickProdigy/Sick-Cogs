@@ -7,7 +7,9 @@ import re
 from typing import Any, Mapping
 
 from .account_connection import AccountConnectionError, normalize_evm_address
-from .order_intent import MarketBuyApproval, OrderIntentError
+from .order_intent import (
+    MarketBuyApproval, MarketSellApproval, OrderIntentError,
+)
 from .security_policy import EligibilityAttestation
 from .trade_confirmation import TradeConfirmation, TradeConfirmationError
 
@@ -21,7 +23,7 @@ class TradeApprovalRequest:
     signer_address: str
     account_wallet_address: str
     session_address: str
-    approval: MarketBuyApproval
+    approval: MarketBuyApproval | MarketSellApproval
     eligibility: EligibilityAttestation
     confirmation: TradeConfirmation
 
@@ -44,7 +46,9 @@ class TradeApprovalRequest:
         )
         if len({self.signer_address, self.account_wallet_address, self.session_address}) != 3:
             raise TradeConfirmationError("Trade signer identities must remain separate.")
-        if not isinstance(self.approval, MarketBuyApproval):
+        if not isinstance(
+            self.approval, (MarketBuyApproval, MarketSellApproval)
+        ):
             raise TradeConfirmationError("Trade approval is invalid.")
         if not isinstance(self.eligibility, EligibilityAttestation):
             raise TradeConfirmationError("Trade eligibility is invalid.")
@@ -66,7 +70,8 @@ class TradeApprovalRequest:
     def create(
         cls, *, request_id: str, profile_id: str, signer_address: str,
         account_wallet_address: str, session_address: str,
-        approval: MarketBuyApproval, eligibility: EligibilityAttestation,
+        approval: MarketBuyApproval | MarketSellApproval,
+        eligibility: EligibilityAttestation,
         final_confirmation_required: bool,
     ) -> "TradeApprovalRequest":
         confirmation = TradeConfirmation(
@@ -150,7 +155,12 @@ class TradeApprovalRequest:
                 signer_address=str(record["signer_address"]),
                 account_wallet_address=str(record["account_wallet_address"]),
                 session_address=str(record["session_address"]),
-                approval=MarketBuyApproval.from_record(record["approval"]),
+                approval=(
+                    MarketBuyApproval.from_record(record["approval"])
+                    if isinstance(record["approval"], Mapping)
+                    and "max_spend_pusd" in record["approval"]
+                    else MarketSellApproval.from_record(record["approval"])
+                ),
                 eligibility=EligibilityAttestation(
                     discord_user_id=int(eligibility["discord_user_id"]),
                     blocked=eligibility["blocked"],

@@ -1,4 +1,4 @@
-"""Immutable current market metadata, quote, and bounded buy approval models."""
+"""Immutable current market metadata, quote, and bounded trade approval models."""
 
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_EVEN
@@ -82,8 +82,8 @@ class OrderBookSnapshot:
             raise OrderIntentError("Order book token ID is invalid.")
         bids = _levels(payload.get("bids"), "bids")
         asks = _levels(payload.get("asks"), "asks")
-        if not asks:
-            raise OrderIntentError("Order book has no sell liquidity.")
+        if not bids and not asks:
+            raise OrderIntentError("Order book has no liquidity.")
         minimum = _decimal(payload.get("min_order_size"), "min_order_size")
         tick = _decimal(payload.get("tick_size"), "tick_size")
         if tick not in _ALLOWED_TICKS:
@@ -244,6 +244,8 @@ class MarketBuyApproval:
         if self.requester_id <= 0 or not self.market_id or not self.condition_id or not self.outcome:
             raise OrderIntentError("Approval identity is incomplete.")
         self.metadata.require_matches(self.quote)
+        if not self.quote.asks:
+            raise OrderIntentError("Order book has no sell liquidity.")
         if self.max_price <= 0 or self.max_price >= 1 or self.max_price % self.quote.tick_size:
             raise OrderIntentError("Maximum price does not conform to the live tick size.")
         if self.max_price < self.quote.best_ask:
@@ -386,3 +388,195 @@ class MarketBuyApproval:
             raise OrderIntentError("Market constraints changed; reapproval is required.")
         if fresh.best_ask > self.max_price:
             raise OrderIntentError("Price exceeded the approved maximum.")
+
+
+@dataclass(frozen=True, slots=True)
+class MarketSellApproval:
+    """Immutable position-backed FAK sell with a minimum execution price."""
+
+    requester_id: int
+    market_id: str
+    condition_id: str
+    outcome: str
+    quote: OrderBookSnapshot
+    metadata: MarketOrderMetadata
+    shares: Decimal
+    available_shares: Decimal
+    min_price: Decimal
+    created_at: int
+    expires_at: int
+
+    def __post_init__(self) -> None:
+        if (
+            self.requester_id <= 0 or not self.market_id
+            or not self.condition_id or not self.outcome
+        ):
+            raise OrderIntentError("Sell approval identity is incomplete.")
+        self.metadata.require_matches(self.quote)
+        if not self.quote.bids:
+            raise OrderIntentError("Order book has no buy liquidity.")
+        if (
+            self.min_price <= 0 or self.min_price >= 1
+            or self.min_price % self.quote.tick_size
+        ):
+            raise OrderIntentError(
+                "Minimum price does not conform to the live tick size."
+            )
+        if self.quote.best_bid is None or self.quote.best_bid < self.min_price:
+            raise OrderIntentError("Minimum price exceeds the current best bid.")
+        if (
+            self.shares <= 0 or self.available_shares <= 0
+            or self.shares > self.available_shares
+            or _decimal_places(self.shares) > 6
+            or _decimal_places(self.available_shares) > 6
+        ):
+            raise OrderIntentError(
+                "Sell shares exceed the exact available position balance."
+            )
+        if self.shares < self.quote.minimum_order_size:
+            raise OrderIntentError("Sell shares cannot satisfy the market minimum.")
+        if self.created_at != self.quote.captured_at or self.expires_at <= self.created_at:
+            raise OrderIntentError("Sell approval timestamps are not bound to the quote.")
+
+    @classmethod
+    def create(
+        cls, *, requester_id: int, market_id: str, condition_id: str,
+        outcome: str, quote: OrderBookSnapshot, metadata: MarketOrderMetadata,
+        shares: str, available_shares: str, min_price: str, expires_at: int,
+    ) -> "MarketSellApproval":
+        return cls(
+            requester_id, market_id, condition_id, outcome, quote, metadata,
+            _decimal(shares, "shares"),
+            _decimal(available_shares, "available_shares"),
+            _decimal(min_price, "min_price"),
+            quote.captured_at, expires_at,
+        )
+
+    @property
+    def effective_fee_rate(self) -> Decimal:
+        if self.metadata.fee_rate == 0:
+            return Decimal(0)
+        return self.metadata.fee_rate * (
+            (self.min_price * (Decimal(1) - self.min_price))
+            ** self.metadata.fee_exponent
+        )
+
+    @property
+    def minimum_gross_pusd(self) -> Decimal:
+        return (self.shares * self.min_price).quantize(
+            Decimal("0.000001"), rounding=ROUND_CEILING
+        )
+
+    @property
+    def maximum_fee_pusd(self) -> Decimal:
+        return (self.shares * self.effective_fee_rate).quantize(
+            Decimal("0.000001"), rounding=ROUND_CEILING
+        )
+
+    @property
+    def minimum_net_pusd(self) -> Decimal:
+        return max(
+            Decimal(0), self.minimum_gross_pusd - self.maximum_fee_pusd
+        )
+
+    @property
+    def order_amounts(self) -> tuple[int, int]:
+        maker_amount = _atomic(self.shares)
+        taker_amount = int(
+            (self.shares * self.min_price * Decimal(10**6)).to_integral_value(
+                rounding=ROUND_CEILING
+            )
+        )
+        if maker_amount <= 0 or taker_amount <= 0:
+            raise OrderIntentError("Protected sell rounds to zero.")
+        encoded_price = Decimal(taker_amount) / Decimal(maker_amount)
+        if encoded_price < self.min_price:
+            raise OrderIntentError(
+                "Protected sell rounding cannot preserve the approved bounds."
+            )
+        return maker_amount, taker_amount
+
+    @property
+    def fingerprint(self) -> str:
+        fields = (
+            "SELL", str(self.requester_id), self.market_id, self.condition_id,
+            self.outcome, self.quote.token_id, self.quote.book_hash,
+            str(self.quote.negative_risk),
+            format(self.quote.minimum_order_size, "f"),
+            format(self.quote.tick_size, "f"), format(self.quote.best_bid, "f"),
+            format(self.metadata.fee_rate, "f"),
+            format(self.metadata.fee_exponent, "f"),
+            format(self.shares, "f"), format(self.available_shares, "f"),
+            format(self.min_price, "f"), str(self.created_at),
+            str(self.expires_at),
+        )
+        return hashlib.sha256("|".join(fields).encode()).hexdigest()
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "requester_id": self.requester_id,
+            "market_id": self.market_id,
+            "condition_id": self.condition_id,
+            "outcome": self.outcome,
+            "quote": self.quote.to_record(),
+            "metadata": self.metadata.to_record(),
+            "shares": format(self.shares, "f"),
+            "available_shares": format(self.available_shares, "f"),
+            "min_price": format(self.min_price, "f"),
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+
+    @classmethod
+    def from_record(cls, record: Any) -> "MarketSellApproval":
+        expected = {
+            "requester_id", "market_id", "condition_id", "outcome", "quote",
+            "metadata", "shares", "available_shares", "min_price",
+            "created_at", "expires_at",
+        }
+        if not isinstance(record, Mapping) or set(record) != expected:
+            raise OrderIntentError("Stored sell approval has an invalid shape.")
+        try:
+            quote = OrderBookSnapshot.from_record(record["quote"])
+            metadata = MarketOrderMetadata.from_record(
+                record["metadata"], expected_token_id=quote.token_id
+            )
+            approval = cls.create(
+                requester_id=int(record["requester_id"]),
+                market_id=str(record["market_id"]),
+                condition_id=str(record["condition_id"]),
+                outcome=str(record["outcome"]), quote=quote, metadata=metadata,
+                shares=str(record["shares"]),
+                available_shares=str(record["available_shares"]),
+                min_price=str(record["min_price"]),
+                expires_at=int(record["expires_at"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OrderIntentError("Stored sell approval is invalid.") from exc
+        if approval.created_at != int(record["created_at"]):
+            raise OrderIntentError("Stored sell approval timestamp changed.")
+        return approval
+
+    def require_fresh(
+        self, fresh: OrderBookSnapshot, metadata: MarketOrderMetadata, *,
+        available_shares: Decimal, now: int,
+    ) -> None:
+        if now < self.created_at or now >= self.expires_at:
+            raise OrderIntentError("Approval is expired or not current.")
+        if fresh.captured_at < self.created_at or fresh.captured_at > now:
+            raise OrderIntentError("Final quote timestamp is invalid.")
+        metadata.require_matches(fresh)
+        if (
+            fresh.token_id != self.quote.token_id
+            or metadata != self.metadata
+            or fresh.minimum_order_size != self.quote.minimum_order_size
+        ):
+            raise OrderIntentError(
+                "Market constraints changed; reapproval is required."
+            )
+        if fresh.best_bid is None or fresh.best_bid < self.min_price:
+            raise OrderIntentError("Price fell below the approved minimum.")
+        if available_shares != self.available_shares or self.shares > available_shares:
+            raise OrderIntentError(
+                "Position balance changed; reapproval is required."
+            )

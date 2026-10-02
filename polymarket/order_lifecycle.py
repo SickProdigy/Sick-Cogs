@@ -96,6 +96,7 @@ class OrderBinding:
     created_at: datetime
     expires_at: datetime
     order_type: str = "GTC"
+    minimum_price: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         if not isinstance(self.discord_user_id, int) or self.discord_user_id <= 0:
@@ -123,20 +124,26 @@ class OrderBinding:
         if self.protocol_version not in {"2", "3"}:
             raise OrderLifecycleError("protocol_version is invalid")
         side = _short_text(self.side, "side", limit=8).upper()
-        if side != "BUY":
-            raise OrderLifecycleError("only BUY order bindings are supported")
+        if side not in {"BUY", "SELL"}:
+            raise OrderLifecycleError("order side is invalid")
         object.__setattr__(self, "side", side)
         order_type = _short_text(self.order_type, "order_type", limit=3).upper()
         if order_type not in {"GTC", "FAK", "FOK"}:
             raise OrderLifecycleError("order_type is invalid")
         object.__setattr__(self, "order_type", order_type)
         price = _decimal(self.maximum_price, "maximum_price")
+        minimum_price = _decimal(self.minimum_price, "minimum_price")
         size = _decimal(self.maximum_size, "maximum_size")
         if price <= 0 or price > 1:
             raise OrderLifecycleError("maximum_price must be greater than zero and at most one")
+        if side == "BUY" and minimum_price != 0:
+            raise OrderLifecycleError("BUY minimum_price must be zero")
+        if side == "SELL" and (minimum_price <= 0 or minimum_price >= 1):
+            raise OrderLifecycleError("SELL minimum_price must be between zero and one")
         if size <= 0:
             raise OrderLifecycleError("maximum_size must be greater than zero")
         object.__setattr__(self, "maximum_price", price)
+        object.__setattr__(self, "minimum_price", minimum_price)
         object.__setattr__(self, "maximum_size", size)
         created_at = _utc_timestamp(self.created_at, "created_at")
         expires_at = _utc_timestamp(self.expires_at, "expires_at")
@@ -163,6 +170,8 @@ class OrderBinding:
             "order_type": self.order_type,
             "token_id": self.token_id,
         }
+        if self.side == "SELL":
+            payload["minimum_price"] = str(self.minimum_price)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -180,6 +189,10 @@ class OrderBinding:
             "order_type": self.order_type,
             "maximum_price": str(self.maximum_price),
             "maximum_size": str(self.maximum_size),
+            **(
+                {"minimum_price": str(self.minimum_price)}
+                if self.side == "SELL" else {}
+            ),
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
         }
@@ -202,6 +215,7 @@ class OrderBinding:
                 created_at=datetime.fromisoformat(record["created_at"]),
                 expires_at=datetime.fromisoformat(record["expires_at"]),
                 order_type=record.get("order_type", "GTC"),
+                minimum_price=record.get("minimum_price", "0"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise OrderLifecycleError("invalid order binding record") from exc
@@ -392,7 +406,13 @@ class OrderLifecycle:
         price = _decimal(payload.get("price"), "price")
         original_size = _decimal(payload.get("original_size"), "original_size")
         matched_size = _decimal(payload.get("size_matched"), "size_matched")
-        if price <= 0 or price > self.binding.maximum_price:
+        if price <= 0 or (
+            self.binding.side == "BUY"
+            and price > self.binding.maximum_price
+        ) or (
+            self.binding.side == "SELL"
+            and price < self.binding.minimum_price
+        ):
             raise OrderLifecycleError("provider price exceeds the approved bound")
         if original_size <= 0 or original_size > self.binding.maximum_size:
             raise OrderLifecycleError("provider size exceeds the approved bound")

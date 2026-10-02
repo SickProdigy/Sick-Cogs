@@ -1174,6 +1174,40 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             deposit_claims["sickwallet_polymarket_eligibility"]["action"],
             "deposit",
         )
+        trade_base = {
+            **payload, "session_address": "0x" + "3" * 40,
+            "market_path": "/markets/slug/example", "outcome": "yes",
+        }
+        for trade in (
+            {
+                **trade_base, "action": "buy",
+                "max_spend_pusd": "10", "max_price": "0.55",
+            },
+            {
+                **trade_base, "action": "sell",
+                "shares": "4.25", "min_price": "0.45",
+            },
+        ):
+            trade_token, _ = await harness.create_external_companion_handoff(
+                7, "polymarket_eligibility", trade
+            )
+            trade_claims = jwt.decode(
+                trade_token, self.key.public_key(), algorithms=["ES256"],
+                audience="project-id", issuer="https://wallet.example.test",
+            )
+            self.assertEqual(
+                trade_claims["sickwallet_polymarket_eligibility"],
+                {**trade, "discord_user_id": "7"},
+            )
+        for invalid_trade in (
+            {**trade_base, "action": "buy", "max_spend_pusd": "10"},
+            {**trade_base, "action": "sell", "shares": "4", "min_price": "1"},
+            {**trade_base, "action": "sell", "shares": "4", "min_price": "0.4", "private_key": "forbidden"},
+        ):
+            with self.assertRaisesRegex(ValueError, "Polymarket eligibility binding"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_eligibility", invalid_trade
+                )
         for changes in (
             {"discord_user_id": 8}, {"chain_id": 1}, {"action": "trade"},
             {"purpose": "polymarket_connect"}, {"private_key": "forbidden"},

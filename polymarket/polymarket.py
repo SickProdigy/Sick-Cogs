@@ -32,7 +32,8 @@ from .onboarding import (
 )
 from .onboarding_verification import finalize_onboarding_evidence
 from .order_intent import (
-    MarketBuyApproval, MarketOrderMetadata, OrderBookSnapshot, OrderIntentError,
+    MarketBuyApproval, MarketOrderMetadata, MarketSellApproval,
+    OrderBookSnapshot, OrderIntentError,
 )
 from .order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
@@ -1504,8 +1505,12 @@ class Polymarket(commands.Cog):
         embed.add_field(
             name="Approved bound",
             value=(
-                f"{lifecycle.binding.maximum_size:f} shares at no more than "
-                f"{lifecycle.binding.maximum_price:f} pUSD"
+                f"{lifecycle.binding.maximum_size:f} shares at "
+                + (
+                    f"no more than {lifecycle.binding.maximum_price:f} pUSD"
+                    if lifecycle.binding.side == "BUY"
+                    else f"no less than {lifecycle.binding.minimum_price:f} pUSD"
+                )
             ),
             inline=False,
         )
@@ -1797,6 +1802,38 @@ class Polymarket(commands.Cog):
                     raise SafetyLimitError("Trade limit reservation is missing.")
                 await setting.set(history)
 
+    async def _position_for_sell(
+        self, user, binding: BotFirstAccountBinding, *,
+        condition_id: str, token_id: str, outcome: str,
+    ):
+        payload = await self._get_data_json(
+            "/v2/positions", {
+                "user": binding.account_wallet_address,
+                "condition_id": condition_id,
+                "status": "OPEN", "limit": 100,
+            },
+        )
+        positions, cursor = parse_positions_page(
+            payload, expected_wallet=binding.account_wallet_address
+        )
+        matches = [
+            position for position in positions
+            if (
+                position.condition_id == condition_id
+                and position.token_id == token_id
+                and position.outcome.casefold() == outcome.casefold()
+            )
+        ]
+        if cursor:
+            raise AccountDataError(
+                "Position evidence is incomplete; narrow provider pagination is required."
+            )
+        if len(matches) != 1 or matches[0].size <= 0:
+            raise AccountDataError(
+                "One exact open position was not found for this market outcome."
+            )
+        return matches[0]
+
     async def _execute_trade_approval(
         self, interaction: discord.Interaction,
         request: TradeApprovalRequest,
@@ -1849,7 +1886,18 @@ class Polymarket(commands.Cog):
         metadata = MarketOrderMetadata.from_payload(
             metadata_payload, expected_token_id=request.approval.quote.token_id
         )
-        request.approval.require_fresh(fresh, metadata, now=now)
+        if isinstance(request.approval, MarketSellApproval):
+            position = await self._position_for_sell(
+                interaction.user, binding,
+                condition_id=request.approval.condition_id,
+                token_id=request.approval.quote.token_id,
+                outcome=request.approval.outcome,
+            )
+            request.approval.require_fresh(
+                fresh, metadata, available_shares=position.size, now=now
+            )
+        else:
+            request.approval.require_fresh(fresh, metadata, now=now)
         protocol = resolve_order_protocol(
             fresh.token_id, negative_risk=fresh.negative_risk
         )
@@ -1863,9 +1911,26 @@ class Polymarket(commands.Cog):
             session_signer_address=session.session_address,
             exchange_address=protocol.exchange_address,
             protocol_version=protocol.version,
-            side="BUY", order_type="FAK",
-            maximum_price=request.approval.max_price,
-            maximum_size=Decimal(taker_amount) / Decimal(10**6),
+            side=(
+                "SELL" if isinstance(request.approval, MarketSellApproval)
+                else "BUY"
+            ),
+            order_type="FAK",
+            maximum_price=(
+                Decimal(1)
+                if isinstance(request.approval, MarketSellApproval)
+                else request.approval.max_price
+            ),
+            minimum_price=(
+                request.approval.min_price
+                if isinstance(request.approval, MarketSellApproval)
+                else Decimal(0)
+            ),
+            maximum_size=(
+                Decimal(maker_amount) / Decimal(10**6)
+                if isinstance(request.approval, MarketSellApproval)
+                else Decimal(taker_amount) / Decimal(10**6)
+            ),
             created_at=datetime.fromtimestamp(
                 request.approval.created_at, timezone.utc
             ),
@@ -1889,20 +1954,23 @@ class Polymarket(commands.Cog):
                     OrderState.EXPIRED, OrderState.REJECTED,
                 }:
                     raise OrderLifecycleError(
-                        "An existing order must be reconciled before another buy."
+                        "An existing order must be reconciled before another trade."
                     )
                 async with user_config.order_history() as history:
                     history.append(existing.to_record())
                     del history[:-25]
                 await user_config.active_order.set(None)
 
-        await self._reserve_trade_spend(interaction.user, request, now=now)
+        is_sell = isinstance(request.approval, MarketSellApproval)
+        if not is_sell:
+            await self._reserve_trade_spend(interaction.user, request, now=now)
         wrapping_key, deployment_id = await self._session_storage_material()
         encrypted_record = await user_config.encrypted_session_key()
         if not encrypted_record:
-            await self._set_trade_spend_state(
-                interaction.user, request.request_id, "released"
-            )
+            if not is_sell:
+                await self._set_trade_spend_state(
+                    interaction.user, request.request_id, "released"
+                )
             raise AccountConnectionError("The active session key is unavailable.")
         try:
             private_key = reveal_session_private_key(
@@ -1922,6 +1990,7 @@ class Polymarket(commands.Cog):
                 taker_amount=taker_amount,
                 salt=secrets.randbits(53),
                 timestamp=now * 1000,
+                side="SELL" if is_sell else "BUY",
                 protocol_version=protocol.version,
             )
             signed_order = sign_deposit_wallet_order(private_key, unsigned)
@@ -1932,25 +2001,27 @@ class Polymarket(commands.Cog):
             )
             await user_config.active_order.set(submitting.to_record())
         except Exception:
-            await self._set_trade_spend_state(
-                interaction.user, request.request_id, "released"
-            )
+            if not is_sell:
+                await self._set_trade_spend_state(
+                    interaction.user, request.request_id, "released"
+                )
             raise
         result = await transport.submit_prepared(
             submitting, signed_order,
             now=datetime.fromtimestamp(now, timezone.utc), timestamp=now,
         )
         await user_config.active_order.set(result.to_record())
-        await self._set_trade_spend_state(
-            interaction.user, request.request_id,
-            "released" if result.state is OrderState.REJECTED else "submitted",
-        )
+        if not is_sell:
+            await self._set_trade_spend_state(
+                interaction.user, request.request_id,
+                "released" if result.state is OrderState.REJECTED else "submitted",
+            )
         await user_config.trade_approval.set(None)
         embed = discord.Embed(
             title=(
-                "Polymarket buy rejected"
+                f"Polymarket {'sell' if is_sell else 'buy'} rejected"
                 if result.state is OrderState.REJECTED
-                else "Polymarket buy submitted"
+                else f"Polymarket {'sell' if is_sell else 'buy'} submitted"
             ),
             description=(
                 f"Provider state: **{result.state.value}**"
@@ -1963,15 +2034,21 @@ class Polymarket(commands.Cog):
             ),
         )
         embed.add_field(
-            name="Approved maximum",
-            value=f"{request.approval.max_spend_pusd:f} pUSD all-in",
+            name="Approved bound",
+            value=(
+                f"{request.approval.shares:f} shares at no less than "
+                f"{request.approval.min_price:f} pUSD"
+                if is_sell else
+                f"{request.approval.max_spend_pusd:f} pUSD all-in"
+            ),
         )
         embed.set_footer(
             text=f"Fingerprint {request.approval.fingerprint[:12]}"
         )
         await interaction.message.edit(embed=embed, view=None)
         await interaction.followup.send(
-            "The exact approved FAK buy reached the authenticated provider "
+            f"The exact approved FAK {'sell' if is_sell else 'buy'} reached "
+            "the authenticated provider "
             "boundary. Use poly orders for current provider state.",
             ephemeral=True,
         )
@@ -1988,13 +2065,17 @@ class Polymarket(commands.Cog):
 
     def _trade_approval_embed(self, request: TradeApprovalRequest) -> discord.Embed:
         state = request.confirmation.state
-        title = {
-            TradeConfirmationState.AWAITING_APPROVAL: "Approve Polymarket buy",
-            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION: "Are you sure?",
-            TradeConfirmationState.APPROVED: "Submitting approved buy",
-            TradeConfirmationState.DECLINED: "Polymarket buy cancelled",
-        }[state]
         approval = request.approval
+        side = "sell" if isinstance(approval, MarketSellApproval) else "buy"
+        title = {
+            TradeConfirmationState.AWAITING_APPROVAL:
+                f"Approve Polymarket {side}",
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION: "Are you sure?",
+            TradeConfirmationState.APPROVED:
+                f"Submitting approved {side}",
+            TradeConfirmationState.DECLINED:
+                f"Polymarket {side} cancelled",
+        }[state]
         maker_amount, taker_amount = approval.order_amounts
         embed = discord.Embed(
             title=title,
@@ -2005,29 +2086,50 @@ class Polymarket(commands.Cog):
                 else discord.Color.blurple()
             ),
         )
-        embed.add_field(
-            name="Maximum total",
-            value=f"{approval.max_spend_pusd:f} pUSD",
-            inline=True,
-        )
-        embed.add_field(
-            name="Price ceiling",
-            value=f"{approval.max_price:f} pUSD/share",
-            inline=True,
-        )
-        embed.add_field(
-            name="Order",
-            value=(
-                f"FAK buy - {Decimal(taker_amount) / Decimal(10**6):f} shares "
-                f"for {Decimal(maker_amount) / Decimal(10**6):f} pUSD notional"
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="Fee reserve",
-            value=f"up to {approval.maximum_fee_pusd:f} pUSD",
-            inline=True,
-        )
+        if isinstance(approval, MarketSellApproval):
+            embed.add_field(
+                name="Shares to sell", value=f"{approval.shares:f}", inline=True
+            )
+            embed.add_field(
+                name="Price floor",
+                value=f"{approval.min_price:f} pUSD/share", inline=True,
+            )
+            embed.add_field(
+                name="Order",
+                value=(
+                    f"FAK sell - {Decimal(maker_amount) / Decimal(10**6):f} shares "
+                    f"for at least {Decimal(taker_amount) / Decimal(10**6):f} pUSD gross"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="Minimum after fee reserve",
+                value=f"{approval.minimum_net_pusd:f} pUSD", inline=True,
+            )
+        else:
+            embed.add_field(
+                name="Maximum total",
+                value=f"{approval.max_spend_pusd:f} pUSD",
+                inline=True,
+            )
+            embed.add_field(
+                name="Price ceiling",
+                value=f"{approval.max_price:f} pUSD/share",
+                inline=True,
+            )
+            embed.add_field(
+                name="Order",
+                value=(
+                    f"FAK buy - {Decimal(taker_amount) / Decimal(10**6):f} shares "
+                    f"for {Decimal(maker_amount) / Decimal(10**6):f} pUSD notional"
+                ),
+                inline=False,
+            )
+            embed.add_field(
+                name="Fee reserve",
+                value=f"up to {approval.maximum_fee_pusd:f} pUSD",
+                inline=True,
+            )
         embed.add_field(
             name="Deposit Wallet",
             value=f"`{request.account_wallet_address}`",
@@ -2099,8 +2201,8 @@ class Polymarket(commands.Cog):
                 await self._edit_trade_card(
                     interaction, request,
                     content=(
-                        "Please confirm once more. The market, price ceiling, "
-                        "all-in cap, fee parameters, and order amounts are unchanged."
+                        "Please confirm once more. The market, price bound, "
+                        "amount, fee parameters, and order amounts are unchanged."
                     ),
                 )
                 return
@@ -2113,7 +2215,7 @@ class Polymarket(commands.Cog):
             await self.config.user(interaction.user).trade_approval.set(None)
             await interaction.message.edit(view=None)
             await interaction.followup.send(
-                f"The buy was not submitted: {exc}", ephemeral=True
+                f"The trade was not submitted: {exc}", ephemeral=True
             )
 
     async def confirm_trade_interaction(
@@ -2137,7 +2239,7 @@ class Polymarket(commands.Cog):
             await self.config.user(interaction.user).trade_approval.set(None)
             await interaction.message.edit(view=None)
             await interaction.followup.send(
-                f"The buy was not submitted: {exc}", ephemeral=True
+                f"The trade was not submitted: {exc}", ephemeral=True
             )
 
     async def decline_trade_interaction(
@@ -2307,7 +2409,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
-        embed.add_field(name="Protected market buy", value=f"DM-only `{prefix}poly buy <market> <outcome> <max pUSD> [max price]` creates an immutable FAK approval card after protected eligibility. Trading remains default-off.", inline=False)
+        embed.add_field(name="Protected market trades", value=f"DM-only `{prefix}poly buy <market> <outcome> <max pUSD> [max price]` and `{prefix}poly sell <market> <outcome> <shares> <min price>` create immutable FAK approval cards after protected eligibility. Trading remains default-off.", inline=False)
         embed.add_field(name="Active order", value=f"DM-only `{prefix}poly orderstatus` reconciles the exact stored order. `{prefix}poly cancel [order ID]` creates an immutable cancellation card when its separate gate is enabled.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Fund Polymarket", value=f"DM-only `{prefix}poly deposit <ETH amount>` prepares a CryptoWallet approval card or resumes deposit status. Production gates remain default-off.", inline=False)
@@ -2468,7 +2570,9 @@ class Polymarket(commands.Cog):
 
     async def _protected_trade_eligibility(
         self, ctx: commands.Context, *, market_path_value: str,
-        outcome: str, max_spend_pusd: str, max_price: str | None,
+        outcome: str, action: str = "buy",
+        max_spend_pusd: str | None = None, max_price: str | None = None,
+        shares: str | None = None, min_price: str | None = None,
     ) -> tuple[
         BotFirstAccountBinding, SessionKeyLifecycle, EligibilityAttestation
     ] | None:
@@ -2477,23 +2581,39 @@ class Polymarket(commands.Cog):
         _transport, lifecycle = await self._active_account_transport(
             ctx.author, binding
         )
+        if action not in {"buy", "sell"}:
+            raise AccountConnectionError("Trade action is invalid.")
         try:
-            spend = Decimal(max_spend_pusd)
-            ceiling = Decimal(max_price) if max_price is not None else None
+            if action == "buy":
+                amount = Decimal(max_spend_pusd)
+                bound = Decimal(max_price) if max_price is not None else None
+            else:
+                amount = Decimal(shares)
+                bound = Decimal(min_price)
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise AccountConnectionError("Trade amount or price is invalid.") from exc
         if (
-            not spend.is_finite() or spend <= 0 or spend.as_tuple().exponent < -6
-            or ceiling is not None and (
-                not ceiling.is_finite() or ceiling <= 0 or ceiling >= 1
+            not amount.is_finite() or amount <= 0
+            or amount.as_tuple().exponent < -6
+            or bound is not None and (
+                not bound.is_finite() or bound <= 0 or bound >= 1
+                or bound.as_tuple().exponent < -6
             )
         ):
             raise AccountConnectionError("Trade amount or price is invalid.")
         normalized = {
             "market_path": market_path_value,
             "outcome": outcome.casefold(),
-            "max_spend_pusd": format(spend, "f"),
-            "max_price": format(ceiling, "f") if ceiling is not None else None,
+            **(
+                {
+                    "max_spend_pusd": format(amount, "f"),
+                    "max_price": format(bound, "f") if bound is not None else None,
+                }
+                if action == "buy" else {
+                    "shares": format(amount, "f"),
+                    "min_price": format(bound, "f"),
+                }
+            ),
         }
         now = int(time.time())
         challenge = await user_config.trade_eligibility()
@@ -2501,8 +2621,8 @@ class Polymarket(commands.Cog):
             expected = {
                 "request_id", "result_handle", "discord_user_id", "profile_id",
                 "signer_address", "account_wallet_address", "session_address",
-                "market_path", "outcome", "max_spend_pusd", "max_price",
-                "created_at", "expires_at",
+                "action", "market_path", "outcome", "created_at",
+                "expires_at", *normalized.keys(),
             }
             if not isinstance(challenge, dict) or set(challenge) != expected:
                 raise AccountConnectionError(
@@ -2515,6 +2635,7 @@ class Polymarket(commands.Cog):
                 or challenge["account_wallet_address"]
                     != binding.account_wallet_address
                 or challenge["session_address"] != lifecycle.session_address
+                or challenge["action"] != action
                 or any(challenge[key] != value for key, value in normalized.items())
             ):
                 raise AccountConnectionError(
@@ -2535,7 +2656,7 @@ class Polymarket(commands.Cog):
             if result is None:
                 await ctx.send(
                     "Complete the protected eligibility page first, then run "
-                    f"{ctx.clean_prefix}poly buy with the same details again."
+                    f"{ctx.clean_prefix}poly {action} with the same details again."
                 )
                 return None
             checked_at = int(result["checked_at"])
@@ -2583,7 +2704,7 @@ class Polymarket(commands.Cog):
         result_handle = secrets.token_urlsafe(32)
         payload = {
             "request_id": request_id, "result_handle": result_handle,
-            "discord_user_id": ctx.author.id, "action": "buy",
+            "discord_user_id": ctx.author.id, "action": action,
             "signer_address": binding.signer_address,
             "account_wallet_address": binding.account_wallet_address,
             "session_address": lifecycle.session_address,
@@ -2605,7 +2726,7 @@ class Polymarket(commands.Cog):
             "discord_user_id": ctx.author.id, "profile_id": binding.profile_id,
             "signer_address": binding.signer_address,
             "account_wallet_address": binding.account_wallet_address,
-            "session_address": lifecycle.session_address,
+            "session_address": lifecycle.session_address, "action": action,
             **normalized, "created_at": now, "expires_at": expires_at,
         })
         eligibility_url = (
@@ -2613,8 +2734,8 @@ class Polymarket(commands.Cog):
             f"#handoff={quote(handoff, safe='')}"
         )
         await ctx.send(
-            "Check current Polymarket eligibility for this exact buy: "
-            f"{eligibility_url}\nThen run {ctx.clean_prefix}poly buy with the "
+            f"Check current Polymarket eligibility for this exact {action}: "
+            f"{eligibility_url}\nThen run {ctx.clean_prefix}poly {action} with the "
             f"same details again before <t:{expires_at}:R>. No order has been "
             "signed or submitted."
         )
@@ -2791,6 +2912,123 @@ class Polymarket(commands.Cog):
         ) as exc:
             await ctx.send(
                 f"The protected buy preview could not be prepared: {exc} "
+                "No order was signed or submitted."
+            )
+
+    @polymarket.command(name="sell")
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_sell(
+        self, ctx: commands.Context, reference: str, outcome: str,
+        shares: str, min_price: str,
+    ):
+        """Prepare a protected position-backed FAK market sell."""
+        if not await self._trade_allowed():
+            await ctx.send(
+                "Polymarket trading is disabled or emergency-paused. "
+                "No order was signed or submitted."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"{ctx.clean_prefix}poly terms."
+            )
+            return
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or link.")
+            return
+        try:
+            existing_record = await user_config.trade_approval()
+            if existing_record:
+                existing = TradeApprovalRequest.from_record(existing_record)
+                if int(time.time()) < existing.approval.expires_at:
+                    view = TradeApprovalView(self, existing)
+                    view.message = await ctx.send(
+                        embed=self._trade_approval_embed(existing), view=view
+                    )
+                    return
+                await user_config.trade_approval.set(None)
+            protected = await self._protected_trade_eligibility(
+                ctx, market_path_value=path, outcome=outcome, action="sell",
+                shares=shares, min_price=min_price,
+            )
+            if protected is None:
+                return
+            binding, lifecycle, eligibility = protected
+            now = int(time.time())
+            market = await self._get_json(path)
+            snapshot = MarketSnapshot.from_market(market, quote_timestamp=now)
+            selected = next(
+                (
+                    index for index, label in enumerate(snapshot.outcomes)
+                    if label.casefold() == outcome.casefold()
+                ),
+                None,
+            )
+            if (
+                selected is None and outcome.isdigit()
+                and 1 <= int(outcome) <= len(snapshot.outcomes)
+            ):
+                selected = int(outcome) - 1
+            if selected is None:
+                raise OrderIntentError("Outcome is not part of this market.")
+            token_id = snapshot.outcome_token_ids[selected]
+            position = await self._position_for_sell(
+                ctx.author, binding, condition_id=snapshot.condition_id,
+                token_id=token_id, outcome=snapshot.outcomes[selected],
+            )
+            book_payload = await self._get_clob_json(
+                "/book", {"token_id": token_id}
+            )
+            metadata_payload = await self._get_clob_json(
+                f"/clob-markets/{snapshot.condition_id}"
+            )
+            book = OrderBookSnapshot.from_payload(book_payload, captured_at=now)
+            metadata = MarketOrderMetadata.from_payload(
+                metadata_payload, expected_token_id=token_id
+            )
+            approval = MarketSellApproval.create(
+                requester_id=ctx.author.id, market_id=snapshot.market_id,
+                condition_id=snapshot.condition_id,
+                outcome=snapshot.outcomes[selected], quote=book,
+                metadata=metadata, shares=shares,
+                available_shares=format(position.size, "f"),
+                min_price=min_price,
+                expires_at=min(now + 120, eligibility.expires_at),
+            )
+            if lifecycle.expires_at <= approval.expires_at:
+                raise AccountConnectionError(
+                    "The active session expires before this sell approval."
+                )
+            request = TradeApprovalRequest.create(
+                request_id=secrets.token_urlsafe(24),
+                profile_id=binding.profile_id,
+                signer_address=binding.signer_address,
+                account_wallet_address=binding.account_wallet_address,
+                session_address=lifecycle.session_address,
+                approval=approval, eligibility=eligibility,
+                final_confirmation_required=bool(
+                    await user_config.final_confirmation_required()
+                ),
+            )
+            await user_config.trade_approval.set(request.to_record())
+            view = TradeApprovalView(self, request)
+            view.message = await ctx.send(
+                embed=self._trade_approval_embed(request), view=view
+            )
+        except (
+            AccountConnectionError, AccountDataError, KeyError,
+            MarketSnapshotError, OrderIntentError, OrderTransportError,
+            RuntimeError, TradeConfirmationError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The protected sell preview could not be prepared: {exc} "
                 "No order was signed or submitted."
             )
 

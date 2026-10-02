@@ -114,13 +114,21 @@ def validate_signed_order(lifecycle: OrderLifecycle, order: Mapping[str, Any]) -
     expires_ms = int(binding.expires_at.timestamp() * 1000)
     if not created_ms <= unsigned.timestamp < expires_ms:
         raise OrderTransportError("signed order timestamp is outside approval")
-    size = Decimal(unsigned.taker_amount) / Decimal(1_000_000)
-    price = Decimal(unsigned.maker_amount) / Decimal(unsigned.taker_amount)
-    if binding.order_type in {"FAK", "FOK"}:
-        price_exceeded = price >= binding.maximum_price + Decimal("0.0001")
+    if binding.side == "BUY":
+        size = Decimal(unsigned.taker_amount) / Decimal(1_000_000)
+        price = Decimal(unsigned.maker_amount) / Decimal(unsigned.taker_amount)
+        if binding.order_type in {"FAK", "FOK"}:
+            price_exceeded = (
+                price >= binding.maximum_price + Decimal("0.0001")
+            )
+        else:
+            price_exceeded = price > binding.maximum_price
+        outside_bound = price_exceeded
     else:
-        price_exceeded = price > binding.maximum_price
-    if size > binding.maximum_size or price_exceeded:
+        size = Decimal(unsigned.maker_amount) / Decimal(1_000_000)
+        price = Decimal(unsigned.taker_amount) / Decimal(unsigned.maker_amount)
+        outside_bound = price < binding.minimum_price
+    if size > binding.maximum_size or outside_bound:
         raise OrderTransportError("signed order exceeds approved price or size")
     try:
         verify_deposit_wallet_order_signature(

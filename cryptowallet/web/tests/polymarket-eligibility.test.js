@@ -27,6 +27,27 @@ test("accepts exact user-bound eligibility request", () => {
   assert.ok(Object.isFrozen(result));
 });
 
+test("accepts exact public buy and sell intent bindings", () => {
+  const trade = {
+    session_address: "0x" + "3".repeat(40),
+    market_path: "/markets/slug/example", outcome: "yes",
+  };
+  const buy = validateEligibilityBinding(claims({
+    ...trade, action: "buy", max_spend_pusd: "10", max_price: "0.55",
+  }), now);
+  assert.equal(buy.max_spend_pusd, "10");
+  const sell = validateEligibilityBinding(claims({
+    ...trade, action: "sell", shares: "4.25", min_price: "0.45",
+  }), now);
+  assert.equal(sell.shares, "4.25");
+  for (const invalid of [
+    claims({ ...trade, action: "buy", max_spend_pusd: "10" }),
+    claims({ ...trade, action: "sell", shares: "4", min_price: "1" }),
+    claims({ ...trade, action: "sell", shares: "4", min_price: "0.4", private_key: "no" }),
+    claims({ ...trade, action: "sell", shares: "9".repeat(400), min_price: "0.4" }),
+  ]) assert.throws(() => validateEligibilityBinding(invalid, now), /invalid binding/);
+});
+
 test("rejects drift, extra fields, wrong identity, and expiry", () => {
   for (const input of [
     claims({ action: "trade" }), claims({ chain_id: 1 }),
