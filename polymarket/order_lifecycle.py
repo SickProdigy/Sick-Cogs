@@ -95,6 +95,7 @@ class OrderBinding:
     maximum_size: Decimal
     created_at: datetime
     expires_at: datetime
+    order_type: str = "GTC"
 
     def __post_init__(self) -> None:
         if not isinstance(self.discord_user_id, int) or self.discord_user_id <= 0:
@@ -124,6 +125,10 @@ class OrderBinding:
         if side != "BUY":
             raise OrderLifecycleError("only BUY order bindings are supported")
         object.__setattr__(self, "side", side)
+        order_type = _short_text(self.order_type, "order_type", limit=3).upper()
+        if order_type not in {"GTC", "FAK", "FOK"}:
+            raise OrderLifecycleError("order_type is invalid")
+        object.__setattr__(self, "order_type", order_type)
         price = _decimal(self.maximum_price, "maximum_price")
         size = _decimal(self.maximum_size, "maximum_size")
         if price <= 0 or price > 1:
@@ -154,6 +159,7 @@ class OrderBinding:
             "exchange_address": self.exchange_address,
             "protocol_version": self.protocol_version,
             "side": self.side,
+            "order_type": self.order_type,
             "token_id": self.token_id,
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -170,6 +176,7 @@ class OrderBinding:
             "exchange_address": self.exchange_address,
             "protocol_version": self.protocol_version,
             "side": self.side,
+            "order_type": self.order_type,
             "maximum_price": str(self.maximum_price),
             "maximum_size": str(self.maximum_size),
             "created_at": self.created_at.isoformat(),
@@ -193,6 +200,7 @@ class OrderBinding:
                 maximum_size=record["maximum_size"],
                 created_at=datetime.fromisoformat(record["created_at"]),
                 expires_at=datetime.fromisoformat(record["expires_at"]),
+                order_type=record.get("order_type", "GTC"),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise OrderLifecycleError("invalid order binding record") from exc

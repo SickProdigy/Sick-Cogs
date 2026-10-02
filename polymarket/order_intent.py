@@ -1,7 +1,7 @@
 """Immutable current market metadata, quote, and bounded buy approval models."""
 
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_EVEN
 import hashlib
 from typing import Any, Mapping
 
@@ -10,10 +10,16 @@ class OrderIntentError(ValueError):
     """Raised when public quote or approval data fails closed."""
 
 
-_ALLOWED_TICKS = {
-    Decimal("0.1"), Decimal("0.01"), Decimal("0.005"),
-    Decimal("0.0025"), Decimal("0.001"), Decimal("0.0001"),
+_ROUNDING_BY_TICK = {
+    Decimal("0.1"): (3, 1, 2),
+    Decimal("0.01"): (4, 2, 2),
+    Decimal("0.005"): (5, 3, 2),
+    Decimal("0.0025"): (6, 4, 2),
+    Decimal("0.001"): (5, 3, 2),
+    Decimal("0.0001"): (6, 4, 2),
 }
+_ALLOWED_TICKS = frozenset(_ROUNDING_BY_TICK)
+_MINIMUM_TICK = min(_ALLOWED_TICKS)
 
 
 def _decimal(value: Any, field: str, *, positive: bool = True) -> Decimal:
@@ -24,6 +30,21 @@ def _decimal(value: Any, field: str, *, positive: bool = True) -> Decimal:
     if not result.is_finite() or (result <= 0 if positive else result < 0):
         raise OrderIntentError(f"{field} is outside its allowed range.")
     return result
+
+
+def _decimal_places(value: Decimal) -> int:
+    exponent = value.normalize().as_tuple().exponent
+    return 0 if isinstance(exponent, str) else max(0, -exponent)
+
+
+def _round(value: Decimal, decimals: int, rounding: str) -> Decimal:
+    if _decimal_places(value) <= decimals:
+        return value
+    return value.quantize(Decimal(10) ** -decimals, rounding=rounding)
+
+
+def _atomic(value: Decimal) -> int:
+    return int((value * Decimal(10**6)).quantize(Decimal(1), rounding=ROUND_HALF_EVEN))
 
 
 def _levels(value: Any, field: str) -> tuple[tuple[Decimal, Decimal], ...]:
@@ -77,6 +98,45 @@ class OrderBookSnapshot:
             book_hash, captured_at,
         )
 
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "token_id": self.token_id,
+            "bids": [[format(price, "f"), format(size, "f")] for price, size in self.bids],
+            "asks": [[format(price, "f"), format(size, "f")] for price, size in self.asks],
+            "minimum_order_size": format(self.minimum_order_size, "f"),
+            "tick_size": format(self.tick_size, "f"),
+            "negative_risk": self.negative_risk,
+            "book_hash": self.book_hash,
+            "captured_at": self.captured_at,
+        }
+
+    @classmethod
+    def from_record(cls, record: Any) -> "OrderBookSnapshot":
+        expected = {
+            "token_id", "bids", "asks", "minimum_order_size", "tick_size",
+            "negative_risk", "book_hash", "captured_at",
+        }
+        if not isinstance(record, Mapping) or set(record) != expected:
+            raise OrderIntentError("Stored order book has an invalid shape.")
+        def stored_levels(name: str) -> list[dict[str, str]]:
+            raw = record[name]
+            if not isinstance(raw, list):
+                raise OrderIntentError("Stored order book levels are invalid.")
+            return [
+                {"price": row[0], "size": row[1]}
+                for row in raw
+                if isinstance(row, list) and len(row) == 2
+            ]
+        bids, asks = stored_levels("bids"), stored_levels("asks")
+        if len(bids) != len(record["bids"]) or len(asks) != len(record["asks"]):
+            raise OrderIntentError("Stored order book levels are invalid.")
+        return cls.from_payload({
+            "asset_id": record["token_id"], "bids": bids, "asks": asks,
+            "min_order_size": record["minimum_order_size"],
+            "tick_size": record["tick_size"],
+            "neg_risk": record["negative_risk"], "hash": record["book_hash"],
+        }, captured_at=int(record["captured_at"]))
+
     @property
     def best_ask(self) -> Decimal:
         return min(price for price, _size in self.asks)
@@ -129,6 +189,34 @@ class MarketOrderMetadata:
         if rate > 1 or exponent > 10 or exponent != exponent.to_integral_value():
             raise OrderIntentError("Platform fee metadata exceeds reviewed bounds.")
         return cls(tuple(tokens), tick, payload.get("nr", False), rate, exponent)
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "token_ids": list(self.token_ids),
+            "tick_size": format(self.tick_size, "f"),
+            "negative_risk": self.negative_risk,
+            "fee_rate": format(self.fee_rate, "f"),
+            "fee_exponent": format(self.fee_exponent, "f"),
+        }
+
+    @classmethod
+    def from_record(
+        cls, record: Any, *, expected_token_id: str,
+    ) -> "MarketOrderMetadata":
+        expected = {
+            "token_ids", "tick_size", "negative_risk", "fee_rate",
+            "fee_exponent",
+        }
+        if not isinstance(record, Mapping) or set(record) != expected:
+            raise OrderIntentError("Stored market metadata has an invalid shape.")
+        tokens = record["token_ids"]
+        if not isinstance(tokens, list):
+            raise OrderIntentError("Stored market token list is invalid.")
+        return cls.from_payload({
+            "mts": record["tick_size"], "nr": record["negative_risk"],
+            "t": [{"t": token} for token in tokens],
+            "fd": {"r": record["fee_rate"], "e": record["fee_exponent"]},
+        }, expected_token_id=expected_token_id)
 
     def require_matches(self, quote: OrderBookSnapshot) -> None:
         if (
@@ -201,6 +289,31 @@ class MarketBuyApproval:
         return self.max_spend_pusd - self.maximum_notional
 
     @property
+    def order_amounts(self) -> tuple[int, int]:
+        amount_decimals, _price_decimals, size_decimals = _ROUNDING_BY_TICK[
+            self.quote.tick_size
+        ]
+        maker = _round(self.maximum_notional, size_decimals, ROUND_DOWN)
+        shares = maker / self.max_price
+        if _decimal_places(shares) > amount_decimals:
+            shares = _round(shares, amount_decimals + 4, ROUND_CEILING)
+            if _decimal_places(shares) > amount_decimals:
+                shares = _round(shares, amount_decimals, ROUND_DOWN)
+        maker_amount, taker_amount = _atomic(maker), _atomic(shares)
+        if maker_amount <= 0 or taker_amount <= 0:
+            raise OrderIntentError("Protected buy rounds to zero.")
+        encoded_price = Decimal(maker_amount) / Decimal(taker_amount)
+        if (
+            shares < self.quote.minimum_order_size
+            or encoded_price < self.max_price
+            or encoded_price >= self.max_price + _MINIMUM_TICK
+        ):
+            raise OrderIntentError(
+                "Protected buy rounding cannot preserve the approved bounds."
+            )
+        return maker_amount, taker_amount
+
+    @property
     def fingerprint(self) -> str:
         fields = (
             str(self.requester_id), self.market_id, self.condition_id, self.outcome,
@@ -213,6 +326,49 @@ class MarketBuyApproval:
             str(self.created_at), str(self.expires_at),
         )
         return hashlib.sha256("|".join(fields).encode()).hexdigest()
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "requester_id": self.requester_id,
+            "market_id": self.market_id,
+            "condition_id": self.condition_id,
+            "outcome": self.outcome,
+            "quote": self.quote.to_record(),
+            "metadata": self.metadata.to_record(),
+            "max_price": format(self.max_price, "f"),
+            "max_spend_pusd": format(self.max_spend_pusd, "f"),
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }
+
+    @classmethod
+    def from_record(cls, record: Any) -> "MarketBuyApproval":
+        expected = {
+            "requester_id", "market_id", "condition_id", "outcome", "quote",
+            "metadata", "max_price", "max_spend_pusd", "created_at",
+            "expires_at",
+        }
+        if not isinstance(record, Mapping) or set(record) != expected:
+            raise OrderIntentError("Stored market approval has an invalid shape.")
+        try:
+            quote = OrderBookSnapshot.from_record(record["quote"])
+            metadata = MarketOrderMetadata.from_record(
+                record["metadata"], expected_token_id=quote.token_id
+            )
+            approval = cls.create(
+                requester_id=int(record["requester_id"]),
+                market_id=str(record["market_id"]),
+                condition_id=str(record["condition_id"]),
+                outcome=str(record["outcome"]), quote=quote, metadata=metadata,
+                max_price=str(record["max_price"]),
+                max_spend_pusd=str(record["max_spend_pusd"]),
+                expires_at=int(record["expires_at"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OrderIntentError("Stored market approval is invalid.") from exc
+        if approval.created_at != int(record["created_at"]):
+            raise OrderIntentError("Stored market approval timestamp changed.")
+        return approval
 
     def require_fresh(
         self, fresh: OrderBookSnapshot, metadata: MarketOrderMetadata, *, now: int,

@@ -194,8 +194,8 @@ class AuthenticatedOrderTransport:
         order = validate_signed_order(submitting, signed_order)
         credentials = await self._credential_provider()
         payload = {
-            "order": order, "owner": credentials.key, "orderType": "GTC",
-            "deferExec": False,
+            "order": order, "owner": credentials.key,
+            "orderType": submitting.binding.order_type, "deferExec": False,
         }
         try:
             response = await self._call(

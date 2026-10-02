@@ -94,6 +94,7 @@ from polymarket.session_key_store import (
 from polymarket.trade_confirmation import (
     TradeConfirmation, TradeConfirmationError, TradeConfirmationState,
 )
+from polymarket.trade_request import TradeApprovalRequest
 from polymarket.session_approval import (
     SessionApprovalRequest, SessionApprovalState,
 )
@@ -443,6 +444,12 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         )
         self.assertEqual(str(approval.maximum_notional), "9.997750")
         self.assertEqual(str(approval.maximum_fee_pusd), "0.002250")
+        self.assertEqual(approval.order_amounts, (9_990_000, 18_163_600))
+        encoded_price = Decimal(approval.order_amounts[0]) / Decimal(
+            approval.order_amounts[1]
+        )
+        self.assertGreaterEqual(encoded_price, approval.max_price)
+        self.assertLess(encoded_price, approval.max_price + Decimal("0.0001"))
         self.assertEqual(len(approval.fingerprint), 64)
         fresh = OrderBookSnapshot.from_payload({
             **payload, "hash": "book-2",
@@ -507,6 +514,32 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
                 MarketOrderMetadata.from_payload(
                     payload, expected_token_id="123"
                 )
+
+    def test_market_buy_rounding_matches_current_sdk_tick_configs(self):
+        for tick, max_price, expected in (
+            ("0.1", "0.5", (10_000_000, 20_000_000)),
+            ("0.01", "0.55", (10_000_000, 18_181_800)),
+            ("0.005", "0.555", (10_000_000, 18_018_010)),
+            ("0.0025", "0.5525", (10_000_000, 18_099_547)),
+            ("0.001", "0.551", (10_000_000, 18_148_820)),
+            ("0.0001", "0.5501", (10_000_000, 18_178_512)),
+        ):
+            quote = OrderBookSnapshot.from_payload({
+                "asset_id": "123", "bids": [],
+                "asks": [{"price": max_price, "size": "100"}],
+                "min_order_size": "1", "tick_size": tick,
+                "neg_risk": False, "hash": "book",
+            }, captured_at=100)
+            metadata = MarketOrderMetadata.from_payload({
+                "mts": tick, "nr": False, "t": [{"t": "123"}],
+            }, expected_token_id="123")
+            approval = MarketBuyApproval.create(
+                requester_id=7, market_id="42", condition_id="condition",
+                outcome="Yes", quote=quote, metadata=metadata,
+                max_price=max_price, max_spend_pusd="10", expires_at=220,
+            )
+            with self.subTest(tick=tick):
+                self.assertEqual(approval.order_amounts, expected)
 
     def test_collateral_plans_bind_exact_assets_spenders_amounts_and_revocation(self):
         wallet = "0x" + "9" * 40
@@ -887,7 +920,7 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
             maker_address="0x" + "1" * 40,
             session_signer_address=session_address_from_private_key(self.private_key),
             exchange_address=POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange,
-            protocol_version="2", side="BUY",
+            protocol_version="2", side="BUY", order_type="FAK",
             maximum_price=Decimal("0.55"), maximum_size=Decimal("10"),
             created_at=datetime.fromtimestamp(100, timezone.utc),
             expires_at=datetime.fromtimestamp(400, timezone.utc),
@@ -968,6 +1001,7 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live.state, OrderState.LIVE)
         self.assertEqual(provider.await_count, 1)
         self.assertEqual(calls[0]["body"]["owner"], "api-key")
+        self.assertEqual(calls[0]["body"]["orderType"], "FAK")
         self.assertEqual(set(calls[0]["body"]), {
             "order", "owner", "orderType", "deferExec",
         })
@@ -2688,6 +2722,48 @@ class TradeConfirmationTests(unittest.TestCase):
             requester_id=7, order_fingerprint=fingerprint, now=110
         )
         self.assertEqual(approved.state, TradeConfirmationState.APPROVED)
+
+    def test_trade_request_round_trip_binds_quote_user_account_session_and_eligibility(self):
+        quote = OrderBookSnapshot.from_payload({
+            "asset_id": "123", "bids": [],
+            "asks": [{"price": "0.52", "size": "20"}],
+            "min_order_size": "5", "tick_size": "0.01",
+            "neg_risk": False, "hash": "book-1",
+        }, captured_at=100)
+        metadata = MarketOrderMetadata.from_payload({
+            "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+            "nr": False, "t": [{"t": "123"}],
+        }, expected_token_id="123")
+        approval = MarketBuyApproval.create(
+            requester_id=7, market_id="42", condition_id="condition",
+            outcome="Yes", quote=quote, metadata=metadata, max_price="0.55",
+            max_spend_pusd="10", expires_at=220,
+        )
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="CA", region="ON",
+            checked_at=90, expires_at=390,
+        )
+        request = TradeApprovalRequest.create(
+            request_id="trade-request-one", profile_id="profile-seven",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40,
+            approval=approval, eligibility=eligibility,
+            final_confirmation_required=True,
+        )
+        restored = TradeApprovalRequest.from_record(request.to_record())
+        self.assertEqual(restored, request)
+        restored = restored.approve_primary(requester_id=7, now=110)
+        self.assertEqual(
+            restored.confirmation.state,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        )
+        restored = restored.decide_final(True, requester_id=7, now=111)
+        restored.require_approved(requester_id=7, now=112)
+        record = restored.to_record()
+        record["approval"]["max_price"] = "0.54"
+        with self.assertRaises(TradeConfirmationError):
+            TradeApprovalRequest.from_record(record)
 
     def test_confirmation_rejects_changed_order_wrong_user_and_expiry(self):
         pending = TradeConfirmation(7, "c" * 64, True, 100, 200)
