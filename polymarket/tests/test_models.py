@@ -9,6 +9,9 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, utils
+
 from cryptowallet.core.polymarket import (
     validate_polymarket_session_batch_typed_data,
 )
@@ -40,7 +43,8 @@ from polymarket.onboarding import (
 )
 from polymarket.onboarding_verification import finalize_onboarding_evidence
 from polymarket.signer_proof import (
-    CURVE_N, clob_auth_digest, recover_signer_address, verify_clob_auth_proof,
+    CURVE_N, HALF_CURVE_N, clob_auth_digest, recover_signer_address,
+    verify_clob_auth_proof,
 )
 from polymarket.safety import ProductionLimits, SafetyLimitError
 from polymarket.terms import (
@@ -54,7 +58,8 @@ from polymarket.session_lifecycle import (
 from polymarket.session_transport import SessionKeyTransport
 from polymarket.session_authorization import (
     AUTHORIZATION_PATH, REVOCATION_PATH, SessionKeyOwnerApproval,
-    generate_session_key, session_address_from_private_key, sign_session_clob_auth,
+    generate_session_key, session_address_from_private_key, session_batch_digest,
+    sign_session_clob_auth, verify_session_batch_signature,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
@@ -66,7 +71,7 @@ from polymarket.session_credential_store import (
     reveal_session_credentials,
 )
 from polymarket.session_key_store import (
-    EncryptedSessionKey, SessionKeyStoreError, protect_session_private_key,
+    EncryptedSessionKey, SESSION_KEY_TOKEN_NAMESPACE, SessionKeyStoreError, decode_wrapping_key, protect_session_private_key,
     reveal_session_private_key,
 )
 from polymarket.trade_confirmation import (
@@ -109,6 +114,40 @@ class _UserConfig:
     def __init__(self, values):
         for name, value in values.items():
             setattr(self, name, _Value(value))
+
+
+class _MappedValue:
+    def __init__(self, values, name):
+        self.values = values
+        self.name = name
+
+    async def __call__(self):
+        return self.values.get(self.name)
+
+    async def set(self, value):
+        self.values[self.name] = value
+
+
+class _AllValues:
+    def __init__(self, values):
+        self.values = values
+
+    async def __aenter__(self):
+        return self.values
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class _SessionUserConfig:
+    def __init__(self, values):
+        self.values = values
+
+    def __getattr__(self, name):
+        return _MappedValue(self.values, name)
+
+    def all(self):
+        return _AllValues(self.values)
 
 
 class _ConfiguredTest:
@@ -1207,6 +1246,33 @@ class SessionKeyAuthorizationTests(unittest.TestCase):
         self.assertEqual(len(signature), 132)
         int(signature[2:], 16)
 
+    def test_batch_digest_matches_independent_viem_fixture_and_recovers_owner(self):
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        approval = self._approval(owner_address=owner)
+        digest = session_batch_digest(approval)
+        self.assertEqual(
+            digest.hex(),
+            "18b8487377aa64cd9357a07865be39a5b9df85a7822bb5f48fc90c5c0bc71fa3",
+        )
+        der = ec.derive_private_key(1, ec.SECP256K1()).sign(
+            digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+        )
+        r, s = utils.decode_dss_signature(der)
+        if s > HALF_CURVE_N:
+            s = CURVE_N - s
+        for recovery_id in (0, 1):
+            signature = "0x" + (
+                r.to_bytes(32, "big") + s.to_bytes(32, "big")
+                + bytes([27 + recovery_id])
+            ).hex()
+            try:
+                if verify_session_batch_signature(approval, signature) == owner:
+                    break
+            except AccountConnectionError:
+                continue
+        else:
+            self.fail("Batch signature did not recover to the fixture owner")
+
     def test_authorization_pins_exact_batch_and_request_contract(self):
         approval = self._approval()
         typed = approval.typed_data()
@@ -1333,12 +1399,39 @@ class SessionKeyTransportTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(secret, repr(created))
 
+        await transport.clob_credentials(
+            address="0x" + "4" * 40, signature="0x" + "A" * 130,
+            timestamp=101, nonce=7, derive=True,
+        )
+        owner_call = request.await_args
+        self.assertEqual(owner_call.kwargs["headers"]["POLY_ADDRESS"], "0x" + "4" * 40)
+        self.assertEqual(owner_call.kwargs["headers"]["POLY_SIGNATURE"], "0x" + "a" * 130)
+        self.assertEqual(owner_call.kwargs["headers"]["POLY_NONCE"], "7")
+
         await transport.session_credentials(
-            private_key, timestamp=101, nonce=0, derive=True
+            private_key, timestamp=102, nonce=0, derive=True
         )
         derive_call = request.await_args
         self.assertEqual(derive_call.args[0], "GET")
         self.assertTrue(derive_call.args[1].endswith("/auth/derive-api-key"))
+
+    async def test_credential_create_ambiguity_derives_before_returning(self):
+        secret = base64.urlsafe_b64encode(b"c" * 32).decode()
+        request = AsyncMock(side_effect=[
+            AccountConnectionError("ambiguous create"),
+            {"apiKey": "recovered-key", "secret": secret,
+             "passphrase": "recovered-pass"},
+        ])
+        credentials = await SessionKeyTransport(
+            request
+        ).create_or_derive_clob_credentials(
+            address="0x" + "1" * 40, signature="0x" + "1" * 130,
+            timestamp=100, nonce=0,
+        )
+        self.assertEqual(credentials.key, "recovered-key")
+        self.assertEqual(
+            [call.args[0] for call in request.await_args_list], ["POST", "GET"]
+        )
 
     async def test_transaction_and_registry_require_exact_identity_scope_and_expiry(self):
         approval = self._approval()
@@ -1431,6 +1524,191 @@ class SessionKeyStoreTests(unittest.TestCase):
 
 
 
+
+
+class SessionProvisioningTests(unittest.IsolatedAsyncioTestCase):
+    def _cog(self, *, enabled):
+        user = SimpleNamespace(id=7)
+        values = {
+            "terms_acceptance": create_polymarket_terms_acceptance(
+                7, now=90, acceptance_id="terms-7"
+            ),
+            "encrypted_session_key": None, "session_lifecycle": None,
+            "session_operation": None,
+        }
+        user_config = _SessionUserConfig(values)
+        config = SimpleNamespace(
+            production_capabilities=_Value({"session": enabled}),
+            production_enabled=_Value(enabled), production_paused=_Value(not enabled),
+            user=lambda _user: user_config,
+        )
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = config
+        return cog, user, values
+
+    async def test_provisioning_is_default_off_before_identity_or_secrets(self):
+        cog, user, _values = self._cog(enabled=False)
+        cog.bot = SimpleNamespace(get_shared_api_tokens=AsyncMock())
+        cog._bot_first_account = AsyncMock()
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="US", region="NY",
+            checked_at=90, expires_at=390,
+        )
+
+        with self.assertRaisesRegex(AccountConnectionError, "disabled"):
+            await cog._provision_session_key(user, eligibility)
+
+        cog._bot_first_account.assert_not_awaited()
+        cog.bot.get_shared_api_tokens.assert_not_awaited()
+
+    async def test_provisioning_persists_secret_first_and_never_stores_signature(self):
+        cog, user, values = self._cog(enabled=True)
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        wallet = "0x" + "2" * 40
+        session = session_address_from_private_key((7).to_bytes(32, "big"))
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=owner, account_wallet_address=wallet, created_at=80,
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._polygon_rpc = AsyncMock()
+        cog._session_storage_material = AsyncMock(
+            return_value=(bytes(range(32)), "deployment-7")
+        )
+        cog.session_transport = SimpleNamespace(
+            get_wallet_nonce=AsyncMock(return_value=9),
+            submit=AsyncMock(return_value={
+                "operation_id": "operation-1",
+                "transaction_id": "transaction-1",
+                "transaction_hash": None,
+            }),
+        )
+        approval = SessionKeyOwnerApproval(
+            action="authorize", discord_user_id=7, profile_id="profile-7",
+            owner_address=owner, wallet_address=wallet, session_address=session,
+            nonce=9, created_at=100, deadline=400,
+            idempotency_key="fixture-idempotency-key-" + "x" * 12,
+            valid_until=100 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        digest = session_batch_digest(approval)
+        der = ec.derive_private_key(1, ec.SECP256K1()).sign(
+            digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+        )
+        r, s = utils.decode_dss_signature(der)
+        if s > HALF_CURVE_N:
+            s = CURVE_N - s
+        signature = None
+        for recovery_id in (0, 1):
+            candidate = "0x" + (
+                r.to_bytes(32, "big") + s.to_bytes(32, "big")
+                + bytes([27 + recovery_id])
+            ).hex()
+            try:
+                if verify_session_batch_signature(approval, candidate) == owner:
+                    signature = candidate
+                    break
+            except AccountConnectionError:
+                pass
+        self.assertIsNotNone(signature)
+
+        async def sign(_user, **kwargs):
+            persisted = SessionKeyOperation.from_record(values["session_operation"])
+            self.assertEqual(
+                persisted.state, SessionOperationState.PENDING_OWNER_APPROVAL
+            )
+            self.assertIsNotNone(values["encrypted_session_key"])
+            self.assertNotIn(str(signature), repr(values))
+            return {"signature": signature, "signer_address": owner}
+
+        cryptowallet = SimpleNamespace(polymarket_sign_session_batch=sign)
+        cog.bot = SimpleNamespace(
+            get_cog=lambda name: cryptowallet if name == "CryptoWallet" else None,
+            get_shared_api_tokens=AsyncMock(return_value={
+                "api_key": "builder-key", "secret": "YnVpbGRlci1zZWNyZXQ=",
+                "passphrase": "builder-passphrase",
+            }),
+        )
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="US", region="NY",
+            checked_at=90, expires_at=390,
+        )
+        evidence = SimpleNamespace(block_number=99)
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.generate_session_key",
+                  return_value=((7).to_bytes(32, "big"), session)),
+            patch("polymarket.polymarket.PolygonAccountIdentityVerifier")
+            as verifier,
+        ):
+            verifier.return_value.verify = AsyncMock(return_value=evidence)
+            submitted = await cog._provision_session_key(user, eligibility)
+
+        self.assertEqual(submitted.state, SessionOperationState.SUBMITTED)
+        stored = SessionKeyOperation.from_record(values["session_operation"])
+        self.assertEqual(stored.state, SessionOperationState.SUBMITTED)
+        self.assertEqual(stored.owner_signature_digest,
+                         hashlib.sha256(bytes.fromhex(signature[2:])).hexdigest())
+        self.assertNotIn(signature, repr(values))
+        cog.session_transport.submit.assert_awaited_once()
+
+        owner_credentials = ClobCredentials(
+            "owner-key", base64.urlsafe_b64encode(b"o" * 32).decode(),
+            "owner-pass",
+        )
+        session_credentials = ClobCredentials(
+            "session-key", base64.urlsafe_b64encode(b"s" * 32).decode(),
+            "session-pass",
+        )
+        cog._request_cdp_clob_auth_signature = AsyncMock(
+            return_value="0x" + "2" * 130
+        )
+        cog.session_transport.transaction = AsyncMock(return_value={
+            "transaction_id": "transaction-1",
+            "transaction_hash": "0x" + "a" * 64,
+            "state": "STATE_CONFIRMED", "error_msg": None,
+        })
+        cog.session_transport.create_or_derive_clob_credentials = AsyncMock(
+            return_value=owner_credentials
+        )
+        cog.session_transport.require_active = AsyncMock(return_value={
+            "address": session, "scopes": ("CLOB",),
+            "valid_until": 100 + SESSION_KEY_LIFETIME_SECONDS,
+        })
+        cog.session_transport.create_or_derive_session_credentials = AsyncMock(
+            return_value=session_credentials
+        )
+        with patch("polymarket.polymarket.time.time", return_value=110):
+            active = await cog._reconcile_session_key(user)
+
+        self.assertEqual(active.status, SessionKeyStatus.ACTIVE)
+        self.assertEqual(
+            SessionKeyOperation.from_record(values["session_operation"]).state,
+            SessionOperationState.COMPLETE,
+        )
+        self.assertIsNotNone(values["encrypted_session_credentials"])
+        self.assertNotIn("owner-key", repr(values))
+        self.assertNotIn("session-key", repr(values))
+        cog.session_transport.require_active.assert_awaited_once()
+
+    async def test_initialize_creates_or_validates_only_server_side_wrapping_key(self):
+        cog = Polymarket.__new__(Polymarket)
+        tokens = {}
+        bot = SimpleNamespace()
+        bot.get_shared_api_tokens = AsyncMock(side_effect=lambda _name: dict(tokens))
+
+        async def store(_name, **values):
+            tokens.update(values)
+
+        bot.set_shared_api_tokens = AsyncMock(side_effect=store)
+        cog.bot = bot
+        await cog.initialize()
+        self.assertEqual(len(decode_wrapping_key(tokens["wrapping_key"])), 32)
+        first = tokens["wrapping_key"]
+        await cog.initialize()
+        self.assertEqual(tokens["wrapping_key"], first)
+        bot.set_shared_api_tokens.assert_awaited_once()
+
+
 class SessionKeyLifecycleTests(unittest.TestCase):
     def _approval(self, action="authorize", session="0x" + "3" * 40):
         return SessionKeyOwnerApproval(
@@ -1460,6 +1738,13 @@ class SessionKeyLifecycleTests(unittest.TestCase):
         signature = "0x" + "1" * 130
         approved = SessionKeyOperation(self._approval()).approve(signature, now=101)
         self.assertNotIn(signature, repr(approved.to_record()))
+        recovered_approval = SessionKeyOperation.from_record(
+            json.loads(json.dumps(approved.to_record()))
+        ).recover_after_restart()
+        self.assertEqual(
+            recovered_approval.state, SessionOperationState.PENDING_OWNER_APPROVAL
+        )
+        self.assertIsNone(recovered_approval.owner_signature_digest)
         submitting = approved.begin_submission(now=102)
         unknown = SessionKeyOperation.from_record(
             json.loads(json.dumps(submitting.to_record()))
@@ -1516,6 +1801,13 @@ class SessionKeyLifecycleTests(unittest.TestCase):
         self.assertEqual(operation.state, SessionOperationState.FAILED)
         self.assertNotIn("sensitive provider detail", repr(operation))
         self.assertEqual(len(operation.failure_digest), 64)
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40, created_at=100,
+            expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        ).fail(operation)
+        self.assertEqual(lifecycle.status, SessionKeyStatus.FAILED)
 
 
 class SessionCredentialStoreTests(unittest.TestCase):
@@ -1617,14 +1909,24 @@ class PolymarketSetupTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         class Bot:
             def __init__(self):
                 self.cogs = []
+                self.tokens = {}
 
             async def add_cog(self, cog):
                 self.cogs.append(cog)
+
+            async def get_shared_api_tokens(self, namespace):
+                return dict(self.tokens.get(namespace, {}))
+
+            async def set_shared_api_tokens(self, namespace, **values):
+                self.tokens.setdefault(namespace, {}).update(values)
 
         bot = Bot()
         await setup(bot)
         self.assertEqual(len(bot.cogs), 1)
         self.assertIsInstance(bot.cogs[0], Polymarket)
+        self.assertEqual(len(decode_wrapping_key(
+            bot.tokens[SESSION_KEY_TOKEN_NAMESPACE]["wrapping_key"]
+        )), 32)
 
 
 class Context:

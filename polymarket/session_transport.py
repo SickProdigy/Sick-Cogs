@@ -125,21 +125,26 @@ class SessionKeyTransport:
             raise AccountConnectionError("Session-key transaction state is invalid.")
         return dict(payload)
 
-    async def session_credentials(
-        self, private_key: bytes, *, timestamp: int, nonce: int = 0,
-        derive: bool = False,
+    async def clob_credentials(
+        self, *, address: str, signature: str, timestamp: int,
+        nonce: int = 0, derive: bool = False,
     ) -> ClobCredentials:
-        """Create or derive only the credentials owned by this session EOA."""
+        """Create or derive credentials from one independently verified ClobAuth."""
 
-        signature, address = sign_session_clob_auth(
-            private_key, timestamp=timestamp, nonce=nonce
-        )
+        owner = normalize_evm_address(address, "CLOB credential owner")
+        if (
+            not isinstance(signature, str)
+            or len(signature) != 132 or not signature.startswith("0x")
+            or any(character not in "0123456789abcdefABCDEF" for character in signature[2:])
+            or timestamp <= 0 or not 0 <= nonce < 2**256
+        ):
+            raise AccountConnectionError("CLOB credential proof is invalid.")
         path = DERIVE_CREDENTIALS_PATH if derive else CREATE_CREDENTIALS_PATH
         method = "GET" if derive else "POST"
         payload = await self._transport(
             method, POLYMARKET_PRODUCTION_MANIFEST.clob_api + path,
             headers={
-                "POLY_ADDRESS": address, "POLY_SIGNATURE": signature,
+                "POLY_ADDRESS": owner, "POLY_SIGNATURE": signature.lower(),
                 "POLY_TIMESTAMP": str(timestamp), "POLY_NONCE": str(nonce),
                 "Accept": "application/json",
             },
@@ -157,6 +162,46 @@ class SessionKeyTransport:
             raise AccountConnectionError(
                 "Session CLOB credentials response is invalid."
             ) from exc
+
+    async def session_credentials(
+        self, private_key: bytes, *, timestamp: int, nonce: int = 0,
+        derive: bool = False,
+    ) -> ClobCredentials:
+        """Create or derive only the credentials owned by this session EOA."""
+
+        signature, address = sign_session_clob_auth(
+            private_key, timestamp=timestamp, nonce=nonce
+        )
+        return await self.clob_credentials(
+            address=address, signature=signature, timestamp=timestamp,
+            nonce=nonce, derive=derive,
+        )
+
+    async def create_or_derive_clob_credentials(
+        self, *, address: str, signature: str, timestamp: int, nonce: int = 0,
+    ) -> ClobCredentials:
+        """Create credentials once, deriving the same key after retry or ambiguity."""
+
+        try:
+            return await self.clob_credentials(
+                address=address, signature=signature, timestamp=timestamp,
+                nonce=nonce, derive=False,
+            )
+        except (aiohttp.ClientError, AccountConnectionError, TimeoutError):
+            return await self.clob_credentials(
+                address=address, signature=signature, timestamp=timestamp,
+                nonce=nonce, derive=True,
+            )
+
+    async def create_or_derive_session_credentials(
+        self, private_key: bytes, *, timestamp: int, nonce: int = 0,
+    ) -> ClobCredentials:
+        signature, address = sign_session_clob_auth(
+            private_key, timestamp=timestamp, nonce=nonce
+        )
+        return await self.create_or_derive_clob_credentials(
+            address=address, signature=signature, timestamp=timestamp, nonce=nonce
+        )
 
     async def active_session_keys(
         self, *, owner_address: str, wallet_address: str,

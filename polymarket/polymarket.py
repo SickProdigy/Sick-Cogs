@@ -28,11 +28,25 @@ from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
 from .security_policy import (
-    ELIGIBILITY_LIFETIME_SECONDS, EligibilityAttestation, validate_session_key_policy,
+    ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
+    EligibilityAttestation, validate_session_key_policy,
 )
 from .signer_proof import (
     clob_auth_digest, recover_signer_address, verify_clob_auth_proof,
 )
+from .session_authorization import (
+    BATCH_LIFETIME_SECONDS, SessionKeyOwnerApproval, generate_session_key,
+    verify_session_batch_signature,
+)
+from .session_credential_store import protect_session_credentials
+from .session_key_store import (
+    EncryptedSessionKey, SESSION_KEY_TOKEN_NAMESPACE, decode_wrapping_key,
+    encode_wrapping_key, protect_session_private_key, reveal_session_private_key,
+)
+from .session_lifecycle import (
+    SessionKeyLifecycle, SessionKeyOperation, SessionOperationState,
+)
+from .session_transport import SessionKeyTransport
 from cryptowallet.core.polymarket import polymarket_clob_auth_typed_data
 from .safety import ProductionLimits, SafetyLimitError
 from .terms import (
@@ -42,8 +56,8 @@ from .terms import (
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
-    "account_connect", "deposit_wallet_create", "eligibility", "collateral",
-    "order", "cancel", "redeem",
+    "account_connect", "deposit_wallet_create", "session", "eligibility",
+    "collateral", "order", "cancel", "redeem",
 )
 ONBOARDING_ENABLE_ACKNOWLEDGEMENT = (
     "I understand protected Polymarket onboarding uses Polygon mainnet "
@@ -134,7 +148,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.25"
+    __version__ = "0.2.26"
 
     def __init__(self, bot):
         self.bot = bot
@@ -161,6 +175,303 @@ class Polymarket(commands.Cog):
             final_confirmation_required=True
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
+        self.session_transport = SessionKeyTransport()
+
+    async def initialize(self) -> None:
+        """Create the server-side wrapping key without exposing it to users."""
+
+        tokens = await self.bot.get_shared_api_tokens(SESSION_KEY_TOKEN_NAMESPACE)
+        encoded = str(tokens.get("wrapping_key") or "")
+        if encoded:
+            decode_wrapping_key(encoded)
+            return
+        await self.bot.set_shared_api_tokens(
+            SESSION_KEY_TOKEN_NAMESPACE,
+            wrapping_key=encode_wrapping_key(secrets.token_bytes(32)),
+        )
+
+    async def _session_storage_material(self) -> tuple[bytes, str]:
+        tokens = await self.bot.get_shared_api_tokens(SESSION_KEY_TOKEN_NAMESPACE)
+        try:
+            wrapping_key = decode_wrapping_key(tokens["wrapping_key"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AccountConnectionError(
+                "Polymarket session-key storage is unavailable."
+            ) from exc
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        deployment_config = getattr(cryptowallet, "config", None)
+        deployment_value = getattr(deployment_config, "deployment_id", None)
+        if not callable(deployment_value):
+            raise AccountConnectionError("CryptoWallet deployment identity is unavailable.")
+        deployment_id = str(await deployment_value() or "")
+        if not deployment_id:
+            raise AccountConnectionError("CryptoWallet deployment identity is unavailable.")
+        return wrapping_key, deployment_id
+
+    async def _session_capability_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("session"))
+            and not validate_polymarket_production_manifest()
+        )
+
+    async def _persist_session_provision(
+        self, user, *, encrypted_key: dict, lifecycle: SessionKeyLifecycle,
+        operation: SessionKeyOperation,
+    ) -> None:
+        async with self.config.user(user).all() as values:
+            if any(values.get(field) for field in (
+                "encrypted_session_key", "session_lifecycle", "session_operation",
+            )):
+                raise AccountConnectionError(
+                    "A Polymarket session key already exists for this user."
+                )
+            values["encrypted_session_key"] = encrypted_key
+            values["session_lifecycle"] = lifecycle.to_record()
+            values["session_operation"] = operation.to_record()
+
+    async def _provision_session_key(
+        self, user, eligibility: EligibilityAttestation,
+    ) -> SessionKeyOperation:
+        """Persist and submit one exact owner-approved session authorization."""
+
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session provisioning is disabled.")
+        now = int(time.time())
+        eligibility.require_current(discord_user_id=user.id, now=now)
+        if not is_current_polymarket_terms_acceptance(
+            await self.config.user(user).terms_acceptance(), user.id
+        ):
+            raise AccountConnectionError("Current Polymarket terms are required.")
+        binding = await self._bot_first_account(user)
+        relationship = await PolygonAccountIdentityVerifier(self._polygon_rpc).verify(
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            wallet_type=WalletType.DEPOSIT_WALLET,
+        )
+        if relationship.block_number < 0:
+            raise AccountConnectionError("Deposit Wallet deployment was not verified.")
+        wrapping_key, deployment_id = await self._session_storage_material()
+        builder_tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            builder = BuilderCredentials(
+                builder_tokens["api_key"], builder_tokens["secret"],
+                builder_tokens["passphrase"],
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        nonce = await self.session_transport.get_wallet_nonce(binding.signer_address)
+        private_key, session_address = generate_session_key()
+        approval = SessionKeyOwnerApproval(
+            action="authorize", discord_user_id=user.id,
+            profile_id=binding.profile_id,
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address=session_address, nonce=nonce, created_at=now,
+            deadline=now + BATCH_LIFETIME_SECONDS,
+            valid_until=now + SESSION_KEY_LIFETIME_SECONDS,
+            idempotency_key=secrets.token_urlsafe(32),
+        )
+        encrypted = protect_session_private_key(
+            wrapping_key, private_key, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=session_address, created_at=now,
+            expires_at=approval.valid_until,
+        )
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=user.id, profile_id=binding.profile_id,
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address=session_address, created_at=now,
+            expires_at=approval.valid_until,
+        )
+        operation = SessionKeyOperation(approval)
+        await self._persist_session_provision(
+            user, encrypted_key=encrypted.to_record(),
+            lifecycle=lifecycle, operation=operation,
+        )
+        return await self._submit_pending_session_key(user)
+
+    async def _submit_pending_session_key(self, user) -> SessionKeyOperation:
+        """Resume owner approval safely until provider submission begins."""
+
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session provisioning is disabled.")
+        user_config = self.config.user(user)
+        stored = await user_config.session_operation()
+        if not stored:
+            raise AccountConnectionError("No Polymarket session approval is pending.")
+        operation = SessionKeyOperation.from_record(stored).recover_after_restart()
+        if operation.state is not SessionOperationState.PENDING_OWNER_APPROVAL:
+            raise AccountConnectionError("Polymarket session approval is not pending.")
+        approval = operation.approval
+        binding = await self._bot_first_account(user)
+        if (
+            approval.discord_user_id != user.id
+            or approval.profile_id != binding.profile_id
+            or approval.owner_address != binding.signer_address
+            or approval.wallet_address != binding.account_wallet_address
+        ):
+            raise AccountConnectionError("Polymarket session approval identity changed.")
+        await user_config.session_operation.set(operation.to_record())
+        builder_tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            builder = BuilderCredentials(
+                builder_tokens["api_key"], builder_tokens["secret"],
+                builder_tokens["passphrase"],
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        signer = getattr(cryptowallet, "polymarket_sign_session_batch", None)
+        if not callable(signer):
+            raise AccountConnectionError("CryptoWallet session signing is unavailable.")
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                approval.typed_data(), sort_keys=True, separators=(",", ":")
+            ).encode("ascii")
+        ).hexdigest()
+        try:
+            result = await signer(
+                user, owner_address=approval.owner_address,
+                wallet_address=approval.wallet_address,
+                session_address=approval.session_address,
+                action=approval.action, valid_until=approval.valid_until,
+                typed_data=approval.typed_data(),
+                approval_fingerprint=fingerprint,
+            )
+        except RuntimeError as exc:
+            raise AccountConnectionError(
+                "CryptoWallet session signing is unavailable."
+            ) from exc
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"signature", "signer_address"}
+            or result["signer_address"] != approval.owner_address
+        ):
+            raise AccountConnectionError("CryptoWallet returned an invalid session signer.")
+        signature = str(result["signature"])
+        verify_session_batch_signature(approval, signature)
+        operation = operation.approve(signature, now=int(time.time()))
+        await user_config.session_operation.set(operation.to_record())
+        submitting = operation.begin_submission(now=int(time.time()))
+        await user_config.session_operation.set(submitting.to_record())
+        try:
+            response = await self.session_transport.submit(
+                approval, signature, builder, timestamp=int(time.time())
+            )
+        except (aiohttp.ClientError, AccountConnectionError, TimeoutError):
+            unknown = submitting.recover_after_restart()
+            await user_config.session_operation.set(unknown.to_record())
+            raise AccountConnectionError(
+                "Session authorization outcome is unknown; reconcile before retry."
+            ) from None
+        submitted = submitting.record_submission(response)
+        await user_config.session_operation.set(submitted.to_record())
+        return submitted
+
+    async def _reconcile_session_key(self, user) -> SessionKeyLifecycle:
+        """Reconcile transaction, registry, and encrypted session credentials."""
+
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session reconciliation is disabled.")
+        user_config = self.config.user(user)
+        operation_record = await user_config.session_operation()
+        lifecycle_record = await user_config.session_lifecycle()
+        encrypted_record = await user_config.encrypted_session_key()
+        if not all((operation_record, lifecycle_record, encrypted_record)):
+            raise AccountConnectionError("Polymarket session provisioning is incomplete.")
+        operation = SessionKeyOperation.from_record(operation_record).recover_after_restart()
+        lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+        encrypted = EncryptedSessionKey.from_record(encrypted_record)
+        binding = await self._bot_first_account(user)
+        identity = (
+            user.id, binding.profile_id, binding.signer_address,
+            binding.account_wallet_address, lifecycle.session_address,
+        )
+        if identity != (
+            lifecycle.discord_user_id, lifecycle.profile_id,
+            lifecycle.owner_address, lifecycle.wallet_address,
+            encrypted.session_address,
+        ) or (
+            encrypted.profile_id, encrypted.signer_address,
+            encrypted.account_wallet_address,
+        ) != (
+            lifecycle.profile_id, lifecycle.owner_address, lifecycle.wallet_address,
+        ):
+            raise AccountConnectionError("Polymarket session identity changed.")
+        if operation.approval.session_address != lifecycle.session_address:
+            raise AccountConnectionError("Polymarket session operation identity changed.")
+        if operation.state is SessionOperationState.UNKNOWN and not operation.transaction_id:
+            await user_config.session_operation.set(operation.to_record())
+            raise AccountConnectionError(
+                "Session authorization has no transaction identity; manual review is required."
+            )
+        if operation.state in {
+            SessionOperationState.SUBMITTED, SessionOperationState.UNKNOWN,
+        }:
+            evidence = await self.session_transport.transaction(operation.transaction_id)
+            operation = operation.reconcile_transaction(evidence)
+            await user_config.session_operation.set(operation.to_record())
+        if operation.state is SessionOperationState.FAILED:
+            lifecycle = lifecycle.fail(operation)
+            await user_config.session_lifecycle.set(lifecycle.to_record())
+            return lifecycle
+        if operation.state is not SessionOperationState.CONFIRMING_REGISTRY:
+            return lifecycle
+
+        wrapping_key, deployment_id = await self._session_storage_material()
+        private_key = reveal_session_private_key(
+            wrapping_key, encrypted, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=lifecycle.profile_id,
+            signer_address=lifecycle.owner_address,
+            account_wallet_address=lifecycle.wallet_address,
+            session_address=lifecycle.session_address,
+        )
+        now = int(time.time())
+        owner_signature = await self._request_cdp_clob_auth_signature(
+            user, binding, timestamp=now, nonce=0,
+        )
+        owner_credentials = await self.session_transport.create_or_derive_clob_credentials(
+            address=lifecycle.owner_address, signature=owner_signature,
+            timestamp=now, nonce=0,
+        )
+        await self.session_transport.require_active(
+            operation.approval, credentials=owner_credentials, timestamp=now
+        )
+        session_credentials = (
+            await self.session_transport.create_or_derive_session_credentials(
+                private_key, timestamp=now, nonce=0
+            )
+        )
+        encrypted_credentials = protect_session_credentials(
+            wrapping_key, session_credentials, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=lifecycle.profile_id,
+            signer_address=lifecycle.owner_address,
+            account_wallet_address=lifecycle.wallet_address,
+            session_address=lifecycle.session_address,
+            created_at=lifecycle.created_at, expires_at=lifecycle.expires_at,
+        )
+        operation = operation.confirm_registry(active=True, now=now)
+        lifecycle = lifecycle.activate(operation)
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session reconciliation was paused.")
+        async with user_config.all() as values:
+            current = SessionKeyOperation.from_record(values["session_operation"])
+            if current.state is not SessionOperationState.CONFIRMING_REGISTRY:
+                raise AccountConnectionError("Polymarket session operation changed.")
+            values["encrypted_session_credentials"] = encrypted_credentials.to_record()
+            values["session_operation"] = operation.to_record()
+            values["session_lifecycle"] = lifecycle.to_record()
+        return lifecycle
 
     async def _bot_first_account(self, user) -> BotFirstAccountBinding:
         """Resolve and persist the user's CryptoWallet-owned Deposit Wallet identity."""

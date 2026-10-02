@@ -101,6 +101,11 @@ class SessionKeyOperation:
         return replace(self, state=SessionOperationState.SUBMITTING)
 
     def recover_after_restart(self) -> "SessionKeyOperation":
+        if self.state is SessionOperationState.APPROVED:
+            return replace(
+                self, state=SessionOperationState.PENDING_OWNER_APPROVAL,
+                owner_signature_digest=None,
+            )
         if self.state is SessionOperationState.SUBMITTING:
             return replace(self, state=SessionOperationState.UNKNOWN)
         return self
@@ -119,7 +124,10 @@ class SessionKeyOperation:
             not isinstance(transaction_hash, str)
             or not TX_HASH.fullmatch(transaction_hash.lower())
         ):
-            return replace(self, state=SessionOperationState.UNKNOWN)
+            return replace(
+                self, state=SessionOperationState.UNKNOWN,
+                operation_id=operation_id, transaction_id=transaction_id,
+            )
         return replace(
             self, state=SessionOperationState.SUBMITTED,
             operation_id=operation_id, transaction_id=transaction_id,
@@ -289,6 +297,17 @@ class SessionKeyLifecycle:
         }:
             raise AccountConnectionError("Session key cannot begin revocation.")
         return replace(self, status=SessionKeyStatus.REVOKING)
+
+    def fail(self, operation: SessionKeyOperation) -> "SessionKeyLifecycle":
+        if (
+            operation.state is not SessionOperationState.FAILED
+            or operation.approval.session_address != self.session_address
+            or self.status not in {
+                SessionKeyStatus.PROVISIONING, SessionKeyStatus.REVOKING,
+            }
+        ):
+            raise AccountConnectionError("Session failure evidence is invalid.")
+        return replace(self, status=SessionKeyStatus.FAILED)
 
     def revoke(self, operation: SessionKeyOperation) -> "SessionKeyLifecycle":
         if (

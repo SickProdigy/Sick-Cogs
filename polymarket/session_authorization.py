@@ -200,3 +200,52 @@ class SessionKeyOwnerApproval:
     @property
     def endpoint(self) -> str:
         return AUTHORIZATION_PATH if self.action == "authorize" else REVOCATION_PATH
+
+
+def session_batch_digest(approval: SessionKeyOwnerApproval) -> bytes:
+    """Hash one exact Deposit Wallet Batch using canonical EIP-712 encoding."""
+
+    if not isinstance(approval, SessionKeyOwnerApproval):
+        raise AccountConnectionError("Session-key approval is invalid.")
+    domain_type = keccak(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    )
+    domain_separator = keccak(
+        domain_type
+        + keccak(b"DepositWallet")
+        + keccak(b"1")
+        + _uint_word(approval.chain_id)
+        + _address_word(approval.wallet_address)
+    )
+    call_type = keccak(b"Call(address target,uint256 value,bytes data)")
+    call_hash = keccak(
+        call_type
+        + _address_word(approval.wallet_address)
+        + _uint_word(0)
+        + keccak(bytes.fromhex(approval.calldata[2:]))
+    )
+    batch_type = keccak(
+        b"Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)"
+        b"Call(address target,uint256 value,bytes data)"
+    )
+    batch_hash = keccak(
+        batch_type
+        + _address_word(approval.wallet_address)
+        + _uint_word(approval.nonce)
+        + _uint_word(approval.deadline)
+        + keccak(call_hash)
+    )
+    return keccak(b"\x19\x01" + domain_separator + batch_hash)
+
+
+def verify_session_batch_signature(
+    approval: SessionKeyOwnerApproval, signature: str,
+) -> str:
+    """Recover and require the immutable CryptoWallet owner for one Batch."""
+
+    recovered = recover_signer_address(session_batch_digest(approval), signature)
+    if recovered != approval.owner_address:
+        raise AccountConnectionError(
+            "Session-key owner signature does not match CryptoWallet."
+        )
+    return recovered
