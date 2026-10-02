@@ -29,7 +29,9 @@ from .onboarding import (
     complete_protected_onboarding,
 )
 from .onboarding_verification import finalize_onboarding_evidence
-from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from .order_intent import (
+    MarketBuyApproval, MarketOrderMetadata, OrderBookSnapshot, OrderIntentError,
+)
 from .order_transport import AuthenticatedOrderTransport, ClobCredentials, OrderTransportError
 from .relayer import BuilderCredentials, DepositWalletRelayerClient
 from .production_manifest import (
@@ -163,7 +165,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.35"
+    __version__ = "0.2.36"
 
     def __init__(self, bot):
         self.bot = bot
@@ -1762,15 +1764,20 @@ class Polymarket(commands.Cog):
                 raise OrderIntentError("Outcome is not part of this market.")
             token_id = snapshot.outcome_token_ids[selected]
             book_payload = await self._get_clob_json("/book", {"token_id": token_id})
-            fee_payload = await self._get_clob_json("/fee-rate", {"token_id": token_id})
+            metadata_payload = await self._get_clob_json(
+                f"/clob-markets/{snapshot.condition_id}"
+            )
             quote = OrderBookSnapshot.from_payload(book_payload, captured_at=now)
-            base_fee_bps = int(fee_payload["base_fee"])
+            metadata = MarketOrderMetadata.from_payload(
+                metadata_payload, expected_token_id=token_id
+            )
+            metadata.require_matches(quote)
             approval = MarketBuyApproval.create(
                 requester_id=ctx.author.id, market_id=snapshot.market_id,
                 condition_id=snapshot.condition_id, outcome=snapshot.outcomes[selected],
-                quote=quote, max_price=max_price or format(quote.best_ask, "f"),
-                max_spend_pusd=max_spend_pusd, maximum_base_fee_bps=base_fee_bps,
-                expires_at=now + 120,
+                quote=quote, metadata=metadata,
+                max_price=max_price or format(quote.best_ask, "f"),
+                max_spend_pusd=max_spend_pusd, expires_at=now + 120,
             )
         except (aiohttp.ClientError, RuntimeError, ValueError, KeyError, TypeError,
                 MarketSnapshotError, OrderIntentError):
@@ -1784,7 +1791,8 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Best ask / ceiling", value=f"{quote.best_ask} / {approval.max_price}", inline=True)
         embed.add_field(name="All-in cap", value=f"{approval.max_spend_pusd} pUSD", inline=True)
         embed.add_field(name="Maximum notional", value=f"{approval.maximum_notional} pUSD", inline=True)
-        embed.add_field(name="Fee reserve", value=f"up to {approval.maximum_fee_pusd} pUSD (base fee {base_fee_bps} bps)", inline=True)
+        embed.add_field(name="Fee reserve", value=(f"up to {approval.maximum_fee_pusd} pUSD "
+                  f"(rate {metadata.fee_rate}, exponent {metadata.fee_exponent})"), inline=True)
         embed.add_field(name="Market constraints", value=f"Minimum {quote.minimum_order_size} shares · tick {quote.tick_size} · {'negative-risk' if quote.negative_risk else 'standard'} exchange", inline=False)
         embed.add_field(name="Approval fingerprint", value=f"`{approval.fingerprint}`", inline=False)
         embed.add_field(name="Expires", value=f"<t:{approval.expires_at}:R>", inline=True)

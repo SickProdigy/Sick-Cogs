@@ -6,7 +6,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import hashes
@@ -39,7 +39,9 @@ from polymarket.identity_verifier import (
     AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
 )
 from polymarket.relayer import BuilderCredentials, DepositWalletRelayerClient
-from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from polymarket.order_intent import (
+    MarketBuyApproval, MarketOrderMetadata, OrderBookSnapshot, OrderIntentError,
+)
 from polymarket.order_transport import (
     AuthenticatedOrderTransport, ClobCredentials, OrderTransportError,
     _hmac_signature, validate_signed_order,
@@ -422,41 +424,89 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         with self.assertRaises(AccountConnectionError):
             replace(result, source="bot_server_ip")
 
-    def test_market_buy_approval_binds_live_constraints_caps_and_fingerprint(self):
-        payload = {"asset_id": "123", "bids": [{"price": "0.50", "size": "20"}],
-            "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
-            "tick_size": "0.01", "neg_risk": False, "hash": "book-1"}
+    def test_market_buy_approval_binds_current_fees_constraints_and_fingerprint(self):
+        payload = {
+            "asset_id": "123", "bids": [{"price": "0.50", "size": "20"}],
+            "asks": [{"price": "0.52", "size": "20"}],
+            "min_order_size": "5", "tick_size": "0.01",
+            "neg_risk": False, "hash": "book-1",
+        }
         quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
-        approval = MarketBuyApproval.create(requester_id=7, market_id="42",
-            condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
-            max_spend_pusd="10", maximum_base_fee_bps=200, expires_at=220)
-        self.assertEqual(str(approval.maximum_notional), "9.904912")
-        self.assertEqual(str(approval.maximum_fee_pusd), "0.095088")
+        metadata = MarketOrderMetadata.from_payload({
+            "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+            "nr": False, "t": [{"t": "123", "o": "Yes"}],
+        }, expected_token_id="123")
+        approval = MarketBuyApproval.create(
+            requester_id=7, market_id="42", condition_id="condition",
+            outcome="Yes", quote=quote, metadata=metadata, max_price="0.55",
+            max_spend_pusd="10", expires_at=220,
+        )
+        self.assertEqual(str(approval.maximum_notional), "9.997750")
+        self.assertEqual(str(approval.maximum_fee_pusd), "0.002250")
         self.assertEqual(len(approval.fingerprint), 64)
-        fresh = OrderBookSnapshot.from_payload({**payload, "hash": "book-2",
-            "asks": [{"price": "0.54", "size": "10"}]}, captured_at=150)
-        approval.require_fresh(fresh, base_fee_bps=150, now=150)
+        fresh = OrderBookSnapshot.from_payload({
+            **payload, "hash": "book-2",
+            "asks": [{"price": "0.54", "size": "10"}],
+        }, captured_at=150)
+        approval.require_fresh(fresh, metadata, now=150)
 
     def test_market_buy_approval_requires_reapproval_on_material_drift(self):
-        payload = {"asset_id": "123", "bids": [],
-            "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
-            "tick_size": "0.01", "neg_risk": False, "hash": "book-1"}
+        payload = {
+            "asset_id": "123", "bids": [],
+            "asks": [{"price": "0.52", "size": "20"}],
+            "min_order_size": "5", "tick_size": "0.01",
+            "neg_risk": False, "hash": "book-1",
+        }
         quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
-        approval = MarketBuyApproval.create(requester_id=7, market_id="42",
-            condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
-            max_spend_pusd="10", maximum_base_fee_bps=200, expires_at=220)
-        changes = (
-            ({**payload, "hash": "2", "asks": [{"price": "0.56", "size": "10"}]}, 100),
-            ({**payload, "hash": "3", "tick_size": "0.001"}, 100),
-            ({**payload, "hash": "4", "neg_risk": True}, 100),
+        metadata = MarketOrderMetadata.from_payload({
+            "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+            "nr": False, "t": [{"t": "123", "o": "Yes"}],
+        }, expected_token_id="123")
+        approval = MarketBuyApproval.create(
+            requester_id=7, market_id="42", condition_id="condition",
+            outcome="Yes", quote=quote, metadata=metadata, max_price="0.55",
+            max_spend_pusd="10", expires_at=220,
         )
-        for changed, fee in changes:
+        changed_quotes = (
+            {**payload, "hash": "2", "asks": [{"price": "0.56", "size": "10"}]},
+            {**payload, "hash": "3", "tick_size": "0.001"},
+            {**payload, "hash": "4", "neg_risk": True},
+        )
+        for changed in changed_quotes:
             with self.assertRaises(OrderIntentError):
-                approval.require_fresh(OrderBookSnapshot.from_payload(changed, captured_at=150), base_fee_bps=fee, now=150)
+                approval.require_fresh(
+                    OrderBookSnapshot.from_payload(changed, captured_at=150),
+                    metadata, now=150,
+                )
+        changed_fee = replace(metadata, fee_rate=Decimal("0.0006"))
         with self.assertRaises(OrderIntentError):
-            approval.require_fresh(quote, base_fee_bps=201, now=150)
+            approval.require_fresh(quote, changed_fee, now=150)
         with self.assertRaises(OrderIntentError):
-            approval.require_fresh(quote, base_fee_bps=100, now=220)
+            approval.require_fresh(quote, metadata, now=220)
+
+    def test_market_metadata_fails_closed_and_supports_explicit_no_fee(self):
+        base = {
+            "mts": "0.01", "nr": False,
+            "t": [{"t": "123", "o": "Yes"}],
+        }
+        no_fee = MarketOrderMetadata.from_payload(base, expected_token_id="123")
+        self.assertEqual(
+            (no_fee.fee_rate, no_fee.fee_exponent), (Decimal(0), Decimal(0))
+        )
+        invalid = (
+            {**base, "mts": "0.03"},
+            {**base, "nr": "false"},
+            {**base, "t": [{"t": "456"}]},
+            {**base, "t": [{"t": "123"}, {"t": "123"}]},
+            {**base, "fd": "0.0005"},
+            {**base, "fd": {"r": "1.01", "e": "1"}},
+            {**base, "fd": {"r": "0.0005", "e": "1.5"}},
+        )
+        for payload in invalid:
+            with self.subTest(payload=payload), self.assertRaises(OrderIntentError):
+                MarketOrderMetadata.from_payload(
+                    payload, expected_token_id="123"
+                )
 
     def test_collateral_plans_bind_exact_assets_spenders_amounts_and_revocation(self):
         wallet = "0x" + "9" * 40
@@ -3238,17 +3288,22 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             {"asset_id": "123", "bids": [{"price": "0.50", "size": "20"}],
              "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
              "tick_size": "0.01", "neg_risk": False, "hash": "live-book"},
-            {"base_fee": 400},
+            {"fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+             "nr": False, "t": [{"t": "123", "o": "Yes"}]},
         ])
         with patch("polymarket.polymarket.time.time", return_value=100):
             await Polymarket.polymarket_quote.callback(
                 cog, ctx, "example", "Yes", "10", "0.55"
             )
         self.assertEqual(cog._get_clob_json.await_count, 2)
+        self.assertEqual(
+            cog._get_clob_json.await_args_list,
+            [call("/book", {"token_id": "123"}), call("/clob-markets/condition")],
+        )
         embed = ctx.send.await_args.kwargs["embed"]
         fields = {field.name: field.value for field in embed.fields}
         self.assertEqual(fields["All-in cap"], "10 pUSD")
-        self.assertIn("base fee 400 bps", fields["Fee reserve"])
+        self.assertIn("rate 0.0005, exponent 1", fields["Fee reserve"])
         self.assertIn("Preview only", fields["Execution"])
         self.assertEqual(len(fields["Approval fingerprint"].strip("`")), 64)
 
