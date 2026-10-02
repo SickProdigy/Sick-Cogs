@@ -10,6 +10,12 @@ free-play dice and card games.
 - `[p]coinflip` flips a coin.
 - `[p]blackjack` or `[p]21` starts an interactive hand.
 - `[p]higherlower` starts a higher-or-lower run.
+- `[p]highcard` draws once against the dealer.
+- `[p]games rules [game]` shows concise rules.
+
+The launcher buttons run quick games directly and open interactive card games in the
+same message. Interactive games provide Play Again and Quit controls, visibly expire
+after inactivity, and limit each member to one active game per channel.
 
 When Red's General or Economy cogs are loaded, the launcher also lists their native
 `roll`, `flip`, `rps`, and `slot` commands. GameRoom does not replace those
@@ -17,7 +23,7 @@ commands.
 
 ## Initial release boundary
 
-Version 0.1.0 is free play only. It stores no game or user data. Blackjack uses one
+Version 0.1.1 is free play only. It stores no game or user data. Blackjack uses one
 shuffled 52-card deck, dealer stands on all 17s, and Double draws exactly one card
 before standing. Higher-or-lower treats aces as high, continues on ties, and ends
 after a wrong guess or ten correct guesses.

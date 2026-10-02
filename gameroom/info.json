@@ -1,10 +1,10 @@
 {
   "author": ["SickProdigy"],
-  "description": "A unified free-play game room with dice, coin flips, blackjack, higher-or-lower, and discovery of Red's native games.",
+  "description": "A unified free-play game room with dice, coin flips, blackjack, higher-or-lower, high card, and discovery of Red's native games.",
   "disabled": false,
   "end_user_data_statement": "This cog does not persistently store end user data.",
   "hidden": false,
-  "install_msg": "Open the game room with `[p]games`. Try `[p]dice d20`, `[p]coinflip`, `[p]blackjack`, or `[p]higherlower`.",
+  "install_msg": "Open the game room with `[p]games`. Try `[p]dice d20`, `[p]coinflip`, `[p]blackjack`, or `[p]higherlower`, or `[p]highcard`.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 8, 0],
   "name": "GameRoom",
@@ -13,5 +13,5 @@
   "short": "Unified free-play dice and card games",
   "tags": ["games", "dice", "blackjack", "cards", "fun"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

@@ -211,3 +211,25 @@ class HigherLowerGame:
                 f"{next_card.label} was not {direction} than {self.current.label}. Game over."
             )
         return next_card
+
+
+@dataclass(frozen=True)
+class HighCardResult:
+    player: Card
+    dealer: Card
+    result: str
+
+
+def draw_high_card(deck: Optional[List[Card]] = None) -> HighCardResult:
+    cards = list(deck) if deck is not None else new_deck()
+    if len(cards) < 2:
+        raise ValueError("High card needs at least two cards.")
+    player = cards.pop()
+    dealer = cards.pop()
+    if player.high_value > dealer.high_value:
+        result = "Your card is higher — you win!"
+    elif player.high_value < dealer.high_value:
+        result = "Dealer card is higher."
+    else:
+        result = "Tie — same rank."
+    return HighCardResult(player, dealer, result)

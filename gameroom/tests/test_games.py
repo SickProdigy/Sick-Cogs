@@ -4,14 +4,15 @@ from unittest.mock import AsyncMock, Mock
 
 from gameroom import remove_conflicting_aliases
 from gameroom.gameroom import GameRoom
-from gameroom.views import GameMenuView
 from gameroom.games import (
     BlackjackGame,
     Card,
     HigherLowerGame,
+    draw_high_card,
     hand_value,
     parse_dice,
 )
+from gameroom.views import BlackjackView, GameMenuView
 
 
 class DiceTests(unittest.TestCase):
@@ -41,6 +42,16 @@ class CardValueTests(unittest.TestCase):
             21,
         )
         self.assertEqual(hand_value([Card("A", "♠"), Card("K", "♥")]), 21)
+
+    def test_high_card_compares_ranks_with_aces_high(self):
+        result = draw_high_card([Card("K", "♣"), Card("A", "♠")])
+        self.assertEqual(result.player.rank, "A")
+        self.assertEqual(result.dealer.rank, "K")
+        self.assertIn("you win", result.result.lower())
+
+    def test_high_card_allows_rank_ties(self):
+        result = draw_high_card([Card("5", "♣"), Card("5", "♠")])
+        self.assertEqual(result.result, "Tie — same rank.")
 
 
 class BlackjackTests(unittest.TestCase):
@@ -86,6 +97,22 @@ class BlackjackTests(unittest.TestCase):
         self.assertTrue(game.finished)
         self.assertEqual(game.result, "Blackjack! You win.")
 
+    def test_finished_view_offers_replay_and_quit(self):
+        game = BlackjackGame(
+            [
+                Card("8", "♣"),
+                Card("7", "♦"),
+                Card("9", "♣"),
+                Card("K", "♥"),
+                Card("A", "♠"),
+            ]
+        )
+        view = BlackjackView(100, game)
+        self.assertEqual(
+            {item.label for item in view.children},
+            {"Play again", "Quit"},
+        )
+
 
 class HigherLowerTests(unittest.TestCase):
     def test_correct_guess_increases_score(self):
@@ -111,7 +138,7 @@ class HigherLowerTests(unittest.TestCase):
 
 class InteractionTests(unittest.IsolatedAsyncioTestCase):
     async def test_launcher_rejects_other_users_privately(self):
-        view = GameMenuView(100, "!")
+        view = GameMenuView(100, "!", Mock())
         interaction = SimpleNamespace(
             user=SimpleNamespace(id=200), response=AsyncMock()
         )
@@ -122,9 +149,42 @@ class InteractionTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_launcher_accepts_its_requester(self):
-        view = GameMenuView(100, "!")
+        view = GameMenuView(100, "!", Mock())
         interaction = SimpleNamespace(user=SimpleNamespace(id=100))
         self.assertTrue(await view.interaction_check(interaction))
+
+    async def test_session_limit_and_release(self):
+        cog = GameRoom(Mock())
+        first = SimpleNamespace(
+            guild_id=1,
+            channel_id=2,
+            user=SimpleNamespace(id=3),
+            message=Mock(),
+            response=AsyncMock(),
+        )
+        second = SimpleNamespace(
+            guild_id=1,
+            channel_id=2,
+            user=SimpleNamespace(id=3),
+            message=Mock(),
+            response=AsyncMock(),
+        )
+        self.assertTrue(await cog.start_blackjack_interaction(first))
+        self.assertFalse(await cog.start_higher_lower_interaction(second))
+        second.response.send_message.assert_awaited_once()
+        key = cog._session_key(1, 2, 3)
+        cog.active_sessions[key].release()
+        self.assertNotIn(key, cog.active_sessions)
+
+    async def test_timeout_is_visible_and_releases_session(self):
+        released = Mock()
+        view = GameMenuView(100, "!", Mock())
+        view._on_release = released
+        view.message = AsyncMock()
+        await view.on_timeout()
+        released.assert_called_once_with()
+        view.message.edit.assert_awaited_once()
+        self.assertTrue(all(item.disabled for item in view.children))
 
 
 class CommandTests(unittest.TestCase):
@@ -132,7 +192,15 @@ class CommandTests(unittest.TestCase):
         commands = {command.name: command for command in GameRoom.__cog_commands__}
         self.assertEqual(
             set(commands),
-            {"gameroom", "dice", "coinflip", "blackjack", "higherlower"},
+            {
+                "gameroom",
+                "rules",
+                "dice",
+                "coinflip",
+                "highcard",
+                "blackjack",
+                "higherlower",
+            },
         )
         self.assertIn("games", commands["gameroom"].aliases)
         self.assertIn("21", commands["blackjack"].aliases)
