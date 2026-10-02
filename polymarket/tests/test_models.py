@@ -7,6 +7,7 @@ from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
+from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
     validate_session_key_policy,
@@ -120,6 +121,41 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             blocked.require_current(discord_user_id=7, now=150)
         with self.assertRaises(AccountConnectionError):
             replace(result, source="bot_server_ip")
+
+    def test_market_buy_approval_binds_live_constraints_caps_and_fingerprint(self):
+        payload = {"asset_id": "123", "bids": [{"price": "0.50", "size": "20"}],
+            "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
+            "tick_size": "0.01", "neg_risk": False, "hash": "book-1"}
+        quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
+        approval = MarketBuyApproval.create(requester_id=7, market_id="42",
+            condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
+            max_spend_pusd="10", maximum_fee_bps=200, expires_at=220)
+        self.assertEqual(str(approval.maximum_notional), "9.803921")
+        self.assertEqual(len(approval.fingerprint), 64)
+        fresh = OrderBookSnapshot.from_payload({**payload, "hash": "book-2",
+            "asks": [{"price": "0.54", "size": "10"}]}, captured_at=150)
+        approval.require_fresh(fresh, fee_bps=150, now=150)
+
+    def test_market_buy_approval_requires_reapproval_on_material_drift(self):
+        payload = {"asset_id": "123", "bids": [],
+            "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
+            "tick_size": "0.01", "neg_risk": False, "hash": "book-1"}
+        quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
+        approval = MarketBuyApproval.create(requester_id=7, market_id="42",
+            condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
+            max_spend_pusd="10", maximum_fee_bps=200, expires_at=220)
+        changes = (
+            ({**payload, "hash": "2", "asks": [{"price": "0.56", "size": "10"}]}, 100),
+            ({**payload, "hash": "3", "tick_size": "0.001"}, 100),
+            ({**payload, "hash": "4", "neg_risk": True}, 100),
+        )
+        for changed, fee in changes:
+            with self.assertRaises(OrderIntentError):
+                approval.require_fresh(OrderBookSnapshot.from_payload(changed, captured_at=150), fee_bps=fee, now=150)
+        with self.assertRaises(OrderIntentError):
+            approval.require_fresh(quote, fee_bps=201, now=150)
+        with self.assertRaises(OrderIntentError):
+            approval.require_fresh(quote, fee_bps=100, now=220)
 
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])

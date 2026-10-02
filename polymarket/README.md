@@ -4,7 +4,7 @@ A develop-only Sick-Cogs cog for read-only prediction-market discovery and infor
 
 ## Current boundary
 
-Version `0.2.6` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
+Version `0.2.7` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
 Production controls are owner-only: `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. Enablement deliberately refuses while execution has no reviewed capabilities.
 
@@ -33,6 +33,8 @@ The category browser uses Polymarket's public Gamma API tags for Politics, Crypt
 ## Future handoff foundation
 
 The develop-only package includes an immutable `MarketSnapshot` parser for technically ready public CLOB markets. It records only public market identity, outcome token IDs, displayed prices, and public fee/minimum-size metadata. It is not a wallet, order, approval, quote, or transaction object.
+
+It also includes a non-executable live order-book snapshot and market-buy approval model. The approval binds the user, market, outcome token, book hash, best ask, tick size, minimum size, negative-risk route, fee ceiling, price ceiling, all-in pUSD cap, and expiry into one fingerprint. A final refresh requires reapproval when market constraints change or price/fee ceilings are exceeded.
 
 ## Planned direction
 
