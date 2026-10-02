@@ -219,7 +219,7 @@ class JwtAuthMixin:
                 or payload.get("discord_user_id") != discord_user_id
                 or payload.get("wallet_type") not in wallet_types
                 or not isinstance(payload.get("connection_id"), str)
-                or not 1 <= len(payload["connection_id"]) <= 128
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", payload["connection_id"]) is None
                 or not isinstance(payload.get("result_handle"), str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["result_handle"]) is None
                 or not isinstance(payload.get("challenge"), str)
@@ -254,6 +254,9 @@ class JwtAuthMixin:
             else CLAIM_HANDOFF_LIFETIME_SECONDS
         )
         expires_at = now + lifetime
+        signed_payload = dict(payload)
+        if purpose == "polymarket_connect":
+            signed_payload["discord_user_id"] = str(discord_user_id)
         claims = {
             "iss": configuration["issuer"],
             "aud": configuration["audience"],
@@ -266,7 +269,7 @@ class JwtAuthMixin:
             "sickwallet_deployment": deployment_id,
             "sickwallet_application": str(application_id),
             "sickwallet_discord_user": str(discord_user_id),
-            claim_name: dict(payload),
+            claim_name: signed_payload,
         }
         token = jwt.encode(
             claims,

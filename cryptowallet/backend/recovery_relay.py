@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 from urllib.parse import urlparse
@@ -185,6 +186,37 @@ class RecoveryRelayMixin:
             or len(acceptance_id) > 128
         ):
             raise RuntimeError("The CryptoWallet terms relay returned an invalid binding")
+        return result
+
+    async def poll_polymarket_onboarding_result(self, handle: str) -> dict | None:
+        """Consume one encrypted, browser-submitted Polymarket proof result."""
+        result = await self._poll_structured_relay_result(
+            handle, path="/api/polymarket-connect.php", label="Polymarket onboarding",
+        )
+        if result is None:
+            return None
+        signature = result.get("signature")
+        country = result.get("country")
+        region = result.get("region")
+        checked_at = result.get("checked_at")
+        if (
+            set(result) != {"status", "signature", "blocked", "country", "region", "checked_at"}
+            or result.get("status") != "submitted"
+            or (
+                result.get("blocked") is False
+                and (not isinstance(signature, str)
+                     or re.fullmatch(r"0x[0-9a-fA-F]{130}", signature) is None)
+            )
+            or (result.get("blocked") is True and signature is not None)
+            or not isinstance(result.get("blocked"), bool)
+            or not isinstance(country, str)
+            or re.fullmatch(r"[A-Z]{2}", country) is None
+            or not isinstance(region, str)
+            or re.fullmatch(r"[A-Z0-9-]{0,16}", region) is None
+            or not isinstance(checked_at, int)
+            or checked_at <= 0
+        ):
+            raise RuntimeError("The Polymarket onboarding relay returned an invalid binding")
         return result
 
     async def _poll_structured_relay_result(

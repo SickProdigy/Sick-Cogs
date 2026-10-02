@@ -7,6 +7,7 @@
     "build:clanker": "esbuild src/clanker-external.js --bundle --format=esm --minify --legal-comments=none --outfile=clanker-external.js",
     "build:security": "esbuild src/security.js --bundle --format=esm --minify --legal-comments=none --outfile=security.js",
     "build:terms": "esbuild src/wallet-terms.js --bundle --format=esm --minify --legal-comments=none --outfile=wallet-terms.js",
+    "build:polymarket": "esbuild src/polymarket-connect.js --bundle --format=esm --minify --legal-comments=none --outfile=polymarket-connect.js",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

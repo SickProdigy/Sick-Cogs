@@ -787,6 +787,36 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS", endpoint)
         self.assertIn("polymarket_connect' => RECOVERY_HANDOFF_POLYMARKET_LIFETIME_SECONDS", endpoint)
 
+    async def test_polymarket_result_poll_validates_exact_bounded_schema(self):
+        valid = {
+            "status": "submitted", "signature": "0x" + "1" * 130,
+            "blocked": False, "country": "IE", "region": "", "checked_at": 100,
+        }
+        harness = SimpleNamespace(
+            _poll_structured_relay_result=AsyncMock(return_value=valid)
+        )
+        result = await RecoveryRelayMixin.poll_polymarket_onboarding_result(
+            harness, "r" * 32
+        )
+        self.assertEqual(result, valid)
+        harness._poll_structured_relay_result.return_value = {
+            **valid, "blocked": True, "signature": None,
+        }
+        self.assertTrue((await RecoveryRelayMixin.poll_polymarket_onboarding_result(
+            harness, "r" * 32
+        ))["blocked"])
+        for invalid in (
+            {**valid, "extra": True},
+            {**valid, "signature": None},
+            {**valid, "country": "Ireland"},
+            {**valid, "checked_at": "100"},
+        ):
+            harness._poll_structured_relay_result.return_value = invalid
+            with self.assertRaisesRegex(RuntimeError, "invalid binding"):
+                await RecoveryRelayMixin.poll_polymarket_onboarding_result(
+                    harness, "r" * 32
+                )
+
     async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):
         author = SimpleNamespace(id=7, send=AsyncMock())
         ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
@@ -1044,7 +1074,10 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             audience="project-id", issuer="https://wallet.example.test",
         )
         self.assertEqual(claims["sickwallet_purpose"], "polymarket_connect")
-        self.assertEqual(claims["sickwallet_polymarket"], payload)
+        self.assertEqual(
+            claims["sickwallet_polymarket"],
+            {**payload, "discord_user_id": "7"},
+        )
         self.assertEqual(claims["sickwallet_discord_user"], "7")
         self.assertNotIn("sickwallet_accounts", claims)
         self.assertNotIn("sickwallet_address", claims)
@@ -3722,13 +3755,30 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FOR UPDATE", endpoint)
         self.assertNotIn("discord_user", endpoint)
 
+    def test_polymarket_companion_encrypts_proofs_and_checks_browser_ip(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "polymarket-connect.html").read_text(encoding="utf-8")
+        source = (root / "web" / "src" / "polymarket-connect.js").read_text(encoding="utf-8")
+        endpoint = (root / "web" / "api" / "polymarket-connect.php").read_text(encoding="utf-8")
+        self.assertIn("polymarket-connect.js", page)
+        self.assertIn("https://polymarket.com/api/geoblock", source)
+        self.assertIn("signTypedData", source)
+        self.assertIn("ClobAuthDomain", source)
+        self.assertIn("polymarket_client_ip", endpoint)
+        self.assertIn("hash_equals(inet_pton", endpoint)
+        self.assertIn("aes-256-gcm", endpoint)
+        self.assertIn("FOR UPDATE", endpoint)
+        self.assertNotIn("reported_ip", endpoint)
+        self.assertNotIn("client_ip", (root / "web" / "server" / "migrations" / "0004_polymarket_onboarding.sql").read_text(encoding="utf-8"))
+
     def test_database_migrations_are_numbered_immutable_and_shared_by_setup(self):
         root = Path(__file__).resolve().parents[1]
         server = root / "web" / "server"
         migrations = sorted((server / "migrations").glob("*.sql"))
         self.assertEqual(
             [path.name for path in migrations],
-            ["0001_initial_relay.sql", "0002_totp_enrollments.sql", "0003_wallet_terms.sql"],
+            ["0001_initial_relay.sql", "0002_totp_enrollments.sql", "0003_wallet_terms.sql",
+             "0004_polymarket_onboarding.sql"],
         )
         self.assertTrue(all("CREATE TABLE IF NOT EXISTS" in path.read_text(
             encoding="utf-8"

@@ -8,6 +8,7 @@ function sickwallet_recovery_config(): array
         'database_dsn' => (string) getenv('SICKWALLET_DATABASE_DSN'),
         'database_user' => (string) getenv('SICKWALLET_DATABASE_USER'),
         'database_password' => (string) getenv('SICKWALLET_DATABASE_PASSWORD'),
+        'trusted_client_ip_server_key' => (string) getenv('SICKWALLET_TRUSTED_CLIENT_IP_SERVER_KEY'),
     ];
     if ($environment['relay_secret'] !== '' || $environment['database_dsn'] !== '') {
         return $environment;
