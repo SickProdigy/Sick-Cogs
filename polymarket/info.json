@@ -2,7 +2,7 @@
   "author": ["SickProdigy"],
   "description": "Develop-only read-only prediction-market discovery.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores installation-wide production safety settings. It does not store user wallet credentials or place trades.",
+  "end_user_data_statement": "This cog reserves a per-user, secret-free Polymarket account connection record and stores installation-wide production safety settings. It does not store wallet credentials or place trades.",
   "hidden": false,
   "install_msg": "This is a read-only prediction-market discovery cog. It does not connect wallets or place trades.",
   "min_bot_version": "3.5.0",
@@ -12,5 +12,5 @@
   "short": "Read-only prediction-market discovery",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.2.4"
+  "version": "0.2.5"
 }

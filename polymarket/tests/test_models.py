@@ -3,6 +3,9 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 from polymarket import setup
+from polymarket.account_connection import (
+    AccountConnection, AccountConnectionError, ConnectionState, WalletType,
+)
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
@@ -29,6 +32,18 @@ class _Config:
         for name, value in values.items():
             setattr(self, name, _Value(value))
 
+    def register_user(self, **values):
+        self.user_values = values
+
+    def user(self, _user):
+        return _UserConfig(self.user_values)
+
+
+class _UserConfig:
+    def __init__(self, values):
+        for name, value in values.items():
+            setattr(self, name, _Value(value))
+
 
 class _ConfiguredTest:
     def setUp(self):
@@ -41,6 +56,35 @@ class _ConfiguredTest:
 
 
 class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
+    def test_account_connection_keeps_signer_wallet_user_and_lifecycle_separate(self):
+        pending = AccountConnection.pending(
+            connection_id="one-time-handle", discord_user_id=7,
+            signer_address="0x" + "1" * 40, account_wallet_address="0x" + "2" * 40,
+            wallet_type=WalletType.DEPOSIT_WALLET, created_at=100, expires_at=200,
+        )
+        verified = pending.mark_verified(discord_user_id=7, now=150)
+        disconnected = verified.disconnect(discord_user_id=7, now=175)
+        self.assertEqual(pending.state, ConnectionState.PENDING)
+        self.assertEqual(verified.state, ConnectionState.VERIFIED)
+        self.assertEqual(disconnected.state, ConnectionState.DISCONNECTED)
+        self.assertEqual(AccountConnection.from_record(disconnected.to_record()), disconnected)
+
+    def test_account_connection_fails_closed_on_identity_or_lifecycle_drift(self):
+        values = dict(connection_id="one-time-handle", discord_user_id=7,
+            signer_address="0x" + "1" * 40, account_wallet_address="0x" + "2" * 40,
+            wallet_type=WalletType.DEPOSIT_WALLET, created_at=100, expires_at=200)
+        pending = AccountConnection.pending(**values)
+        with self.assertRaises(AccountConnectionError):
+            pending.mark_verified(discord_user_id=8, now=150)
+        with self.assertRaises(AccountConnectionError):
+            pending.mark_verified(discord_user_id=7, now=99)
+        with self.assertRaises(AccountConnectionError):
+            pending.mark_verified(discord_user_id=7, now=200)
+        with self.assertRaises(AccountConnectionError):
+            AccountConnection.pending(**{**values, "account_wallet_address": values["signer_address"]})
+        with self.assertRaises(AccountConnectionError):
+            AccountConnection.from_record({"state": "verified"})
+
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
         self.assertEqual(_json_list(["Yes"]), ["Yes"])
@@ -162,6 +206,7 @@ class Context:
         self.clean_prefix = "!"
         self.send = AsyncMock()
         self.invoke = AsyncMock()
+        self.author = object()
 
 
 class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
@@ -172,8 +217,15 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account"):
             self.assertIn(command, fields)
+
+    async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
+        ctx = Context()
+        await Polymarket.polymarket_account.callback(Polymarket(object()), ctx)
+        message = ctx.send.await_args.args[0]
+        self.assertIn("No Polymarket account is connected", message)
+        self.assertIn("never send a private key", message)
 
     async def test_status_reports_valid_default_off_deposit_wallet_boundary(self):
         ctx = Context()

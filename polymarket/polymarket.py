@@ -102,7 +102,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.4"
+    __version__ = "0.2.5"
 
     def __init__(self, bot):
         self.bot = bot
@@ -114,6 +114,7 @@ class Polymarket(commands.Cog):
             production_paused=True,
             production_capabilities={name: False for name in PRODUCTION_CAPABILITIES},
         )
+        self.config.register_user(account_connection=None)
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -140,6 +141,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
+        embed.add_field(name="Account connection", value=f"`{prefix}poly account`\nPublic identity status only; protected connection is not available yet.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -372,6 +374,22 @@ class Polymarket(commands.Cog):
         )
         embed.set_footer(text="No wallet creation, credentials, approvals, signatures, deposits, or orders")
         await ctx.send(embed=embed)
+
+    @polymarket.command(name="account")
+    async def polymarket_account(self, ctx: commands.Context):
+        """Show the caller's secret-free Polymarket connection state."""
+        record = await self.config.user(ctx.author).account_connection()
+        if not record:
+            await ctx.send(
+                "No Polymarket account is connected. Protected onboarding is still "
+                "code-disabled; never send a private key, recovery phrase, signature, "
+                "or API credential in Discord."
+            )
+            return
+        await ctx.send(
+            "A Polymarket account record exists but cannot be displayed or used until "
+            "protected onboarding is reviewed. Production execution remains disabled."
+        )
 
     @commands.group(name="polyset")
     @checks.is_owner()
