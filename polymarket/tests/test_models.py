@@ -77,6 +77,10 @@ from polymarket.session_key_store import (
 from polymarket.trade_confirmation import (
     TradeConfirmation, TradeConfirmationError, TradeConfirmationState,
 )
+from polymarket.session_approval import (
+    SessionApprovalRequest, SessionApprovalState,
+)
+from polymarket.session_views import SessionApprovalView
 from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
@@ -2241,6 +2245,70 @@ class TradeConfirmationTests(unittest.TestCase):
                 pending.approve_primary(**kwargs)
 
 
+class SessionApprovalRequestTests(unittest.TestCase):
+    def _pending(self, *, final=True):
+        return SessionApprovalRequest(
+            request_id="q" * 32, result_handle="r" * 32,
+            handoff_handle="h" * 32, requester_id=7,
+            action="provision", signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=100,
+            expires_at=400, final_confirmation_required=final,
+        )
+
+    def test_protected_eligibility_and_two_clicks_bind_one_fingerprint(self):
+        pending = self._pending()
+        eligibility = EligibilityAttestation(7, False, "IE", "", 110, 410)
+        eligible = pending.record_eligibility(
+            eligibility, requester_id=7, fingerprint=pending.fingerprint, now=110
+        )
+        final = eligible.approve_primary(
+            requester_id=7, fingerprint=pending.fingerprint, now=111
+        )
+        self.assertEqual(final.state, SessionApprovalState.AWAITING_FINAL_CONFIRMATION)
+        approved = final.decide_final(
+            True, requester_id=7, fingerprint=pending.fingerprint, now=112
+        )
+        consumed = approved.consume(
+            requester_id=7, fingerprint=pending.fingerprint, now=113
+        )
+        self.assertEqual(consumed.state, SessionApprovalState.CONSUMED)
+        self.assertEqual(SessionApprovalRequest.from_record(
+            consumed.to_record()
+        ), consumed)
+        self.assertNotIn("ip", repr(consumed.to_record()).lower())
+        for changed in (
+            {**consumed.to_record(), "created_at": "100"},
+            {**consumed.to_record(), "primary_approved_at": True},
+            {**consumed.to_record(), "final_decided_at": 99},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                SessionApprovalRequest.from_record(changed)
+
+    def test_optional_second_click_never_removes_primary_approval(self):
+        pending = self._pending(final=False)
+        eligible = pending.record_eligibility(
+            EligibilityAttestation(7, False, "CA", "ON", 110, 410),
+            requester_id=7, fingerprint=pending.fingerprint, now=110,
+        )
+        approved = eligible.approve_primary(
+            requester_id=7, fingerprint=pending.fingerprint, now=111
+        )
+        self.assertEqual(approved.state, SessionApprovalState.APPROVED)
+
+    def test_request_rejects_wrong_user_changed_binding_block_and_expiry(self):
+        pending = self._pending()
+        for eligibility, user_id, fingerprint, now in (
+            (EligibilityAttestation(7, False, "IE", "", 110, 410), 8, pending.fingerprint, 110),
+            (EligibilityAttestation(7, False, "IE", "", 110, 410), 7, "0" * 64, 110),
+            (EligibilityAttestation(7, True, "IE", "", 110, 410), 7, pending.fingerprint, 110),
+            (EligibilityAttestation(7, False, "IE", "", 110, 410), 7, pending.fingerprint, 400),
+        ):
+            with self.assertRaises(AccountConnectionError):
+                pending.record_eligibility(
+                    eligibility, requester_id=user_id, fingerprint=fingerprint, now=now
+                )
+
+
 class PolymarketSetupTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
     async def test_setup_adds_a_polymarket_cog(self):
         class Bot:
@@ -2282,8 +2350,137 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "session", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral"):
             self.assertIn(command, fields)
+
+    async def test_session_command_creates_exact_protected_eligibility_card(self):
+        author = SimpleNamespace(id=7)
+        message = SimpleNamespace(edit=AsyncMock())
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock(return_value=message)
+        )
+        companion = SimpleNamespace(
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True,
+                "approval_base_url": "https://wallet.example.test/cryptowallet",
+            }),
+            create_external_companion_handoff=AsyncMock(
+                return_value=("signed-token", 400)
+            ),
+            register_recovery_handoff=AsyncMock(return_value="h" * 32),
+            poll_polymarket_eligibility_result=AsyncMock(),
+        )
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: companion if name == "CryptoWallet" else None
+        ))
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "session": True, "eligibility": True,
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(7, now=90, acceptance_id="terms-7")
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        with patch("polymarket.polymarket.time.time", return_value=100):
+            await Polymarket.polymarket_session.callback(cog, ctx)
+        sent = ctx.send.await_args.kwargs
+        self.assertIsInstance(sent["view"], SessionApprovalView)
+        self.assertEqual(
+            [item.label for item in sent["view"].children],
+            ["Check eligibility", "Eligibility checked", "Cancel"],
+        )
+        self.assertIn("#handoff=" + "h" * 32, sent["view"].children[0].url)
+        request = SessionApprovalRequest.from_record(
+            await user_config.session_approval()
+        )
+        self.assertEqual(request.state, SessionApprovalState.AWAITING_ELIGIBILITY)
+        self.assertTrue(request.final_confirmation_required)
+        payload = companion.create_external_companion_handoff.await_args.args[2]
+        self.assertEqual(set(payload), {
+            "request_id", "result_handle", "discord_user_id", "action",
+            "signer_address", "account_wallet_address", "created_at",
+            "expires_at", "chain_id", "purpose",
+        })
+        self.assertNotIn("private", repr(payload).lower())
+        self.assertNotIn("session", repr(payload["request_id"]).lower())
+
+    async def test_session_card_requires_two_clicks_and_executes_unchanged_request(self):
+        user = SimpleNamespace(id=7)
+        eligibility = EligibilityAttestation(7, False, "IE", "", 100, 400)
+        request = SessionApprovalRequest(
+            request_id="q" * 32, result_handle="r" * 32,
+            handoff_handle="h" * 32, requester_id=7, action="provision",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=90,
+            expires_at=390, final_confirmation_required=True,
+            state=SessionApprovalState.AWAITING_APPROVAL, eligibility=eligibility,
+        )
+        values = {"session_approval": request.to_record()}
+        user_config = _SessionUserConfig(values)
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(user=lambda _user: user_config)
+        cog._bot_first_account = AsyncMock(return_value=BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=request.signer_address,
+            account_wallet_address=request.account_wallet_address, created_at=80,
+        ))
+        cog._provision_session_key = AsyncMock()
+        response = SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock())
+        followup = SimpleNamespace(send=AsyncMock())
+        message = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(
+            user=user, response=response, followup=followup, message=message
+        )
+        first_view = SessionApprovalView(cog, request)
+        with patch("polymarket.polymarket.time.time", return_value=110):
+            await cog.approve_session_interaction(interaction, first_view)
+        pending_final = SessionApprovalRequest.from_record(values["session_approval"])
+        self.assertEqual(
+            pending_final.state, SessionApprovalState.AWAITING_FINAL_CONFIRMATION
+        )
+        cog._provision_session_key.assert_not_awaited()
+        final_view = message.edit.await_args.kwargs["view"]
+        self.assertEqual([item.label for item in final_view.children], ["Yes, authorize", "No"])
+        message.edit.reset_mock()
+        with patch("polymarket.polymarket.time.time", return_value=111):
+            await cog.confirm_session_interaction(interaction, final_view)
+        cog._provision_session_key.assert_awaited_once_with(user, eligibility)
+        consumed = SessionApprovalRequest.from_record(values["session_approval"])
+        self.assertEqual(consumed.state, SessionApprovalState.CONSUMED)
+        self.assertIsNone(message.edit.await_args.kwargs["view"])
+
+    async def test_stale_session_card_cannot_advance_replaced_request(self):
+        user = SimpleNamespace(id=7)
+        request = SessionApprovalRequest(
+            request_id="q" * 32, result_handle="r" * 32,
+            handoff_handle="h" * 32, requester_id=7, action="provision",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=100,
+            expires_at=400, final_confirmation_required=True,
+        )
+        self.assertNotEqual(
+            request.fingerprint, replace(request, result_handle="x" * 32).fingerprint
+        )
+        self.assertNotEqual(
+            request.fingerprint,
+            replace(request, final_confirmation_required=False).fingerprint,
+        )
+        changed = replace(request, request_id="x" * 32)
+        user_config = _SessionUserConfig({"session_approval": changed.to_record()})
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(user=lambda _user: user_config)
+        with self.assertRaisesRegex(AccountConnectionError, "no longer current"):
+            await cog._session_request_for_view(
+                user, SessionApprovalView(cog, request)
+            )
 
     async def test_confirmation_preference_defaults_on_and_can_be_disabled(self):
         ctx = Context()

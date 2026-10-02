@@ -59,6 +59,7 @@ class RecoveryRelayMixin:
             "wallet_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
             "polymarket_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
             "polymarket_connect": RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS,
+            "polymarket_eligibility": RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS,
         }
         max_lifetime = lifetimes.get(purpose)
         now = int(time.time())
@@ -207,6 +208,31 @@ class RecoveryRelayMixin:
             raise RuntimeError("The Polymarket terms relay returned an invalid binding")
         return result
 
+    async def poll_polymarket_eligibility_result(self, handle: str) -> dict | None:
+        """Consume one encrypted browser-IP Polymarket eligibility result."""
+        result = await self._poll_structured_relay_result(
+            handle, path="/api/polymarket-eligibility.php",
+            label="Polymarket eligibility",
+        )
+        if result is None:
+            return None
+        country = result.get("country")
+        region = result.get("region")
+        checked_at = result.get("checked_at")
+        if (
+            set(result) != {"status", "blocked", "country", "region", "checked_at"}
+            or result.get("status") != "submitted"
+            or not isinstance(result.get("blocked"), bool)
+            or not isinstance(country, str)
+            or re.fullmatch(r"[A-Z]{2}", country) is None
+            or not isinstance(region, str)
+            or re.fullmatch(r"[A-Z0-9-]{0,16}", region) is None
+            or type(checked_at) is not int
+            or checked_at <= 0
+        ):
+            raise RuntimeError("The Polymarket eligibility relay returned an invalid binding")
+        return result
+
     async def poll_polymarket_onboarding_result(self, handle: str) -> dict | None:
         """Consume one encrypted, browser-submitted Polymarket proof result."""
         result = await self._poll_structured_relay_result(
@@ -232,7 +258,7 @@ class RecoveryRelayMixin:
             or re.fullmatch(r"[A-Z]{2}", country) is None
             or not isinstance(region, str)
             or re.fullmatch(r"[A-Z0-9-]{0,16}", region) is None
-            or not isinstance(checked_at, int)
+            or type(checked_at) is not int
             or checked_at <= 0
         ):
             raise RuntimeError("The Polymarket onboarding relay returned an invalid binding")

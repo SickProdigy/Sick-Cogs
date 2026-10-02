@@ -8,6 +8,7 @@
     "build:security": "esbuild src/security.js --bundle --format=esm --minify --legal-comments=none --outfile=security.js",
     "build:terms": "esbuild src/wallet-terms.js --bundle --format=esm --minify --legal-comments=none --outfile=wallet-terms.js",
     "build:polymarket": "esbuild src/polymarket-connect.js --bundle --format=esm --minify --legal-comments=none --outfile=polymarket-connect.js",
+    "build:polymarket-eligibility": "esbuild src/polymarket-eligibility.js --bundle --format=esm --minify --legal-comments=none --outfile=polymarket-eligibility.js",
     "build:polymarket-terms": "esbuild src/polymarket-terms.js --bundle --format=esm --minify --legal-comments=none --outfile=polymarket-terms.js",
     "test": "node --test tests/*.test.js"
   },

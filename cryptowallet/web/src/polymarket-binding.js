@@ -39,3 +39,27 @@ export function validateGeoblock(result) {
   }
   return Object.freeze({ ...result });
 }
+
+const ELIGIBILITY_KEYS = [
+  "account_wallet_address", "action", "chain_id", "created_at", "discord_user_id",
+  "expires_at", "purpose", "request_id", "result_handle", "signer_address",
+];
+
+export function validateEligibilityBinding(claims, nowSeconds) {
+  const value = claims?.sickwallet_polymarket_eligibility;
+  const userId = String(claims?.sickwallet_discord_user || "");
+  if (claims?.sickwallet_purpose !== "polymarket_eligibility"
+      || String(claims?.sub) !== userId || !/^[1-9][0-9]{5,24}$/.test(userId)
+      || Number(claims?.exp) <= nowSeconds || !value
+      || Object.keys(value).sort().join(",") !== ELIGIBILITY_KEYS.join(",")
+      || value.purpose !== "polymarket_eligibility" || value.chain_id !== 137
+      || String(value.discord_user_id) !== userId || !HANDLE.test(value.request_id)
+      || !HANDLE.test(value.result_handle) || !["provision", "rotate"].includes(value.action)
+      || !ADDRESS.test(value.signer_address) || !ADDRESS.test(value.account_wallet_address)
+      || value.signer_address === value.account_wallet_address
+      || !Number.isSafeInteger(value.created_at) || !Number.isSafeInteger(value.expires_at)
+      || value.expires_at !== value.created_at + 300 || value.expires_at <= nowSeconds) {
+    throw new Error("This Polymarket eligibility handoff is expired or has an invalid binding.");
+  }
+  return Object.freeze({ ...value });
+}

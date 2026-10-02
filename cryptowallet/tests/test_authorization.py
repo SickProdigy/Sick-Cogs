@@ -821,6 +821,34 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
                     harness, "r" * 32
                 )
 
+    async def test_polymarket_eligibility_poll_validates_exact_bounded_schema(self):
+        valid = {
+            "status": "submitted", "blocked": False, "country": "IE",
+            "region": "", "checked_at": 100,
+        }
+        harness = SimpleNamespace(
+            _poll_structured_relay_result=AsyncMock(return_value=valid)
+        )
+        result = await RecoveryRelayMixin.poll_polymarket_eligibility_result(
+            harness, "r" * 32
+        )
+        self.assertEqual(result, valid)
+        call = harness._poll_structured_relay_result.await_args
+        self.assertEqual(call.kwargs["path"], "/api/polymarket-eligibility.php")
+        for invalid in (
+            {**valid, "signature": "forbidden"},
+            {**valid, "blocked": 0},
+            {**valid, "country": "Ireland"},
+            {**valid, "region": "too-long-region-name"},
+            {**valid, "checked_at": "100"},
+            {**valid, "checked_at": True},
+        ):
+            harness._poll_structured_relay_result.return_value = invalid
+            with self.assertRaisesRegex(RuntimeError, "invalid binding"):
+                await RecoveryRelayMixin.poll_polymarket_eligibility_result(
+                    harness, "r" * 32
+                )
+
     async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):
         author = SimpleNamespace(id=7, send=AsyncMock())
         ctx = SimpleNamespace(author=author, send=AsyncMock(), clean_prefix="!")
@@ -1095,6 +1123,44 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "Polymarket onboarding binding"):
                 await harness.create_external_companion_handoff(
                     7, "polymarket_connect", changed
+                )
+
+    async def test_polymarket_eligibility_handoff_is_exact_and_wallet_free(self):
+        harness = _JwtHarness(self.configuration)
+        now = int(time.time())
+        payload = {
+            "request_id": "q" * 32, "result_handle": "r" * 32,
+            "discord_user_id": 7, "action": "provision",
+            "signer_address": "0x" + "1" * 40,
+            "account_wallet_address": "0x" + "2" * 40,
+            "created_at": now,
+            "expires_at": now + POLYMARKET_ONBOARDING_LIFETIME_SECONDS,
+            "chain_id": 137, "purpose": "polymarket_eligibility",
+        }
+        token, expires_at = await harness.create_external_companion_handoff(
+            7, "polymarket_eligibility", payload
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "polymarket_eligibility")
+        self.assertEqual(
+            claims["sickwallet_polymarket_eligibility"],
+            {**payload, "discord_user_id": "7"},
+        )
+        self.assertEqual(expires_at - claims["iat"], 300)
+        self.assertNotIn("private", repr(claims).lower())
+        self.assertNotIn("session_address", repr(claims))
+        for changes in (
+            {"discord_user_id": 8}, {"chain_id": 1}, {"action": "trade"},
+            {"purpose": "polymarket_connect"}, {"private_key": "forbidden"},
+            {"created_at": now - 10},
+            {"account_wallet_address": "0x" + "1" * 40},
+        ):
+            with self.assertRaisesRegex(ValueError, "Polymarket (eligibility binding|binding is stale)"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_eligibility", {**payload, **changes}
                 )
 
     async def test_totp_enrollment_handoff_contains_only_public_metadata(self):
@@ -4145,6 +4211,23 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FOR UPDATE", endpoint)
         self.assertNotIn("discord_user", endpoint)
 
+    def test_polymarket_eligibility_companion_is_wallet_free_and_ip_bound(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "polymarket-eligibility.html").read_text(encoding="utf-8")
+        source = (root / "web" / "src" / "polymarket-eligibility.js").read_text(encoding="utf-8")
+        endpoint = (root / "web" / "api" / "polymarket-eligibility.php").read_text(encoding="utf-8")
+        migration = (root / "web" / "server" / "migrations" / "0006_polymarket_eligibility.sql").read_text(encoding="utf-8")
+        self.assertIn("polymarket-eligibility.js", page)
+        self.assertIn("https://polymarket.com/api/geoblock", source)
+        self.assertNotIn("window.ethereum", source)
+        self.assertNotIn("signTypedData", source)
+        self.assertIn("polymarket_client_ip", endpoint)
+        self.assertIn("hash_equals(inet_pton", endpoint)
+        self.assertIn("aes-256-gcm", endpoint)
+        self.assertIn("FOR UPDATE", endpoint)
+        self.assertNotIn("signature", source)
+        self.assertNotIn("client_ip", migration)
+
     def test_polymarket_companion_encrypts_proofs_and_checks_browser_ip(self):
         root = Path(__file__).resolve().parents[1]
         page = (root / "web" / "polymarket-connect.html").read_text(encoding="utf-8")
@@ -4168,7 +4251,8 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [path.name for path in migrations],
             ["0001_initial_relay.sql", "0002_totp_enrollments.sql", "0003_wallet_terms.sql",
-             "0004_polymarket_onboarding.sql", "0005_polymarket_terms.sql"],
+             "0004_polymarket_onboarding.sql", "0005_polymarket_terms.sql",
+             "0006_polymarket_eligibility.sql"],
         )
         self.assertTrue(all("CREATE TABLE IF NOT EXISTS" in path.read_text(
             encoding="utf-8"

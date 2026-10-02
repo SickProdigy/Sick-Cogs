@@ -49,6 +49,8 @@ from .session_lifecycle import (
     SessionKeyLifecycle, SessionKeyOperation, SessionKeyStatus,
     SessionOperationState,
 )
+from .session_approval import SessionApprovalRequest, SessionApprovalState
+from .session_views import SessionApprovalView
 from .session_transport import SessionKeyTransport
 from cryptowallet.core.polymarket import polymarket_clob_auth_typed_data
 from .safety import ProductionLimits, SafetyLimitError
@@ -151,7 +153,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.28"
+    __version__ = "0.2.29"
 
     def __init__(self, bot):
         self.bot = bot
@@ -175,7 +177,7 @@ class Polymarket(commands.Cog):
             replacement_session_operation=None,
             replacement_encrypted_session_key=None,
             replacement_encrypted_session_credentials=None,
-            session_lifecycle_history=[],
+            session_lifecycle_history=[], session_approval=None,
             bot_first_account=None, deposit_wallet_creation=None,
             final_confirmation_required=True
         )
@@ -236,6 +238,221 @@ class Polymarket(commands.Cog):
             values["encrypted_session_key"] = encrypted_key
             values["session_lifecycle"] = lifecycle.to_record()
             values["session_operation"] = operation.to_record()
+
+    def _session_approval_embed(self, request: SessionApprovalRequest) -> discord.Embed:
+        titles = {
+            SessionApprovalState.AWAITING_ELIGIBILITY: "Check eligibility",
+            SessionApprovalState.AWAITING_APPROVAL: "Approve session authorization",
+            SessionApprovalState.AWAITING_FINAL_CONFIRMATION: "Are you sure?",
+            SessionApprovalState.APPROVED: "Authorization approved",
+            SessionApprovalState.DECLINED: "Authorization cancelled",
+            SessionApprovalState.CONSUMED: "Authorization submitted",
+        }
+        embed = discord.Embed(
+            title=titles[request.state],
+            description=(
+                "Authorize a CLOB-only session signer for routine Polymarket orders. "
+                "It cannot withdraw funds and expires after 180 days."
+            ),
+            color=discord.Color.blurple(),
+        )
+        embed.add_field(name="Action", value=(
+            "Renew session authorization" if request.action == "rotate"
+            else "Set up session authorization"
+        ), inline=False)
+        embed.add_field(name="Network", value="Polygon (137)", inline=True)
+        embed.add_field(name="Signer", value=f"`{request.signer_address}`", inline=False)
+        embed.add_field(
+            name="Deposit Wallet", value=f"`{request.account_wallet_address}`",
+            inline=False,
+        )
+        embed.add_field(name="Scope", value="CLOB orders only; no withdrawals", inline=False)
+        embed.add_field(name="Expires", value=f"<t:{request.expires_at}:R>", inline=True)
+        embed.set_footer(text=f"Request {request.fingerprint[:12]} · Exact details remain unchanged")
+        return embed
+
+    async def _stored_session_approval(self, user) -> SessionApprovalRequest | None:
+        record = await self.config.user(user).session_approval()
+        return SessionApprovalRequest.from_record(record) if record else None
+
+    async def _session_request_for_view(
+        self, user, view: SessionApprovalView,
+    ) -> SessionApprovalRequest:
+        request = await self._stored_session_approval(user)
+        if (request is None or request.request_id != view.request_id
+                or request.fingerprint != view.fingerprint
+                or request.requester_id != user.id):
+            raise AccountConnectionError("This session approval card is no longer current.")
+        return request
+
+    async def _edit_session_card(
+        self, interaction: discord.Interaction, request: SessionApprovalRequest,
+        *, eligibility_url: str | None = None, content: str | None = None,
+    ) -> None:
+        view = None
+        if request.state not in {
+            SessionApprovalState.DECLINED, SessionApprovalState.CONSUMED,
+        }:
+            view = SessionApprovalView(self, request, eligibility_url)
+            view.message = interaction.message
+        await interaction.message.edit(
+            embed=self._session_approval_embed(request), view=view
+        )
+        if content:
+            await interaction.followup.send(content, ephemeral=True)
+
+    async def check_session_eligibility_interaction(
+        self, interaction: discord.Interaction, view: SessionApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._session_request_for_view(interaction.user, view)
+            if request.state is not SessionApprovalState.AWAITING_ELIGIBILITY:
+                raise AccountConnectionError("Eligibility was already checked.")
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            poll = getattr(cryptowallet, "poll_polymarket_eligibility_result", None)
+            if not callable(poll):
+                raise AccountConnectionError("Protected eligibility is unavailable.")
+            result = await poll(request.result_handle)
+            if result is None:
+                await interaction.followup.send(
+                    "Complete the protected eligibility page first, then press "
+                    "Eligibility checked again.", ephemeral=True,
+                )
+                return
+            now = int(time.time())
+            checked_at = int(result["checked_at"])
+            if not request.created_at <= checked_at < request.expires_at:
+                raise AccountConnectionError("Eligibility result does not match this request.")
+            eligibility = EligibilityAttestation(
+                discord_user_id=request.requester_id, blocked=result["blocked"],
+                country=result["country"], region=result["region"],
+                checked_at=checked_at,
+                expires_at=checked_at + ELIGIBILITY_LIFETIME_SECONDS,
+            )
+            if eligibility.blocked:
+                await self.config.user(interaction.user).session_approval.set(None)
+                await interaction.message.edit(
+                    embed=discord.Embed(
+                        title="Polymarket unavailable",
+                        description="Polymarket reports this location as unavailable. "
+                                    "No wallet signature or transaction was requested.",
+                        color=discord.Color.red(),
+                    ),
+                    view=None,
+                )
+                return
+            request = request.record_eligibility(
+                eligibility, requester_id=interaction.user.id,
+                fingerprint=view.fingerprint, now=now,
+            )
+            await self.config.user(interaction.user).session_approval.set(
+                request.to_record()
+            )
+            await self._edit_session_card(
+                interaction, request,
+                content="Eligibility confirmed. Review the unchanged authorization and approve it.",
+            )
+        except (AccountConnectionError, KeyError, RuntimeError, TypeError, ValueError):
+            await interaction.followup.send(
+                "Eligibility could not be verified for this exact request. Nothing was signed.",
+                ephemeral=True,
+            )
+
+    async def approve_session_interaction(
+        self, interaction: discord.Interaction, view: SessionApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._session_request_for_view(interaction.user, view)
+            if request.state is SessionApprovalState.APPROVED:
+                await self._execute_session_approval(interaction, request)
+                return
+            request = request.approve_primary(
+                requester_id=interaction.user.id, fingerprint=view.fingerprint,
+                now=int(time.time()),
+            )
+            await self.config.user(interaction.user).session_approval.set(
+                request.to_record()
+            )
+            if request.state is SessionApprovalState.AWAITING_FINAL_CONFIRMATION:
+                await self._edit_session_card(
+                    interaction, request,
+                    content="Please confirm once more. The authorization details have not changed.",
+                )
+                return
+            await self._execute_session_approval(interaction, request)
+        except AccountConnectionError as exc:
+            await interaction.followup.send(
+                f"Session authorization was not submitted: {exc}", ephemeral=True
+            )
+
+    async def confirm_session_interaction(
+        self, interaction: discord.Interaction, view: SessionApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._session_request_for_view(interaction.user, view)
+            request = request.decide_final(
+                True, requester_id=interaction.user.id, fingerprint=view.fingerprint,
+                now=int(time.time()),
+            )
+            await self.config.user(interaction.user).session_approval.set(
+                request.to_record()
+            )
+            await self._execute_session_approval(interaction, request)
+        except AccountConnectionError as exc:
+            await interaction.followup.send(
+                f"Session authorization was not submitted: {exc}", ephemeral=True
+            )
+
+    async def decline_session_interaction(
+        self, interaction: discord.Interaction, view: SessionApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await self._session_request_for_view(interaction.user, view)
+        except AccountConnectionError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+            return
+        await self.config.user(interaction.user).session_approval.set(None)
+        await interaction.message.edit(
+            embed=discord.Embed(
+                title="Session authorization cancelled",
+                description="Nothing was signed or submitted.",
+                color=discord.Color.red(),
+            ),
+            view=None,
+        )
+
+    async def _execute_session_approval(
+        self, interaction: discord.Interaction, request: SessionApprovalRequest,
+    ) -> None:
+        binding = await self._bot_first_account(interaction.user)
+        if (binding.signer_address != request.signer_address
+                or binding.account_wallet_address != request.account_wallet_address):
+            raise AccountConnectionError("CryptoWallet account identity changed.")
+        if request.eligibility is None:
+            raise AccountConnectionError("Protected eligibility evidence is missing.")
+        approved_at = int(time.time())
+        request.eligibility.require_current(
+            discord_user_id=interaction.user.id, now=approved_at
+        )
+        if request.action == "provision":
+            await self._provision_session_key(interaction.user, request.eligibility)
+        else:
+            await self._begin_session_rotation(interaction.user, request.eligibility)
+        consumed = request.consume(
+            requester_id=interaction.user.id, fingerprint=request.fingerprint,
+            now=approved_at,
+        )
+        await self.config.user(interaction.user).session_approval.set(
+            consumed.to_record()
+        )
+        await self._edit_session_card(
+            interaction, consumed,
+            content="Session authorization was submitted and will be reconciled before use.",
+        )
 
     async def _provision_session_key(
         self, user, eligibility: EligibilityAttestation,
@@ -1202,7 +1419,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` automatically derives the CryptoWallet-owned Deposit Wallet. Existing-account `connect`/`confirm` is compatibility-only. `{prefix}poly confirmations [on|off]` controls the default-on second trade check. Never send secrets in Discord.", inline=False)
+        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` automatically derives the CryptoWallet-owned Deposit Wallet. `{prefix}poly session` starts protected session authorization. Existing-account `connect`/`confirm` is compatibility-only. `{prefix}poly confirmations [on|off]` controls the default-on second approval check. Never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -1680,6 +1897,119 @@ class Polymarket(commands.Cog):
             "No separate Polymarket setup is required. No funds moved, signature "
             "was requested, or transaction was submitted."
         )
+
+    @polymarket.command(name="session")
+    @commands.dm_only()
+    async def polymarket_session(self, ctx: commands.Context):
+        """Start or resume protected CLOB session authorization."""
+        capabilities = await self.config.production_capabilities()
+        if (not await self._session_capability_allowed()
+                or not bool(capabilities.get("eligibility"))):
+            await ctx.send(
+                "Protected Polymarket session setup is disabled or emergency-paused."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"`{ctx.clean_prefix}poly terms`."
+            )
+            return
+        now = int(time.time())
+        try:
+            binding = await self._bot_first_account(ctx.author)
+            request = await self._stored_session_approval(ctx.author)
+            if request is not None and now >= request.expires_at:
+                await user_config.session_approval.set(None)
+                request = None
+            if request is not None and (
+                request.signer_address != binding.signer_address
+                or request.account_wallet_address != binding.account_wallet_address
+            ):
+                raise AccountConnectionError(
+                    "The pending session request no longer matches CryptoWallet."
+                )
+            if request is None:
+                lifecycle_record = await user_config.session_lifecycle()
+                action = "provision"
+                if lifecycle_record:
+                    lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+                    maintenance = lifecycle.maintenance_action(now=now)
+                    if maintenance != "rotate":
+                        await ctx.send(
+                            "Your Polymarket session authorization already exists. "
+                            f"Current state: **{lifecycle.status.value}**."
+                        )
+                        return
+                    action = "rotate"
+                cryptowallet = self.bot.get_cog("CryptoWallet")
+                required = (
+                    "recovery_relay_status", "create_external_companion_handoff",
+                    "register_recovery_handoff",
+                    "poll_polymarket_eligibility_result",
+                )
+                if cryptowallet is None or not all(
+                    callable(getattr(cryptowallet, name, None)) for name in required
+                ):
+                    raise AccountConnectionError(
+                        "The protected CryptoWallet companion is unavailable."
+                    )
+                status = await cryptowallet.recovery_relay_status()
+                if not status.get("configured"):
+                    raise AccountConnectionError(
+                        "The protected CryptoWallet companion is unavailable."
+                    )
+                payload = {
+                    "request_id": secrets.token_urlsafe(32),
+                    "result_handle": secrets.token_urlsafe(32),
+                    "discord_user_id": ctx.author.id, "action": action,
+                    "signer_address": binding.signer_address,
+                    "account_wallet_address": binding.account_wallet_address,
+                    "created_at": now, "expires_at": now + 300,
+                    "chain_id": 137, "purpose": "polymarket_eligibility",
+                }
+                token, expires_at = await cryptowallet.create_external_companion_handoff(
+                    ctx.author.id, "polymarket_eligibility", payload
+                )
+                if expires_at != payload["expires_at"]:
+                    raise AccountConnectionError(
+                        "Protected eligibility expiry changed unexpectedly."
+                    )
+                handoff = await cryptowallet.register_recovery_handoff(
+                    token, expires_at, purpose="polymarket_eligibility"
+                )
+                request = SessionApprovalRequest(
+                    request_id=payload["request_id"],
+                    result_handle=payload["result_handle"],
+                    handoff_handle=handoff, requester_id=ctx.author.id,
+                    action=action, signer_address=binding.signer_address,
+                    account_wallet_address=binding.account_wallet_address,
+                    created_at=now, expires_at=expires_at,
+                    final_confirmation_required=bool(
+                        await user_config.final_confirmation_required()
+                    ),
+                )
+                await user_config.session_approval.set(request.to_record())
+            status = await self.bot.get_cog("CryptoWallet").recovery_relay_status()
+            eligibility_url = None
+            if request.state is SessionApprovalState.AWAITING_ELIGIBILITY:
+                eligibility_url = (
+                    f"{status['approval_base_url']}/polymarket-eligibility.html"
+                    f"#handoff={quote(request.handoff_handle, safe='')}"
+                )
+            view = SessionApprovalView(self, request, eligibility_url)
+            message = await ctx.send(
+                embed=self._session_approval_embed(request), view=view
+            )
+            view.message = message
+        except (AccountConnectionError, KeyError, RuntimeError, TypeError, ValueError):
+            await ctx.send(
+                "Protected session setup could not be prepared. Nothing was signed "
+                "or submitted."
+            )
 
     @polymarket.command(name="confirmations", aliases=["doublecheck"])
     async def polymarket_confirmations(self, ctx: commands.Context, mode: str = ""):
