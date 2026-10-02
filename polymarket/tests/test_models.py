@@ -1,6 +1,7 @@
 import unittest
 from dataclasses import replace
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
 
 from polymarket import setup
 from polymarket.account_connection import (
@@ -129,12 +130,13 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
         approval = MarketBuyApproval.create(requester_id=7, market_id="42",
             condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
-            max_spend_pusd="10", maximum_fee_bps=200, expires_at=220)
-        self.assertEqual(str(approval.maximum_notional), "9.803921")
+            max_spend_pusd="10", maximum_base_fee_bps=200, expires_at=220)
+        self.assertEqual(str(approval.maximum_notional), "9.904912")
+        self.assertEqual(str(approval.maximum_fee_pusd), "0.095088")
         self.assertEqual(len(approval.fingerprint), 64)
         fresh = OrderBookSnapshot.from_payload({**payload, "hash": "book-2",
             "asks": [{"price": "0.54", "size": "10"}]}, captured_at=150)
-        approval.require_fresh(fresh, fee_bps=150, now=150)
+        approval.require_fresh(fresh, base_fee_bps=150, now=150)
 
     def test_market_buy_approval_requires_reapproval_on_material_drift(self):
         payload = {"asset_id": "123", "bids": [],
@@ -143,7 +145,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         quote = OrderBookSnapshot.from_payload(payload, captured_at=100)
         approval = MarketBuyApproval.create(requester_id=7, market_id="42",
             condition_id="condition", outcome="Yes", quote=quote, max_price="0.55",
-            max_spend_pusd="10", maximum_fee_bps=200, expires_at=220)
+            max_spend_pusd="10", maximum_base_fee_bps=200, expires_at=220)
         changes = (
             ({**payload, "hash": "2", "asks": [{"price": "0.56", "size": "10"}]}, 100),
             ({**payload, "hash": "3", "tick_size": "0.001"}, 100),
@@ -151,11 +153,11 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         )
         for changed, fee in changes:
             with self.assertRaises(OrderIntentError):
-                approval.require_fresh(OrderBookSnapshot.from_payload(changed, captured_at=150), fee_bps=fee, now=150)
+                approval.require_fresh(OrderBookSnapshot.from_payload(changed, captured_at=150), base_fee_bps=fee, now=150)
         with self.assertRaises(OrderIntentError):
-            approval.require_fresh(quote, fee_bps=201, now=150)
+            approval.require_fresh(quote, base_fee_bps=201, now=150)
         with self.assertRaises(OrderIntentError):
-            approval.require_fresh(quote, fee_bps=100, now=220)
+            approval.require_fresh(quote, base_fee_bps=100, now=220)
 
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
@@ -278,7 +280,7 @@ class Context:
         self.clean_prefix = "!"
         self.send = AsyncMock()
         self.invoke = AsyncMock()
-        self.author = object()
+        self.author = SimpleNamespace(id=7)
 
 
 class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
@@ -289,7 +291,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "quote"):
             self.assertIn(command, fields)
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
@@ -298,6 +300,34 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         message = ctx.send.await_args.args[0]
         self.assertIn("No Polymarket account is connected", message)
         self.assertIn("never send a private key", message)
+
+    async def test_live_quote_builds_public_bounded_preview_without_execution(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._get_json = AsyncMock(return_value={
+            "id": "42", "conditionId": "condition", "slug": "example",
+            "question": "Example?", "active": True, "closed": False,
+            "enableOrderBook": True, "acceptingOrders": True,
+            "outcomes": '["Yes", "No"]', "clobTokenIds": '["123", "456"]',
+            "outcomePrices": '["0.52", "0.48"]',
+        })
+        cog._get_clob_json = AsyncMock(side_effect=[
+            {"asset_id": "123", "bids": [{"price": "0.50", "size": "20"}],
+             "asks": [{"price": "0.52", "size": "20"}], "min_order_size": "5",
+             "tick_size": "0.01", "neg_risk": False, "hash": "live-book"},
+            {"base_fee": 400},
+        ])
+        with patch("polymarket.polymarket.time.time", return_value=100):
+            await Polymarket.polymarket_quote.callback(
+                cog, ctx, "example", "Yes", "10", "0.55"
+            )
+        self.assertEqual(cog._get_clob_json.await_count, 2)
+        embed = ctx.send.await_args.kwargs["embed"]
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertEqual(fields["All-in cap"], "10 pUSD")
+        self.assertIn("base fee 400 bps", fields["Fee reserve"])
+        self.assertIn("Preview only", fields["Execution"])
+        self.assertEqual(len(fields["Approval fingerprint"].strip("`")), 64)
 
     async def test_status_reports_valid_default_off_deposit_wallet_boundary(self):
         ctx = Context()

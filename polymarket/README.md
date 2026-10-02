@@ -4,7 +4,7 @@ A develop-only Sick-Cogs cog for read-only prediction-market discovery and infor
 
 ## Current boundary
 
-Version `0.2.7` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
+Version `0.2.8` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
 Production controls are owner-only: `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. Enablement deliberately refuses while execution has no reviewed capabilities.
 
@@ -26,6 +26,7 @@ The root command aliases are `polymarket` and `poly`.
 - `poly market` is intentionally singular: it only opens one exact ID, slug, or copied Polymarket link. Category words receive a category hint; failed exact references suggest `poly search`.
 - `poly compatible [words]` - technically CLOB V2-ready markets for the staged future Polygon handoff; this does not check personal eligibility or enable trading.
 - `poly readiness <market>` - public technical readiness details for one market.
+- `poly quote <market> <outcome> <max pUSD> [max price]` - fetch the live public CLOB book and fee rate and display a two-minute, all-in bounded approval preview. It never connects an account, signs, or submits.
 - `poly status` - the current safety boundary.
 
 The category browser uses Polymarket's public Gamma API tags for Politics, Crypto, and Sports. General discovery remains available through explicit search and `trending`, so `markets` no longer starts with an unrelated mixed list.

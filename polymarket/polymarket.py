@@ -8,6 +8,7 @@ import discord
 from redbot.core import Config, checks, commands
 
 from .handoff import MarketSnapshot, MarketSnapshotError
+from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
@@ -103,7 +104,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.7"
+    __version__ = "0.2.8"
 
     def __init__(self, bot):
         self.bot = bot
@@ -125,6 +126,14 @@ class Polymarket(commands.Cog):
                 payload = await response.json(content_type=None)
         return payload
 
+    async def _get_clob_json(self, path: str, params: dict | None = None):
+        base = POLYMARKET_PRODUCTION_MANIFEST.clob_api
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            async with session.get(base + path, params=params, headers={"Accept": "application/json"}) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"Polymarket CLOB returned HTTP {response.status}.")
+                return await response.json(content_type=None)
+
     @commands.group(aliases=["poly"], invoke_without_command=True)
     async def polymarket(self, ctx: commands.Context):
         """Browse read-only Polymarket market information.
@@ -141,6 +150,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Trending", value=f"`{prefix}poly trending`\nActive markets ranked by 24-hour volume.", inline=False)
         embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
+        embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.add_field(name="Account connection", value=f"`{prefix}poly account`\nPublic identity status only; protected connection is not available yet.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
@@ -293,6 +303,56 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Future target", value=f"Polygon mainnet (`137`) · pUSD\nSelected-market minimum size: `{snapshot.minimum_order_size or 'not supplied'}`", inline=False)
         embed.add_field(name="Execution state", value="Disabled. No wallet lookup, account creation, balance check, approval, signature, or order occurs.", inline=False)
         embed.set_footer(text="A later protected approval, eligibility, security, and release review is required.")
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="quote")
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_quote(self, ctx: commands.Context, reference: str, outcome: str,
+                               max_spend_pusd: str, max_price: str | None = None):
+        """Preview a bounded live CLOB market buy without signing or submitting it."""
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or link.")
+            return
+        now = int(time.time())
+        try:
+            market = await self._get_json(path)
+            snapshot = MarketSnapshot.from_market(market, quote_timestamp=now)
+            selected = next((index for index, label in enumerate(snapshot.outcomes)
+                             if label.casefold() == outcome.casefold()), None)
+            if selected is None and outcome.isdigit() and 1 <= int(outcome) <= len(snapshot.outcomes):
+                selected = int(outcome) - 1
+            if selected is None:
+                raise OrderIntentError("Outcome is not part of this market.")
+            token_id = snapshot.outcome_token_ids[selected]
+            book_payload = await self._get_clob_json("/book", {"token_id": token_id})
+            fee_payload = await self._get_clob_json("/fee-rate", {"token_id": token_id})
+            quote = OrderBookSnapshot.from_payload(book_payload, captured_at=now)
+            base_fee_bps = int(fee_payload["base_fee"])
+            approval = MarketBuyApproval.create(
+                requester_id=ctx.author.id, market_id=snapshot.market_id,
+                condition_id=snapshot.condition_id, outcome=snapshot.outcomes[selected],
+                quote=quote, max_price=max_price or format(quote.best_ask, "f"),
+                max_spend_pusd=max_spend_pusd, maximum_base_fee_bps=base_fee_bps,
+                expires_at=now + 120,
+            )
+        except (aiohttp.ClientError, RuntimeError, ValueError, KeyError, TypeError,
+                MarketSnapshotError, OrderIntentError):
+            await ctx.send("A complete bounded live quote could not be produced. Check the market, outcome, amount, and maximum price.")
+            return
+        embed = discord.Embed(
+            title="Polymarket market-buy preview", url=market_url(market),
+            description=snapshot.question,
+        )
+        embed.add_field(name="Outcome", value=approval.outcome, inline=True)
+        embed.add_field(name="Best ask / ceiling", value=f"{quote.best_ask} / {approval.max_price}", inline=True)
+        embed.add_field(name="All-in cap", value=f"{approval.max_spend_pusd} pUSD", inline=True)
+        embed.add_field(name="Maximum notional", value=f"{approval.maximum_notional} pUSD", inline=True)
+        embed.add_field(name="Fee reserve", value=f"up to {approval.maximum_fee_pusd} pUSD (base fee {base_fee_bps} bps)", inline=True)
+        embed.add_field(name="Market constraints", value=f"Minimum {quote.minimum_order_size} shares · tick {quote.tick_size} · {'negative-risk' if quote.negative_risk else 'standard'} exchange", inline=False)
+        embed.add_field(name="Approval fingerprint", value=f"`{approval.fingerprint}`", inline=False)
+        embed.add_field(name="Expires", value=f"<t:{approval.expires_at}:R>", inline=True)
+        embed.add_field(name="Execution", value="Preview only. No account, balance, allowance, signature, credential, or order was used.", inline=False)
         await ctx.send(embed=embed)
 
     @polymarket.command(name="market", aliases=["info"])

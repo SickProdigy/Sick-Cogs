@@ -84,7 +84,7 @@ class MarketBuyApproval:
     quote: OrderBookSnapshot
     max_price: Decimal
     max_spend_pusd: Decimal
-    maximum_fee_bps: int
+    maximum_base_fee_bps: int
     created_at: int
     expires_at: int
 
@@ -97,7 +97,7 @@ class MarketBuyApproval:
             raise OrderIntentError("Maximum price is below the current best ask.")
         if self.max_spend_pusd <= 0 or self.max_spend_pusd.as_tuple().exponent < -6:
             raise OrderIntentError("Maximum spend must be positive pUSD with at most six decimals.")
-        if not 0 <= self.maximum_fee_bps <= 10_000:
+        if not 0 <= self.maximum_base_fee_bps <= 10_000:
             raise OrderIntentError("Maximum fee is invalid.")
         if self.created_at != self.quote.captured_at or self.expires_at <= self.created_at:
             raise OrderIntentError("Approval timestamps are not bound to the quote.")
@@ -107,17 +107,22 @@ class MarketBuyApproval:
     @classmethod
     def create(cls, *, requester_id: int, market_id: str, condition_id: str,
                outcome: str, quote: OrderBookSnapshot, max_price: str,
-               max_spend_pusd: str, maximum_fee_bps: int, expires_at: int):
+               max_spend_pusd: str, maximum_base_fee_bps: int, expires_at: int):
         return cls(
             requester_id, market_id, condition_id, outcome, quote,
             _decimal(max_price, "max_price"), _decimal(max_spend_pusd, "max_spend_pusd"),
-            int(maximum_fee_bps), quote.captured_at, expires_at,
+            int(maximum_base_fee_bps), quote.captured_at, expires_at,
         )
 
     @property
     def maximum_notional(self) -> Decimal:
-        multiplier = Decimal(1) + Decimal(self.maximum_fee_bps) / Decimal(10_000)
+        rate = Decimal(self.maximum_base_fee_bps) / Decimal(10_000)
+        multiplier = Decimal(1) + rate * (Decimal(1) - self.quote.best_ask)
         return (self.max_spend_pusd / multiplier).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
+
+    @property
+    def maximum_fee_pusd(self) -> Decimal:
+        return self.max_spend_pusd - self.maximum_notional
 
     @property
     def fingerprint(self) -> str:
@@ -126,12 +131,12 @@ class MarketBuyApproval:
             self.quote.token_id, self.quote.book_hash, str(self.quote.negative_risk),
             format(self.quote.minimum_order_size, "f"), format(self.quote.tick_size, "f"),
             format(self.quote.best_ask, "f"), format(self.max_price, "f"),
-            format(self.max_spend_pusd, "f"), str(self.maximum_fee_bps),
+            format(self.max_spend_pusd, "f"), str(self.maximum_base_fee_bps),
             str(self.created_at), str(self.expires_at),
         )
         return hashlib.sha256("|".join(fields).encode()).hexdigest()
 
-    def require_fresh(self, fresh: OrderBookSnapshot, *, fee_bps: int, now: int) -> None:
+    def require_fresh(self, fresh: OrderBookSnapshot, *, base_fee_bps: int, now: int) -> None:
         if now < self.created_at or now >= self.expires_at:
             raise OrderIntentError("Approval is expired or not current.")
         if fresh.captured_at < self.created_at or fresh.captured_at > now:
@@ -143,5 +148,5 @@ class MarketBuyApproval:
             or fresh.negative_risk != self.quote.negative_risk
         ):
             raise OrderIntentError("Market constraints changed; reapproval is required.")
-        if fresh.best_ask > self.max_price or fee_bps > self.maximum_fee_bps:
+        if fresh.best_ask > self.max_price or base_fee_bps > self.maximum_base_fee_bps:
             raise OrderIntentError("Price or fee exceeded the approved maximum.")
