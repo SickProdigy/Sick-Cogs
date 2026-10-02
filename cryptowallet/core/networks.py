@@ -122,8 +122,18 @@ BASE_MAINNET = Network(
     native_decimals=18,
     explorer_url="https://basescan.org",
     testnet=False,
-    enabled=False,
-    capabilities=NetworkCapabilities(),
+    enabled=True,
+    capabilities=NetworkCapabilities(
+        balance=True,
+        token_discovery=True,
+        send=True,
+        history=True,
+        transaction_lookup=True,
+        delegation=True,
+        recovery=True,
+        export=True,
+        sponsorship=False,
+    ),
 )
 
 ARBITRUM_SEPOLIA = Network(
@@ -270,10 +280,11 @@ KNOWN_NETWORKS = {
     )
 }
 
-# Only reviewed networks belong in NETWORKS. Disabled mainnet definitions remain
-# metadata-only until their capabilities and production safety are reviewed.
+# NETWORKS is the ordinary testnet command registry. Reviewed real-asset networks
+# use explicit guarded routing and never enter generic testnet selection.
 NETWORKS = {
-    key: network for key, network in KNOWN_NETWORKS.items() if network.enabled
+    key: network for key, network in KNOWN_NETWORKS.items()
+    if network.enabled and network.testnet
 }
 NETWORK_ALIASES = {
     "base": BASE_SEPOLIA.key,

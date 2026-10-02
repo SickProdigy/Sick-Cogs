@@ -219,6 +219,13 @@ class CdpWalletProvider(WalletProvider):
 
     name = "cdp"
     supported_capabilities = {
+        BASE_MAINNET.key: frozenset({
+            NetworkCapability.BALANCE,
+            NetworkCapability.TOKEN_DISCOVERY,
+            NetworkCapability.SEND,
+            NetworkCapability.HISTORY,
+            NetworkCapability.DELEGATION,
+        }),
         BASE_SEPOLIA.key: frozenset({
             NetworkCapability.BALANCE,
             NetworkCapability.TOKEN_DISCOVERY,
@@ -483,7 +490,7 @@ class CdpWalletProvider(WalletProvider):
             )
         except (CdpApiError, TypeError, ValueError) as exc:
             raise WalletProviderError(
-                "The isolated Base mainnet project does not verify this wallet account."
+                "The shared CDP project does not verify this Base mainnet wallet account."
             ) from exc
         updated = dict(profile)
         updated["accounts"] = accounts + [{
@@ -1684,7 +1691,7 @@ class CdpWalletProvider(WalletProvider):
     async def _submit_base_mainnet_transaction(
         self, profile: dict, intent: TransactionIntent
     ) -> dict:
-        """Submit one user-funded Base mainnet transfer through the isolated project."""
+        """Submit one user-funded Base mainnet transfer through the shared project."""
         provider_user_id = str(profile.get("provider_user_id") or "")
         profile_id = str(profile.get("profile_id") or "")
         account = next(

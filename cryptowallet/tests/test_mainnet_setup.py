@@ -28,6 +28,9 @@ class MainnetRootStagingTests(unittest.IsolatedAsyncioTestCase):
                     fromlist=["WalletEnvironment"],
                 ).WalletEnvironment.MAINNET
             ),
+            wallet_provider=SimpleNamespace(
+                supports=lambda network, capability: True
+            ),
             has_current_cryptowallet_mainnet_terms=AsyncMock(return_value=False),
             _wallet_read_allowed=AsyncMock(),
             _wallet_profile_or_error=AsyncMock(),

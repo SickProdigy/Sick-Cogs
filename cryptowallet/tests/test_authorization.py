@@ -1946,7 +1946,6 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         for network in (
-            BASE_MAINNET,
             POLYGON_MAINNET,
             OPTIMISM_MAINNET,
             BNB_MAINNET,
@@ -1962,6 +1961,15 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(POLYGON_MAINNET.chain_id, 137)
         self.assertEqual(POLYGON_MAINNET.native_symbol, "POL")
         self.assertEqual(POLYGON_MAINNET.explorer_url, "https://polygonscan.com")
+        self.assertTrue(BASE_MAINNET.enabled)
+        self.assertEqual(
+            set(BASE_MAINNET.capabilities.enabled()),
+            {capability for capability in NetworkCapability
+             if capability is not NetworkCapability.SPONSORSHIP},
+        )
+        self.assertTrue(BASE_MAINNET.supports(NetworkCapability.BALANCE))
+        self.assertTrue(BASE_MAINNET.supports(NetworkCapability.SEND))
+        self.assertFalse(BASE_MAINNET.supports(NetworkCapability.SPONSORSHIP))
         self.assertEqual(BASE_MAINNET.chain_id, 8453)
         self.assertEqual(BASE_MAINNET.native_symbol, "ETH")
         self.assertEqual(BASE_MAINNET.explorer_url, "https://basescan.org")
@@ -1981,8 +1989,8 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(BASE_SEPOLIA.supports(NetworkCapability.SEND))
         provider = CdpWalletProvider(SimpleNamespace())
         self.assertTrue(provider.supports(BASE_SEPOLIA.key, NetworkCapability.SEND))
-        self.assertFalse(provider.supports(BASE_MAINNET.key, NetworkCapability.BALANCE))
-        self.assertFalse(provider.supports(BASE_MAINNET.key, NetworkCapability.SEND))
+        self.assertTrue(provider.supports(BASE_MAINNET.key, NetworkCapability.BALANCE))
+        self.assertTrue(provider.supports(BASE_MAINNET.key, NetworkCapability.SEND))
         self.assertTrue(
             provider.supports(ETHEREUM_SEPOLIA.key, NetworkCapability.BALANCE)
         )
@@ -2012,7 +2020,11 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(manifest.smart_account_key_exportable)
         self.assertTrue(manifest.fee_quote_required)
         self.assertFalse(manifest.bounded_user_paid_fee_supported)
-        self.assertEqual(manifest.executable_capabilities, ())
+        self.assertEqual(
+            set(manifest.executable_capabilities),
+            {capability.value for capability in NetworkCapability
+             if capability is not NetworkCapability.SPONSORSHIP},
+        )
         self.assertEqual(len(manifest.fingerprint), 64)
         int(manifest.fingerprint, 16)
 
@@ -2360,10 +2372,11 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         cog.config.operating_mode.value = "testnet"
         self.assertTrue(await testnet_path_allowed(cog, ctx))
 
-    async def test_mainnet_send_route_remains_closed_at_code_boundary(self):
+    async def test_mainnet_send_route_remains_closed_at_installation_boundary(self):
         cog = SimpleNamespace(
             _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
             wallet_provider=SimpleNamespace(supports=lambda network, capability: True),
+            config=SimpleNamespace(base_mainnet_policy=_Value({})),
         )
         ctx = SimpleNamespace(
             author=SimpleNamespace(id=7), clean_prefix="!", send=AsyncMock()
@@ -2373,9 +2386,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             cog, ctx, "0xE338aDC6468484f2C6da16647B7154407661c371", "0.000001"
         )
 
-        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
 
-    async def test_mainnet_balance_route_remains_closed_at_code_boundary(self):
+    async def test_mainnet_balance_route_remains_closed_at_installation_boundary(self):
         cog = SimpleNamespace(
             _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
             config=SimpleNamespace(base_mainnet_policy=_Value({})),
@@ -2385,9 +2398,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         await WalletCoreCommands.wallet_balance.callback(cog, ctx)
 
-        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
 
-    async def test_mainnet_history_route_remains_closed_at_code_boundary(self):
+    async def test_mainnet_history_route_remains_closed_at_installation_boundary(self):
         cog = SimpleNamespace(
             _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
             config=SimpleNamespace(base_mainnet_policy=_Value({})),
@@ -2397,9 +2410,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         await WalletActivityCommands.wallet_transactions.callback(cog, ctx, "base")
 
-        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
 
-    async def test_mainnet_txid_route_remains_closed_at_code_boundary(self):
+    async def test_mainnet_txid_route_remains_closed_at_installation_boundary(self):
         cog = SimpleNamespace(
             _wallet_environment=AsyncMock(return_value=WalletEnvironment.MAINNET),
             config=SimpleNamespace(base_mainnet_policy=_Value({})),
@@ -2410,7 +2423,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             cog, ctx, "base", "0x" + "a" * 64
         )
 
-        self.assertIn("code-disabled", ctx.send.await_args.args[0])
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
 
     async def test_integrated_mainnet_context_requires_wallet_gate_first(self):
         cog = SimpleNamespace(
@@ -2510,7 +2523,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         })
         cog = SimpleNamespace(
             config=SimpleNamespace(
-                base_mainnet_policy=policy, operating_mode=_Value("testnet")
+                base_mainnet_policy=policy, operating_mode=_MutableValue("testnet")
             )
         )
         ctx = SimpleNamespace(author=SimpleNamespace(id=7), send=AsyncMock())
@@ -2525,9 +2538,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         await WalletAdminCommands.walletset_mainnet_enable.callback(
             cog, ctx, acknowledgement=MAINNET_ENABLE_ACKNOWLEDGEMENT
         )
-        self.assertFalse(policy.data["enabled"])
-        self.assertTrue(policy.data["paused"])
-        self.assertIn("no reviewed code-level capabilities", ctx.send.await_args.args[0])
+        self.assertTrue(policy.data["enabled"])
+        self.assertFalse(policy.data["paused"])
+        self.assertIn("armed installation-wide", ctx.send.await_args.args[0])
 
         policy.data["enabled"] = True
         policy.data["paused"] = False
@@ -2535,7 +2548,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(policy.data["enabled"])
         self.assertTrue(policy.data["paused"])
 
-    async def test_mainnet_capability_controls_cannot_exceed_code_boundary(self):
+    async def test_mainnet_capability_controls_respect_reviewed_code_boundary(self):
         policy = _ApprovalStore()
         policy.data.update({
             "enabled": False, "paused": True, "capabilities": {"send": True},
@@ -2547,7 +2560,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             cog, ctx, "send", "status", acknowledgement=""
         )
         self.assertIn("policy `enabled`", ctx.send.await_args.args[0])
-        self.assertIn("code `unavailable`", ctx.send.await_args.args[0])
+        self.assertIn("code `reviewed`", ctx.send.await_args.args[0])
 
         await WalletAdminCommands.walletset_mainnet_capability.callback(
             cog, ctx, "send", "disable", acknowledgement=""
@@ -2558,8 +2571,8 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             cog, ctx, "send", "enable",
             acknowledgement=MAINNET_ENABLE_ACKNOWLEDGEMENT,
         )
-        self.assertFalse(policy.data["capabilities"]["send"])
-        self.assertIn("not enabled", ctx.send.await_args.args[0])
+        self.assertTrue(policy.data["capabilities"]["send"])
+        self.assertIn("enabled", ctx.send.await_args.args[0])
 
         await WalletAdminCommands.walletset_mainnet_capability.callback(
             cog, ctx, "not-real", "enable", acknowledgement=""

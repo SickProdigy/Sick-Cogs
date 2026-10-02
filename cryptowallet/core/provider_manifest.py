@@ -7,7 +7,7 @@ from .networks import BASE_MAINNET, ChainFamily, Network
 
 @dataclass(frozen=True, slots=True)
 class EvmProviderManifest:
-    """Immutable reviewed provider assumptions for one disabled production network."""
+    """Immutable reviewed provider assumptions for one gated production network."""
 
     schema_version: int
     network_key: str
@@ -35,7 +35,7 @@ class EvmProviderManifest:
 
 
 BASE_MAINNET_PROVIDER_MANIFEST = EvmProviderManifest(
-    schema_version=2,
+    schema_version=3,
     network_key="base-mainnet",
     provider_network="base",
     chain_id=8453,
@@ -57,7 +57,10 @@ BASE_MAINNET_PROVIDER_MANIFEST = EvmProviderManifest(
         "pending", "signed", "broadcast", "complete", "dropped", "failed",
     ),
     operation_identifiers=("userOpHash", "transactionHash"),
-    executable_capabilities=(),
+    executable_capabilities=(
+        "balance", "token_discovery", "send", "history", "transaction_lookup",
+        "delegation", "recovery", "export",
+    ),
 )
 
 
@@ -67,7 +70,7 @@ def validate_evm_provider_manifest(
     """Return every drift reason; an empty tuple is the only passing result."""
 
     errors = []
-    if manifest.schema_version != 2:
+    if manifest.schema_version != 3:
         errors.append("unsupported manifest schema")
     if manifest.network_key != network.key:
         errors.append("network key mismatch")
@@ -77,10 +80,13 @@ def validate_evm_provider_manifest(
         errors.append("chain ID mismatch")
     if manifest.family != ChainFamily.EVM.value or network.family is not ChainFamily.EVM:
         errors.append("chain family mismatch")
-    if network.enabled or network.capabilities.enabled():
-        errors.append("production network is not fail-closed")
-    if manifest.executable_capabilities:
-        errors.append("manifest exposes executable capabilities")
+    if not network.enabled:
+        errors.append("reviewed production network is code-disabled")
+    reviewed_capabilities = {item.value for item in network.capabilities.enabled()}
+    if set(manifest.executable_capabilities) != reviewed_capabilities:
+        errors.append("manifest capability contract mismatch")
+    if "sponsorship" in reviewed_capabilities:
+        errors.append("mainnet sponsorship must remain disabled")
     if manifest.account_type != "erc-4337-smart-account":
         errors.append("smart-account model mismatch")
     if manifest.owner_account_type != "evm-eoa":
