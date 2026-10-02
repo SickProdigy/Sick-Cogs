@@ -39,6 +39,116 @@ SESSION_AUTHORIZE_SELECTOR = "24017fae"
 SESSION_REVOKE_SELECTOR = "e63f952f"
 SESSION_BATCH_LIFETIME_SECONDS = 5 * 60
 SESSION_KEY_LIFETIME_SECONDS = 180 * 24 * 60 * 60
+SETTLEMENT_BATCH_TYPES = {
+    **SESSION_BATCH_TYPES,
+    "EIP712Domain": [
+        {"name": "name", "type": "string"},
+        {"name": "version", "type": "string"},
+        {"name": "chainId", "type": "uint256"},
+        {"name": "verifyingContract", "type": "address"},
+    ],
+}
+SETTLEMENT_COLLATERAL = "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb"
+SETTLEMENT_ADAPTERS = {
+    "0xada100db00ca00073811820692005400218fce1f",
+    "0xada2005600dec949baf300f4c6120000bdb6eaab",
+}
+SETTLEMENT_ROUTER = "0x12121212006e4cd160d18e3f00711da5c3372600"
+CTF_REDEEM_SELECTOR = "01b7037c"
+ROUTER_REDEEM_SELECTOR = "d217a3cc"
+SETTLEMENT_BATCH_LIFETIME_SECONDS = 10 * 60
+
+
+def _settlement_call(call: dict) -> tuple[str, str]:
+    if not isinstance(call, dict) or set(call) != {"target", "value", "data"}:
+        raise ValueError("Polymarket settlement call has an invalid shape.")
+    target = _polymarket_address(call["target"], "settlement target")
+    data = str(call["data"]).lower()
+    if (
+        str(call["value"]) != "0"
+        or not data.startswith("0x")
+        or len(data) < 10
+        or len(data) % 2
+        or any(character not in "0123456789abcdef" for character in data[2:])
+    ):
+        raise ValueError("Polymarket settlement call is invalid.")
+    return target, data
+
+
+def validate_polymarket_settlement_batch_typed_data(
+    typed_data: dict, *, wallet_address: str,
+) -> tuple[int, int, tuple[tuple[str, str], ...]]:
+    """Accept only exact current-SDK CTF or protocol-v3 redemption calls."""
+
+    wallet = _polymarket_address(wallet_address, "Deposit Wallet")
+    if not isinstance(typed_data, dict) or set(typed_data) != {
+        "domain", "types", "primaryType", "message"
+    }:
+        raise ValueError("Polymarket settlement Batch has an invalid shape.")
+    domain = typed_data.get("domain")
+    message = typed_data.get("message")
+    calls = message.get("calls") if isinstance(message, dict) else None
+    if (
+        domain != {
+            "name": "DepositWallet", "version": "1", "chainId": 137,
+            "verifyingContract": wallet,
+        }
+        or typed_data.get("types") != SETTLEMENT_BATCH_TYPES
+        or typed_data.get("primaryType") != "Batch"
+        or not isinstance(message, dict)
+        or set(message) != {"wallet", "nonce", "deadline", "calls"}
+        or message.get("wallet") != wallet
+        or not isinstance(calls, list)
+        or not 1 <= len(calls) <= 2
+    ):
+        raise ValueError("Polymarket settlement Batch has an invalid shape.")
+    try:
+        nonce = int(message["nonce"])
+        deadline = int(message["deadline"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Polymarket settlement timing is invalid.") from exc
+    if not 0 <= nonce < 2**256 or not 0 < deadline < 2**256:
+        raise ValueError("Polymarket settlement timing is invalid.")
+
+    normalized = tuple(_settlement_call(call) for call in calls)
+    targets = {target for target, _data in normalized}
+    if targets.issubset(SETTLEMENT_ADAPTERS):
+        if len(normalized) != 1:
+            raise ValueError("CTF settlement must contain exactly one call.")
+        _target, data = normalized[0]
+        words = [data[index:index + 64] for index in range(10, len(data), 64)]
+        expected_collateral = "0" * 24 + SETTLEMENT_COLLATERAL[2:]
+        if (
+            data[2:10] != CTF_REDEEM_SELECTOR or len(words) != 7
+            or words[0] != expected_collateral or words[1] != "0" * 64
+            or int(words[2], 16) == 0 or int(words[3], 16) != 128
+            or [int(word, 16) for word in words[4:]] != [2, 1, 2]
+        ):
+            raise ValueError("CTF settlement calldata changed.")
+    elif targets == {SETTLEMENT_ROUTER}:
+        outcomes = set()
+        condition = None
+        for _target, data in normalized:
+            words = [data[index:index + 64] for index in range(10, len(data), 64)]
+            if (
+                data[2:10] != ROUTER_REDEEM_SELECTOR or len(words) != 3
+                or not words[0].endswith("00")
+                or int(words[1], 16) not in {0, 1}
+                or int(words[2], 16) <= 0
+            ):
+                raise ValueError("Protocol-v3 settlement calldata changed.")
+            if condition is not None and words[0] != condition:
+                raise ValueError("Protocol-v3 settlement conditions differ.")
+            condition = words[0]
+            outcomes.add(int(words[1], 16))
+        if len(outcomes) != len(normalized):
+            raise ValueError("Protocol-v3 settlement outcomes are duplicated.")
+    else:
+        raise ValueError("Polymarket settlement target is not reviewed.")
+    return nonce, deadline, normalized
+
+
+
 
 
 def _polymarket_address(value: str, label: str) -> str:

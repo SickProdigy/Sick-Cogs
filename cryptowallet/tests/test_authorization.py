@@ -122,6 +122,7 @@ from ..core.polymarket import (
     polymarket_clob_auth_typed_data,
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
+    validate_polymarket_settlement_batch_typed_data,
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
@@ -2164,6 +2165,51 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
             },
         }, wallet, session, valid_until
 
+    @staticmethod
+    def _settlement_batch():
+        wallet = "0x" + "2" * 40
+        deadline = int(time.time()) + 600
+        collateral = "0" * 24 + "c011a7e12a19f7b1f670d46f03b03f3342e82dfb"
+        data = "0x01b7037c" + "".join((
+            collateral, "0" * 64, "ab" * 32, f"{128:064x}",
+            f"{2:064x}", f"{1:064x}", f"{2:064x}",
+        ))
+        typed = {
+            "domain": {
+                "name": "DepositWallet", "version": "1", "chainId": 137,
+                "verifyingContract": wallet,
+            },
+            "types": {
+                "Call": [
+                    {"name": "target", "type": "address"},
+                    {"name": "value", "type": "uint256"},
+                    {"name": "data", "type": "bytes"},
+                ],
+                "Batch": [
+                    {"name": "wallet", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "deadline", "type": "uint256"},
+                    {"name": "calls", "type": "Call[]"},
+                ],
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+            },
+            "primaryType": "Batch",
+            "message": {
+                "wallet": wallet, "nonce": "12",
+                "deadline": str(deadline),
+                "calls": [{
+                    "target": "0xada100db00ca00073811820692005400218fce1f",
+                    "value": "0", "data": data,
+                }],
+            },
+        }
+        return typed, wallet
+
     def test_session_batch_validator_rejects_chain_wallet_and_action_drift(self):
         typed, wallet, session, valid_until = self._batch()
         self.assertEqual(validate_polymarket_session_batch_typed_data(
@@ -2190,6 +2236,25 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
                 typed, wallet_address=wallet, session_address=session,
                 action="authorize", valid_until=valid_until + 1,
             )
+
+    def test_settlement_batch_validator_rejects_arbitrary_execution(self):
+        typed, wallet = self._settlement_batch()
+        nonce, deadline, calls = validate_polymarket_settlement_batch_typed_data(
+            typed, wallet_address=wallet
+        )
+        self.assertEqual((nonce, deadline), (12, int(typed["message"]["deadline"])))
+        self.assertEqual(calls[0][0], typed["message"]["calls"][0]["target"])
+        for mutation in (
+            ("target", "0x" + "9" * 40),
+            ("value", "1"),
+            ("data", "0xdeadbeef"),
+        ):
+            changed = copy.deepcopy(typed)
+            changed["message"]["calls"][0][mutation[0]] = mutation[1]
+            with self.assertRaises(ValueError):
+                validate_polymarket_settlement_batch_typed_data(
+                    changed, wallet_address=wallet
+                )
 
     def test_clob_auth_builder_is_exact_and_rejects_drift(self):
         signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
@@ -2301,6 +2366,40 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
                 "authorize", valid_until, typed, "attempt-9",
             )
 
+    async def test_provider_signs_only_exact_bound_settlement_batch(self):
+        typed, wallet = self._settlement_batch()
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        signature = "0x" + "1" * 128 + "1b"
+        client = SimpleNamespace(sign_end_user_evm_typed_data=AsyncMock(
+            return_value={"signature": signature}
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.polymarket_signer_context = AsyncMock(return_value={
+            "provider_user_id": "profile-7", "signer_address": owner,
+        })
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-7")
+        )
+        provider._api_client = lambda _credentials: client
+
+        result = await provider.sign_polymarket_settlement_batch(
+            {"profile_id": "profile-7"}, 7, owner, wallet, typed, "attempt-7"
+        )
+
+        self.assertEqual(result, {"signature": signature, "signer_address": owner})
+        client.sign_end_user_evm_typed_data.assert_awaited_once_with(
+            "profile-7", owner, "project-7", typed, "attempt-7"
+        )
+        changed = copy.deepcopy(typed)
+        changed["message"]["calls"][0]["value"] = "1"
+        with self.assertRaises(ValueError):
+            await provider.sign_polymarket_settlement_batch(
+                {"profile_id": "profile-7"}, 7, owner, wallet, changed,
+                "attempt-8",
+            )
+        self.assertEqual(client.sign_end_user_evm_typed_data.await_count, 1)
+
     async def test_cryptowallet_signing_gate_fails_before_profile_access(self):
         config = SimpleNamespace(
             polymarket_typed_signing_enabled=_Value(False),
@@ -2325,6 +2424,44 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
                 approval_fingerprint="a" * 64,
             )
         cog.get_or_create_wallet_profile.assert_not_awaited()
+        settlement, wallet = self._settlement_batch()
+        with self.assertRaisesRegex(RuntimeError, "remains disabled"):
+            await cog.polymarket_sign_settlement_batch(
+                SimpleNamespace(id=7), owner_address="0x" + "1" * 40,
+                wallet_address=wallet, typed_data=settlement,
+                approval_fingerprint="a" * 64,
+            )
+        cog.get_or_create_wallet_profile.assert_not_awaited()
+
+    async def test_cryptowallet_settlement_route_binds_exact_approval(self):
+        typed, wallet = self._settlement_batch()
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        user = SimpleNamespace(id=7)
+        profile = {"profile_id": "profile-7"}
+        provider = SimpleNamespace(sign_polymarket_settlement_batch=AsyncMock(
+            return_value={"signature": "0x" + "1" * 128 + "1b",
+                          "signer_address": owner}
+        ))
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.config = SimpleNamespace(
+            polymarket_typed_signing_enabled=_Value(True),
+            provider_paused=_Value(False),
+            user=lambda _user: SimpleNamespace(security_locked=_Value(False)),
+        )
+        cog.wallet_provider = provider
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+
+        result = await cog.polymarket_sign_settlement_batch(
+            user, owner_address=owner, wallet_address=wallet,
+            typed_data=typed, approval_fingerprint="a" * 64,
+        )
+
+        self.assertEqual(result["signer_address"], owner)
+        cog.get_or_create_wallet_profile.assert_awaited_once_with(user)
+        provider.sign_polymarket_settlement_batch.assert_awaited_once_with(
+            profile, 7, owner, wallet, typed,
+            "polymarket-settlement-" + "a" * 64,
+        )
 
     async def test_cryptowallet_enabled_route_uses_one_profile_and_exact_idempotency(self):
         signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"

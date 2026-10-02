@@ -21,6 +21,7 @@ from .core.models import IntentStatus, TransactionIntent
 from .core.polymarket import (
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
+    validate_polymarket_settlement_batch_typed_data,
 )
 from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
@@ -200,6 +201,43 @@ class CryptoWallet(
         return await self.wallet_provider.sign_polymarket_session_batch(
             profile, user.id, owner, wallet, session, action, valid_until,
             typed_data, f"polymarket-session-{action}-{approval_fingerprint}",
+        )
+
+    async def polymarket_sign_settlement_batch(
+        self, user, *, owner_address: str, wallet_address: str,
+        typed_data: dict, approval_fingerprint: str,
+    ) -> dict:
+        """Sign one exact user-approved Deposit Wallet settlement Batch."""
+
+        if not bool(await self.config.polymarket_typed_signing_enabled()):
+            raise RuntimeError("CryptoWallet Polymarket signing remains disabled.")
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if not re.fullmatch(r"[0-9a-f]{64}", approval_fingerprint):
+            raise RuntimeError("Polymarket settlement approval is invalid.")
+        try:
+            owner = normalize_evm_address(owner_address).lower()
+            wallet = normalize_evm_address(wallet_address).lower()
+            if owner == wallet:
+                raise ValueError("Polymarket owner and wallet must remain separate.")
+            _nonce, deadline, _calls = (
+                validate_polymarket_settlement_batch_typed_data(
+                    typed_data, wallet_address=wallet,
+                )
+            )
+            now = int(time.time())
+            if not now < deadline <= now + 10 * 60:
+                raise ValueError("Polymarket settlement approval is not current.")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError(
+                "Polymarket settlement Batch typed data is invalid."
+            ) from exc
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.sign_polymarket_settlement_batch(
+            profile, user.id, owner, wallet, typed_data,
+            f"polymarket-settlement-{approval_fingerprint}",
         )
 
     @staticmethod

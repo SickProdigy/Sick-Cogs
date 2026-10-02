@@ -16,6 +16,7 @@ from ..core.provider_manifest import (
 from ..core.polymarket import (
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
+    validate_polymarket_settlement_batch_typed_data,
 )
 from ..core.models import (
     AccountType,
@@ -916,6 +917,77 @@ class CdpWalletProvider(WalletProvider):
         ):
             raise WalletProviderError("CDP returned an invalid EIP-712 signature.")
         return {"signature": str(response["signature"]).lower(), "signer_address": owner}
+
+    async def sign_polymarket_settlement_batch(
+        self, profile: dict, discord_user_id: int, owner_address: str,
+        wallet_address: str, typed_data: dict, idempotency_key: str,
+    ) -> dict:
+        """Sign only one exact Deposit Wallet settlement Batch."""
+
+        owner = normalize_evm_address(owner_address).lower()
+        wallet = normalize_evm_address(wallet_address).lower()
+        if owner == wallet:
+            raise WalletProviderError(
+                "Polymarket owner and wallet must remain separate."
+            )
+        _nonce, deadline, _calls = (
+            validate_polymarket_settlement_batch_typed_data(
+                typed_data, wallet_address=wallet,
+            )
+        )
+        now = int(time.time())
+        if not now < deadline <= now + 10 * 60:
+            raise WalletProviderError(
+                "Polymarket settlement approval is not current."
+            )
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", idempotency_key):
+            raise WalletProviderError(
+                "Polymarket signing idempotency key is invalid."
+            )
+        context = await self.polymarket_signer_context(
+            profile, discord_user_id
+        )
+        if context["signer_address"] != owner:
+            raise WalletProviderError(
+                "Polymarket signer no longer matches CryptoWallet."
+            )
+        delegation = await self.get_delegation_status(
+            profile, BASE_SEPOLIA.key
+        )
+        if delegation.get("active") is not True:
+            raise WalletProviderError(
+                "CryptoWallet delegated signing is not active for this profile."
+            )
+        credentials = await self.credentials_for_network(BASE_SEPOLIA.key)
+        if credentials is None:
+            raise WalletProviderError(
+                "CDP credentials are not completely configured."
+            )
+        try:
+            response = await self._api_client(
+                credentials
+            ).sign_end_user_evm_typed_data(
+                context["provider_user_id"], owner, credentials.project_id,
+                typed_data, idempotency_key,
+            )
+        except (CdpApiError, AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not sign the Polymarket settlement."
+            ) from exc
+        signature = str(
+            response.get("signature") if isinstance(response, dict) else ""
+        )
+        if (
+            not isinstance(response, dict)
+            or set(response) != {"signature"}
+            or re.fullmatch(r"0x[0-9a-fA-F]{130}", signature) is None
+        ):
+            raise WalletProviderError(
+                "CDP returned an invalid EIP-712 signature."
+            )
+        return {
+            "signature": signature.lower(), "signer_address": owner,
+        }
 
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
         """Read a legacy profile grant or the complete account-scoped grant set."""
