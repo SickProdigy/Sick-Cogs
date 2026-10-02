@@ -1433,6 +1433,28 @@ class SessionKeyTransportTests(unittest.IsolatedAsyncioTestCase):
             [call.args[0] for call in request.await_args_list], ["POST", "GET"]
         )
 
+    async def test_registry_absence_is_required_for_revocation(self):
+        approval = self._approval("revoke")
+        credentials = ClobCredentials(
+            "clob-key", base64.urlsafe_b64encode(b"c" * 32).decode(), "clob-pass"
+        )
+        absent = SessionKeyTransport(AsyncMock(return_value={
+            "wallet": approval.wallet_address, "signers": [],
+        }))
+        await absent.require_absent(
+            approval, credentials=credentials, timestamp=102
+        )
+        present = SessionKeyTransport(AsyncMock(return_value={
+            "wallet": approval.wallet_address, "signers": [{
+                "address": approval.session_address, "scopes": ["CLOB"],
+                "valid_until": 999,
+            }],
+        }))
+        with self.assertRaisesRegex(AccountConnectionError, "remains active"):
+            await present.require_absent(
+                approval, credentials=credentials, timestamp=102
+            )
+
     async def test_transaction_and_registry_require_exact_identity_scope_and_expiry(self):
         approval = self._approval()
         credentials = ClobCredentials(
@@ -1689,6 +1711,74 @@ class SessionProvisioningTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("owner-key", repr(values))
         self.assertNotIn("session-key", repr(values))
         cog.session_transport.require_active.assert_awaited_once()
+
+        revoke_approval = SessionKeyOwnerApproval(
+            action="revoke", discord_user_id=7, profile_id="profile-7",
+            owner_address=owner, wallet_address=wallet, session_address=session,
+            nonce=10, created_at=120, deadline=420,
+            idempotency_key="revoke-idempotency-key-" + "x" * 12,
+        )
+        revoke_digest = session_batch_digest(revoke_approval)
+        der = ec.derive_private_key(1, ec.SECP256K1()).sign(
+            revoke_digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+        )
+        r, s = utils.decode_dss_signature(der)
+        if s > HALF_CURVE_N:
+            s = CURVE_N - s
+        revoke_signature = None
+        for recovery_id in (0, 1):
+            candidate = "0x" + (
+                r.to_bytes(32, "big") + s.to_bytes(32, "big")
+                + bytes([27 + recovery_id])
+            ).hex()
+            try:
+                if verify_session_batch_signature(
+                    revoke_approval, candidate
+                ) == owner:
+                    revoke_signature = candidate
+                    break
+            except AccountConnectionError:
+                pass
+        self.assertIsNotNone(revoke_signature)
+
+        async def revoke_sign(_user, **kwargs):
+            self.assertEqual(kwargs["action"], "revoke")
+            self.assertIsNone(kwargs["valid_until"])
+            return {"signature": revoke_signature, "signer_address": owner}
+
+        cryptowallet.polymarket_sign_session_batch = revoke_sign
+        cog.session_transport.get_wallet_nonce.return_value = 10
+        cog.session_transport.submit.return_value = {
+            "operation_id": "operation-2",
+            "transaction_id": "transaction-2",
+            "transaction_hash": None,
+            "fenced": True,
+        }
+        with patch("polymarket.polymarket.time.time", return_value=120):
+            revocation = await cog._begin_session_revocation(user)
+        self.assertEqual(revocation.state, SessionOperationState.SUBMITTED)
+        self.assertEqual(
+            SessionKeyLifecycle.from_record(values["session_lifecycle"]).status,
+            SessionKeyStatus.REVOKING,
+        )
+
+        cog.session_transport.transaction.return_value = {
+            "transaction_id": "transaction-2",
+            "transaction_hash": "0x" + "b" * 64,
+            "state": "STATE_CONFIRMED", "error_msg": None,
+        }
+        cog.session_transport.require_absent = AsyncMock(return_value=None)
+        with patch("polymarket.polymarket.time.time", return_value=130):
+            revoked = await cog._reconcile_session_key(user)
+        self.assertEqual(revoked.status, SessionKeyStatus.REVOKED)
+        self.assertIsNone(values["encrypted_session_key"])
+        self.assertIsNone(values["encrypted_session_credentials"])
+        cog.session_transport.require_absent.assert_awaited_once()
+        self.assertEqual(
+            cog.session_transport.create_or_derive_session_credentials.await_count, 1
+        )
+        terminal = await cog._reconcile_session_key(user)
+        self.assertEqual(terminal.status, SessionKeyStatus.REVOKED)
 
     async def test_initialize_creates_or_validates_only_server_side_wrapping_key(self):
         cog = Polymarket.__new__(Polymarket)

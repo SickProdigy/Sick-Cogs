@@ -250,6 +250,20 @@ class SessionKeyTransport:
             })
         return tuple(signers)
 
+    async def require_absent(
+        self, approval: SessionKeyOwnerApproval, *, credentials: ClobCredentials,
+        timestamp: int,
+    ) -> None:
+        signers = await self.active_session_keys(
+            owner_address=approval.owner_address,
+            wallet_address=approval.wallet_address,
+            credentials=credentials, timestamp=timestamp,
+        )
+        if any(
+            signer["address"] == approval.session_address for signer in signers
+        ):
+            raise AccountConnectionError("Revoked session key remains active.")
+
     async def require_active(
         self, approval: SessionKeyOwnerApproval, *, credentials: ClobCredentials,
         timestamp: int,
