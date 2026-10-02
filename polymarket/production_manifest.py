@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class PolymarketProductionManifest:
     """Official production facts that must fail closed when they drift."""
 
-    schema_version: int = 5
+    schema_version: int = 6
     chain_id: int = 137
     network_key: str = "polygon"
     collateral_symbol: str = "pUSD"
@@ -18,6 +18,9 @@ class PolymarketProductionManifest:
     collateral_offramp: str = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
     ctf_exchange: str = "0xE111180000d2663C0091e4f400237545B87B996B"
     neg_risk_exchange: str = "0xe2222d279d744050d28e00520010520000310F59"
+    exchange_v3: str = "0xe3333700cA9d93003F00f0F71f8515005F6c00Aa"
+    protocol_v2_router: str = "0x12121212006e4CD160D18e3f00711DA5c3372600"
+    position_manager: str = "0x006F54F7f9A22e0000CC2AB60031000000ae9fEF"
     conditional_tokens: str = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
     deposit_wallet_factory: str = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
     deposit_wallet_beacon: str = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a"
@@ -61,6 +64,9 @@ def validate_polymarket_production_manifest(
         "collateral_offramp": "0x2957922eb93258b93368531d39facca3b4dc5854",
         "ctf_exchange": "0xe111180000d2663c0091e4f400237545b87b996b",
         "neg_risk_exchange": "0xe2222d279d744050d28e00520010520000310f59",
+        "exchange_v3": "0xe3333700ca9d93003f00f0f71f8515005f6c00aa",
+        "protocol_v2_router": "0x12121212006e4cd160d18e3f00711da5c3372600",
+        "position_manager": "0x006f54f7f9a22e0000cc2ab60031000000ae9fef",
         "conditional_tokens": "0x4d97dcd97ec945f40cf65f87097ace5ea0476045",
         "deposit_wallet_factory": "0x00000000000fb5c9adea0298d729a0cb3823cc07",
         "deposit_wallet_beacon": "0x7a18edfe055488a3128f01f563e5b479d92ffc3a",
@@ -69,7 +75,7 @@ def validate_polymarket_production_manifest(
         "proxy_wallet_implementation": "0x44e999d5c2f66ef0861317f9a4805ac2e90aeb4f",
         "safe_wallet_factory": "0xaacfeea03eb1561c4e67d661e40682bd20e3541b",
     }
-    if manifest.schema_version != 5:
+    if manifest.schema_version != 6:
         errors.append("unsupported manifest schema")
     if manifest.chain_id != 137 or manifest.network_key != "polygon":
         errors.append("Polygon network binding mismatch")

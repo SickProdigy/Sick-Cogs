@@ -116,6 +116,7 @@ class OrderBinding:
         if exchange not in {
             POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange.lower(),
             POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower(),
+            POLYMARKET_PRODUCTION_MANIFEST.exchange_v3.lower(),
         }:
             raise OrderLifecycleError("exchange_address is not pinned")
         object.__setattr__(self, "exchange_address", exchange)

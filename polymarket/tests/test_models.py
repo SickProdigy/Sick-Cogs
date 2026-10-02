@@ -49,6 +49,9 @@ from polymarket.order_transport import (
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
 )
+from polymarket.order_protocol import (
+    OrderProtocolError, is_protocol_v3_position_id, resolve_order_protocol,
+)
 from polymarket.order_signing import (
     OrderSigningError, UnsignedDepositWalletOrder,
     deposit_wallet_order_digest, sign_deposit_wallet_order,
@@ -740,7 +743,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
-        self.assertEqual(manifest.schema_version, 5)
+        self.assertEqual(manifest.schema_version, 6)
         self.assertEqual(manifest.bridge_api, "https://bridge.polymarket.com")
         self.assertEqual(manifest.data_api, "https://data-api.polymarket.com")
         self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
@@ -751,6 +754,18 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertTrue(manifest.session_keys_documented)
         self.assertEqual(manifest.deposit_wallet_order_signature_type, 3)
         self.assertEqual(manifest.order_protocol_versions, ("2", "3"))
+        self.assertEqual(
+            manifest.exchange_v3.lower(),
+            "0xe3333700ca9d93003f00f0f71f8515005f6c00aa",
+        )
+        self.assertEqual(
+            manifest.protocol_v2_router.lower(),
+            "0x12121212006e4cd160d18e3f00711da5c3372600",
+        )
+        self.assertEqual(
+            manifest.position_manager.lower(),
+            "0x006f54f7f9a22e0000cc2ab60031000000ae9fef",
+        )
         self.assertEqual(manifest.order_signature_scheme, "ERC-7739_SESSION_KEY")
         self.assertFalse(manifest.execution_enabled)
         self.assertEqual(manifest.executable_capabilities, ())
@@ -761,6 +776,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             replace(POLYMARKET_PRODUCTION_MANIFEST, collateral_decimals=18),
             replace(POLYMARKET_PRODUCTION_MANIFEST, usdce_token="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, ctf_exchange="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, exchange_v3="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, protocol_v2_router="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, position_manager="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, deposit_wallet_beacon="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, safe_init_code_hash="0x" + "1" * 64),
             replace(POLYMARKET_PRODUCTION_MANIFEST, polygon_rpc="https://example.invalid"),
@@ -774,6 +792,30 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         ):
             with self.subTest(manifest=changed):
                 self.assertTrue(validate_polymarket_production_manifest(changed))
+
+    def test_order_protocol_matches_current_sdk_asset_namespace(self):
+        position_id = str(1 << 248)
+        legacy_token_id = str(1 << 80)
+        self.assertTrue(is_protocol_v3_position_id(position_id))
+        self.assertFalse(is_protocol_v3_position_id(legacy_token_id))
+        self.assertEqual(
+            resolve_order_protocol(position_id, negative_risk=True),
+            resolve_order_protocol(position_id, negative_risk=False),
+        )
+        v3 = resolve_order_protocol(position_id, negative_risk=False)
+        self.assertEqual((v3.version, v3.exchange_address), (
+            "3", POLYMARKET_PRODUCTION_MANIFEST.exchange_v3.lower(),
+        ))
+        standard = resolve_order_protocol(legacy_token_id, negative_risk=False)
+        negative = resolve_order_protocol(legacy_token_id, negative_risk=True)
+        self.assertEqual((standard.version, standard.exchange_address), (
+            "2", POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange.lower(),
+        ))
+        self.assertEqual((negative.version, negative.exchange_address), (
+            "2", POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower(),
+        ))
+        with self.assertRaises(OrderProtocolError):
+            resolve_order_protocol(str(1 << 256), negative_risk=False)
 
     def test_terms_acceptance_is_exact_versioned_and_user_bound(self):
         record = create_polymarket_terms_acceptance(
@@ -874,6 +916,7 @@ class CurrentDepositWalletOrderSigningTests(unittest.TestCase):
     def _order(self):
         manifest = SimpleNamespace(
             ctf_exchange=self.exchange, neg_risk_exchange="0x" + "9" * 40,
+            exchange_v3="0x" + "8" * 40,
         )
         with patch("polymarket.order_signing.POLYMARKET_PRODUCTION_MANIFEST", manifest):
             return UnsignedDepositWalletOrder(

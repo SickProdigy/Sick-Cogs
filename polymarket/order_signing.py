@@ -90,6 +90,7 @@ class UnsignedDepositWalletOrder:
         if self.exchange_address not in {
             POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange.lower(),
             POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower(),
+            POLYMARKET_PRODUCTION_MANIFEST.exchange_v3.lower(),
         }:
             raise OrderSigningError("order exchange is not pinned")
         if not isinstance(self.token_id, str) or not self.token_id.isdigit():
