@@ -19,6 +19,8 @@ POST_ORDER_PATH = "/order"
 CANCEL_ORDER_PATH = "/order"
 GET_ORDER_PREFIX = "/data/order/"
 GET_TRADES_PATH = "/data/trades"
+GET_OPEN_ORDERS_PATH = "/data/orders"
+GET_BALANCE_ALLOWANCE_PATH = "/balance-allowance"
 _ZERO_ADDRESS = "0x" + "0" * 40
 
 
@@ -153,6 +155,32 @@ class AuthenticatedOrderTransport:
         if not isinstance(result, Mapping):
             raise OrderTransportError("CLOB returned an invalid response")
         return result
+
+    async def balance_allowance(
+        self, *, timestamp: int, session_signer_address: str,
+        signature_type: int = 2,
+    ) -> Mapping[str, Any]:
+        if signature_type not in {0, 1, 2}:
+            raise OrderTransportError("signature type is invalid")
+        return await self._call(
+            "GET", GET_BALANCE_ALLOWANCE_PATH, timestamp=timestamp,
+            params={"asset_type": "COLLATERAL", "signature_type": signature_type},
+            session_signer_address=session_signer_address,
+        )
+
+    async def list_open_orders(
+        self, *, timestamp: int, session_signer_address: str,
+        next_cursor: str | None = None,
+    ) -> Mapping[str, Any]:
+        params: dict[str, Any] = {}
+        if next_cursor is not None:
+            if not isinstance(next_cursor, str) or not next_cursor or len(next_cursor) > 512:
+                raise OrderTransportError("open-orders cursor is invalid")
+            params["next_cursor"] = next_cursor
+        return await self._call(
+            "GET", GET_OPEN_ORDERS_PATH, timestamp=timestamp, params=params,
+            session_signer_address=session_signer_address,
+        )
 
     async def submit(
         self, lifecycle: OrderLifecycle, signed_order: Mapping[str, Any], *,

@@ -17,6 +17,10 @@ from cryptowallet.core.polymarket import (
 )
 from polymarket import setup
 from polymarket.account_binding import BotFirstAccountBinding
+from polymarket.account_data import (
+    AccountDataError, CollateralBalance, PortfolioValue,
+    parse_open_orders_page, parse_positions_page,
+)
 from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
@@ -646,8 +650,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
-        self.assertEqual(manifest.schema_version, 3)
+        self.assertEqual(manifest.schema_version, 4)
         self.assertEqual(manifest.bridge_api, "https://bridge.polymarket.com")
+        self.assertEqual(manifest.data_api, "https://data-api.polymarket.com")
         self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
         self.assertEqual(manifest.deposit_wallet_beacon.lower(), "0x7a18edfe055488a3128f01f563e5b479d92ffc3a")
         self.assertEqual(manifest.usdce_token.lower(), "0x2791bca1f2de4661ed88a30c99a7a9449aa84174")
@@ -666,6 +671,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             replace(POLYMARKET_PRODUCTION_MANIFEST, deposit_wallet_beacon="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, safe_init_code_hash="0x" + "1" * 64),
             replace(POLYMARKET_PRODUCTION_MANIFEST, polygon_rpc="https://example.invalid"),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, data_api="https://example.invalid"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, default_new_wallet_type="EOA"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, signer_and_wallet_are_distinct=False),
             replace(POLYMARKET_PRODUCTION_MANIFEST, execution_enabled=True),
@@ -720,6 +726,51 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             [{"id": "active", "active": True, "closed": False}],
         )
 
+
+
+class AccountDataTests(unittest.TestCase):
+    wallet = "0x" + "1" * 40
+
+    def test_official_portfolio_positions_and_balance_shapes_are_wallet_bound(self):
+        portfolio = PortfolioValue.from_response(
+            {"data": {"proxy_wallet": self.wallet, "value": "12.34"}},
+            expected_wallet=self.wallet,
+        )
+        self.assertEqual(portfolio.value_pusd, Decimal("12.34"))
+        positions, cursor = parse_positions_page({
+            "data": [{
+                "proxy_wallet": self.wallet, "condition_id": "0xcondition",
+                "token_id": "123", "title": "Example?", "outcome": "Yes",
+                "current_size": "10", "avg_price": "0.4",
+                "current_price": "0.6", "current_value": "6",
+                "total_pnl": "2", "redeemable": False, "mergeable": False,
+            }],
+            "next_cursor": "next-page",
+        }, expected_wallet=self.wallet)
+        self.assertEqual(positions[0].current_value_pusd, Decimal("6"))
+        self.assertEqual(cursor, "next-page")
+        balance = CollateralBalance.from_response({
+            "balance": "12500000", "allowances": {"0x" + "2" * 40: "50"},
+        })
+        self.assertEqual(balance.pusd, Decimal("12.5"))
+
+    def test_account_data_rejects_wallet_drift_and_malformed_provider_values(self):
+        with self.assertRaises((AccountDataError, AccountConnectionError)):
+            PortfolioValue.from_response(
+                {"data": {"proxy_wallet": "0x" + "2" * 40, "value": "1"}},
+                expected_wallet=self.wallet,
+            )
+        with self.assertRaises(AccountDataError):
+            CollateralBalance.from_response({"balance": "1.5", "allowances": {}})
+        with self.assertRaises((AccountDataError, AccountConnectionError)):
+            parse_open_orders_page({
+                "data": [{
+                    "id": "order", "market": "condition", "asset_id": "123",
+                    "maker_address": "0x" + "2" * 40, "side": "BUY",
+                    "outcome": "Yes", "price": "0.5", "original_size": "10",
+                    "size_matched": "0", "status": "LIVE",
+                }], "next_cursor": "LTE=",
+            }, expected_wallet=self.wallet)
 
 class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
     def _lifecycle(self):
@@ -822,6 +873,38 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
             reconciled, now=datetime.fromtimestamp(170, timezone.utc), timestamp=170
         )
         self.assertEqual(canceled.state, OrderState.CANCELED)
+
+    async def test_authenticated_account_reads_use_exact_routes_and_session_headers(self):
+        secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
+        calls = []
+
+        async def request(**kwargs):
+            calls.append(kwargs)
+            if kwargs["path"] == "/balance-allowance":
+                return {"balance": "1000000", "allowances": {}}
+            return {"data": [], "next_cursor": "LTE="}
+
+        transport = AuthenticatedOrderTransport(
+            credential_provider=AsyncMock(return_value=ClobCredentials(
+                "api-key", secret, "passphrase"
+            )),
+            request=request,
+        )
+        signer = "0x" + "2" * 40
+        await transport.balance_allowance(
+            timestamp=100, session_signer_address=signer
+        )
+        await transport.list_open_orders(
+            timestamp=101, session_signer_address=signer, next_cursor="cursor-two"
+        )
+        self.assertEqual(calls[0]["path"], "/balance-allowance")
+        self.assertEqual(calls[0]["params"], {
+            "asset_type": "COLLATERAL", "signature_type": 2,
+        })
+        self.assertEqual(calls[1]["path"], "/data/orders")
+        self.assertEqual(calls[1]["params"], {"next_cursor": "cursor-two"})
+        self.assertEqual(calls[0]["headers"]["POLY_ADDRESS"], signer)
+        self.assertNotIn(secret, repr(calls))
 
     async def test_submission_timeout_becomes_unknown_without_secret_or_retry(self):
         secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
@@ -3118,6 +3201,52 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Revoke: set value to 0", fields["Approval 1: pUSD"])
         self.assertIn("Revoke: set value to false", fields["Approval 2: Outcome tokens"])
         self.assertIn("Disclosure only", fields["Execution"])
+
+    async def test_account_data_commands_default_closed_before_wallet_or_network(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._bot_first_account = AsyncMock()
+        cog._get_data_json = AsyncMock()
+        for command in (
+            Polymarket.polymarket_balance,
+            Polymarket.polymarket_positions,
+            Polymarket.polymarket_orders,
+        ):
+            ctx.send.reset_mock()
+            await command.callback(cog, ctx)
+            self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        cog._bot_first_account.assert_not_awaited()
+        cog._get_data_json.assert_not_awaited()
+
+    async def test_positions_reads_only_the_bound_wallet_and_renders_live_values(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({"account_data": True})
+        wallet = "0x" + "2" * 40
+        cog._bot_first_account = AsyncMock(return_value=BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address=wallet, created_at=80,
+        ))
+        cog._get_data_json = AsyncMock(return_value={
+            "data": [{
+                "proxy_wallet": wallet, "condition_id": "condition",
+                "token_id": "123", "title": "Example?", "outcome": "Yes",
+                "current_size": "10", "avg_price": "0.4",
+                "current_price": "0.6", "current_value": "6",
+                "total_pnl": "2", "redeemable": False, "mergeable": False,
+            }],
+            "next_cursor": None,
+        })
+        await Polymarket.polymarket_positions.callback(cog, ctx)
+        cog._get_data_json.assert_awaited_once_with(
+            "/v2/positions", {"user": wallet, "status": "OPEN", "limit": 10}
+        )
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Polymarket positions")
+        self.assertIn("6 pUSD", embed.fields[0].value)
 
     async def test_deposit_default_gate_stops_before_bridge_or_wallet_access(self):
         ctx = Context()

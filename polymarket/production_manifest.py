@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class PolymarketProductionManifest:
     """Official production facts that must fail closed when they drift."""
 
-    schema_version: int = 3
+    schema_version: int = 4
     chain_id: int = 137
     network_key: str = "polygon"
     collateral_symbol: str = "pUSD"
@@ -28,6 +28,7 @@ class PolymarketProductionManifest:
     safe_init_code_hash: str = "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf"
     gamma_api: str = "https://gamma-api.polymarket.com"
     clob_api: str = "https://clob.polymarket.com"
+    data_api: str = "https://data-api.polymarket.com"
     relayer_api: str = "https://relayer-v2.polymarket.com"
     bridge_api: str = "https://bridge.polymarket.com"
     polygon_rpc: str = "https://polygon.drpc.org"
@@ -65,7 +66,7 @@ def validate_polymarket_production_manifest(
         "proxy_wallet_implementation": "0x44e999d5c2f66ef0861317f9a4805ac2e90aeb4f",
         "safe_wallet_factory": "0xaacfeea03eb1561c4e67d661e40682bd20e3541b",
     }
-    if manifest.schema_version != 3:
+    if manifest.schema_version != 4:
         errors.append("unsupported manifest schema")
     if manifest.chain_id != 137 or manifest.network_key != "polygon":
         errors.append("Polygon network binding mismatch")
@@ -77,11 +78,12 @@ def validate_polymarket_production_manifest(
     if manifest.safe_init_code_hash.lower() != "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf":
         errors.append("Safe init-code hash mismatch")
     if (
-        manifest.gamma_api, manifest.clob_api, manifest.relayer_api,
-        manifest.bridge_api,
+        manifest.gamma_api, manifest.clob_api, manifest.data_api,
+        manifest.relayer_api, manifest.bridge_api,
     ) != (
         "https://gamma-api.polymarket.com",
         "https://clob.polymarket.com",
+        "https://data-api.polymarket.com",
         "https://relayer-v2.polymarket.com",
         "https://bridge.polymarket.com",
     ):

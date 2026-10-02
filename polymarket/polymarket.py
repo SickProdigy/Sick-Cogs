@@ -11,6 +11,10 @@ import discord
 from redbot.core import Config, checks, commands
 
 from .account_binding import BotFirstAccountBinding
+from .account_data import (
+    AccountDataError, CollateralBalance, PortfolioValue,
+    parse_open_orders_page, parse_positions_page,
+)
 from .account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
@@ -26,6 +30,7 @@ from .onboarding import (
 )
 from .onboarding_verification import finalize_onboarding_evidence
 from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from .order_transport import AuthenticatedOrderTransport, ClobCredentials, OrderTransportError
 from .relayer import BuilderCredentials, DepositWalletRelayerClient
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
@@ -43,6 +48,7 @@ from .session_authorization import (
 )
 from .session_credential_store import (
     EncryptedSessionCredentials, protect_session_credentials,
+    reveal_session_credentials,
 )
 from .session_key_store import (
     EncryptedSessionKey, SESSION_KEY_TOKEN_NAMESPACE, decode_wrapping_key,
@@ -65,6 +71,7 @@ from .terms import (
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
     "account_connect", "deposit_wallet_create", "session", "eligibility",
+    "account_data",
     "collateral", "deposit", "order", "cancel", "redeem",
 )
 ONBOARDING_ENABLE_ACKNOWLEDGEMENT = (
@@ -156,7 +163,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.33"
+    __version__ = "0.2.34"
 
     def __init__(self, bot):
         self.bot = bot
@@ -219,6 +226,15 @@ class Polymarket(commands.Cog):
         if not deployment_id:
             raise AccountConnectionError("CryptoWallet deployment identity is unavailable.")
         return wrapping_key, deployment_id
+
+    async def _account_data_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("account_data"))
+            and not validate_polymarket_production_manifest()
+        )
 
     async def _session_capability_allowed(self) -> bool:
         capabilities = await self.config.production_capabilities()
@@ -1250,6 +1266,52 @@ class Polymarket(commands.Cog):
         await user_config.bot_first_account.set(binding.to_record())
         return binding
 
+    async def _active_account_transport(
+        self, user, binding: BotFirstAccountBinding,
+    ) -> tuple[AuthenticatedOrderTransport, SessionKeyLifecycle]:
+        user_config = self.config.user(user)
+        lifecycle_record = await user_config.session_lifecycle()
+        credential_record = await user_config.encrypted_session_credentials()
+        if not lifecycle_record or not credential_record:
+            raise AccountConnectionError(
+                "An active Polymarket session is required for private account data."
+            )
+        lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+        encrypted = EncryptedSessionCredentials.from_record(credential_record)
+        now = int(time.time())
+        if lifecycle.status is not SessionKeyStatus.ACTIVE or now >= lifecycle.expires_at:
+            raise AccountConnectionError(
+                "The Polymarket session is not active; renew it before reading private data."
+            )
+        if (
+            lifecycle.discord_user_id != user.id
+            or lifecycle.profile_id != binding.profile_id
+            or lifecycle.owner_address != binding.signer_address
+            or lifecycle.wallet_address != binding.account_wallet_address
+            or encrypted.profile_id != binding.profile_id
+            or encrypted.signer_address != binding.signer_address
+            or encrypted.account_wallet_address != binding.account_wallet_address
+            or encrypted.session_address != lifecycle.session_address
+            or now >= encrypted.expires_at
+        ):
+            raise AccountConnectionError("Polymarket account-data identity changed.")
+        wrapping_key, deployment_id = await self._session_storage_material()
+        credentials = reveal_session_credentials(
+            wrapping_key, encrypted, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=lifecycle.session_address,
+        )
+
+        async def credential_provider() -> ClobCredentials:
+            return credentials
+
+        return AuthenticatedOrderTransport(
+            credential_provider=credential_provider,
+            request=self._authenticated_clob_request,
+        ), lifecycle
+
     async def _request_cdp_clob_auth_signature(
         self, user, binding: BotFirstAccountBinding, *,
         timestamp: int, nonce: int,
@@ -1466,6 +1528,37 @@ class Polymarket(commands.Cog):
         await self._append_audit(user, "connect_verified", connection.to_record())
         return connection
 
+    async def _get_data_json(self, path: str, params: dict | None = None):
+        base = POLYMARKET_PRODUCTION_MANIFEST.data_api
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            async with session.get(
+                base + path, params=params, headers={"Accept": "application/json"}
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"Polymarket Data API returned HTTP {response.status}."
+                    )
+                return await response.json(content_type=None)
+
+    async def _authenticated_clob_request(
+        self, *, method: str, path: str, headers: dict,
+        body: dict | None = None, params: dict | None = None,
+    ):
+        base = POLYMARKET_PRODUCTION_MANIFEST.clob_api
+        request_headers = {**headers, "Accept": "application/json"}
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            async with session.request(
+                method, base + path, params=params, json=body, headers=request_headers,
+            ) as response:
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"Polymarket CLOB returned HTTP {response.status}."
+                    )
+                payload = await response.json(content_type=None)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("Polymarket CLOB returned invalid JSON.")
+                return payload
+
     async def _get_clob_json(self, path: str, params: dict | None = None):
         base = POLYMARKET_PRODUCTION_MANIFEST.clob_api
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -1493,6 +1586,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Fund Polymarket", value=f"DM-only `{prefix}poly deposit <ETH amount>` prepares a CryptoWallet approval card or resumes deposit status. Production gates remain default-off.", inline=False)
+        embed.add_field(name="Your account", value=f"DM-only `{prefix}poly balance`, `{prefix}poly positions`, and `{prefix}poly orders` show identity-bound live account data when its gate is enabled.", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` automatically derives the CryptoWallet-owned Deposit Wallet. `{prefix}poly session` starts protected session authorization. Existing-account `connect`/`confirm` is compatibility-only. `{prefix}poly confirmations [on|off]` controls the default-on second approval check. Never send secrets in Discord.", inline=False)
         embed.set_footer(text="Public discovery is read-only; production actions remain default-off.")
@@ -2344,6 +2438,145 @@ class Polymarket(commands.Cog):
             f"Polymarket terms **{POLYMARKET_TERMS_VERSION}** accepted. "
             "No account was connected and no transaction was submitted."
         )
+
+    @polymarket.command(name="balance")
+    @commands.dm_only()
+    async def polymarket_balance(self, ctx: commands.Context):
+        """Show pUSD collateral and current position value for the bound account."""
+        if not await self._account_data_allowed():
+            await ctx.send("Polymarket account data is disabled or emergency-paused.")
+            return
+        try:
+            binding = await self._bot_first_account(ctx.author)
+            transport, lifecycle = await self._active_account_transport(
+                ctx.author, binding
+            )
+            portfolio_payload = await self._get_data_json(
+                "/v2/value", {"user": binding.account_wallet_address}
+            )
+            portfolio = PortfolioValue.from_response(
+                portfolio_payload, expected_wallet=binding.account_wallet_address
+            )
+            balance_payload = await transport.balance_allowance(
+                timestamp=int(time.time()),
+                session_signer_address=lifecycle.session_address,
+            )
+            balance = CollateralBalance.from_response(balance_payload)
+        except (
+            AccountConnectionError, AccountDataError, OrderTransportError,
+            RuntimeError, ValueError, aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(f"Polymarket balance could not be verified: {exc}")
+            return
+        embed = discord.Embed(
+            title="Polymarket balance",
+            description="Live values for your bound Deposit Wallet.",
+        )
+        embed.add_field(name="Available pUSD", value=f"{balance.pusd:f} pUSD")
+        embed.add_field(
+            name="Open position value", value=f"{portfolio.value_pusd:f} pUSD"
+        )
+        embed.add_field(
+            name="Account wallet", value=f"`{binding.account_wallet_address}`",
+            inline=False,
+        )
+        embed.set_footer(text="Read only - no approval, signature, or order submitted")
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="positions")
+    @commands.dm_only()
+    async def polymarket_positions(self, ctx: commands.Context):
+        """Show current positions for the bound Polymarket account."""
+        if not await self._account_data_allowed():
+            await ctx.send("Polymarket account data is disabled or emergency-paused.")
+            return
+        try:
+            binding = await self._bot_first_account(ctx.author)
+            payload = await self._get_data_json(
+                "/v2/positions", {
+                    "user": binding.account_wallet_address,
+                    "status": "OPEN", "limit": 10,
+                },
+            )
+            positions, cursor = parse_positions_page(
+                payload, expected_wallet=binding.account_wallet_address
+            )
+        except (
+            AccountConnectionError, AccountDataError, RuntimeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(f"Polymarket positions could not be verified: {exc}")
+            return
+        if not positions:
+            await ctx.send("No open Polymarket positions were found for this account.")
+            return
+        embed = discord.Embed(title="Polymarket positions")
+        for position in positions[:10]:
+            title = discord.utils.escape_mentions(
+                discord.utils.escape_markdown(position.title)
+            )[:200]
+            flags = []
+            if position.redeemable:
+                flags.append("redeemable")
+            if position.mergeable:
+                flags.append("mergeable")
+            suffix = f" - {', '.join(flags)}" if flags else ""
+            embed.add_field(
+                name=f"{title} - {position.outcome}"[:256],
+                value=(
+                    f"{position.size:f} shares - {position.current_value_pusd:f} pUSD"
+                    f" - PnL {position.total_pnl_pusd:+f} pUSD{suffix}"
+                )[:1024],
+                inline=False,
+            )
+        embed.set_footer(
+            text="First 10 open positions" + (" - more available" if cursor else "")
+        )
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="orders")
+    @commands.dm_only()
+    async def polymarket_orders(self, ctx: commands.Context):
+        """Show authenticated open orders for the active session."""
+        if not await self._account_data_allowed():
+            await ctx.send("Polymarket account data is disabled or emergency-paused.")
+            return
+        try:
+            binding = await self._bot_first_account(ctx.author)
+            transport, lifecycle = await self._active_account_transport(
+                ctx.author, binding
+            )
+            payload = await transport.list_open_orders(
+                timestamp=int(time.time()),
+                session_signer_address=lifecycle.session_address,
+            )
+            orders, cursor = parse_open_orders_page(
+                payload, expected_wallet=binding.account_wallet_address
+            )
+        except (
+            AccountConnectionError, AccountDataError, OrderTransportError,
+            RuntimeError, ValueError, aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(f"Polymarket orders could not be verified: {exc}")
+            return
+        if not orders:
+            await ctx.send("No open Polymarket orders were found for this account.")
+            return
+        embed = discord.Embed(title="Polymarket open orders")
+        for order in orders[:10]:
+            remaining = order.original_size - order.matched_size
+            embed.add_field(
+                name=f"{order.side} {order.outcome}"[:256],
+                value=(
+                    f"{remaining:f} remaining @ {order.price:f} pUSD\n"
+                    f"ID: `{order.order_id}`"
+                )[:1024],
+                inline=False,
+            )
+        embed.set_footer(
+            text="First 10 open orders" + (" - more available" if cursor else "")
+        )
+        await ctx.send(embed=embed)
 
     @polymarket.command(name="audit")
     @commands.dm_only()
