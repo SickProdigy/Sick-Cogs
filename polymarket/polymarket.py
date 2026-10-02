@@ -5,11 +5,17 @@ from urllib.parse import quote, urlparse
 
 import aiohttp
 import discord
-from redbot.core import commands
+from redbot.core import Config, checks, commands
 
 from .handoff import MarketSnapshot, MarketSnapshotError
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
+)
+
+CONFIG_IDENTIFIER = 1531372026
+PRODUCTION_CAPABILITIES = (
+    "account_connect", "deposit_wallet_create", "eligibility", "collateral",
+    "order", "cancel", "redeem",
 )
 
 GAMMA_API = "https://gamma-api.polymarket.com"
@@ -96,10 +102,18 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.3"
+    __version__ = "0.2.4"
 
     def __init__(self, bot):
         self.bot = bot
+        self.config = Config.get_conf(
+            self, identifier=CONFIG_IDENTIFIER, force_registration=True
+        )
+        self.config.register_global(
+            production_enabled=False,
+            production_paused=True,
+            production_capabilities={name: False for name in PRODUCTION_CAPABILITIES},
+        )
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -331,6 +345,8 @@ class Polymarket(commands.Cog):
         """Show the reviewed, default-off production integration boundary."""
         manifest = POLYMARKET_PRODUCTION_MANIFEST
         drift = validate_polymarket_production_manifest(manifest)
+        enabled = bool(await self.config.production_enabled())
+        paused = bool(await self.config.production_paused())
         embed = discord.Embed(
             title="Polymarket integration status",
             description="Public discovery is available. Production execution remains disabled.",
@@ -347,8 +363,55 @@ class Polymarket(commands.Cog):
         )
         embed.add_field(
             name="Reviewed boundary",
-            value=("Manifest valid · session keys documented · execution disabled" if not drift else "Manifest drift detected · all execution blocked"),
+            value=(
+                f"Manifest: {'valid' if not drift else 'drift detected'} · "
+                f"installation: {'enabled' if enabled else 'disabled'} · "
+                f"pause: {'active' if paused else 'inactive'} · execution disabled"
+            ),
             inline=False,
         )
         embed.set_footer(text="No wallet creation, credentials, approvals, signatures, deposits, or orders")
         await ctx.send(embed=embed)
+
+    @commands.group(name="polyset")
+    @checks.is_owner()
+    async def polymarketset(self, ctx: commands.Context):
+        """Owner-only Polymarket production controls."""
+        pass
+
+    @polymarketset.command(name="productionstatus")
+    async def polymarketset_production_status(self, ctx: commands.Context):
+        """Show the default-off Polygon production control state."""
+        capabilities = await self.config.production_capabilities()
+        enabled = [name for name in PRODUCTION_CAPABILITIES if capabilities.get(name)]
+        await ctx.send(
+            "**Polymarket Polygon production**\n"
+            f"Manifest: **{'valid' if not validate_polymarket_production_manifest() else 'drift detected'}**\n"
+            f"Installation enabled: **{bool(await self.config.production_enabled())}**\n"
+            f"Emergency paused: **{bool(await self.config.production_paused())}**\n"
+            f"Enabled capabilities: **{', '.join(enabled) if enabled else 'none'}**\n"
+            "Order execution: **code-disabled**"
+        )
+
+    @polymarketset.command(name="productioncontrol")
+    async def polymarketset_production_control(self, ctx: commands.Context, mode: str):
+        """Pause the production boundary; enablement fails closed until reviewed."""
+        choice = str(mode or "").strip().lower()
+        if choice in {"pause", "disable"}:
+            await self.config.production_enabled.set(False)
+            await self.config.production_paused.set(True)
+            await ctx.send("Polymarket production is disabled and emergency-paused.")
+            return
+        if choice != "enable":
+            await ctx.send("Use `productioncontrol enable`, `pause`, or `disable`.")
+            return
+        if (
+            validate_polymarket_production_manifest()
+            or not POLYMARKET_PRODUCTION_MANIFEST.execution_enabled
+            or not POLYMARKET_PRODUCTION_MANIFEST.executable_capabilities
+        ):
+            await ctx.send(
+                "Polymarket production remains code-disabled. No state changed."
+            )
+            return
+        await ctx.send("Polymarket production cannot be enabled by this release.")

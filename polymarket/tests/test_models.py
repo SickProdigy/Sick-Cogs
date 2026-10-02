@@ -1,6 +1,6 @@
 import unittest
 from dataclasses import replace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from polymarket import setup
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
@@ -8,12 +8,39 @@ from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
 from polymarket.polymarket import (
-    CATEGORIES, Polymarket, _active_search_markets, _json_list,
+    CATEGORIES, CONFIG_IDENTIFIER, PRODUCTION_CAPABILITIES, Polymarket, _active_search_markets, _json_list,
     future_handoff_reasons, market_path, market_url, technically_handoff_ready,
 )
 
 
-class PolymarketModelTests(unittest.TestCase):
+class _Value:
+    def __init__(self, value):
+        self.value = value
+
+    async def __call__(self):
+        return self.value
+
+    async def set(self, value):
+        self.value = value
+
+
+class _Config:
+    def register_global(self, **values):
+        for name, value in values.items():
+            setattr(self, name, _Value(value))
+
+
+class _ConfiguredTest:
+    def setUp(self):
+        self.config = _Config()
+        patcher = patch(
+            "polymarket.polymarket.Config.get_conf", return_value=self.config
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
         self.assertEqual(_json_list(["Yes"]), ["Yes"])
@@ -115,7 +142,7 @@ class PolymarketModelTests(unittest.TestCase):
         )
 
 
-class PolymarketSetupTests(unittest.IsolatedAsyncioTestCase):
+class PolymarketSetupTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
     async def test_setup_adds_a_polymarket_cog(self):
         class Bot:
             def __init__(self):
@@ -137,7 +164,7 @@ class Context:
         self.invoke = AsyncMock()
 
 
-class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
+class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
     async def test_group_shows_complete_guide_and_has_poly_alias(self):
         ctx = Context()
         await Polymarket.polymarket.callback(Polymarket(object()), ctx)
@@ -158,6 +185,32 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("pUSD", fields["Production target"])
         self.assertIn("Deposit Wallets", fields["Wallet model"])
         self.assertIn("execution disabled", fields["Reviewed boundary"])
+
+    async def test_production_controls_default_closed_pause_and_refuse_enable(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        self.assertEqual(CONFIG_IDENTIFIER, 1531372026)
+        self.assertFalse(await cog.config.production_enabled())
+        self.assertTrue(await cog.config.production_paused())
+        self.assertEqual(
+            await cog.config.production_capabilities(),
+            {name: False for name in PRODUCTION_CAPABILITIES},
+        )
+
+        await Polymarket.polymarketset_production_status.callback(cog, ctx)
+        self.assertIn("Installation enabled: **False**", ctx.send.await_args.args[0])
+        self.assertIn("Order execution: **code-disabled**", ctx.send.await_args.args[0])
+
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await Polymarket.polymarketset_production_control.callback(cog, ctx, "pause")
+        self.assertFalse(await cog.config.production_enabled())
+        self.assertTrue(await cog.config.production_paused())
+
+        await Polymarket.polymarketset_production_control.callback(cog, ctx, "enable")
+        self.assertFalse(await cog.config.production_enabled())
+        self.assertTrue(await cog.config.production_paused())
+        self.assertIn("code-disabled", ctx.send.await_args.args[0])
 
     async def test_markets_without_words_opens_category_chooser(self):
         ctx = Context()
