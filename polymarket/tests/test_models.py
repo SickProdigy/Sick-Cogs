@@ -12,6 +12,7 @@ from polymarket.account_connection import (
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
+from polymarket.identity_verifier import PolygonAccountIdentityVerifier
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
@@ -443,6 +444,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
+        self.assertEqual(manifest.schema_version, 2)
+        self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
+        self.assertEqual(manifest.deposit_wallet_beacon.lower(), "0x7a18edfe055488a3128f01f563e5b479d92ffc3a")
         self.assertEqual(manifest.usdce_token.lower(), "0x2791bca1f2de4661ed88a30c99a7a9449aa84174")
         self.assertEqual(manifest.default_new_wallet_type, "DEPOSIT_WALLET")
         self.assertTrue(manifest.signer_and_wallet_are_distinct)
@@ -456,6 +460,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             replace(POLYMARKET_PRODUCTION_MANIFEST, collateral_decimals=18),
             replace(POLYMARKET_PRODUCTION_MANIFEST, usdce_token="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, ctf_exchange="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, deposit_wallet_beacon="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, safe_init_code_hash="0x" + "1" * 64),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, polygon_rpc="https://example.invalid"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, default_new_wallet_type="EOA"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, signer_and_wallet_are_distinct=False),
             replace(POLYMARKET_PRODUCTION_MANIFEST, execution_enabled=True),
@@ -478,6 +485,76 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             _active_search_markets(payload),
             [{"id": "active", "active": True, "closed": False}],
         )
+
+
+class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
+    async def _rpc(self, method, params):
+        if method == "eth_chainId":
+            return "0x89"
+        if method == "eth_blockNumber":
+            return "0x1234"
+        if method == "eth_getCode":
+            return "0x6000"
+        raise AssertionError(f"unexpected RPC method {method}")
+
+    async def test_derives_every_official_owner_wallet_type_and_verifies_deployment(self):
+        verifier = PolygonAccountIdentityVerifier(self._rpc)
+        signer = "0x" + "1" * 40
+        derived = await verifier.derive_wallets(signer)
+        self.assertEqual(derived[WalletType.EOA], (signer,))
+        self.assertEqual(derived[WalletType.POLY_PROXY], (
+            "0xf537a2b3159593a425e2fa8f5ba3bd3080d4a18a",
+        ))
+        self.assertEqual(derived[WalletType.GNOSIS_SAFE], (
+            "0x6b503ad95d139be2a07cd0e8888d71c6403d9c9c",
+        ))
+        self.assertEqual(derived[WalletType.DEPOSIT_WALLET], (
+            "0xfaea0f08159fcf2f573fe24e9e989b0d48f7651b",
+            "0x574548bc296a44a39a7828343fc262244f37a7e5",
+        ))
+        self.assertEqual(len({wallet for values in derived.values() for wallet in values}), 5)
+        evidence = await verifier.verify(
+            signer_address=signer,
+            account_wallet_address=derived[WalletType.DEPOSIT_WALLET][1],
+            wallet_type=WalletType.DEPOSIT_WALLET,
+        )
+        self.assertEqual(evidence.block_number, 0x1234)
+        self.assertEqual(evidence.source, "polygon_contract_read")
+        self.assertEqual(len(evidence.evidence_digest), 64)
+
+    async def test_rejects_wrong_relationship_chain_and_undeployed_smart_wallet(self):
+        signer = "0x" + "1" * 40
+        verifier = PolygonAccountIdentityVerifier(self._rpc)
+        with self.assertRaises(AccountConnectionError):
+            await verifier.verify(
+                signer_address=signer, account_wallet_address="0x" + "9" * 40,
+                wallet_type=WalletType.DEPOSIT_WALLET,
+            )
+        derived = await verifier.derive_wallets(signer)
+
+        async def wrong_chain(method, params):
+            if method == "eth_chainId":
+                return "0x1"
+            return await self._rpc(method, params)
+
+        with self.assertRaises(AccountConnectionError):
+            await PolygonAccountIdentityVerifier(wrong_chain).verify(
+                signer_address=signer,
+                account_wallet_address=derived[WalletType.GNOSIS_SAFE][0],
+                wallet_type=WalletType.GNOSIS_SAFE,
+            )
+
+        async def undeployed(method, params):
+            if method == "eth_getCode":
+                return "0x"
+            return await self._rpc(method, params)
+
+        with self.assertRaises(AccountConnectionError):
+            await PolygonAccountIdentityVerifier(undeployed).verify(
+                signer_address=signer,
+                account_wallet_address=derived[WalletType.POLY_PROXY][0],
+                wallet_type=WalletType.POLY_PROXY,
+            )
 
 
 class PolymarketSetupTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):

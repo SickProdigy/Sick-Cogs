@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class PolymarketProductionManifest:
     """Official production facts that must fail closed when they drift."""
 
-    schema_version: int = 1
+    schema_version: int = 2
     chain_id: int = 137
     network_key: str = "polygon"
     collateral_symbol: str = "pUSD"
@@ -20,9 +20,16 @@ class PolymarketProductionManifest:
     neg_risk_exchange: str = "0xe2222d279d744050d28e00520010520000310F59"
     conditional_tokens: str = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
     deposit_wallet_factory: str = "0x00000000000Fb5C9ADea0298D729A0CB3823Cc07"
+    deposit_wallet_beacon: str = "0x7A18EDfe055488A3128f01F563e5B479D92ffc3a"
+    deposit_wallet_implementation: str = "0x58CA52ebe0DadfdF531Cde7062e76746de4Db1eB"
+    proxy_wallet_factory: str = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052"
+    proxy_wallet_implementation: str = "0x44e999d5c2F66Ef0861317f9A4805AC2e90aEB4f"
+    safe_wallet_factory: str = "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b"
+    safe_init_code_hash: str = "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf"
     gamma_api: str = "https://gamma-api.polymarket.com"
     clob_api: str = "https://clob.polymarket.com"
     relayer_api: str = "https://relayer-v2.polymarket.com"
+    polygon_rpc: str = "https://polygon.drpc.org"
     supported_wallet_types: tuple[str, ...] = (
         "EOA", "POLY_PROXY", "GNOSIS_SAFE", "DEPOSIT_WALLET",
     )
@@ -51,8 +58,13 @@ def validate_polymarket_production_manifest(
         "neg_risk_exchange": "0xe2222d279d744050d28e00520010520000310f59",
         "conditional_tokens": "0x4d97dcd97ec945f40cf65f87097ace5ea0476045",
         "deposit_wallet_factory": "0x00000000000fb5c9adea0298d729a0cb3823cc07",
+        "deposit_wallet_beacon": "0x7a18edfe055488a3128f01f563e5b479d92ffc3a",
+        "deposit_wallet_implementation": "0x58ca52ebe0dadfdf531cde7062e76746de4db1eb",
+        "proxy_wallet_factory": "0xab45c5a4b0c941a2f231c04c3f49182e1a254052",
+        "proxy_wallet_implementation": "0x44e999d5c2f66ef0861317f9a4805ac2e90aeb4f",
+        "safe_wallet_factory": "0xaacfeea03eb1561c4e67d661e40682bd20e3541b",
     }
-    if manifest.schema_version != 1:
+    if manifest.schema_version != 2:
         errors.append("unsupported manifest schema")
     if manifest.chain_id != 137 or manifest.network_key != "polygon":
         errors.append("Polygon network binding mismatch")
@@ -61,12 +73,16 @@ def validate_polymarket_production_manifest(
     for field, expected in expected_addresses.items():
         if str(getattr(manifest, field, "")).lower() != expected:
             errors.append(f"{field} address mismatch")
+    if manifest.safe_init_code_hash.lower() != "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf":
+        errors.append("Safe init-code hash mismatch")
     if (manifest.gamma_api, manifest.clob_api, manifest.relayer_api) != (
         "https://gamma-api.polymarket.com",
         "https://clob.polymarket.com",
         "https://relayer-v2.polymarket.com",
     ):
         errors.append("official API endpoint mismatch")
+    if manifest.polygon_rpc != "https://polygon.drpc.org":
+        errors.append("official Polygon RPC mismatch")
     if set(manifest.supported_wallet_types) != {
         "EOA", "POLY_PROXY", "GNOSIS_SAFE", "DEPOSIT_WALLET",
     }:
