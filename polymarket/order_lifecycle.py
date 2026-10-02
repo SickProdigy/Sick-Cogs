@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Mapping
 
 from .account_connection import normalize_evm_address
+from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 
 
 class OrderLifecycleError(ValueError):
@@ -87,6 +88,8 @@ class OrderBinding:
     token_id: str
     maker_address: str
     session_signer_address: str
+    exchange_address: str
+    protocol_version: str
     side: str
     maximum_price: Decimal
     maximum_size: Decimal
@@ -108,6 +111,15 @@ class OrderBinding:
             "session_signer_address",
             normalize_evm_address(self.session_signer_address, "session_signer_address"),
         )
+        exchange = normalize_evm_address(self.exchange_address, "exchange_address")
+        if exchange not in {
+            POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange.lower(),
+            POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower(),
+        }:
+            raise OrderLifecycleError("exchange_address is not pinned")
+        object.__setattr__(self, "exchange_address", exchange)
+        if self.protocol_version not in {"2", "3"}:
+            raise OrderLifecycleError("protocol_version is invalid")
         side = _short_text(self.side, "side", limit=8).upper()
         if side != "BUY":
             raise OrderLifecycleError("only BUY order bindings are supported")
@@ -139,6 +151,8 @@ class OrderBinding:
             "maximum_price": str(self.maximum_price),
             "maximum_size": str(self.maximum_size),
             "session_signer_address": self.session_signer_address,
+            "exchange_address": self.exchange_address,
+            "protocol_version": self.protocol_version,
             "side": self.side,
             "token_id": self.token_id,
         }
@@ -153,6 +167,8 @@ class OrderBinding:
             "token_id": self.token_id,
             "maker_address": self.maker_address,
             "session_signer_address": self.session_signer_address,
+            "exchange_address": self.exchange_address,
+            "protocol_version": self.protocol_version,
             "side": self.side,
             "maximum_price": str(self.maximum_price),
             "maximum_size": str(self.maximum_size),
@@ -170,6 +186,8 @@ class OrderBinding:
                 token_id=record["token_id"],
                 maker_address=record["maker_address"],
                 session_signer_address=record["session_signer_address"],
+                exchange_address=record["exchange_address"],
+                protocol_version=record["protocol_version"],
                 side=record["side"],
                 maximum_price=record["maximum_price"],
                 maximum_size=record["maximum_size"],

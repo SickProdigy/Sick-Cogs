@@ -47,6 +47,11 @@ from polymarket.order_transport import (
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
 )
+from polymarket.order_signing import (
+    OrderSigningError, UnsignedDepositWalletOrder,
+    deposit_wallet_order_digest, sign_deposit_wallet_order,
+    verify_deposit_wallet_order_signature,
+)
 from polymarket.onboarding import (
     ONBOARDING_LIFETIME_SECONDS, ProtectedOnboardingChallenge,
     ProtectedOnboardingResult, complete_protected_onboarding,
@@ -475,6 +480,8 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             condition_id="condition", token_id="123",
             maker_address="0x" + "1" * 40,
             session_signer_address="0x" + "2" * 40, side="BUY",
+            exchange_address=POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange,
+            protocol_version="2",
             maximum_price=Decimal("0.55"), maximum_size=Decimal("10"),
             created_at=created, expires_at=created + timedelta(minutes=2),
         )
@@ -650,7 +657,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
-        self.assertEqual(manifest.schema_version, 4)
+        self.assertEqual(manifest.schema_version, 5)
         self.assertEqual(manifest.bridge_api, "https://bridge.polymarket.com")
         self.assertEqual(manifest.data_api, "https://data-api.polymarket.com")
         self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
@@ -659,6 +666,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.default_new_wallet_type, "DEPOSIT_WALLET")
         self.assertTrue(manifest.signer_and_wallet_are_distinct)
         self.assertTrue(manifest.session_keys_documented)
+        self.assertEqual(manifest.deposit_wallet_order_signature_type, 3)
+        self.assertEqual(manifest.order_protocol_versions, ("2", "3"))
+        self.assertEqual(manifest.order_signature_scheme, "ERC-7739_SESSION_KEY")
         self.assertFalse(manifest.execution_enabled)
         self.assertEqual(manifest.executable_capabilities, ())
 
@@ -675,6 +685,8 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             replace(POLYMARKET_PRODUCTION_MANIFEST, default_new_wallet_type="EOA"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, signer_and_wallet_are_distinct=False),
             replace(POLYMARKET_PRODUCTION_MANIFEST, execution_enabled=True),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, deposit_wallet_order_signature_type=2),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, order_protocol_versions=("2",)),
             replace(POLYMARKET_PRODUCTION_MANIFEST, executable_capabilities=("order",)),
         ):
             with self.subTest(manifest=changed):
@@ -772,13 +784,60 @@ class AccountDataTests(unittest.TestCase):
                 }], "next_cursor": "LTE=",
             }, expected_wallet=self.wallet)
 
+class CurrentDepositWalletOrderSigningTests(unittest.TestCase):
+    exchange = "0x4bfb41d5b3570defd03c39a9a4d8de6bd8b8982e"
+    wallet = "0x57ffbc34de23124faeb8387fcd689d314e57accd"
+
+    def _order(self):
+        manifest = SimpleNamespace(
+            ctf_exchange=self.exchange, neg_risk_exchange="0x" + "9" * 40,
+        )
+        with patch("polymarket.order_signing.POLYMARKET_PRODUCTION_MANIFEST", manifest):
+            return UnsignedDepositWalletOrder(
+                exchange_address=self.exchange, maker=self.wallet, token_id="1",
+                maker_amount=1_000_000, taker_amount=500_000,
+                salt=1, timestamp=0,
+            )
+
+    def test_digest_matches_official_sdk_golden_vector(self):
+        self.assertEqual(
+            "0x" + deposit_wallet_order_digest(self._order()).hex(),
+            "0x1b9566eedd9589a73275df23a3a9d9e2e9897e76d31cd46d436f1b824d161b33",
+        )
+
+    def test_session_signature_has_exact_erc7739_and_wallet_wrappers(self):
+        private_key = (7).to_bytes(32, "big")
+        order = self._order()
+        signed = sign_deposit_wallet_order(private_key, order)
+        self.assertEqual(set(signed), {
+            "builder", "expiration", "maker", "makerAmount", "metadata", "salt",
+            "side", "signature", "signatureType", "signer", "takerAmount",
+            "timestamp", "tokenId",
+        })
+        self.assertEqual(signed["signatureType"], 3)
+        self.assertEqual(signed["signer"], self.wallet)
+        session = session_address_from_private_key(private_key)
+        verify_deposit_wallet_order_signature(
+            order, signed["signature"], expected_session_address=session
+        )
+        changed = signed["signature"][:-66] + "0" * 64 + signed["signature"][-2:]
+        with self.assertRaises(OrderSigningError):
+            verify_deposit_wallet_order_signature(
+                order, changed, expected_session_address=session
+            )
+        self.assertNotIn(private_key.hex(), repr(signed))
+
 class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
+    private_key = (7).to_bytes(32, "big")
+
     def _lifecycle(self):
         binding = OrderBinding(
             discord_user_id=7, approval_fingerprint="a" * 64,
             condition_id="condition-one", token_id="123",
             maker_address="0x" + "1" * 40,
-            session_signer_address="0x" + "2" * 40, side="BUY",
+            session_signer_address=session_address_from_private_key(self.private_key),
+            exchange_address=POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange,
+            protocol_version="2", side="BUY",
             maximum_price=Decimal("0.55"), maximum_size=Decimal("10"),
             created_at=datetime.fromtimestamp(100, timezone.utc),
             expires_at=datetime.fromtimestamp(400, timezone.utc),
@@ -786,14 +845,14 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         return OrderLifecycle.approved(binding)
 
     def _signed_order(self, **changes):
-        order = {
-            "salt": "1", "maker": "0x" + "1" * 40,
-            "signer": "0x" + "2" * 40, "taker": "0x" + "0" * 40,
-            "tokenId": "123", "makerAmount": "5000000",
-            "takerAmount": "10000000", "expiration": "0", "nonce": "0",
-            "feeRateBps": "400", "side": "BUY", "signatureType": 2,
-            "signature": "0x" + "3" * 130,
-        }
+        binding = self._lifecycle().binding
+        unsigned = UnsignedDepositWalletOrder(
+            exchange_address=binding.exchange_address, maker=binding.maker_address,
+            token_id=binding.token_id, maker_amount=5_000_000,
+            taker_amount=10_000_000, salt=1, timestamp=150_000,
+            protocol_version=binding.protocol_version,
+        )
+        order = sign_deposit_wallet_order(self.private_key, unsigned)
         order.update(changes)
         return order
 
@@ -859,6 +918,9 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(live.state, OrderState.LIVE)
         self.assertEqual(provider.await_count, 1)
         self.assertEqual(calls[0]["body"]["owner"], "api-key")
+        self.assertEqual(set(calls[0]["body"]), {
+            "order", "owner", "orderType", "deferExec",
+        })
         self.assertEqual(set(calls[0]["headers"]), {
             "POLY_ADDRESS", "POLY_SIGNATURE", "POLY_TIMESTAMP",
             "POLY_API_KEY", "POLY_PASSPHRASE",
@@ -899,7 +961,7 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(calls[0]["path"], "/balance-allowance")
         self.assertEqual(calls[0]["params"], {
-            "asset_type": "COLLATERAL", "signature_type": 2,
+            "asset_type": "COLLATERAL", "signature_type": 3,
         })
         self.assertEqual(calls[1]["path"], "/data/orders")
         self.assertEqual(calls[1]["params"], {"next_cursor": "cursor-two"})

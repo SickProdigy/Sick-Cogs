@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class PolymarketProductionManifest:
     """Official production facts that must fail closed when they drift."""
 
-    schema_version: int = 4
+    schema_version: int = 5
     chain_id: int = 137
     network_key: str = "polygon"
     collateral_symbol: str = "pUSD"
@@ -38,6 +38,9 @@ class PolymarketProductionManifest:
     default_new_wallet_type: str = "DEPOSIT_WALLET"
     signer_and_wallet_are_distinct: bool = True
     session_keys_documented: bool = True
+    deposit_wallet_order_signature_type: int = 3
+    order_protocol_versions: tuple[str, ...] = ("2", "3")
+    order_signature_scheme: str = "ERC-7739_SESSION_KEY"
     execution_enabled: bool = False
     executable_capabilities: tuple[str, ...] = ()
 
@@ -66,7 +69,7 @@ def validate_polymarket_production_manifest(
         "proxy_wallet_implementation": "0x44e999d5c2f66ef0861317f9a4805ac2e90aeb4f",
         "safe_wallet_factory": "0xaacfeea03eb1561c4e67d661e40682bd20e3541b",
     }
-    if manifest.schema_version != 4:
+    if manifest.schema_version != 5:
         errors.append("unsupported manifest schema")
     if manifest.chain_id != 137 or manifest.network_key != "polygon":
         errors.append("Polygon network binding mismatch")
@@ -100,6 +103,12 @@ def validate_polymarket_production_manifest(
         errors.append("signer/account-wallet separation is disabled")
     if not manifest.session_keys_documented:
         errors.append("session-key contract is missing")
+    if (
+        manifest.deposit_wallet_order_signature_type != 3
+        or manifest.order_protocol_versions != ("2", "3")
+        or manifest.order_signature_scheme != "ERC-7739_SESSION_KEY"
+    ):
+        errors.append("Deposit Wallet order-signature contract mismatch")
     if manifest.execution_enabled or manifest.executable_capabilities:
         errors.append("Polymarket execution must remain disabled")
     return tuple(errors)

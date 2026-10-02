@@ -9,11 +9,15 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from typing import Any, Awaitable, Callable, Mapping
 
 from .account_connection import normalize_evm_address
 from .order_lifecycle import OrderLifecycle, OrderLifecycleError
+from .order_signing import (
+    ZERO_BYTES32, OrderSigningError, UnsignedDepositWalletOrder,
+    verify_deposit_wallet_order_signature,
+)
 
 POST_ORDER_PATH = "/order"
 CANCEL_ORDER_PATH = "/order"
@@ -68,59 +72,59 @@ def _hmac_signature(secret: str, timestamp: int, method: str, path: str, body: s
     ).decode("ascii")
 
 
-def _amount(value: Any, field: str) -> Decimal:
-    try:
-        parsed = Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError) as exc:
-        raise OrderTransportError(f"{field} is invalid") from exc
-    if not parsed.is_finite() or parsed < 0:
-        raise OrderTransportError(f"{field} is invalid")
-    return parsed
-
-
 def validate_signed_order(lifecycle: OrderLifecycle, order: Mapping[str, Any]) -> dict[str, Any]:
-    """Verify the signed order fields remain inside the exact approved binding."""
+    """Verify one current Deposit Wallet order against the exact approval binding."""
     expected = {
-        "salt", "maker", "signer", "taker", "tokenId",
-        "makerAmount", "takerAmount", "expiration", "nonce",
-        "feeRateBps", "side", "signatureType", "signature",
+        "builder", "expiration", "maker", "makerAmount", "metadata", "salt",
+        "side", "signature", "signatureType", "signer", "takerAmount",
+        "timestamp", "tokenId",
     }
     if not isinstance(order, Mapping) or set(order) != expected:
         raise OrderTransportError("signed order shape is invalid")
     binding = lifecycle.binding
-    if normalize_evm_address(order.get("maker"), "maker") != binding.maker_address:
-        raise OrderTransportError("signed order maker does not match approval")
-    if normalize_evm_address(order.get("signer"), "signer") != binding.session_signer_address:
-        raise OrderTransportError("signed order signer does not match approval")
-    if normalize_evm_address(order.get("taker"), "taker") != _ZERO_ADDRESS:
-        raise OrderTransportError("only public orders are supported")
-    if str(order.get("tokenId")) != binding.token_id or str(order.get("side")).upper() != "BUY":
-        raise OrderTransportError("signed order market binding does not match approval")
-    maker_raw = _amount(order.get("makerAmount"), "makerAmount")
-    taker_raw = _amount(order.get("takerAmount"), "takerAmount")
-    if maker_raw != maker_raw.to_integral_value() or taker_raw != taker_raw.to_integral_value():
-        raise OrderTransportError("signed order raw amounts must be integers")
-    if maker_raw <= 0 or taker_raw <= 0:
-        raise OrderTransportError("signed order amounts must be positive")
-    size = taker_raw / Decimal(1_000_000)
-    price = maker_raw / taker_raw
+    maker = normalize_evm_address(order.get("maker"), "maker")
+    signer = normalize_evm_address(order.get("signer"), "signer")
+    if maker != binding.maker_address or signer != binding.maker_address:
+        raise OrderTransportError("Deposit Wallet order identity does not match approval")
+    if str(order.get("tokenId")) != binding.token_id:
+        raise OrderTransportError("signed order token does not match approval")
+    if str(order.get("side")).upper() != binding.side:
+        raise OrderTransportError("signed order side does not match approval")
+    if order.get("builder") != ZERO_BYTES32 or order.get("metadata") != ZERO_BYTES32:
+        raise OrderTransportError("unreviewed builder or metadata is blocked")
+    try:
+        unsigned = UnsignedDepositWalletOrder(
+            exchange_address=binding.exchange_address,
+            maker=maker,
+            token_id=binding.token_id,
+            maker_amount=int(str(order.get("makerAmount"))),
+            taker_amount=int(str(order.get("takerAmount"))),
+            salt=int(str(order.get("salt"))),
+            timestamp=int(str(order.get("timestamp"))),
+            side=binding.side,
+            expiration=int(str(order.get("expiration"))),
+            signature_type=int(order.get("signatureType")),
+            metadata=str(order.get("metadata")),
+            builder=str(order.get("builder")),
+            protocol_version=binding.protocol_version,
+        )
+    except (TypeError, ValueError, OrderSigningError) as exc:
+        raise OrderTransportError("signed order fields are invalid") from exc
+    created_ms = int(binding.created_at.timestamp() * 1000)
+    expires_ms = int(binding.expires_at.timestamp() * 1000)
+    if not created_ms <= unsigned.timestamp < expires_ms:
+        raise OrderTransportError("signed order timestamp is outside approval")
+    size = Decimal(unsigned.taker_amount) / Decimal(1_000_000)
+    price = Decimal(unsigned.maker_amount) / Decimal(unsigned.taker_amount)
     if size > binding.maximum_size or price > binding.maximum_price:
         raise OrderTransportError("signed order exceeds approved price or size")
     try:
-        expiration = int(str(order.get("expiration")))
-        int(str(order.get("salt")))
-        int(str(order.get("nonce")))
-        fee = int(str(order.get("feeRateBps")))
-        signature_type = int(order.get("signatureType"))
-    except (TypeError, ValueError) as exc:
-        raise OrderTransportError("signed order numeric fields are invalid") from exc
-    if expiration < 0 or expiration > int(binding.expires_at.timestamp()):
-        raise OrderTransportError("signed order expiration exceeds approval")
-    if not 0 <= fee <= 10_000 or signature_type not in {0, 1, 2}:
-        raise OrderTransportError("signed order policy fields are invalid")
-    signature = order.get("signature")
-    if not isinstance(signature, str) or re.fullmatch(r"0x[0-9a-fA-F]{130}", signature) is None:
-        raise OrderTransportError("signed order signature is invalid")
+        verify_deposit_wallet_order_signature(
+            unsigned, str(order.get("signature")),
+            expected_session_address=binding.session_signer_address,
+        )
+    except (OrderSigningError, ValueError) as exc:
+        raise OrderTransportError("signed order signature is invalid") from exc
     return dict(order)
 
 
@@ -158,9 +162,9 @@ class AuthenticatedOrderTransport:
 
     async def balance_allowance(
         self, *, timestamp: int, session_signer_address: str,
-        signature_type: int = 2,
+        signature_type: int = 3,
     ) -> Mapping[str, Any]:
-        if signature_type not in {0, 1, 2}:
+        if signature_type not in {0, 1, 2, 3}:
             raise OrderTransportError("signature type is invalid")
         return await self._call(
             "GET", GET_BALANCE_ALLOWANCE_PATH, timestamp=timestamp,
@@ -191,7 +195,7 @@ class AuthenticatedOrderTransport:
         credentials = await self._credential_provider()
         payload = {
             "order": order, "owner": credentials.key, "orderType": "GTC",
-            "deferExec": False, "postOnly": False,
+            "deferExec": False,
         }
         try:
             response = await self._call(
