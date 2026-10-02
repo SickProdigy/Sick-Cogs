@@ -296,6 +296,11 @@ class OrderLifecycle:
             raise OrderLifecycleError("the approval has expired")
         return self._transition(now, state=OrderState.SUBMITTING, last_error=None)
 
+    def recover_after_restart(self, now: datetime) -> "OrderLifecycle":
+        if self.state is OrderState.SUBMITTING:
+            return self.submission_unknown(now, "submission interrupted before provider evidence")
+        return self
+
     def submission_unknown(self, now: datetime, reason: str) -> "OrderLifecycle":
         if self.state is not OrderState.SUBMITTING:
             raise OrderLifecycleError("only a submitting order can become unknown")

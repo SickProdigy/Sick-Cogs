@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Awaitable, Callable, Mapping
 
 from .account_connection import normalize_evm_address
-from .order_lifecycle import OrderLifecycle, OrderLifecycleError
+from .order_lifecycle import OrderLifecycle, OrderLifecycleError, OrderState
 from .order_signing import (
     ZERO_BYTES32, OrderSigningError, UnsignedDepositWalletOrder,
     verify_deposit_wallet_order_signature,
@@ -116,7 +116,11 @@ def validate_signed_order(lifecycle: OrderLifecycle, order: Mapping[str, Any]) -
         raise OrderTransportError("signed order timestamp is outside approval")
     size = Decimal(unsigned.taker_amount) / Decimal(1_000_000)
     price = Decimal(unsigned.maker_amount) / Decimal(unsigned.taker_amount)
-    if size > binding.maximum_size or price > binding.maximum_price:
+    if binding.order_type in {"FAK", "FOK"}:
+        price_exceeded = price >= binding.maximum_price + Decimal("0.0001")
+    else:
+        price_exceeded = price > binding.maximum_price
+    if size > binding.maximum_size or price_exceeded:
         raise OrderTransportError("signed order exceeds approved price or size")
     try:
         verify_deposit_wallet_order_signature(
@@ -190,7 +194,17 @@ class AuthenticatedOrderTransport:
         self, lifecycle: OrderLifecycle, signed_order: Mapping[str, Any], *,
         now: datetime, timestamp: int,
     ) -> OrderLifecycle:
-        submitting = lifecycle.begin_submission(now)
+        return await self.submit_prepared(
+            lifecycle.begin_submission(now), signed_order,
+            now=now, timestamp=timestamp,
+        )
+
+    async def submit_prepared(
+        self, submitting: OrderLifecycle, signed_order: Mapping[str, Any], *,
+        now: datetime, timestamp: int,
+    ) -> OrderLifecycle:
+        if submitting.state is not OrderState.SUBMITTING:
+            raise OrderTransportError("order is not in persisted submitting state")
         order = validate_signed_order(submitting, signed_order)
         credentials = await self._credential_provider()
         payload = {
@@ -204,8 +218,6 @@ class AuthenticatedOrderTransport:
                 credentials=credentials,
             )
             return submitting.record_submission(now, response)
-        except (OrderLifecycleError, OrderTransportError):
-            raise
         except Exception:
             return submitting.submission_unknown(
                 now, "authenticated transport outcome unknown"

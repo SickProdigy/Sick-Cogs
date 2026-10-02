@@ -1,3 +1,5 @@
+import asyncio
+from datetime import datetime, timezone
 import hashlib
 import json
 import secrets
@@ -31,6 +33,13 @@ from .onboarding import (
 from .onboarding_verification import finalize_onboarding_evidence
 from .order_intent import (
     MarketBuyApproval, MarketOrderMetadata, OrderBookSnapshot, OrderIntentError,
+)
+from .order_lifecycle import (
+    OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
+)
+from .order_protocol import OrderProtocolError, resolve_order_protocol
+from .order_signing import (
+    OrderSigningError, UnsignedDepositWalletOrder, sign_deposit_wallet_order,
 )
 from .order_transport import AuthenticatedOrderTransport, ClobCredentials, OrderTransportError
 from .relayer import BuilderCredentials, DepositWalletRelayerClient
@@ -69,6 +78,9 @@ from .terms import (
     POLYMARKET_TERMS_PRODUCT, POLYMARKET_TERMS_VERSION,
     create_polymarket_terms_acceptance, is_current_polymarket_terms_acceptance,
 )
+from .trade_confirmation import TradeConfirmationError, TradeConfirmationState
+from .trade_request import TradeApprovalRequest
+from .trade_views import TradeApprovalView
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
@@ -165,7 +177,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.38"
+    __version__ = "0.2.39"
 
     def __init__(self, bot):
         self.bot = bot
@@ -180,6 +192,7 @@ class Polymarket(commands.Cog):
                 "per_order_pusd": "0", "per_user_day_pusd": "0",
                 "installation_day_pusd": "0",
             },
+            trade_spend_history=[],
         )
         self.config.register_user(
             account_connection=None, onboarding_challenge=None, terms_challenge=None,
@@ -192,11 +205,14 @@ class Polymarket(commands.Cog):
             session_lifecycle_history=[], session_approval=None,
             bot_first_account=None, deposit_wallet_creation=None,
             final_confirmation_required=True, bridge_deposit=None,
-            bridge_deposit_history=[], deposit_eligibility=None
+            bridge_deposit_history=[], deposit_eligibility=None,
+            trade_eligibility=None, trade_approval=None,
+            active_order=None, order_history=[], trade_spend_history=[],
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
         self.bridge_client = PolymarketBridgeClient()
         self.session_transport = SessionKeyTransport()
+        self._trade_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         """Create the server-side wrapping key without exposing it to users."""
@@ -1439,6 +1455,448 @@ class Polymarket(commands.Cog):
         await user_config.deposit_wallet_creation.set(reconciled.to_record())
         return reconciled
 
+    async def _reserve_trade_spend(
+        self, user, request: TradeApprovalRequest, *, now: int,
+    ) -> None:
+        cutoff = now - 24 * 60 * 60
+        amount = request.approval.max_spend_pusd
+        limits = ProductionLimits.from_record(await self.config.production_limits())
+        async with self._trade_lock:
+            global_history = [
+                row for row in list(await self.config.trade_spend_history() or [])
+                if isinstance(row, dict)
+                and int(row.get("created_at", 0)) >= cutoff
+                and row.get("state") != "released"
+            ]
+            user_setting = self.config.user(user).trade_spend_history
+            user_history = [
+                row for row in list(await user_setting() or [])
+                if isinstance(row, dict)
+                and int(row.get("created_at", 0)) >= cutoff
+                and row.get("state") != "released"
+            ]
+            existing = [
+                row for row in global_history
+                if row.get("request_id") == request.request_id
+            ]
+            if existing:
+                if (
+                    len(existing) != 1
+                    or int(existing[0].get("discord_user_id", 0)) != user.id
+                    or Decimal(str(existing[0].get("amount_pusd"))) != amount
+                ):
+                    raise SafetyLimitError("Trade limit reservation changed.")
+                return
+            user_total = sum(
+                (Decimal(str(row["amount_pusd"])) for row in user_history),
+                Decimal(0),
+            )
+            installation_total = sum(
+                (Decimal(str(row["amount_pusd"])) for row in global_history),
+                Decimal(0),
+            )
+            if not limits.permits(
+                order_pusd=amount, user_day_pusd=user_total,
+                installation_day_pusd=installation_total,
+            ):
+                raise SafetyLimitError(
+                    "Trade exceeds the configured per-order or rolling-day limits."
+                )
+            row = {
+                "request_id": request.request_id,
+                "discord_user_id": user.id,
+                "amount_pusd": format(amount, "f"),
+                "created_at": now,
+                "state": "reserved",
+            }
+            global_history.append(dict(row))
+            user_history.append(dict(row))
+            await self.config.trade_spend_history.set(global_history[-1000:])
+            await user_setting.set(user_history[-100:])
+
+    async def _set_trade_spend_state(
+        self, user, request_id: str, state: str,
+    ) -> None:
+        if state not in {"submitted", "released"}:
+            raise SafetyLimitError("Trade reservation state is invalid.")
+        async with self._trade_lock:
+            for setting in (
+                self.config.trade_spend_history,
+                self.config.user(user).trade_spend_history,
+            ):
+                history = list(await setting() or [])
+                matches = 0
+                for row in history:
+                    if isinstance(row, dict) and row.get("request_id") == request_id:
+                        row["state"] = state
+                        matches += 1
+                if matches != 1:
+                    raise SafetyLimitError("Trade limit reservation is missing.")
+                await setting.set(history)
+
+    async def _execute_trade_approval(
+        self, interaction: discord.Interaction,
+        request: TradeApprovalRequest,
+    ) -> None:
+        now = int(time.time())
+        request.require_approved(requester_id=interaction.user.id, now=now)
+        if not await self._trade_allowed():
+            raise AccountConnectionError(
+                "Polymarket trading is disabled or emergency-paused."
+            )
+        user_config = self.config.user(interaction.user)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), interaction.user.id
+        ):
+            raise AccountConnectionError("Current Polymarket terms are required.")
+        binding = await self._bot_first_account(interaction.user)
+        transport, session = await self._active_account_transport(
+            interaction.user, binding
+        )
+        if (
+            request.profile_id != binding.profile_id
+            or request.signer_address != binding.signer_address
+            or request.account_wallet_address != binding.account_wallet_address
+            or request.session_address != session.session_address
+            or session.expires_at <= request.approval.expires_at
+        ):
+            raise AccountConnectionError("Approved trade identity changed.")
+
+        market = await self._get_json(f"/markets/{request.approval.market_id}")
+        snapshot = MarketSnapshot.from_market(market, quote_timestamp=now)
+        try:
+            outcome_index = snapshot.outcomes.index(request.approval.outcome)
+        except ValueError as exc:
+            raise OrderIntentError(
+                "Approved outcome is no longer available."
+            ) from exc
+        if (
+            snapshot.condition_id != request.approval.condition_id
+            or snapshot.outcome_token_ids[outcome_index]
+            != request.approval.quote.token_id
+        ):
+            raise OrderIntentError("Approved market identity changed.")
+        book_payload = await self._get_clob_json(
+            "/book", {"token_id": request.approval.quote.token_id}
+        )
+        metadata_payload = await self._get_clob_json(
+            f"/clob-markets/{request.approval.condition_id}"
+        )
+        fresh = OrderBookSnapshot.from_payload(book_payload, captured_at=now)
+        metadata = MarketOrderMetadata.from_payload(
+            metadata_payload, expected_token_id=request.approval.quote.token_id
+        )
+        request.approval.require_fresh(fresh, metadata, now=now)
+        protocol = resolve_order_protocol(
+            fresh.token_id, negative_risk=fresh.negative_risk
+        )
+        maker_amount, taker_amount = request.approval.order_amounts
+        order_binding = OrderBinding(
+            discord_user_id=interaction.user.id,
+            approval_fingerprint=request.approval.fingerprint,
+            condition_id=request.approval.condition_id,
+            token_id=fresh.token_id,
+            maker_address=binding.account_wallet_address,
+            session_signer_address=session.session_address,
+            exchange_address=protocol.exchange_address,
+            protocol_version=protocol.version,
+            side="BUY", order_type="FAK",
+            maximum_price=request.approval.max_price,
+            maximum_size=Decimal(taker_amount) / Decimal(10**6),
+            created_at=datetime.fromtimestamp(
+                request.approval.created_at, timezone.utc
+            ),
+            expires_at=datetime.fromtimestamp(
+                request.approval.expires_at, timezone.utc
+            ),
+        )
+        lifecycle = OrderLifecycle.approved(order_binding)
+
+        async with self._trade_lock:
+            existing_record = await user_config.active_order()
+            if existing_record:
+                existing = OrderLifecycle.from_record(
+                    existing_record
+                ).recover_after_restart(
+                    datetime.fromtimestamp(now, timezone.utc)
+                )
+                await user_config.active_order.set(existing.to_record())
+                if existing.state not in {
+                    OrderState.FILLED, OrderState.CANCELED,
+                    OrderState.EXPIRED, OrderState.REJECTED,
+                }:
+                    raise OrderLifecycleError(
+                        "An existing order must be reconciled before another buy."
+                    )
+                async with user_config.order_history() as history:
+                    history.append(existing.to_record())
+                    del history[:-25]
+                await user_config.active_order.set(None)
+
+        await self._reserve_trade_spend(interaction.user, request, now=now)
+        wrapping_key, deployment_id = await self._session_storage_material()
+        encrypted_record = await user_config.encrypted_session_key()
+        if not encrypted_record:
+            await self._set_trade_spend_state(
+                interaction.user, request.request_id, "released"
+            )
+            raise AccountConnectionError("The active session key is unavailable.")
+        try:
+            private_key = reveal_session_private_key(
+                wrapping_key, EncryptedSessionKey.from_record(encrypted_record),
+                deployment_id=deployment_id,
+                discord_user_id=interaction.user.id,
+                profile_id=binding.profile_id,
+                signer_address=binding.signer_address,
+                account_wallet_address=binding.account_wallet_address,
+                session_address=session.session_address,
+            )
+            unsigned = UnsignedDepositWalletOrder(
+                exchange_address=protocol.exchange_address,
+                maker=binding.account_wallet_address,
+                token_id=fresh.token_id,
+                maker_amount=maker_amount,
+                taker_amount=taker_amount,
+                salt=secrets.randbits(53),
+                timestamp=now * 1000,
+                protocol_version=protocol.version,
+            )
+            signed_order = sign_deposit_wallet_order(private_key, unsigned)
+            del private_key
+            await user_config.active_order.set(lifecycle.to_record())
+            submitting = lifecycle.begin_submission(
+                datetime.fromtimestamp(now, timezone.utc)
+            )
+            await user_config.active_order.set(submitting.to_record())
+        except Exception:
+            await self._set_trade_spend_state(
+                interaction.user, request.request_id, "released"
+            )
+            raise
+        result = await transport.submit_prepared(
+            submitting, signed_order,
+            now=datetime.fromtimestamp(now, timezone.utc), timestamp=now,
+        )
+        await user_config.active_order.set(result.to_record())
+        await self._set_trade_spend_state(
+            interaction.user, request.request_id,
+            "released" if result.state is OrderState.REJECTED else "submitted",
+        )
+        await user_config.trade_approval.set(None)
+        embed = discord.Embed(
+            title=(
+                "Polymarket buy rejected"
+                if result.state is OrderState.REJECTED
+                else "Polymarket buy submitted"
+            ),
+            description=(
+                f"Provider state: **{result.state.value}**"
+                + (f"\nOrder ID: {result.order_id}" if result.order_id else "")
+            ),
+            color=(
+                discord.Color.red()
+                if result.state is OrderState.REJECTED
+                else discord.Color.green()
+            ),
+        )
+        embed.add_field(
+            name="Approved maximum",
+            value=f"{request.approval.max_spend_pusd:f} pUSD all-in",
+        )
+        embed.set_footer(
+            text=f"Fingerprint {request.approval.fingerprint[:12]}"
+        )
+        await interaction.message.edit(embed=embed, view=None)
+        await interaction.followup.send(
+            "The exact approved FAK buy reached the authenticated provider "
+            "boundary. Use poly orders for current provider state.",
+            ephemeral=True,
+        )
+
+    async def _trade_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("order"))
+            and bool(capabilities.get("eligibility"))
+            and not validate_polymarket_production_manifest()
+        )
+
+    def _trade_approval_embed(self, request: TradeApprovalRequest) -> discord.Embed:
+        state = request.confirmation.state
+        title = {
+            TradeConfirmationState.AWAITING_APPROVAL: "Approve Polymarket buy",
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION: "Are you sure?",
+            TradeConfirmationState.APPROVED: "Submitting approved buy",
+            TradeConfirmationState.DECLINED: "Polymarket buy cancelled",
+        }[state]
+        approval = request.approval
+        maker_amount, taker_amount = approval.order_amounts
+        embed = discord.Embed(
+            title=title,
+            description=f"{approval.outcome} - market {approval.market_id}",
+            color=(
+                discord.Color.red()
+                if state is TradeConfirmationState.DECLINED
+                else discord.Color.blurple()
+            ),
+        )
+        embed.add_field(
+            name="Maximum total",
+            value=f"{approval.max_spend_pusd:f} pUSD",
+            inline=True,
+        )
+        embed.add_field(
+            name="Price ceiling",
+            value=f"{approval.max_price:f} pUSD/share",
+            inline=True,
+        )
+        embed.add_field(
+            name="Order",
+            value=(
+                f"FAK buy - {Decimal(taker_amount) / Decimal(10**6):f} shares "
+                f"for {Decimal(maker_amount) / Decimal(10**6):f} pUSD notional"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Fee reserve",
+            value=f"up to {approval.maximum_fee_pusd:f} pUSD",
+            inline=True,
+        )
+        embed.add_field(
+            name="Deposit Wallet",
+            value=f"`{request.account_wallet_address}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Expires", value=f"<t:{approval.expires_at}:R>", inline=True
+        )
+        embed.set_footer(
+            text=(
+                f"Request {request.request_id[:12]} - "
+                f"Fingerprint {approval.fingerprint[:12]} - details cannot change"
+            )
+        )
+        return embed
+
+    async def _stored_trade_request(self, user) -> TradeApprovalRequest | None:
+        record = await self.config.user(user).trade_approval()
+        return TradeApprovalRequest.from_record(record) if record else None
+
+    async def _trade_request_for_view(
+        self, user, view: TradeApprovalView,
+    ) -> TradeApprovalRequest:
+        request = await self._stored_trade_request(user)
+        if (
+            request is None
+            or request.request_id != view.request_id
+            or request.approval.fingerprint != view.fingerprint
+            or request.approval.requester_id != user.id
+        ):
+            raise TradeConfirmationError(
+                "This trade approval card is no longer current."
+            )
+        return request
+
+    async def _edit_trade_card(
+        self, interaction: discord.Interaction, request: TradeApprovalRequest,
+        *, content: str | None = None,
+    ) -> None:
+        view = None
+        if request.confirmation.state in {
+            TradeConfirmationState.AWAITING_APPROVAL,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        }:
+            view = TradeApprovalView(self, request)
+            view.message = interaction.message
+        await interaction.message.edit(
+            embed=self._trade_approval_embed(request), view=view
+        )
+        if content:
+            await interaction.followup.send(content, ephemeral=True)
+
+    async def approve_trade_interaction(
+        self, interaction: discord.Interaction, view: TradeApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._trade_request_for_view(interaction.user, view)
+            request = request.approve_primary(
+                requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).trade_approval.set(
+                request.to_record()
+            )
+            if (
+                request.confirmation.state
+                is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION
+            ):
+                await self._edit_trade_card(
+                    interaction, request,
+                    content=(
+                        "Please confirm once more. The market, price ceiling, "
+                        "all-in cap, fee parameters, and order amounts are unchanged."
+                    ),
+                )
+                return
+            await self._execute_trade_approval(interaction, request)
+        except (
+            AccountConnectionError, OrderIntentError, OrderLifecycleError,
+            OrderProtocolError, OrderSigningError, OrderTransportError,
+            SafetyLimitError, TradeConfirmationError, RuntimeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).trade_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The buy was not submitted: {exc}", ephemeral=True
+            )
+
+    async def confirm_trade_interaction(
+        self, interaction: discord.Interaction, view: TradeApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._trade_request_for_view(interaction.user, view)
+            request = request.decide_final(
+                True, requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).trade_approval.set(
+                request.to_record()
+            )
+            await self._execute_trade_approval(interaction, request)
+        except (
+            AccountConnectionError, OrderIntentError, OrderLifecycleError,
+            OrderProtocolError, OrderSigningError, OrderTransportError,
+            SafetyLimitError, TradeConfirmationError, RuntimeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).trade_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The buy was not submitted: {exc}", ephemeral=True
+            )
+
+    async def decline_trade_interaction(
+        self, interaction: discord.Interaction, view: TradeApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            request = await self._trade_request_for_view(interaction.user, view)
+            if (
+                request.confirmation.state
+                is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION
+            ):
+                request = request.decide_final(
+                    False, requester_id=interaction.user.id, now=int(time.time())
+                )
+            await self.config.user(interaction.user).trade_approval.set(None)
+            await interaction.message.edit(
+                embed=self._trade_approval_embed(request), view=None
+            )
+        except TradeConfirmationError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
             async with session.get(GAMMA_API + path, params=params, headers={"Accept": "application/json"}) as response:
@@ -1586,6 +2044,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
+        embed.add_field(name="Protected market buy", value=f"DM-only `{prefix}poly buy <market> <outcome> <max pUSD> [max price]` creates an immutable FAK approval card after protected eligibility. Trading remains default-off.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Fund Polymarket", value=f"DM-only `{prefix}poly deposit <ETH amount>` prepares a CryptoWallet approval card or resumes deposit status. Production gates remain default-off.", inline=False)
         embed.add_field(name="Your account", value=f"DM-only `{prefix}poly balance`, `{prefix}poly positions`, and `{prefix}poly orders` show identity-bound live account data when its gate is enabled.", inline=False)
@@ -1743,6 +2202,160 @@ class Polymarket(commands.Cog):
         embed.set_footer(text="A later protected approval, eligibility, security, and release review is required.")
         await ctx.send(embed=embed)
 
+    async def _protected_trade_eligibility(
+        self, ctx: commands.Context, *, market_path_value: str,
+        outcome: str, max_spend_pusd: str, max_price: str | None,
+    ) -> tuple[
+        BotFirstAccountBinding, SessionKeyLifecycle, EligibilityAttestation
+    ] | None:
+        user_config = self.config.user(ctx.author)
+        binding = await self._bot_first_account(ctx.author)
+        _transport, lifecycle = await self._active_account_transport(
+            ctx.author, binding
+        )
+        try:
+            spend = Decimal(max_spend_pusd)
+            ceiling = Decimal(max_price) if max_price is not None else None
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise AccountConnectionError("Trade amount or price is invalid.") from exc
+        if (
+            not spend.is_finite() or spend <= 0 or spend.as_tuple().exponent < -6
+            or ceiling is not None and (
+                not ceiling.is_finite() or ceiling <= 0 or ceiling >= 1
+            )
+        ):
+            raise AccountConnectionError("Trade amount or price is invalid.")
+        normalized = {
+            "market_path": market_path_value,
+            "outcome": outcome.casefold(),
+            "max_spend_pusd": format(spend, "f"),
+            "max_price": format(ceiling, "f") if ceiling is not None else None,
+        }
+        now = int(time.time())
+        challenge = await user_config.trade_eligibility()
+        if challenge:
+            expected = {
+                "request_id", "result_handle", "discord_user_id", "profile_id",
+                "signer_address", "account_wallet_address", "session_address",
+                "market_path", "outcome", "max_spend_pusd", "max_price",
+                "created_at", "expires_at",
+            }
+            if not isinstance(challenge, dict) or set(challenge) != expected:
+                raise AccountConnectionError(
+                    "The pending trade eligibility record is invalid."
+                )
+            if (
+                challenge["discord_user_id"] != ctx.author.id
+                or challenge["profile_id"] != binding.profile_id
+                or challenge["signer_address"] != binding.signer_address
+                or challenge["account_wallet_address"]
+                    != binding.account_wallet_address
+                or challenge["session_address"] != lifecycle.session_address
+                or any(challenge[key] != value for key, value in normalized.items())
+            ):
+                raise AccountConnectionError(
+                    "Trade details changed after eligibility started."
+                )
+            if now >= int(challenge["expires_at"]):
+                await user_config.trade_eligibility.set(None)
+                raise AccountConnectionError(
+                    "The pending trade eligibility request expired."
+                )
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            poll = getattr(
+                cryptowallet, "poll_polymarket_eligibility_result", None
+            )
+            if not callable(poll):
+                raise AccountConnectionError("Protected eligibility is unavailable.")
+            result = await poll(challenge["result_handle"])
+            if result is None:
+                await ctx.send(
+                    "Complete the protected eligibility page first, then run "
+                    f"{ctx.clean_prefix}poly buy with the same details again."
+                )
+                return None
+            checked_at = int(result["checked_at"])
+            if not (
+                int(challenge["created_at"])
+                <= checked_at
+                < int(challenge["expires_at"])
+            ):
+                raise AccountConnectionError(
+                    "Eligibility result does not match this trade request."
+                )
+            eligibility = EligibilityAttestation(
+                discord_user_id=ctx.author.id, blocked=result["blocked"],
+                country=result["country"], region=result["region"],
+                checked_at=checked_at,
+                expires_at=checked_at + ELIGIBILITY_LIFETIME_SECONDS,
+            )
+            await user_config.trade_eligibility.set(None)
+            if eligibility.blocked:
+                await ctx.send(
+                    "Polymarket reports this location as unavailable. "
+                    "No order was signed or submitted."
+                )
+                return None
+            eligibility.require_current(discord_user_id=ctx.author.id, now=now)
+            return binding, lifecycle, eligibility
+
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        required = (
+            "recovery_relay_status", "create_external_companion_handoff",
+            "register_recovery_handoff", "poll_polymarket_eligibility_result",
+        )
+        if cryptowallet is None or not all(
+            callable(getattr(cryptowallet, name, None)) for name in required
+        ):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        status = await cryptowallet.recovery_relay_status()
+        if not status.get("configured") or not status.get("approval_base_url"):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        request_id = secrets.token_urlsafe(32)
+        result_handle = secrets.token_urlsafe(32)
+        payload = {
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "action": "buy",
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "session_address": lifecycle.session_address,
+            **normalized, "created_at": now, "expires_at": now + 300,
+            "chain_id": 137, "purpose": "polymarket_eligibility",
+        }
+        token, expires_at = await cryptowallet.create_external_companion_handoff(
+            ctx.author.id, "polymarket_eligibility", payload
+        )
+        if expires_at != payload["expires_at"]:
+            raise AccountConnectionError(
+                "Protected eligibility expiry changed unexpectedly."
+            )
+        handoff = await cryptowallet.register_recovery_handoff(
+            token, expires_at, purpose="polymarket_eligibility"
+        )
+        await user_config.trade_eligibility.set({
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "profile_id": binding.profile_id,
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "session_address": lifecycle.session_address,
+            **normalized, "created_at": now, "expires_at": expires_at,
+        })
+        eligibility_url = (
+            f"{status['approval_base_url']}/polymarket-eligibility.html"
+            f"#handoff={quote(handoff, safe='')}"
+        )
+        await ctx.send(
+            "Check current Polymarket eligibility for this exact buy: "
+            f"{eligibility_url}\nThen run {ctx.clean_prefix}poly buy with the "
+            f"same details again before <t:{expires_at}:R>. No order has been "
+            "signed or submitted."
+        )
+        return None
+
     @polymarket.command(name="quote")
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_quote(self, ctx: commands.Context, reference: str, outcome: str,
@@ -1798,6 +2411,124 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Expires", value=f"<t:{approval.expires_at}:R>", inline=True)
         embed.add_field(name="Execution", value="Preview only. No account, balance, allowance, signature, credential, or order was used.", inline=False)
         await ctx.send(embed=embed)
+
+    @polymarket.command(name="buy", aliases=["bet"])
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_buy(
+        self, ctx: commands.Context, reference: str, outcome: str,
+        max_spend_pusd: str, max_price: str | None = None,
+    ):
+        """Prepare a protected all-in-capped FAK market buy."""
+        if not await self._trade_allowed():
+            await ctx.send(
+                "Polymarket trading is disabled or emergency-paused. "
+                "No order was signed or submitted."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"{ctx.clean_prefix}poly terms."
+            )
+            return
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or link.")
+            return
+        try:
+            existing_record = await user_config.trade_approval()
+            if existing_record:
+                existing = TradeApprovalRequest.from_record(existing_record)
+                if int(time.time()) < existing.approval.expires_at:
+                    view = TradeApprovalView(self, existing)
+                    view.message = await ctx.send(
+                        embed=self._trade_approval_embed(existing), view=view
+                    )
+                    return
+                await user_config.trade_approval.set(None)
+            protected = await self._protected_trade_eligibility(
+                ctx, market_path_value=path, outcome=outcome,
+                max_spend_pusd=max_spend_pusd, max_price=max_price,
+            )
+            if protected is None:
+                return
+            binding, lifecycle, eligibility = protected
+            now = int(time.time())
+            market = await self._get_json(path)
+            snapshot = MarketSnapshot.from_market(market, quote_timestamp=now)
+            selected = next(
+                (
+                    index for index, label in enumerate(snapshot.outcomes)
+                    if label.casefold() == outcome.casefold()
+                ),
+                None,
+            )
+            if (
+                selected is None and outcome.isdigit()
+                and 1 <= int(outcome) <= len(snapshot.outcomes)
+            ):
+                selected = int(outcome) - 1
+            if selected is None:
+                raise OrderIntentError("Outcome is not part of this market.")
+            token_id = snapshot.outcome_token_ids[selected]
+            book_payload = await self._get_clob_json(
+                "/book", {"token_id": token_id}
+            )
+            metadata_payload = await self._get_clob_json(
+                f"/clob-markets/{snapshot.condition_id}"
+            )
+            book = OrderBookSnapshot.from_payload(book_payload, captured_at=now)
+            metadata = MarketOrderMetadata.from_payload(
+                metadata_payload, expected_token_id=token_id
+            )
+            expires_at = min(now + 120, eligibility.expires_at)
+            approval = MarketBuyApproval.create(
+                requester_id=ctx.author.id, market_id=snapshot.market_id,
+                condition_id=snapshot.condition_id,
+                outcome=snapshot.outcomes[selected], quote=book,
+                metadata=metadata,
+                max_price=max_price or format(book.best_ask, "f"),
+                max_spend_pusd=max_spend_pusd, expires_at=expires_at,
+            )
+            limits = ProductionLimits.from_record(
+                await self.config.production_limits()
+            )
+            if limits.execution_disabled or approval.max_spend_pusd > (
+                limits.per_order_pusd
+            ):
+                raise SafetyLimitError(
+                    "Trade exceeds the configured per-order limit."
+                )
+            request = TradeApprovalRequest.create(
+                request_id=secrets.token_urlsafe(24),
+                profile_id=binding.profile_id,
+                signer_address=binding.signer_address,
+                account_wallet_address=binding.account_wallet_address,
+                session_address=lifecycle.session_address,
+                approval=approval, eligibility=eligibility,
+                final_confirmation_required=bool(
+                    await user_config.final_confirmation_required()
+                ),
+            )
+            await user_config.trade_approval.set(request.to_record())
+            view = TradeApprovalView(self, request)
+            view.message = await ctx.send(
+                embed=self._trade_approval_embed(request), view=view
+            )
+        except (
+            AccountConnectionError, KeyError, MarketSnapshotError,
+            OrderIntentError, OrderTransportError, RuntimeError,
+            SafetyLimitError, TradeConfirmationError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The protected buy preview could not be prepared: {exc} "
+                "No order was signed or submitted."
+            )
 
     @polymarket.command(name="collateral")
     @commands.bot_has_permissions(embed_links=True)

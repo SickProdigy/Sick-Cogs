@@ -98,6 +98,7 @@ from polymarket.trade_confirmation import (
     TradeConfirmation, TradeConfirmationError, TradeConfirmationState,
 )
 from polymarket.trade_request import TradeApprovalRequest
+from polymarket.trade_views import TradeApprovalView
 from polymarket.session_approval import (
     SessionApprovalRequest, SessionApprovalState,
 )
@@ -999,6 +1000,20 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
     def test_signed_order_is_exact_and_cannot_exceed_approval(self):
         lifecycle = self._lifecycle()
         self.assertEqual(validate_signed_order(lifecycle, self._signed_order())["tokenId"], "123")
+        binding = lifecycle.binding
+        protected_unsigned = UnsignedDepositWalletOrder(
+            exchange_address=binding.exchange_address,
+            maker=binding.maker_address, token_id=binding.token_id,
+            maker_amount=5_500_001, taker_amount=10_000_000,
+            salt=2, timestamp=150_000,
+            protocol_version=binding.protocol_version,
+        )
+        protected = sign_deposit_wallet_order(
+            self.private_key, protected_unsigned
+        )
+        self.assertEqual(
+            validate_signed_order(lifecycle, protected)["makerAmount"], "5500001"
+        )
         for order in (
             self._signed_order(makerAmount="6000000"),
             self._signed_order(takerAmount="11000000"),
@@ -2917,6 +2932,49 @@ class Context:
 
 
 class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
+    def _trade_fixture(self, *, final_confirmation=True):
+        token_id = str(1 << 80)
+        quote = OrderBookSnapshot.from_payload({
+            "asset_id": token_id, "bids": [],
+            "asks": [{"price": "0.52", "size": "20"}],
+            "min_order_size": "5", "tick_size": "0.01",
+            "neg_risk": False, "hash": "book-1",
+        }, captured_at=100)
+        metadata = MarketOrderMetadata.from_payload({
+            "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+            "nr": False, "t": [{"t": token_id}],
+        }, expected_token_id=token_id)
+        approval = MarketBuyApproval.create(
+            requester_id=7, market_id="42", condition_id="condition",
+            outcome="Yes", quote=quote, metadata=metadata,
+            max_price="0.55", max_spend_pusd="10", expires_at=220,
+        )
+        eligibility = EligibilityAttestation(
+            7, False, "CA", "ON", 90, 390
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address="0x" + "3" * 40,
+            created_at=1, expires_at=1 + SESSION_KEY_LIFETIME_SECONDS,
+            status=SessionKeyStatus.ACTIVE, activated_at=2,
+        )
+        request = TradeApprovalRequest.create(
+            request_id="trade-request-one", profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=lifecycle.session_address,
+            approval=approval, eligibility=eligibility,
+            final_confirmation_required=final_confirmation,
+        )
+        return request, binding, lifecycle
+
     async def test_group_shows_complete_guide_and_has_poly_alias(self):
         ctx = Context()
         await Polymarket.polymarket.callback(Polymarket(object()), ctx)
@@ -3425,6 +3483,345 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("rate 0.0005, exponent 1", fields["Fee reserve"])
         self.assertIn("Preview only", fields["Execution"])
         self.assertEqual(len(fields["Approval fingerprint"].strip("`")), 64)
+
+    async def test_buy_is_default_closed_before_identity_or_network_access(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._protected_trade_eligibility = AsyncMock()
+        cog._get_json = AsyncMock()
+        await Polymarket.polymarket_buy.callback(
+            cog, ctx, "example", "Yes", "10", "0.55"
+        )
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        cog._protected_trade_eligibility.assert_not_awaited()
+        cog._get_json.assert_not_awaited()
+
+    async def test_buy_starts_exact_eligibility_before_market_quote(self):
+        _request, binding, lifecycle = self._trade_fixture()
+        author = SimpleNamespace(id=7)
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock()
+        )
+        companion = SimpleNamespace(
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True,
+                "approval_base_url": "https://wallet.example.test/cryptowallet",
+            }),
+            create_external_companion_handoff=AsyncMock(
+                return_value=("signed-token", 400)
+            ),
+            register_recovery_handoff=AsyncMock(return_value="h" * 32),
+            poll_polymarket_eligibility_result=AsyncMock(),
+        )
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: companion if name == "CryptoWallet" else None
+        ))
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "order": True, "eligibility": True,
+        })
+        await cog.config.production_limits.set({
+            "per_order_pusd": "10", "per_user_day_pusd": "20",
+            "installation_day_pusd": "30",
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(
+                7, now=100, acceptance_id="terms-7"
+            )
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._active_account_transport = AsyncMock(
+            return_value=(SimpleNamespace(), lifecycle)
+        )
+        cog._get_json = AsyncMock()
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch(
+                "polymarket.polymarket.secrets.token_urlsafe",
+                side_effect=["q" * 32, "r" * 32],
+            ),
+        ):
+            await Polymarket.polymarket_buy.callback(
+                cog, ctx, "example", "Yes", "10", "0.55"
+            )
+        cog._get_json.assert_not_awaited()
+        payload = companion.create_external_companion_handoff.await_args.args[2]
+        self.assertEqual(payload["action"], "buy")
+        self.assertEqual(payload["market_path"], "/markets/slug/example")
+        self.assertEqual(payload["outcome"], "yes")
+        self.assertEqual(payload["max_spend_pusd"], "10")
+        self.assertEqual(payload["max_price"], "0.55")
+        self.assertEqual(payload["session_address"], lifecycle.session_address)
+        challenge = await user_config.trade_eligibility()
+        self.assertEqual(challenge["result_handle"], "r" * 32)
+        self.assertNotIn("ip", repr(challenge).lower())
+        self.assertIn("#handoff=" + "h" * 32, ctx.send.await_args.args[0])
+        self.assertIn("No order", ctx.send.await_args.args[0])
+
+    async def test_buy_persists_exact_live_card_after_protected_eligibility(self):
+        request, binding, lifecycle = self._trade_fixture()
+        author = SimpleNamespace(id=7)
+        message = SimpleNamespace(edit=AsyncMock())
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock(return_value=message)
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "order": True, "eligibility": True,
+        })
+        await cog.config.production_limits.set({
+            "per_order_pusd": "10", "per_user_day_pusd": "20",
+            "installation_day_pusd": "30",
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(
+                7, now=100, acceptance_id="terms-7"
+            )
+        )
+        cog._protected_trade_eligibility = AsyncMock(return_value=(
+            binding, lifecycle, request.eligibility,
+        ))
+        cog._get_json = AsyncMock(return_value={
+            "id": "42", "conditionId": "condition", "slug": "example",
+            "question": "Example?", "active": True, "closed": False,
+            "enableOrderBook": True, "acceptingOrders": True,
+            "outcomes": '["Yes", "No"]',
+            "clobTokenIds": f'["{request.approval.quote.token_id}", "456"]',
+            "outcomePrices": '["0.52", "0.48"]',
+        })
+        cog._get_clob_json = AsyncMock(side_effect=[
+            {
+                "asset_id": request.approval.quote.token_id, "bids": [],
+                "asks": [{"price": "0.52", "size": "20"}],
+                "min_order_size": "5", "tick_size": "0.01",
+                "neg_risk": False, "hash": "book-1",
+            },
+            {
+                "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+                "nr": False,
+                "t": [{"t": request.approval.quote.token_id}],
+            },
+        ])
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch(
+                "polymarket.polymarket.secrets.token_urlsafe",
+                return_value="trade-request-one",
+            ),
+        ):
+            await Polymarket.polymarket_buy.callback(
+                cog, ctx, "example", "Yes", "10", "0.55"
+            )
+        stored = TradeApprovalRequest.from_record(
+            await user_config.trade_approval()
+        )
+        self.assertEqual(stored.approval.fingerprint, request.approval.fingerprint)
+        self.assertTrue(stored.confirmation.final_confirmation_required)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title,
+                         "Approve Polymarket buy")
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"], TradeApprovalView)
+        self.assertIs(ctx.send.await_args.kwargs["view"].message, message)
+
+    async def test_buy_buttons_require_default_second_confirmation_without_drift(self):
+        request, _binding, _lifecycle = self._trade_fixture()
+        user = SimpleNamespace(id=7)
+        message = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(
+            user=user, message=message,
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(user)
+        cog.config.user = lambda _user: user_config
+        await user_config.trade_approval.set(request.to_record())
+        cog._execute_trade_approval = AsyncMock()
+        view = SimpleNamespace(
+            request_id=request.request_id,
+            fingerprint=request.approval.fingerprint,
+        )
+        with patch("polymarket.polymarket.time.time", return_value=110):
+            await cog.approve_trade_interaction(interaction, view)
+        pending = TradeApprovalRequest.from_record(
+            await user_config.trade_approval()
+        )
+        self.assertEqual(
+            pending.confirmation.state,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        )
+        cog._execute_trade_approval.assert_not_awaited()
+        with patch("polymarket.polymarket.time.time", return_value=111):
+            await cog.confirm_trade_interaction(interaction, view)
+        approved = TradeApprovalRequest.from_record(
+            await user_config.trade_approval()
+        )
+        self.assertEqual(
+            approved.approval.fingerprint, request.approval.fingerprint
+        )
+        cog._execute_trade_approval.assert_awaited_once_with(
+            interaction, approved
+        )
+
+    async def test_buy_confirmation_opt_out_still_requires_primary_approve(self):
+        request, _binding, _lifecycle = self._trade_fixture(
+            final_confirmation=False
+        )
+        user = SimpleNamespace(id=7)
+        interaction = SimpleNamespace(
+            user=user, message=SimpleNamespace(edit=AsyncMock()),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(user)
+        cog.config.user = lambda _user: user_config
+        await user_config.trade_approval.set(request.to_record())
+        cog._execute_trade_approval = AsyncMock()
+        view = SimpleNamespace(
+            request_id=request.request_id,
+            fingerprint=request.approval.fingerprint,
+        )
+        with patch("polymarket.polymarket.time.time", return_value=110):
+            await cog.approve_trade_interaction(interaction, view)
+        approved = TradeApprovalRequest.from_record(
+            await user_config.trade_approval()
+        )
+        self.assertEqual(
+            approved.confirmation.state, TradeConfirmationState.APPROVED
+        )
+        cog._execute_trade_approval.assert_awaited_once_with(
+            interaction, approved
+        )
+
+    async def test_approved_buy_persists_before_locally_signed_fak_submission(self):
+        request, binding, _fixture_lifecycle = self._trade_fixture(
+            final_confirmation=False
+        )
+        private_key = (7).to_bytes(32, "big")
+        session_address = session_address_from_private_key(private_key)
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id=binding.profile_id,
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address=session_address,
+            created_at=1, expires_at=1 + SESSION_KEY_LIFETIME_SECONDS,
+            status=SessionKeyStatus.ACTIVE, activated_at=2,
+        )
+        request = TradeApprovalRequest.create(
+            request_id=request.request_id, profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=session_address,
+            approval=request.approval, eligibility=request.eligibility,
+            final_confirmation_required=False,
+        ).approve_primary(requester_id=7, now=110)
+        user = SimpleNamespace(id=7)
+        message = SimpleNamespace(edit=AsyncMock())
+        interaction = SimpleNamespace(
+            user=user, message=message,
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(user)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "order": True, "eligibility": True,
+        })
+        await cog.config.production_limits.set({
+            "per_order_pusd": "10", "per_user_day_pusd": "20",
+            "installation_day_pusd": "30",
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(
+                7, now=100, acceptance_id="terms-7"
+            )
+        )
+        await user_config.trade_approval.set(request.to_record())
+        wrapping_key = b"w" * 32
+        deployment_id = "deployment-7"
+        encrypted = protect_session_private_key(
+            wrapping_key, private_key, deployment_id=deployment_id,
+            discord_user_id=7, profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=session_address, created_at=1,
+            expires_at=1 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        await user_config.encrypted_session_key.set(encrypted.to_record())
+        cog._session_storage_material = AsyncMock(
+            return_value=(wrapping_key, deployment_id)
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        transport = SimpleNamespace()
+
+        async def submit_prepared(
+            submitting, signed_order, *, now, timestamp
+        ):
+            persisted = OrderLifecycle.from_record(
+                await user_config.active_order()
+            )
+            self.assertEqual(persisted.state, OrderState.SUBMITTING)
+            self.assertEqual(submitting, persisted)
+            self.assertEqual(submitting.binding.order_type, "FAK")
+            self.assertEqual(
+                validate_signed_order(submitting, signed_order)["tokenId"],
+                request.approval.quote.token_id,
+            )
+            return submitting.record_submission(now, {
+                "success": True, "orderID": "order-one", "status": "live",
+            })
+
+        transport.submit_prepared = AsyncMock(side_effect=submit_prepared)
+        cog._active_account_transport = AsyncMock(
+            return_value=(transport, lifecycle)
+        )
+        cog._get_json = AsyncMock(return_value={
+            "id": "42", "conditionId": "condition", "slug": "example",
+            "question": "Example?", "active": True, "closed": False,
+            "enableOrderBook": True, "acceptingOrders": True,
+            "outcomes": '["Yes", "No"]',
+            "clobTokenIds": (
+                f'["{request.approval.quote.token_id}", "456"]'
+            ),
+            "outcomePrices": '["0.52", "0.48"]',
+        })
+        cog._get_clob_json = AsyncMock(side_effect=[
+            {
+                "asset_id": request.approval.quote.token_id, "bids": [],
+                "asks": [{"price": "0.53", "size": "20"}],
+                "min_order_size": "5", "tick_size": "0.01",
+                "neg_risk": False, "hash": "book-2",
+            },
+            {
+                "fd": {"r": "0.0005", "e": "1"}, "mts": "0.01",
+                "nr": False,
+                "t": [{"t": request.approval.quote.token_id}],
+            },
+        ])
+        with patch("polymarket.polymarket.time.time", return_value=112):
+            await cog._execute_trade_approval(interaction, request)
+        stored = OrderLifecycle.from_record(await user_config.active_order())
+        self.assertEqual(stored.state, OrderState.LIVE)
+        self.assertEqual(stored.order_id, "order-one")
+        self.assertIsNone(await user_config.trade_approval())
+        self.assertEqual(
+            (await user_config.trade_spend_history())[0]["state"], "submitted"
+        )
+        self.assertEqual(
+            (await cog.config.trade_spend_history())[0]["state"], "submitted"
+        )
+        transport.submit_prepared.assert_awaited_once()
+        self.assertEqual(message.edit.await_args.kwargs["view"], None)
 
     async def test_collateral_command_discloses_exact_revocation_without_execution(self):
         ctx = Context()
