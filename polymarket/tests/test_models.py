@@ -21,6 +21,10 @@ from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
+from polymarket.bridge import (
+    BridgeAsset, BridgeQuote, BridgeTransaction, NATIVE_EVM_TOKEN, PolymarketBridgeClient,
+)
+from polymarket.deposit_lifecycle import BridgeDeposit, DepositState
 from polymarket.deposit_wallet import (
     DepositWalletCreationPlan, DepositWalletCreationState, RELAYER_REQUEST_TYPE,
 )
@@ -640,7 +644,8 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
-        self.assertEqual(manifest.schema_version, 2)
+        self.assertEqual(manifest.schema_version, 3)
+        self.assertEqual(manifest.bridge_api, "https://bridge.polymarket.com")
         self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
         self.assertEqual(manifest.deposit_wallet_beacon.lower(), "0x7a18edfe055488a3128f01f563e5b479d92ffc3a")
         self.assertEqual(manifest.usdce_token.lower(), "0x2791bca1f2de4661ed88a30c99a7a9449aa84174")
@@ -909,6 +914,244 @@ class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedA
         verify.assert_not_awaited()
 
 
+
+
+class PolymarketBridgeTests(unittest.IsolatedAsyncioTestCase):
+    def _asset(self):
+        return {
+            "chainId": "8453", "chainName": "Base",
+            "token": {
+                "name": "Ether", "symbol": "ETH",
+                "address": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+                "decimals": 18,
+            },
+            "minCheckoutUsd": 2,
+        }
+
+    def _quote(self):
+        return {
+            "estCheckoutTimeMs": 27000,
+            "estFeeBreakdown": {
+                "appFeeLabel": "Instant liquidity cost", "appFeePercent": 0,
+                "appFeeUsd": 0, "fillCostPercent": 0.065,
+                "fillCostUsd": 0.017, "gasUsd": 0.001,
+                "maxSlippage": 0.5, "minReceived": 25.84,
+                "swapImpact": 0.08, "swapImpactUsd": 0.02,
+                "totalImpact": 0.89, "totalImpactUsd": 0.23,
+            },
+            "estInputUsd": 26.61, "estOutputUsd": 26.37,
+            "estToTokenBaseUnit": "26374471",
+            "quoteId": "0x" + "a" * 64,
+        }
+
+    def test_dynamic_base_eth_asset_and_pusd_quote_are_strict(self):
+        asset = BridgeAsset.from_payload(self._asset())
+        self.assertEqual(asset.chain_id, 8453)
+        self.assertEqual(asset.token_address, NATIVE_EVM_TOKEN)
+        self.assertEqual(asset.minimum_usd, Decimal("2"))
+        quote = BridgeQuote.from_payload(self._quote())
+        self.assertEqual(quote.output_atomic, 26374471)
+        self.assertEqual(quote.minimum_received_usd, Decimal("25.84"))
+        for bad in (
+            {**self._asset(), "extra": True},
+            {**self._asset(), "chainId": 8453},
+            {**self._asset(), "minCheckoutUsd": -1},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                BridgeAsset.from_payload(bad)
+        for bad in (
+            {**self._quote(), "extra": True},
+            {**self._quote(), "estToTokenBaseUnit": 1},
+            {**self._quote(), "estOutputUsd": 30},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                BridgeQuote.from_payload(bad)
+
+    async def test_client_uses_exact_public_endpoints_and_pusd_destination(self):
+        transport = AsyncMock(side_effect=[
+            {"supportedAssets": [self._asset()]},
+            self._quote(),
+            {"address": {
+                "evm": "0x" + "3" * 40, "svm": "solana-address",
+                "btc": "bc1address", "tvm": "tron-address",
+            }},
+            {"transactions": [{
+                "fromChainId": "8453",
+                "fromTokenAddress": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+                "fromAmountBaseUnit": "10000000000000000",
+                "toChainId": "137",
+                "toTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.collateral_token,
+                "status": "COMPLETED", "txHash": "0x" + "d" * 64,
+                "createdTimeMs": 1_800_000_000_000,
+            }]},
+        ])
+        client = PolymarketBridgeClient(transport)
+        assets = await client.supported_assets()
+        quote = await client.quote(
+            amount_atomic=10**16, source_chain_id=8453,
+            source_token=NATIVE_EVM_TOKEN, recipient="0x" + "2" * 40,
+        )
+        addresses = await client.deposit_addresses("0x" + "2" * 40)
+        transactions = await client.status(addresses.evm)
+        self.assertEqual(assets[0].symbol, "ETH")
+        self.assertEqual(quote.quote_id, "0x" + "a" * 64)
+        self.assertEqual(transactions[0].status, "COMPLETED")
+        quote_call = transport.await_args_list[1]
+        body = json.loads(quote_call.kwargs["body"])
+        self.assertEqual(body, {
+            "fromAmountBaseUnit": str(10**16), "fromChainId": "8453",
+            "fromTokenAddress": NATIVE_EVM_TOKEN,
+            "recipientAddress": "0x" + "2" * 40, "toChainId": "137",
+            "toTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.collateral_token,
+        })
+        self.assertTrue(transport.await_args_list[3].args[1].endswith(
+            "/status/" + "0x" + "3" * 40
+        ))
+
+    async def test_status_accepts_detection_without_optional_hash_or_time(self):
+        transaction = {
+            "fromChainId": "8453", "fromTokenAddress": NATIVE_EVM_TOKEN,
+            "fromAmountBaseUnit": "1", "toChainId": "137",
+            "toTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.collateral_token,
+            "status": "DEPOSIT_DETECTED",
+        }
+        client = PolymarketBridgeClient(AsyncMock(return_value={
+            "transactions": [transaction]
+        }))
+        result = await client.status("0x" + "3" * 40)
+        self.assertIsNone(result[0].transaction_hash)
+        self.assertIsNone(result[0].created_time_ms)
+
+
+class BridgeDepositLifecycleTests(unittest.TestCase):
+    def _deposit(self):
+        asset = BridgeAsset.from_payload({
+            "chainId": "8453", "chainName": "Base",
+            "token": {"name": "Ether", "symbol": "ETH", "address": NATIVE_EVM_TOKEN, "decimals": 18},
+            "minCheckoutUsd": "2",
+        })
+        quote = BridgeQuote.from_payload({
+            "estCheckoutTimeMs": 27000,
+            "estFeeBreakdown": {
+                "appFeeLabel": "Instant liquidity cost", "appFeePercent": 0,
+                "appFeeUsd": 0, "fillCostPercent": 0.1, "fillCostUsd": 0.02,
+                "gasUsd": 0.01, "maxSlippage": 0.5, "minReceived": "24.50",
+                "swapImpact": 0.1, "swapImpactUsd": 0.02,
+                "totalImpact": 1, "totalImpactUsd": 0.25,
+            },
+            "estInputUsd": "25", "estOutputUsd": "24.75",
+            "estToTokenBaseUnit": "24750000", "quoteId": "0x" + "a" * 64,
+        })
+        return BridgeDeposit.create(
+            deposit_id="deposit-1", discord_user_id=7, profile_id="profile-7",
+            account_wallet_address="0x" + "1" * 40,
+            bridge_address="0x" + "2" * 40, asset=asset, amount_atomic=10**16,
+            quote=quote, wallet_intent_id="intent-1",
+            wallet_intent_fingerprint="b" * 64,
+            created_at=1_800_000_000, expires_at=1_800_000_120,
+        )
+
+    def _intent(self, **changes):
+        evidence = {
+            "intent_id": "intent-1", "profile_id": "profile-7",
+            "network": "base-mainnet", "to_address": "0x" + "2" * 40,
+            "value_atomic": 10**16, "asset_kind": "native",
+            "asset_symbol": "ETH", "asset_decimals": 18,
+            "approval_fingerprint": "b" * 64, "status": "pending",
+            "transaction_hash": None,
+        }
+        evidence.update(changes)
+        return evidence
+
+    def _transaction(self, status, *, tx_hash=None, created=None):
+        return BridgeTransaction.from_payload({
+            "fromChainId": "8453", "fromTokenAddress": NATIVE_EVM_TOKEN,
+            "fromAmountBaseUnit": str(10**16), "toChainId": "137",
+            "toTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.collateral_token,
+            "status": status, **({"txHash": tx_hash} if tx_hash else {}),
+            **({"createdTimeMs": created} if created else {}),
+        })
+
+    def test_record_round_trip_and_fingerprint_are_restart_stable(self):
+        deposit = self._deposit()
+        restored = BridgeDeposit.from_record(deposit.to_record())
+        self.assertEqual(restored, deposit)
+        self.assertEqual(restored.fingerprint, deposit.fingerprint)
+        self.assertEqual(restored.quoted_pusd_atomic, 24750000)
+
+    def test_wallet_intent_requires_exact_immutable_identity(self):
+        deposit = self._deposit()
+        self.assertEqual(deposit.reconcile_wallet_intent(
+            self._intent(status="processing"), now=1_800_000_010
+        ).state, DepositState.WALLET_PROCESSING)
+        confirmed = deposit.reconcile_wallet_intent(
+            self._intent(status="confirmed", transaction_hash="0x" + "c" * 64),
+            now=1_800_000_010,
+        )
+        self.assertEqual(confirmed.state, DepositState.BRIDGE_PENDING)
+        for changed in (
+            {"profile_id": "other"}, {"network": "base-sepolia"},
+            {"to_address": "0x" + "3" * 40}, {"value_atomic": 1},
+            {"approval_fingerprint": "d" * 64},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                deposit.reconcile_wallet_intent(
+                    self._intent(**changed), now=1_800_000_010
+                )
+
+    def test_wallet_terminal_and_uncertain_states_fail_closed(self):
+        deposit = self._deposit()
+        self.assertEqual(deposit.reconcile_wallet_intent(
+            self._intent(status="rejected"), now=1_800_000_010
+        ).state, DepositState.REJECTED)
+        self.assertEqual(deposit.reconcile_wallet_intent(
+            self._intent(status="uncertain"), now=1_800_000_010
+        ).state, DepositState.WALLET_UNCERTAIN)
+        self.assertEqual(deposit.reconcile_wallet_intent(
+            self._intent(status="pending"), now=1_800_000_121
+        ).state, DepositState.EXPIRED)
+        with self.assertRaises(AccountConnectionError):
+            deposit.reconcile_wallet_intent(
+                self._intent(status="confirmed"), now=1_800_000_010
+            )
+
+    def test_bridge_status_progress_completion_and_failure(self):
+        deposit = replace(self._deposit(), state=DepositState.BRIDGE_PENDING,
+                          wallet_transaction_hash="0x" + "c" * 64)
+        self.assertEqual(deposit.reconcile_bridge(
+            [], now_ms=1_800_000_010_000
+        ).state, DepositState.BRIDGE_PENDING)
+        bridging = deposit.reconcile_bridge(
+            [self._transaction("PROCESSING", created=1_800_000_005_000)],
+            now_ms=1_800_000_010_000,
+        )
+        self.assertEqual(bridging.state, DepositState.BRIDGING)
+        completed = deposit.reconcile_bridge(
+            [self._transaction("COMPLETED", tx_hash="0x" + "d" * 64,
+                               created=1_800_000_005_000)],
+            now_ms=1_800_000_010_000,
+        )
+        self.assertEqual(completed.state, DepositState.COMPLETED)
+        self.assertEqual(completed.quoted_pusd_atomic, 24750000)
+        failed = deposit.reconcile_bridge(
+            [self._transaction("FAILED", created=1_800_000_005_000)],
+            now_ms=1_800_000_010_000,
+        )
+        self.assertEqual(failed.state, DepositState.FAILED)
+        self.assertRegex(failed.failure_digest, r"^[0-9a-f]{64}$")
+
+    def test_bridge_ambiguity_and_future_evidence_are_rejected(self):
+        deposit = replace(self._deposit(), state=DepositState.BRIDGE_PENDING,
+                          wallet_transaction_hash="0x" + "c" * 64)
+        transaction = self._transaction("PROCESSING", created=1_800_000_005_000)
+        with self.assertRaises(AccountConnectionError):
+            deposit.reconcile_bridge([transaction, transaction],
+                                     now_ms=1_800_000_010_000)
+        with self.assertRaises(AccountConnectionError):
+            deposit.reconcile_bridge(
+                [self._transaction("PROCESSING", created=1_800_000_080_001)],
+                now_ms=1_800_000_010_000,
+            )
 
 
 class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
