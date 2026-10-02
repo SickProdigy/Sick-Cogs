@@ -44,6 +44,10 @@ from polymarket.terms import (
     POLYMARKET_TERMS_VERSION, create_polymarket_terms_acceptance,
     is_current_polymarket_terms_acceptance,
 )
+from polymarket.session_authorization import (
+    AUTHORIZATION_PATH, REVOCATION_PATH, SessionKeyOwnerApproval,
+    generate_session_key, session_address_from_private_key,
+)
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
     POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
@@ -1157,6 +1161,71 @@ class BotFirstAccountBindingTests(unittest.IsolatedAsyncioTestCase):
                 signer_address="0x" + "3" * 40,
                 account_wallet_address="0x" + "2" * 40,
             )
+
+
+class SessionKeyAuthorizationTests(unittest.TestCase):
+    def _approval(self, action="authorize", **changes):
+        values = {
+            "action": action, "discord_user_id": 7, "profile_id": "profile-7",
+            "owner_address": "0x" + "1" * 40,
+            "wallet_address": "0x" + "2" * 40,
+            "session_address": "0x" + "3" * 40,
+            "nonce": 9, "created_at": 100, "deadline": 400,
+            "idempotency_key": "i" * 32,
+            "valid_until": 100 + SESSION_KEY_LIFETIME_SECONDS
+                if action == "authorize" else None,
+        }
+        values.update(changes)
+        return SessionKeyOwnerApproval(**values)
+
+    def test_private_scalar_derives_known_evm_address_and_generation_matches(self):
+        private_key = (1).to_bytes(32, "big")
+        expected = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        self.assertEqual(session_address_from_private_key(private_key), expected)
+        with patch(
+            "polymarket.session_authorization.secrets.token_bytes",
+            return_value=private_key,
+        ):
+            generated, address = generate_session_key()
+        self.assertEqual((generated, address), (private_key, expected))
+
+    def test_authorization_pins_exact_batch_and_request_contract(self):
+        approval = self._approval()
+        typed = approval.typed_data()
+        self.assertEqual(approval.endpoint, AUTHORIZATION_PATH)
+        self.assertEqual(typed["domain"], {
+            "name": "DepositWallet", "version": "1", "chainId": 137,
+            "verifyingContract": approval.wallet_address,
+        })
+        self.assertEqual(typed["primaryType"], "Batch")
+        self.assertEqual(typed["message"]["wallet"], approval.wallet_address)
+        self.assertEqual(typed["message"]["calls"], [{
+            "target": approval.wallet_address, "value": "0",
+            "data": approval.calldata,
+        }])
+        self.assertEqual(len(bytes.fromhex(approval.calldata[2:])), 68)
+        body = approval.request_body("0x" + "1" * 130)
+        self.assertEqual(body["scopes"], ["CLOB"])
+        self.assertEqual(body["validUntil"], str(approval.valid_until))
+        self.assertEqual(body["nonce"], "9")
+
+    def test_revocation_uses_distinct_call_and_omits_scope_and_expiry(self):
+        approval = self._approval("revoke")
+        self.assertEqual(approval.endpoint, REVOCATION_PATH)
+        self.assertEqual(len(bytes.fromhex(approval.calldata[2:])), 36)
+        body = approval.request_body("0x" + "1" * 130)
+        self.assertNotIn("scopes", body)
+        self.assertNotIn("validUntil", body)
+
+    def test_policy_rejects_scope_expiry_identity_and_timing_drift(self):
+        for changes in (
+            {"scopes": ("ALL",)},
+            {"valid_until": 101 + SESSION_KEY_LIFETIME_SECONDS},
+            {"deadline": 399},
+            {"session_address": "0x" + "1" * 40},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                self._approval(**changes)
 
 
 class SessionKeyStoreTests(unittest.TestCase):
