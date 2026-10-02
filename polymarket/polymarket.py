@@ -11,6 +11,7 @@ from .handoff import MarketSnapshot, MarketSnapshotError
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
+from .security_policy import validate_session_key_policy
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
@@ -102,7 +103,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.5"
+    __version__ = "0.2.6"
 
     def __init__(self, bot):
         self.bot = bot
@@ -408,6 +409,7 @@ class Polymarket(commands.Cog):
             f"Installation enabled: **{bool(await self.config.production_enabled())}**\n"
             f"Emergency paused: **{bool(await self.config.production_paused())}**\n"
             f"Enabled capabilities: **{', '.join(enabled) if enabled else 'none'}**\n"
+            f"Session-key policy: **{'valid, beta, non-executable' if not validate_session_key_policy() else 'drift detected'}**\n"
             "Order execution: **code-disabled**"
         )
 

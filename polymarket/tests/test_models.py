@@ -7,6 +7,10 @@ from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
+from polymarket.security_policy import (
+    ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
+    validate_session_key_policy,
+)
 from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
@@ -84,6 +88,38 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             AccountConnection.pending(**{**values, "account_wallet_address": values["signer_address"]})
         with self.assertRaises(AccountConnectionError):
             AccountConnection.from_record({"state": "verified"})
+
+    def test_session_key_policy_is_scoped_non_executable_and_drift_checked(self):
+        policy = POLYMARKET_SESSION_KEY_POLICY
+        self.assertEqual(validate_session_key_policy(), ())
+        self.assertEqual(policy.wallet_type, WalletType.DEPOSIT_WALLET)
+        self.assertEqual(policy.scopes, ("CLOB",))
+        self.assertTrue(policy.beta)
+        self.assertFalse(policy.withdrawal_allowed)
+        self.assertFalse(policy.executable)
+        for changed in (
+            replace(policy, scopes=("ALL",)),
+            replace(policy, server_secret_store_required=False),
+            replace(policy, withdrawal_allowed=True),
+            replace(policy, executable=True),
+        ):
+            self.assertTrue(validate_session_key_policy(changed))
+
+    def test_eligibility_is_user_bound_short_lived_and_never_stores_ip(self):
+        result = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="CA", region="ON",
+            checked_at=100, expires_at=100 + ELIGIBILITY_LIFETIME_SECONDS,
+        )
+        result.require_current(discord_user_id=7, now=150)
+        self.assertFalse(hasattr(result, "ip"))
+        for user_id, now in ((8, 150), (7, 99), (7, result.expires_at)):
+            with self.assertRaises(AccountConnectionError):
+                result.require_current(discord_user_id=user_id, now=now)
+        blocked = replace(result, blocked=True)
+        with self.assertRaises(AccountConnectionError):
+            blocked.require_current(discord_user_id=7, now=150)
+        with self.assertRaises(AccountConnectionError):
+            replace(result, source="bot_server_ip")
 
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
