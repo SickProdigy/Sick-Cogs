@@ -22,6 +22,106 @@ CLOB_AUTH_TYPES = {
     ]
 }
 
+SESSION_BATCH_TYPES = {
+    "Call": [
+        {"name": "target", "type": "address"},
+        {"name": "value", "type": "uint256"},
+        {"name": "data", "type": "bytes"},
+    ],
+    "Batch": [
+        {"name": "wallet", "type": "address"},
+        {"name": "nonce", "type": "uint256"},
+        {"name": "deadline", "type": "uint256"},
+        {"name": "calls", "type": "Call[]"},
+    ],
+}
+SESSION_AUTHORIZE_SELECTOR = "24017fae"
+SESSION_REVOKE_SELECTOR = "e63f952f"
+SESSION_BATCH_LIFETIME_SECONDS = 5 * 60
+SESSION_KEY_LIFETIME_SECONDS = 180 * 24 * 60 * 60
+
+
+def _polymarket_address(value: str, label: str) -> str:
+    address = str(value).lower()
+    raw = address.removeprefix("0x")
+    if len(raw) != 40 or any(character not in "0123456789abcdef" for character in raw):
+        raise ValueError(f"Polymarket {label} is invalid.")
+    return "0x" + raw
+
+
+def _session_calldata(action: str, session_address: str, valid_until: int | None) -> str:
+    session = _polymarket_address(session_address, "session signer")
+    address_word = "0" * 24 + session[2:]
+    if action == "authorize":
+        if not isinstance(valid_until, int) or not 0 < valid_until < 2**256:
+            raise ValueError("Polymarket session expiration is invalid.")
+        return "0x" + SESSION_AUTHORIZE_SELECTOR + address_word + f"{valid_until:064x}"
+    if action == "revoke" and valid_until is None:
+        return "0x" + SESSION_REVOKE_SELECTOR + address_word
+    raise ValueError("Polymarket session action is invalid.")
+
+
+def validate_polymarket_session_batch_typed_data(
+    typed_data: dict, *, wallet_address: str, session_address: str,
+    action: str, valid_until: int | None,
+) -> tuple[int, int]:
+    """Accept only one exact Deposit Wallet session authorization or revocation."""
+
+    wallet = _polymarket_address(wallet_address, "Deposit Wallet")
+    session = _polymarket_address(session_address, "session signer")
+    if not isinstance(typed_data, dict) or set(typed_data) != {
+        "domain", "types", "primaryType", "message"
+    }:
+        raise ValueError("Polymarket session Batch typed data has an invalid shape.")
+    domain = typed_data.get("domain")
+    message = typed_data.get("message")
+    calls = message.get("calls") if isinstance(message, dict) else None
+    if (
+        not isinstance(domain, dict)
+        or set(domain) != {"name", "version", "chainId", "verifyingContract"}
+        or not isinstance(message, dict)
+        or set(message) != {"wallet", "nonce", "deadline", "calls"}
+        or not isinstance(calls, list) or len(calls) != 1
+        or not isinstance(calls[0], dict)
+        or set(calls[0]) != {"target", "value", "data"}
+    ):
+        raise ValueError("Polymarket session Batch typed data has an invalid shape.")
+    try:
+        nonce = int(message["nonce"])
+        deadline = int(message["deadline"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Polymarket session Batch timing is invalid.") from exc
+    if not 0 <= nonce < 2**256 or not 0 < deadline < 2**256:
+        raise ValueError("Polymarket session Batch timing is invalid.")
+    if (
+        action == "authorize"
+        and valid_until != deadline + (
+            SESSION_KEY_LIFETIME_SECONDS - SESSION_BATCH_LIFETIME_SECONDS
+        )
+    ):
+        raise ValueError("Polymarket session expiration policy changed.")
+    expected = {
+        "domain": {
+            "name": "DepositWallet", "version": "1", "chainId": 137,
+            "verifyingContract": wallet,
+        },
+        "types": {
+            name: [dict(field) for field in fields]
+            for name, fields in SESSION_BATCH_TYPES.items()
+        },
+        "primaryType": "Batch",
+        "message": {
+            "wallet": wallet, "nonce": str(nonce), "deadline": str(deadline),
+            "calls": [{
+                "target": wallet, "value": "0",
+                "data": _session_calldata(action, session, valid_until),
+            }],
+        },
+    }
+    if typed_data != expected:
+        raise ValueError("Polymarket session Batch typed data changed.")
+    return nonce, deadline
+
 
 def polymarket_clob_auth_typed_data(
     signer_address: str, *, timestamp: int, nonce: int

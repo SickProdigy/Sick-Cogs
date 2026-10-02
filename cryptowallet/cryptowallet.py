@@ -18,7 +18,10 @@ from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
 from .core.models import IntentStatus
-from .core.polymarket import validate_polymarket_clob_auth_typed_data
+from .core.polymarket import (
+    validate_polymarket_clob_auth_typed_data,
+    validate_polymarket_session_batch_typed_data,
+)
 from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS
@@ -160,6 +163,42 @@ class CryptoWallet(
         return await self.wallet_provider.sign_polymarket_clob_auth(
             profile, user.id, signer_address, typed_data,
             f"polymarket-clob-auth-{approval_fingerprint}",
+        )
+
+    async def polymarket_sign_session_batch(
+        self, user, *, owner_address: str, wallet_address: str,
+        session_address: str, action: str, valid_until: int | None,
+        typed_data: dict, approval_fingerprint: str,
+    ) -> dict:
+        """Sign one exact user-approved Deposit Wallet session-key Batch."""
+
+        if not bool(await self.config.polymarket_typed_signing_enabled()):
+            raise RuntimeError("CryptoWallet Polymarket signing remains disabled.")
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if not re.fullmatch(r"[0-9a-f]{64}", approval_fingerprint):
+            raise RuntimeError("Polymarket signing approval is invalid.")
+        try:
+            owner = normalize_evm_address(owner_address).lower()
+            wallet = normalize_evm_address(wallet_address).lower()
+            session = normalize_evm_address(session_address).lower()
+            if len({owner, wallet, session}) != 3:
+                raise ValueError("Polymarket session identities must remain separate.")
+            _, deadline = validate_polymarket_session_batch_typed_data(
+                typed_data, wallet_address=wallet, session_address=session,
+                action=action, valid_until=valid_until,
+            )
+            now = int(time.time())
+            if not now < deadline <= now + 5 * 60:
+                raise ValueError("Polymarket session approval is not current.")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("Polymarket session Batch typed data is invalid.") from exc
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.sign_polymarket_session_batch(
+            profile, user.id, owner, wallet, session, action, valid_until,
+            typed_data, f"polymarket-session-{action}-{approval_fingerprint}",
         )
 
     async def estimate_base_mainnet_call_fee(

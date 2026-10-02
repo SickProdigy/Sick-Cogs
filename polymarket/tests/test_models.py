@@ -9,6 +9,9 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
+from cryptowallet.core.polymarket import (
+    validate_polymarket_session_batch_typed_data,
+)
 from polymarket import setup
 from polymarket.account_binding import BotFirstAccountBinding
 from polymarket.account_connection import (
@@ -1219,6 +1222,11 @@ class SessionKeyAuthorizationTests(unittest.TestCase):
             "data": approval.calldata,
         }])
         self.assertEqual(len(bytes.fromhex(approval.calldata[2:])), 68)
+        self.assertEqual(validate_polymarket_session_batch_typed_data(
+            typed, wallet_address=approval.wallet_address,
+            session_address=approval.session_address, action=approval.action,
+            valid_until=approval.valid_until,
+        ), (approval.nonce, approval.deadline))
         body = approval.request_body("0x" + "1" * 130)
         self.assertEqual(body["scopes"], ["CLOB"])
         self.assertEqual(body["validUntil"], str(approval.valid_until))
@@ -1228,6 +1236,11 @@ class SessionKeyAuthorizationTests(unittest.TestCase):
         approval = self._approval("revoke")
         self.assertEqual(approval.endpoint, REVOCATION_PATH)
         self.assertEqual(len(bytes.fromhex(approval.calldata[2:])), 36)
+        self.assertEqual(validate_polymarket_session_batch_typed_data(
+            approval.typed_data(), wallet_address=approval.wallet_address,
+            session_address=approval.session_address, action=approval.action,
+            valid_until=approval.valid_until,
+        ), (approval.nonce, approval.deadline))
         body = approval.request_body("0x" + "1" * 130)
         self.assertNotIn("scopes", body)
         self.assertNotIn("validUntil", body)
