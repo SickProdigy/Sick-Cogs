@@ -1,3 +1,4 @@
+import json
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,10 @@ from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapsh
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
+)
+from polymarket.onboarding import (
+    ONBOARDING_LIFETIME_SECONDS, ProtectedOnboardingChallenge,
+    ProtectedOnboardingResult, complete_protected_onboarding,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
@@ -96,6 +101,82 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             AccountConnection.pending(**{**values, "account_wallet_address": values["signer_address"]})
         with self.assertRaises(AccountConnectionError):
             AccountConnection.from_record({"state": "verified"})
+
+    def _onboarding_challenge(self):
+        return ProtectedOnboardingChallenge(
+            connection_id="connection-one", result_handle="r" * 32,
+            discord_user_id=7, signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40,
+            wallet_type=WalletType.DEPOSIT_WALLET, challenge="c" * 32,
+            created_at=100, expires_at=100 + ONBOARDING_LIFETIME_SECONDS,
+        )
+
+    def _onboarding_result(self, challenge=None, **changes):
+        challenge = challenge or self._onboarding_challenge()
+        values = {
+            "challenge_fingerprint": challenge.fingerprint,
+            "discord_user_id": challenge.discord_user_id,
+            "signer_address": challenge.signer_address,
+            "account_wallet_address": challenge.account_wallet_address,
+            "wallet_type": challenge.wallet_type,
+            "proof_method": "eip712_clob_auth", "proof_digest": "a" * 64,
+            "relationship_source": "polygon_contract_read",
+            "relationship_evidence_digest": "b" * 64,
+            "eligibility": EligibilityAttestation(
+                discord_user_id=challenge.discord_user_id, blocked=False,
+                country="GB", region="ENG", checked_at=150, expires_at=450,
+            ),
+            "verified_at": 150,
+        }
+        values.update(changes)
+        return ProtectedOnboardingResult(**values)
+
+    def test_protected_onboarding_completes_exact_secret_free_binding(self):
+        challenge = self._onboarding_challenge()
+        self.assertEqual(
+            ProtectedOnboardingChallenge.from_record(challenge.to_record()), challenge
+        )
+        result = self._onboarding_result(challenge)
+        self.assertEqual(ProtectedOnboardingResult.from_record(result.to_record()), result)
+        connection = complete_protected_onboarding(
+            challenge, result, discord_user_id=7, now=151
+        )
+        self.assertEqual(connection.state, ConnectionState.VERIFIED)
+        self.assertEqual(connection.signer_address, challenge.signer_address)
+        serialized = json.dumps(result.to_record(), sort_keys=True).casefold()
+        for forbidden in ("signature", "api_key", "passphrase", "secret", "private_key", "\"ip\""):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_protected_onboarding_rejects_identity_eligibility_and_evidence_drift(self):
+        challenge = self._onboarding_challenge()
+        valid = self._onboarding_result(challenge)
+        failures = (
+            (replace(valid, discord_user_id=8), 7, 151),
+            (replace(valid, signer_address="0x" + "3" * 40), 7, 151),
+            (replace(valid, account_wallet_address="0x" + "4" * 40), 7, 151),
+            (replace(valid, wallet_type=WalletType.GNOSIS_SAFE), 7, 151),
+            (replace(valid, challenge_fingerprint="f" * 64), 7, 151),
+            (replace(valid, eligibility=replace(valid.eligibility, blocked=True)), 7, 151),
+            (valid, 7, challenge.expires_at),
+        )
+        for result, user_id, now in failures:
+            with self.assertRaises(AccountConnectionError):
+                complete_protected_onboarding(
+                    challenge, result, discord_user_id=user_id, now=now
+                )
+        with self.assertRaises(AccountConnectionError):
+            replace(valid, relationship_source="browser_claim")
+        with self.assertRaises(AccountConnectionError):
+            replace(valid, proof_method="personal_sign")
+        with self.assertRaises(AccountConnectionError):
+            replace(valid, wallet_type=WalletType.GNOSIS_SAFE, proof_method="deposit_wallet_owner")
+        with self.assertRaises(AccountConnectionError):
+            AccountConnection.pending(
+                connection_id="bad-eoa", discord_user_id=7,
+                signer_address="0x" + "1" * 40,
+                account_wallet_address="0x" + "2" * 40,
+                wallet_type=WalletType.EOA, created_at=100, expires_at=200,
+            )
 
     def test_session_key_policy_is_scoped_non_executable_and_drift_checked(self):
         policy = POLYMARKET_SESSION_KEY_POLICY

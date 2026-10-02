@@ -61,6 +61,8 @@ class AccountConnection:
         wallet = normalize_evm_address(self.account_wallet_address, "account_wallet_address")
         object.__setattr__(self, "signer_address", signer)
         object.__setattr__(self, "account_wallet_address", wallet)
+        if self.wallet_type is WalletType.EOA and signer != wallet:
+            raise AccountConnectionError("EOA signer and account wallet must match.")
         if self.wallet_type is not WalletType.EOA and signer == wallet:
             raise AccountConnectionError("Smart-wallet signer and account wallet must be distinct.")
         if self.expires_at <= self.created_at:

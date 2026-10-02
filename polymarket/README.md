@@ -4,11 +4,11 @@ A develop-only Sick-Cogs cog for read-only prediction-market discovery and infor
 
 ## Current boundary
 
-Version `0.2.10` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
+Version `0.2.11` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
 Production controls are owner-only: `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. Enablement deliberately refuses while execution has no reviewed capabilities.
 
-`poly account` reports the caller's connection state without accepting secrets. The develop-only account model keeps the immutable Discord user, signer address, account-wallet address, wallet type, and pending/verified/disconnected lifecycle separate. Protected verification is not implemented yet, so no account can currently become connected through Discord.
+`poly account` reports the caller's connection state without accepting secrets. The develop-only account model keeps the immutable Discord user, signer address, account-wallet address, wallet type, and pending/verified/disconnected lifecycle separate. Protected verification is not implemented yet, so no account can currently become connected through Discord. The credential-free protected-onboarding contract now requires exact signed-companion challenge binding, reviewed signer proof and account-relationship evidence, and a current browser-IP eligibility attestation before producing a verified public connection record; its relay and browser transport are not connected yet.
 
 The reviewed session-key policy is Deposit-Wallet-only, beta, CLOB-scoped, fixed at 180 days, non-withdrawing, server-secret-only, owner-approved, confirmation-checked, revocable, and still non-executable. Eligibility attestations must come from the protected user's request IP, expire after five minutes, and retain country/region and blocked status without retaining the IP address.
 
