@@ -8,6 +8,9 @@ import discord
 from redbot.core import commands
 
 from .handoff import MarketSnapshot, MarketSnapshotError
+from .production_manifest import (
+    POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
+)
 
 GAMMA_API = "https://gamma-api.polymarket.com"
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10, connect=4)
@@ -93,7 +96,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.1"
+    __version__ = "0.2.3"
 
     def __init__(self, bot):
         self.bot = bot
@@ -325,5 +328,27 @@ class Polymarket(commands.Cog):
 
     @polymarket.command(name="status")
     async def polymarket_status(self, ctx: commands.Context):
-        """Show the current implementation boundary."""
-        await ctx.send("**Polymarket cog status**\nPhase: read-only discovery\nAvailable: market discovery and details\nNot available: wallets, deposits, signatures, or trading.")
+        """Show the reviewed, default-off production integration boundary."""
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        drift = validate_polymarket_production_manifest(manifest)
+        embed = discord.Embed(
+            title="Polymarket integration status",
+            description="Public discovery is available. Production execution remains disabled.",
+        )
+        embed.add_field(
+            name="Production target",
+            value=f"Polygon mainnet (`{manifest.chain_id}`) · {manifest.collateral_symbol} ({manifest.collateral_decimals} decimals)",
+            inline=False,
+        )
+        embed.add_field(
+            name="Wallet model",
+            value="Signer and Polymarket account wallet are separate identities. New accounts use Deposit Wallets; legacy Proxy and Safe wallets remain explicit types.",
+            inline=False,
+        )
+        embed.add_field(
+            name="Reviewed boundary",
+            value=("Manifest valid · session keys documented · execution disabled" if not drift else "Manifest drift detected · all execution blocked"),
+            inline=False,
+        )
+        embed.set_footer(text="No wallet creation, credentials, approvals, signatures, deposits, or orders")
+        await ctx.send(embed=embed)

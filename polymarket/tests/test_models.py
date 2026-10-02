@@ -1,8 +1,12 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 from polymarket import setup
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
+from polymarket.production_manifest import (
+    POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
+)
 from polymarket.polymarket import (
     CATEGORIES, Polymarket, _active_search_markets, _json_list,
     future_handoff_reasons, market_path, market_url, technically_handoff_ready,
@@ -70,6 +74,31 @@ class PolymarketModelTests(unittest.TestCase):
         self.assertEqual(CATEGORIES["crypto"], ("Crypto", "21"))
         self.assertEqual(CATEGORIES["sports"], ("Sports", "1"))
 
+    def test_production_manifest_pins_current_official_non_executable_contract(self):
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        self.assertEqual(validate_polymarket_production_manifest(), ())
+        self.assertEqual(manifest.chain_id, 137)
+        self.assertEqual(manifest.collateral_symbol, "pUSD")
+        self.assertEqual(manifest.collateral_decimals, 6)
+        self.assertEqual(manifest.default_new_wallet_type, "DEPOSIT_WALLET")
+        self.assertTrue(manifest.signer_and_wallet_are_distinct)
+        self.assertTrue(manifest.session_keys_documented)
+        self.assertFalse(manifest.execution_enabled)
+        self.assertEqual(manifest.executable_capabilities, ())
+
+    def test_production_manifest_rejects_identity_contract_and_execution_drift(self):
+        for changed in (
+            replace(POLYMARKET_PRODUCTION_MANIFEST, chain_id=8453),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, collateral_decimals=18),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, ctf_exchange="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, default_new_wallet_type="EOA"),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, signer_and_wallet_are_distinct=False),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, execution_enabled=True),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, executable_capabilities=("order",)),
+        ):
+            with self.subTest(manifest=changed):
+                self.assertTrue(validate_polymarket_production_manifest(changed))
+
     def test_cog_accepts_red_bot_instance(self):
         bot = object()
         self.assertIs(Polymarket(bot).bot, bot)
@@ -118,6 +147,17 @@ class PolymarketCommandTests(unittest.IsolatedAsyncioTestCase):
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
         for command in ("search", "trending", "market", "compatible", "readiness", "status"):
             self.assertIn(command, fields)
+
+    async def test_status_reports_valid_default_off_deposit_wallet_boundary(self):
+        ctx = Context()
+        await Polymarket.polymarket_status.callback(Polymarket(object()), ctx)
+        embed = ctx.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Polymarket integration status")
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn("137", fields["Production target"])
+        self.assertIn("pUSD", fields["Production target"])
+        self.assertIn("Deposit Wallets", fields["Wallet model"])
+        self.assertIn("execution disabled", fields["Reviewed boundary"])
 
     async def test_markets_without_words_opens_category_chooser(self):
         ctx = Context()

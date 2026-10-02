@@ -4,7 +4,7 @@ A develop-only Sick-Cogs cog for read-only prediction-market discovery and infor
 
 ## Current boundary
 
-Version `0.2.1` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It deliberately does **not** create or custody wallets, accept deposits, sign transactions, or place orders.
+Version `0.2.3` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
 The root command aliases are `polymarket` and `poly`.
 
