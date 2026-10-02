@@ -128,7 +128,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.18"
+    __version__ = "0.2.19"
 
     def __init__(self, bot):
         self.bot = bot
@@ -146,7 +146,8 @@ class Polymarket(commands.Cog):
         )
         self.config.register_user(
             account_connection=None, onboarding_challenge=None, terms_challenge=None,
-            terms_acceptance=None, audit_events=[]
+            terms_acceptance=None, audit_events=[], encrypted_session_key=None,
+            final_confirmation_required=True
         )
 
     async def _get_json(self, path: str, params: dict | None = None):
@@ -252,7 +253,7 @@ class Polymarket(commands.Cog):
     async def polymarket(self, ctx: commands.Context):
         """Browse read-only Polymarket market information.
 
-        This cog does not connect wallets, custody funds, sign transactions, or place orders.
+        Production actions remain default-off and emergency-paused.
         """
         prefix = ctx.clean_prefix
         embed = discord.Embed(
@@ -267,7 +268,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly connect`, `{prefix}poly confirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` shows public connection state. Never send secrets in Discord.", inline=False)
+        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly connect`, `{prefix}poly confirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` shows public connection state. `{prefix}poly confirmations [on|off]` controls the default-on second trade check. Never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -728,6 +729,32 @@ class Polymarket(commands.Cog):
             f"Signer: `{connection.signer_address}`\n"
             f"Account wallet: `{connection.account_wallet_address}`\n"
             "Order execution remains disabled."
+        )
+
+    @polymarket.command(name="confirmations", aliases=["doublecheck"])
+    async def polymarket_confirmations(self, ctx: commands.Context, mode: str = ""):
+        """Show or change the optional second trade confirmation."""
+        user_config = self.config.user(ctx.author)
+        current = bool(await user_config.final_confirmation_required())
+        choice = str(mode or "").strip().casefold()
+        if not choice:
+            await ctx.send(
+                "Second trade confirmation is **{}**. Use `{}poly confirmations on` "
+                "or `{}poly confirmations off`.".format(
+                    "on" if current else "off", ctx.clean_prefix, ctx.clean_prefix
+                )
+            )
+            return
+        if choice not in {"on", "off"}:
+            await ctx.send("Use `poly confirmations on` or `poly confirmations off`.")
+            return
+        enabled = choice == "on"
+        await user_config.final_confirmation_required.set(enabled)
+        await ctx.send(
+            "Second trade confirmation is now **{}**. "
+            "The first approval always remains required.".format(
+                "on" if enabled else "off"
+            )
         )
 
     @polymarket.command(name="connect")

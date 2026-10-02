@@ -1,16 +1,16 @@
 {
   "author": ["SickProdigy"],
-  "description": "Develop-only prediction-market discovery with default-off protected existing-account verification.",
+  "description": "Develop-only Polymarket connector with bot-first wallet and default-off trading foundations.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores per-user public Polymarket account connection and versioned terms acceptance records, short-lived public onboarding challenges, and a bounded digest-only safety audit, plus installation-wide production safety settings. It does not store wallet credentials or place trades.",
+  "end_user_data_statement": "This cog stores per-user public Polymarket account and terms records, short-lived public challenges, an optional encrypted session-key record, confirmation preferences, and a bounded digest-only audit, plus installation-wide safety settings. Session private keys are authenticated ciphertext bound to the user and wallet profile; production trading remains default-off.",
   "hidden": false,
-  "install_msg": "Public prediction-market discovery is available. Protected existing-account verification is default-off and emergency-paused; no transaction or order capability is enabled.",
+  "install_msg": "Polymarket is a default-off connector to CryptoWallet. Bot-first Deposit Wallet, session-key, deposit, trading, and withdrawal work remains staged; no production capability is enabled.",
   "min_bot_version": "3.5.0",
   "permissions": [],
   "name": "Polymarket",
-  "requirements": ["eth-hash[pycryptodome]==0.8.0"],
-  "short": "Discovery and protected account verification",
+  "requirements": ["cryptography>=42.0.0,<51.0.0", "eth-hash[pycryptodome]==0.8.0"],
+  "short": "Protected CryptoWallet-to-Polymarket connector",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.2.18"
+  "version": "0.2.19"
 }

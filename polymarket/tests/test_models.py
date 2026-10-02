@@ -44,8 +44,16 @@ from polymarket.terms import (
     is_current_polymarket_terms_acceptance,
 )
 from polymarket.security_policy import (
-    ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
+    ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
+    POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
     validate_session_key_policy,
+)
+from polymarket.session_key_store import (
+    EncryptedSessionKey, SessionKeyStoreError, protect_session_private_key,
+    reveal_session_private_key,
+)
+from polymarket.trade_confirmation import (
+    TradeConfirmation, TradeConfirmationError, TradeConfirmationState,
 )
 from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
@@ -984,6 +992,98 @@ class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
             )
 
 
+class SessionKeyStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.key = bytes(range(32))
+        self.private_key = b"\x07" * 32
+        self.binding = {
+            "deployment_id": "sickgaming-test", "discord_user_id": 7,
+            "profile_id": "profile-seven",
+            "signer_address": "0x" + "1" * 40,
+            "account_wallet_address": "0x" + "2" * 40,
+            "session_address": "0x" + "3" * 40,
+        }
+
+    def test_session_private_key_round_trips_as_identity_bound_ciphertext(self):
+        record = protect_session_private_key(
+            self.key, self.private_key, **self.binding,
+            created_at=100, expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        stored = record.to_record()
+        self.assertNotIn(self.private_key.hex(), repr(stored))
+        self.assertEqual(stored["scope"], "CLOB")
+        self.assertEqual(
+            reveal_session_private_key(self.key, stored, **self.binding),
+            self.private_key,
+        )
+        self.assertEqual(EncryptedSessionKey.from_record(stored), record)
+
+    def test_session_ciphertext_rejects_wrong_user_wallet_or_key(self):
+        record = protect_session_private_key(
+            self.key, self.private_key, **self.binding,
+            created_at=100, expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        with self.assertRaises(SessionKeyStoreError):
+            reveal_session_private_key(
+                self.key, record, **{**self.binding, "discord_user_id": 8}
+            )
+        with self.assertRaises(SessionKeyStoreError):
+            reveal_session_private_key(
+                b"x" * 32, record, **self.binding
+            )
+        changed = record.to_record()
+        changed["scope"] = "ALL"
+        with self.assertRaises(SessionKeyStoreError):
+            EncryptedSessionKey.from_record(changed)
+        changed = record.to_record()
+        changed["expires_at"] -= 1
+        with self.assertRaises(SessionKeyStoreError):
+            EncryptedSessionKey.from_record(changed)
+
+
+class TradeConfirmationTests(unittest.TestCase):
+    def test_default_double_check_approves_only_the_exact_order_after_yes(self):
+        fingerprint = "a" * 64
+        pending = TradeConfirmation(7, fingerprint, True, 100, 200)
+        final = pending.approve_primary(
+            requester_id=7, order_fingerprint=fingerprint, now=110
+        )
+        self.assertEqual(
+            final.state, TradeConfirmationState.AWAITING_FINAL_CONFIRMATION
+        )
+        approved = final.decide_final(
+            requester_id=7, order_fingerprint=fingerprint, approved=True, now=111
+        )
+        approved.require_approved(
+            requester_id=7, order_fingerprint=fingerprint, now=112
+        )
+        self.assertEqual(
+            TradeConfirmation.from_record(approved.to_record()), approved
+        )
+
+    def test_double_check_can_be_disabled_but_primary_approval_remains(self):
+        fingerprint = "b" * 64
+        pending = TradeConfirmation(7, fingerprint, False, 100, 200)
+        with self.assertRaises(TradeConfirmationError):
+            pending.require_approved(
+                requester_id=7, order_fingerprint=fingerprint, now=105
+            )
+        approved = pending.approve_primary(
+            requester_id=7, order_fingerprint=fingerprint, now=110
+        )
+        self.assertEqual(approved.state, TradeConfirmationState.APPROVED)
+
+    def test_confirmation_rejects_changed_order_wrong_user_and_expiry(self):
+        pending = TradeConfirmation(7, "c" * 64, True, 100, 200)
+        for kwargs in (
+            {"requester_id": 8, "order_fingerprint": "c" * 64, "now": 110},
+            {"requester_id": 7, "order_fingerprint": "d" * 64, "now": 110},
+            {"requester_id": 7, "order_fingerprint": "c" * 64, "now": 200},
+        ):
+            with self.assertRaises(TradeConfirmationError):
+                pending.approve_primary(**kwargs)
+
+
 class PolymarketSetupTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
     async def test_setup_adds_a_polymarket_cog(self):
         class Bot:
@@ -1017,6 +1117,17 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
         for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral"):
             self.assertIn(command, fields)
+
+    async def test_confirmation_preference_defaults_on_and_can_be_disabled(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        user_config = cog.config.user(ctx.author)
+        cog.config.user = lambda _user: user_config
+        await Polymarket.polymarket_confirmations.callback(cog, ctx)
+        self.assertIn("**on**", ctx.send.await_args.args[0])
+        await Polymarket.polymarket_confirmations.callback(cog, ctx, "off")
+        self.assertFalse(await user_config.final_confirmation_required())
+        self.assertIn("**off**", ctx.send.await_args.args[0])
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
         ctx = Context()
