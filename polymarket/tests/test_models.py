@@ -1,5 +1,7 @@
 import unittest
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
@@ -10,6 +12,9 @@ from polymarket.account_connection import (
 from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from polymarket.order_lifecycle import (
+    OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
+)
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
     validate_session_key_policy,
@@ -174,6 +179,122 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertFalse(trading.executable)
         with self.assertRaises(CollateralPlanError):
             collateral_plan("wrap", "1.0000001", wallet)
+
+    def _order_binding(self):
+        created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        return OrderBinding(
+            discord_user_id=7, approval_fingerprint="a" * 64,
+            condition_id="condition", token_id="123",
+            maker_address="0x" + "1" * 40,
+            session_signer_address="0x" + "2" * 40, side="BUY",
+            maximum_price=Decimal("0.55"), maximum_size=Decimal("10"),
+            created_at=created, expires_at=created + timedelta(minutes=2),
+        )
+
+    def _provider_order(self, **changes):
+        payload = {
+            "id": "order-1", "market": "condition", "asset_id": "123",
+            "maker_address": "0x" + "1" * 40, "side": "BUY",
+            "price": "0.54", "original_size": "10", "size_matched": "0",
+            "status": "LIVE", "associate_trades": [],
+        }
+        payload.update(changes)
+        return payload
+
+    def test_order_lifecycle_is_restart_safe_and_idempotency_bound(self):
+        binding = self._order_binding()
+        lifecycle = OrderLifecycle.approved(binding)
+        restored = OrderLifecycle.from_record(lifecycle.to_record())
+        self.assertEqual(restored, lifecycle)
+        self.assertEqual(restored.binding.idempotency_key, binding.idempotency_key)
+        submitting = restored.begin_submission(binding.created_at + timedelta(seconds=1))
+        live = submitting.record_submission(
+            binding.created_at + timedelta(seconds=2),
+            {"success": True, "orderID": "order-1", "status": "live"},
+        )
+        partial = live.reconcile(
+            binding.created_at + timedelta(seconds=3),
+            self._provider_order(size_matched="4", associate_trades=["trade-1"]),
+            session_signer_address=binding.session_signer_address,
+        )
+        self.assertEqual(partial.state, OrderState.PARTIALLY_FILLED)
+        self.assertEqual(partial.matched_size, Decimal("4"))
+        self.assertEqual(partial.trade_ids, ("trade-1",))
+        self.assertEqual(OrderLifecycle.from_record(partial.to_record()), partial)
+        with self.assertRaises(OrderLifecycleError):
+            partial.reconcile(
+                binding.created_at + timedelta(seconds=4),
+                self._provider_order(size_matched="3"),
+                session_signer_address=binding.session_signer_address,
+            )
+
+    def test_order_lifecycle_requires_reconcile_after_ambiguous_submission(self):
+        binding = self._order_binding()
+        submitting = OrderLifecycle.approved(binding).begin_submission(
+            binding.created_at + timedelta(seconds=1)
+        )
+        unknown = submitting.submission_unknown(
+            binding.created_at + timedelta(seconds=2), "request timed out"
+        )
+        self.assertEqual(unknown.state, OrderState.UNKNOWN)
+        with self.assertRaises(OrderLifecycleError):
+            unknown.begin_submission(binding.created_at + timedelta(seconds=3))
+        with self.assertRaises(OrderLifecycleError):
+            unknown.reconcile(
+                binding.created_at + timedelta(seconds=3), self._provider_order(),
+                session_signer_address=binding.session_signer_address,
+            )
+
+    def test_order_reconciliation_rejects_signer_identity_and_bound_drift(self):
+        binding = self._order_binding()
+        live = OrderLifecycle.approved(binding).begin_submission(
+            binding.created_at + timedelta(seconds=1)
+        ).record_submission(
+            binding.created_at + timedelta(seconds=2),
+            {"success": True, "orderID": "order-1", "status": "live"},
+        )
+        failures = (
+            ({}, "0x" + "3" * 40),
+            ({"market": "other"}, binding.session_signer_address),
+            ({"asset_id": "456"}, binding.session_signer_address),
+            ({"maker_address": "0x" + "4" * 40}, binding.session_signer_address),
+            ({"price": "0.56"}, binding.session_signer_address),
+            ({"original_size": "11"}, binding.session_signer_address),
+        )
+        for changes, signer in failures:
+            with self.assertRaises(OrderLifecycleError):
+                live.reconcile(
+                    binding.created_at + timedelta(seconds=3),
+                    self._provider_order(**changes), session_signer_address=signer,
+                )
+
+    def test_cancel_outcomes_are_terminal_or_force_reconciliation(self):
+        binding = self._order_binding()
+        live = OrderLifecycle.approved(binding).begin_submission(
+            binding.created_at + timedelta(seconds=1)
+        ).record_submission(
+            binding.created_at + timedelta(seconds=2),
+            {"success": True, "orderID": "order-1", "status": "live"},
+        )
+        canceling = live.request_cancel(binding.created_at + timedelta(seconds=3))
+        canceled = canceling.record_cancel(
+            binding.created_at + timedelta(seconds=4), {"canceled": ["order-1"], "not_canceled": {}}
+        )
+        self.assertEqual(canceled.state, OrderState.CANCELED)
+        ambiguous = canceling.record_cancel(
+            binding.created_at + timedelta(seconds=4),
+            {"canceled": [], "not_canceled": {"order-1": "already matched"}},
+        )
+        self.assertEqual(ambiguous.state, OrderState.UNKNOWN)
+        filled = ambiguous.reconcile(
+            binding.created_at + timedelta(seconds=5),
+            self._provider_order(status="MATCHED", size_matched="10",
+                                 associate_trades=["trade-1"],
+                                 transaction_hashes=["0xabc"]),
+            session_signer_address=binding.session_signer_address,
+        )
+        self.assertEqual(filled.state, OrderState.FILLED)
+        self.assertEqual(filled.transaction_hashes, ("0xabc",))
 
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
