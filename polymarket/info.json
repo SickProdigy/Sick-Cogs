@@ -1,16 +1,16 @@
 {
   "author": ["SickProdigy"],
-  "description": "Develop-only read-only prediction-market discovery.",
+  "description": "Develop-only prediction-market discovery with default-off protected existing-account verification.",
   "disabled": false,
-  "end_user_data_statement": "This cog reserves a per-user, secret-free Polymarket account connection record and stores installation-wide production safety settings. It does not store wallet credentials or place trades.",
+  "end_user_data_statement": "This cog stores per-user public Polymarket account connection records and short-lived public onboarding challenges, plus installation-wide production safety settings. It does not store wallet credentials or place trades.",
   "hidden": false,
-  "install_msg": "This is a read-only prediction-market discovery cog. It does not connect wallets or place trades.",
+  "install_msg": "Public prediction-market discovery is available. Protected existing-account verification is default-off and emergency-paused; no transaction or order capability is enabled.",
   "min_bot_version": "3.5.0",
   "permissions": [],
   "name": "Polymarket",
   "requirements": ["eth-hash[pycryptodome]==0.8.0"],
-  "short": "Read-only prediction-market discovery",
+  "short": "Discovery and protected account verification",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.2.13"
+  "version": "0.2.14"
 }

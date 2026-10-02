@@ -1,4 +1,5 @@
 import json
+import secrets
 import time
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -7,18 +8,32 @@ import aiohttp
 import discord
 from redbot.core import Config, checks, commands
 
+from .account_connection import AccountConnection, AccountConnectionError, WalletType
 from .collateral import CollateralPlanError, collateral_plan
 from .handoff import MarketSnapshot, MarketSnapshotError
+from .identity_verifier import PolygonAccountIdentityVerifier
+from .onboarding import (
+    ONBOARDING_LIFETIME_SECONDS, ProtectedOnboardingChallenge,
+    complete_protected_onboarding,
+)
+from .onboarding_verification import finalize_onboarding_evidence
 from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
-from .security_policy import validate_session_key_policy
+from .security_policy import (
+    ELIGIBILITY_LIFETIME_SECONDS, EligibilityAttestation, validate_session_key_policy,
+)
+from .signer_proof import verify_clob_auth_proof
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
     "account_connect", "deposit_wallet_create", "eligibility", "collateral",
     "order", "cancel", "redeem",
+)
+ONBOARDING_ENABLE_ACKNOWLEDGEMENT = (
+    "I understand protected Polymarket onboarding uses Polygon mainnet "
+    "and enables no transactions"
 )
 
 GAMMA_API = "https://gamma-api.polymarket.com"
@@ -105,7 +120,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.13"
+    __version__ = "0.2.14"
 
     def __init__(self, bot):
         self.bot = bot
@@ -117,7 +132,7 @@ class Polymarket(commands.Cog):
             production_paused=True,
             production_capabilities={name: False for name in PRODUCTION_CAPABILITIES},
         )
-        self.config.register_user(account_connection=None)
+        self.config.register_user(account_connection=None, onboarding_challenge=None)
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -126,6 +141,74 @@ class Polymarket(commands.Cog):
                     raise RuntimeError(f"Polymarket returned HTTP {response.status}.")
                 payload = await response.json(content_type=None)
         return payload
+
+    async def _account_connect_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("account_connect"))
+            and bool(capabilities.get("eligibility"))
+            and not validate_polymarket_production_manifest()
+        )
+
+    async def _polygon_rpc(self, method: str, params: list[Any]):
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
+            async with session.post(
+                POLYMARKET_PRODUCTION_MANIFEST.polygon_rpc, json=payload,
+                headers={"Accept": "application/json"},
+            ) as response:
+                if response.status != 200:
+                    raise AccountConnectionError("Polygon RPC is unavailable.")
+                result = await response.json(content_type=None)
+        if not isinstance(result, dict) or "error" in result or "result" not in result:
+            raise AccountConnectionError("Polygon RPC returned an invalid response.")
+        return result["result"]
+
+    async def _consume_onboarding_result(self, user, cryptowallet):
+        if not await self._account_connect_allowed():
+            raise AccountConnectionError("Protected Polymarket connection is disabled.")
+        stored = await self.config.user(user).onboarding_challenge()
+        if not stored:
+            raise AccountConnectionError("No protected Polymarket connection is pending.")
+        challenge = ProtectedOnboardingChallenge.from_record(stored)
+        if challenge.discord_user_id != user.id:
+            raise AccountConnectionError("The pending connection belongs to another user.")
+        now = int(time.time())
+        if now >= challenge.expires_at:
+            await self.config.user(user).onboarding_challenge.set(None)
+            raise AccountConnectionError("The protected Polymarket connection expired.")
+        result = await cryptowallet.poll_polymarket_onboarding_result(challenge.result_handle)
+        if result is None:
+            return None
+        await self.config.user(user).onboarding_challenge.set(None)
+        eligibility = EligibilityAttestation(
+            discord_user_id=user.id, blocked=result["blocked"],
+            country=result["country"], region=result["region"],
+            checked_at=result["checked_at"],
+            expires_at=result["checked_at"] + ELIGIBILITY_LIFETIME_SECONDS,
+        )
+        eligibility.require_current(discord_user_id=user.id, now=now)
+        signer_proof = verify_clob_auth_proof(
+            challenge, signature=result["signature"], discord_user_id=user.id, now=now,
+        )
+        relationship = await PolygonAccountIdentityVerifier(self._polygon_rpc).verify(
+            signer_address=challenge.signer_address,
+            account_wallet_address=challenge.account_wallet_address,
+            wallet_type=challenge.wallet_type,
+        )
+        evidence = finalize_onboarding_evidence(
+            challenge, signer_proof=signer_proof, account_relationship=relationship,
+            eligibility=eligibility, discord_user_id=user.id, now=now,
+        )
+        connection = complete_protected_onboarding(
+            challenge, evidence, discord_user_id=user.id, now=now
+        )
+        if not await self._account_connect_allowed():
+            raise AccountConnectionError("Protected Polymarket connection was paused.")
+        await self.config.user(user).account_connection.set(connection.to_record())
+        return connection
 
     async def _get_clob_json(self, path: str, params: dict | None = None):
         base = POLYMARKET_PRODUCTION_MANIFEST.clob_api
@@ -154,7 +237,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Account connection", value=f"`{prefix}poly account`\nPublic identity status only; protected connection is not available yet.", inline=False)
+        embed.add_field(name="Account connection", value=f"`{prefix}poly account` · DM-only `{prefix}poly connect` and `{prefix}poly confirm`\nProtected verification is default-off; never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -488,14 +571,110 @@ class Polymarket(commands.Cog):
         record = await self.config.user(ctx.author).account_connection()
         if not record:
             await ctx.send(
-                "No Polymarket account is connected. Protected onboarding is still "
-                "code-disabled; never send a private key, recovery phrase, signature, "
-                "or API credential in Discord."
+                "No Polymarket account is connected; never send a private key, "
+                "recovery phrase, signature, or API credential in Discord."
+            )
+            return
+        try:
+            connection = AccountConnection.from_record(record)
+        except AccountConnectionError:
+            await ctx.send("The stored Polymarket connection is invalid and cannot be used.")
+            return
+        await ctx.send(
+            "**Polymarket account**\n"
+            f"State: **{connection.state.value}**\n"
+            f"Wallet type: **{connection.wallet_type.value}**\n"
+            f"Signer: `{connection.signer_address}`\n"
+            f"Account wallet: `{connection.account_wallet_address}`\n"
+            "Order execution remains disabled."
+        )
+
+    @polymarket.command(name="connect")
+    @commands.dm_only()
+    async def polymarket_connect(
+        self, ctx: commands.Context, signer_address: str,
+        account_wallet_address: str, wallet_type: str,
+    ):
+        """Start protected existing-account verification in DM."""
+        if not await self._account_connect_allowed():
+            await ctx.send("Protected Polymarket connection is disabled or emergency-paused.")
+            return
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        required = (
+            "recovery_relay_status", "create_external_companion_handoff",
+            "register_recovery_handoff", "poll_polymarket_onboarding_result",
+        )
+        if cryptowallet is None or not all(
+            callable(getattr(cryptowallet, name, None)) for name in required
+        ):
+            await ctx.send("The protected CryptoWallet companion is unavailable.")
+            return
+        try:
+            kind = WalletType(str(wallet_type).strip().upper())
+            now = int(time.time())
+            challenge = ProtectedOnboardingChallenge(
+                connection_id=secrets.token_urlsafe(24),
+                result_handle=secrets.token_urlsafe(32),
+                discord_user_id=ctx.author.id, signer_address=signer_address,
+                account_wallet_address=account_wallet_address, wallet_type=kind,
+                challenge=secrets.token_urlsafe(32), created_at=now,
+                expires_at=now + ONBOARDING_LIFETIME_SECONDS,
+            )
+            status = await cryptowallet.recovery_relay_status()
+            if not status.get("configured"):
+                raise RuntimeError("companion unavailable")
+            token, expires_at = await cryptowallet.create_external_companion_handoff(
+                ctx.author.id, "polymarket_connect", challenge.to_record()
+            )
+            if expires_at != challenge.expires_at:
+                raise RuntimeError("companion expiry drift")
+            handoff = await cryptowallet.register_recovery_handoff(
+                token, expires_at, purpose="polymarket_connect"
+            )
+            await self.config.user(ctx.author).onboarding_challenge.set(
+                challenge.to_record()
+            )
+            link = (
+                f"{status['approval_base_url']}/polymarket-connect.html"
+                f"#handoff={quote(handoff, safe='')}"
+            )
+        except (AccountConnectionError, KeyError, RuntimeError, ValueError):
+            await ctx.send(
+                "Protected Polymarket connection could not be prepared. Nothing was connected."
             )
             return
         await ctx.send(
-            "A Polymarket account record exists but cannot be displayed or used until "
-            "protected onboarding is reviewed. Production execution remains disabled."
+            f"Open this one-time protected link: {link}\n"
+            f"It expires <t:{expires_at}:R>. Then run `{ctx.clean_prefix}poly confirm`. "
+            "The page will check eligibility before requesting a signer proof."
+        )
+
+    @polymarket.command(name="confirm")
+    @commands.dm_only()
+    async def polymarket_confirm(self, ctx: commands.Context):
+        """Consume and independently verify one protected connection result."""
+        if not await self._account_connect_allowed():
+            await ctx.send("Protected Polymarket connection is disabled or emergency-paused.")
+            return
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        if cryptowallet is None or not callable(
+            getattr(cryptowallet, "poll_polymarket_onboarding_result", None)
+        ):
+            await ctx.send("The protected CryptoWallet companion is unavailable.")
+            return
+        try:
+            connection = await self._consume_onboarding_result(ctx.author, cryptowallet)
+        except (aiohttp.ClientError, AccountConnectionError, KeyError, RuntimeError, ValueError):
+            await ctx.send(
+                "The protected result could not be verified. No Polymarket account was connected."
+            )
+            return
+        if connection is None:
+            await ctx.send("Complete the protected page first, then run this command again.")
+            return
+        await ctx.send(
+            "Polymarket account connected with independent signer, wallet-derivation, "
+            "Polygon deployment, and eligibility checks. No funds moved and no order was placed."
         )
 
     @commands.group(name="polyset")
@@ -517,6 +696,44 @@ class Polymarket(commands.Cog):
             f"Enabled capabilities: **{', '.join(enabled) if enabled else 'none'}**\n"
             f"Session-key policy: **{'valid, beta, non-executable' if not validate_session_key_policy() else 'drift detected'}**\n"
             "Order execution: **code-disabled**"
+        )
+
+    @polymarketset.command(name="onboardingcontrol")
+    async def polymarketset_onboarding_control(
+        self, ctx: commands.Context, mode: str, *, acknowledgement: str = "",
+    ):
+        """Enable only protected, non-transactional existing-account onboarding."""
+        choice = str(mode or "").strip().lower()
+        if choice in {"pause", "disable"}:
+            capabilities = await self.config.production_capabilities()
+            capabilities["account_connect"] = False
+            capabilities["eligibility"] = False
+            await self.config.production_capabilities.set(capabilities)
+            await self.config.production_enabled.set(False)
+            await self.config.production_paused.set(True)
+            await ctx.send("Protected Polymarket onboarding is disabled and emergency-paused.")
+            return
+        if choice != "enable":
+            await ctx.send("Use `onboardingcontrol enable`, `pause`, or `disable`.")
+            return
+        if acknowledgement != ONBOARDING_ENABLE_ACKNOWLEDGEMENT:
+            await ctx.send(
+                "Onboarding remains disabled. Repeat the command with the exact "
+                f"acknowledgment: `{ONBOARDING_ENABLE_ACKNOWLEDGEMENT}`"
+            )
+            return
+        if validate_polymarket_production_manifest():
+            await ctx.send("Onboarding remains disabled because the manifest has drifted.")
+            return
+        capabilities = {name: False for name in PRODUCTION_CAPABILITIES}
+        capabilities["account_connect"] = True
+        capabilities["eligibility"] = True
+        await self.config.production_capabilities.set(capabilities)
+        await self.config.production_enabled.set(True)
+        await self.config.production_paused.set(False)
+        await ctx.send(
+            "Protected existing-account onboarding is enabled. Transaction, collateral, "
+            "wallet-creation, order, cancel, and redeem capabilities remain disabled."
         )
 
     @polymarketset.command(name="productioncontrol")

@@ -35,7 +35,8 @@ from polymarket.production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
 from polymarket.polymarket import (
-    CATEGORIES, CONFIG_IDENTIFIER, PRODUCTION_CAPABILITIES, Polymarket, _active_search_markets, _json_list,
+    CATEGORIES, CONFIG_IDENTIFIER, ONBOARDING_ENABLE_ACKNOWLEDGEMENT,
+    PRODUCTION_CAPABILITIES, Polymarket, _active_search_markets, _json_list,
     future_handoff_reasons, market_path, market_url, technically_handoff_ready,
 )
 
@@ -576,6 +577,78 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         )
 
 
+class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        self.signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        self.challenge = ProtectedOnboardingChallenge(
+            connection_id="connection-one", result_handle="r" * 32,
+            discord_user_id=7, signer_address=self.signer,
+            account_wallet_address=self.signer, wallet_type=WalletType.EOA,
+            challenge="c" * 32, created_at=100,
+            expires_at=100 + ONBOARDING_LIFETIME_SECONDS,
+        )
+        self.user_config = SimpleNamespace(
+            onboarding_challenge=_Value(self.challenge.to_record()),
+            account_connection=_Value(None),
+        )
+        self.config.user = lambda _user: self.user_config
+        self.cog = Polymarket(SimpleNamespace())
+        self.cog.config = self.config
+        self.config.production_enabled.value = True
+        self.config.production_paused.value = False
+        self.config.production_capabilities.value = {
+            **self.config.production_capabilities.value,
+            "account_connect": True, "eligibility": True,
+        }
+        self.crypto = SimpleNamespace(poll_polymarket_onboarding_result=AsyncMock())
+
+    async def test_consumed_result_is_independently_verified_and_stores_only_public_connection(self):
+        signature = (
+            "0x99d78d15b6c892b2e3bcaaee8835f2abf61447be309d5a3bc85ae2d1f5a039d6"
+            "46e1507a48bfe0904962391c1cb36b749254724b21a7aeb8df48042a114f48e21b"
+        )
+        self.crypto.poll_polymarket_onboarding_result.return_value = {
+            "status": "submitted", "signature": signature, "blocked": False,
+            "country": "IE", "region": "", "checked_at": 150,
+        }
+        relationship = AccountRelationshipEvidence(
+            signer_address=self.signer, account_wallet_address=self.signer,
+            wallet_type=WalletType.EOA, block_number=100,
+            code_hash="0x" + "0" * 64, evidence_digest="b" * 64,
+        )
+        with patch("polymarket.polymarket.time.time", return_value=151), patch(
+            "polymarket.polymarket.PolygonAccountIdentityVerifier.verify",
+            new=AsyncMock(return_value=relationship),
+        ) as verify:
+            connection = await self.cog._consume_onboarding_result(
+                SimpleNamespace(id=7), self.crypto
+            )
+        self.assertEqual(connection.state, ConnectionState.VERIFIED)
+        self.assertIsNone(self.user_config.onboarding_challenge.value)
+        stored = self.user_config.account_connection.value
+        self.assertEqual(stored["account_wallet_address"], self.signer)
+        self.assertNotIn(signature, repr(stored))
+        verify.assert_awaited_once()
+
+    async def test_blocked_result_burns_challenge_before_any_polygon_verification(self):
+        self.crypto.poll_polymarket_onboarding_result.return_value = {
+            "status": "submitted", "signature": None, "blocked": True,
+            "country": "US", "region": "NY", "checked_at": 150,
+        }
+        with patch("polymarket.polymarket.time.time", return_value=151), patch(
+            "polymarket.polymarket.PolygonAccountIdentityVerifier.verify",
+            new=AsyncMock(),
+        ) as verify:
+            with self.assertRaises(AccountConnectionError):
+                await self.cog._consume_onboarding_result(
+                    SimpleNamespace(id=7), self.crypto
+                )
+        self.assertIsNone(self.user_config.onboarding_challenge.value)
+        self.assertIsNone(self.user_config.account_connection.value)
+        verify.assert_not_awaited()
+
+
 class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def _rpc(self, method, params):
         if method == "eth_chainId":
@@ -677,7 +750,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "quote", "collateral"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "connect", "confirm", "quote", "collateral"):
             self.assertIn(command, fields)
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
@@ -686,6 +759,37 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         message = ctx.send.await_args.args[0]
         self.assertIn("No Polymarket account is connected", message)
         self.assertIn("never send a private key", message)
+
+    async def test_connect_command_is_default_off_before_companion_or_rpc_access(self):
+        ctx = Context()
+        bot = SimpleNamespace(get_cog=AsyncMock())
+        await Polymarket.polymarket_connect.callback(
+            Polymarket(bot), ctx, "0x" + "1" * 40, "0x" + "1" * 40, "EOA"
+        )
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        bot.get_cog.assert_not_called()
+
+    async def test_onboarding_control_requires_exact_ack_and_enables_no_transaction_capability(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        await Polymarket.polymarketset_onboarding_control.callback(
+            cog, ctx, "enable", acknowledgement="wrong"
+        )
+        self.assertFalse(await cog.config.production_enabled())
+        self.assertTrue(await cog.config.production_paused())
+        await Polymarket.polymarketset_onboarding_control.callback(
+            cog, ctx, "enable", acknowledgement=ONBOARDING_ENABLE_ACKNOWLEDGEMENT
+        )
+        capabilities = await cog.config.production_capabilities()
+        self.assertTrue(await cog.config.production_enabled())
+        self.assertFalse(await cog.config.production_paused())
+        self.assertEqual(
+            {name for name, enabled in capabilities.items() if enabled},
+            {"account_connect", "eligibility"},
+        )
+        self.assertFalse(any(capabilities[name] for name in (
+            "deposit_wallet_create", "collateral", "order", "cancel", "redeem",
+        )))
 
     async def test_live_quote_builds_public_bounded_preview_without_execution(self):
         ctx = Context()
