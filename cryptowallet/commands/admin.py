@@ -487,7 +487,7 @@ class WalletAdminCommands:
         chain_ready = chain_id == BASE_MAINNET.chain_id
         provider_ready = bool(diagnostic.get("ready"))
         if diagnostic.get("stage") == "configuration":
-            provider_detail = "missing isolated fields: " + ", ".join(
+            provider_detail = "missing shared CDP fields: " + ", ".join(
                 diagnostic.get("missing") or ["unknown"]
             )
         elif provider_ready:
@@ -498,7 +498,7 @@ class WalletAdminCommands:
             "**Base mainnet experimental preflight**\n"
             f"RPC chain identity: `{chain_id if chain_id is not None else rpc_error}` "
             f"(`{'passed' if chain_ready else 'failed'}`)\n"
-            f"Isolated CDP credentials: `{provider_detail}` "
+            f"CDP project credentials: `{provider_detail}` "
             f"(`{'passed' if provider_ready else 'failed'}`)\n"
             f"Provider contract: `v{BASE_MAINNET_PROVIDER_MANIFEST.schema_version} / "
             f"{BASE_MAINNET_PROVIDER_MANIFEST.fingerprint[:12]}` "

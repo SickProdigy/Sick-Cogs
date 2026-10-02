@@ -90,6 +90,15 @@ class CryptoWallet(
     ) -> dict:
         """Return the narrow public wallet identity needed by TokenFactory."""
 
+        if network == BASE_MAINNET.key:
+            mode = str(await self.config.operating_mode() or "testnet").lower()
+            policy = await self.config.base_mainnet_policy()
+            if (mode not in {"mainnet", "mainnet-only"}
+                    or policy.get("enabled") is not True
+                    or policy.get("paused", True) is not False):
+                raise RuntimeError(
+                    "Enable CryptoWallet Base mainnet before using an integrated mainnet product."
+                )
         profile = await self.get_or_create_wallet_profile(user)
         if network == BASE_MAINNET.key:
             profile = await self.ensure_mainnet_wallet_profile(user, profile)

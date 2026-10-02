@@ -2074,16 +2074,15 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(quote["fee_wei"], 171_000_000_000_000)
         self.assertEqual(rpc.await_count, 2)
 
-    async def test_mainnet_credentials_use_an_isolated_secret_namespace(self):
+    async def test_mainnet_uses_the_same_project_credentials_as_testnet(self):
         token_sets = {
-            "cryptowallet_cdp_mainnet": {
-                "project_id": "main-project",
-                "api_key_id": "main-key",
-                "api_key_secret": "main-secret",
-                "wallet_secret": "main-wallet-secret",
+            "cryptowallet_cdp": {
+                "project_id": "shared-project",
+                "api_key_id": "shared-key",
+                "api_key_secret": "shared-secret",
+                "wallet_secret": "shared-wallet-secret",
             },
             "cryptowallet_jwt": {"kid": "deployment-key"},
-            "cryptowallet_cdp": {},
         }
         bot = SimpleNamespace(
             get_shared_api_tokens=AsyncMock(
@@ -2093,13 +2092,13 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         provider = CdpWalletProvider(bot)
 
         self.assertTrue((await provider.mainnet_readiness())["configured"])
-        self.assertFalse((await provider.readiness())["configured"])
+        self.assertTrue((await provider.readiness())["configured"])
         mainnet = await provider.credentials_for_network(BASE_MAINNET.key)
         testnet = await provider.credentials_for_network(BASE_SEPOLIA.key)
-        self.assertEqual(mainnet.project_id, "main-project")
-        self.assertIsNone(testnet)
+        self.assertEqual(mainnet.project_id, "shared-project")
+        self.assertEqual(mainnet, testnet)
 
-    async def test_mainnet_account_attachment_requires_same_isolated_smart_account(self):
+    async def test_mainnet_account_attachment_requires_same_smart_account(self):
         address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         owner = "0x1111111111111111111111111111111111111111"
         profile = {
@@ -2131,7 +2130,7 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(WalletProviderError, "does not verify"):
             await provider.ensure_mainnet_account(profile)
 
-    async def test_mainnet_delegation_uses_only_mainnet_profile_and_credentials(self):
+    async def test_mainnet_delegation_uses_shared_project_and_mainnet_profile(self):
         main_address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         test_address = "0xE338aDC6468484f2C6da16647B7154407661c371"
         owner = "0x1111111111111111111111111111111111111111"
@@ -2143,13 +2142,9 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
             ],
         }
         tokens = {
-            "cryptowallet_cdp_mainnet": {
-                "project_id": "main-project", "api_key_id": "main-key",
-                "api_key_secret": "main-secret", "wallet_secret": "main-wallet",
-            },
             "cryptowallet_cdp": {
-                "project_id": "test-project", "api_key_id": "test-key",
-                "api_key_secret": "test-secret", "wallet_secret": "test-wallet",
+                "project_id": "shared-project", "api_key_id": "shared-key",
+                "api_key_secret": "shared-secret", "wallet_secret": "shared-wallet",
             },
             "cryptowallet_jwt": {"kid": "deployment-key"},
         }
@@ -2177,14 +2172,14 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(status["active"])
         client.get_user_delegation.assert_awaited_once_with(
-            "main-profile-7", "main-project"
+            "main-profile-7", "shared-project"
         )
         client.get_account_delegation.assert_not_awaited()
         namespaces = [call.args[0] for call in bot.get_shared_api_tokens.await_args_list]
-        self.assertIn("cryptowallet_cdp_mainnet", namespaces)
-        self.assertNotIn("cryptowallet_cdp", namespaces)
+        self.assertIn("cryptowallet_cdp", namespaces)
+        self.assertNotIn("cryptowallet_cdp_mainnet", namespaces)
 
-    async def test_mainnet_final_preflight_uses_isolated_contract(self):
+    async def test_mainnet_final_preflight_uses_explicit_network_contract(self):
         address = "0x7930fB6E9853B3835Cf047f36855993cb82d4387"
         profile = {
             "profile_id": "main-profile-7", "provider_user_id": "main-profile-7",
@@ -2416,6 +2411,35 @@ class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertIn("code-disabled", ctx.send.await_args.args[0])
+
+    async def test_integrated_mainnet_context_requires_wallet_gate_first(self):
+        cog = SimpleNamespace(
+            config=SimpleNamespace(
+                operating_mode=_Value("mainnet"),
+                base_mainnet_policy=_Value({"enabled": False, "paused": True}),
+            ),
+            get_or_create_wallet_profile=AsyncMock(),
+            ensure_mainnet_wallet_profile=AsyncMock(),
+        )
+        with self.assertRaisesRegex(RuntimeError, "Enable CryptoWallet Base mainnet"):
+            await CryptoWallet.tokenfactory_wallet_context(
+                cog, SimpleNamespace(id=7), BASE_MAINNET.key
+            )
+        cog.get_or_create_wallet_profile.assert_not_awaited()
+
+        address = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        profile = {
+            "profile_id": "profile-7",
+            "accounts": [{"network": BASE_MAINNET.key, "address": address}],
+        }
+        cog.config.base_mainnet_policy.value = {"enabled": True, "paused": False}
+        cog.get_or_create_wallet_profile.return_value = profile
+        cog.ensure_mainnet_wallet_profile.return_value = profile
+        context = await CryptoWallet.tokenfactory_wallet_context(
+            cog, SimpleNamespace(id=7), BASE_MAINNET.key
+        )
+        self.assertEqual(context["owner_address"], address)
+        self.assertEqual(context["chain_id"], 8453)
 
     async def test_crypto_product_defaults_follow_operating_mode(self):
         cog = SimpleNamespace(

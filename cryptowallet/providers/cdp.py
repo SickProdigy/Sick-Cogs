@@ -62,7 +62,6 @@ from .cdp_api import CdpApiClient, CdpApiCredentials, CdpApiError
 
 
 CDP_TOKEN_NAMESPACE = "cryptowallet_cdp"
-CDP_MAINNET_TOKEN_NAMESPACE = "cryptowallet_cdp_mainnet"
 BASE_FINALITY_CONFIRMATIONS = 12
 NATIVE_ETH_CONTRACT = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 MAX_BALANCE_PAGES = 10
@@ -262,9 +261,7 @@ class CdpWalletProvider(WalletProvider):
     async def credentials_for_network(
         self, network: str
     ) -> CdpCredentials | None:
-        """Select credentials without falling back across environment boundaries."""
-        if network == BASE_MAINNET.key:
-            return await self._credentials_from_namespace(CDP_MAINNET_TOKEN_NAMESPACE)
+        """Use the installation CDP project while binding every call to its network."""
         return await self.credentials()
 
     async def readiness(self) -> dict:
@@ -302,19 +299,11 @@ class CdpWalletProvider(WalletProvider):
         return {"ready": True, "stage": "complete"}
 
     async def mainnet_readiness(self) -> dict:
-        """Report isolated Base-mainnet credential readiness without exposing values."""
-        tokens = await self.bot.get_shared_api_tokens(CDP_MAINNET_TOKEN_NAMESPACE)
-        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
-        combined = dict(tokens)
-        combined["jwt_kid"] = jwt_tokens.get("kid")
-        required = ("project_id", "api_key_id", "api_key_secret", "wallet_secret")
-        missing = [key for key in required if not str(combined.get(key) or "").strip()]
-        if not str(combined.get("jwt_kid") or "").strip():
-            missing.append("generated_jwt_key")
-        return {"configured": not missing, "missing": missing}
+        """Report shared CDP project readiness for explicit Base-mainnet calls."""
+        return await self.readiness()
 
     async def mainnet_diagnostics(self) -> dict:
-        """Validate the pinned provider contract and isolated credentials read-only."""
+        """Validate the pinned provider contract and shared CDP credentials read-only."""
         manifest_errors = validate_base_mainnet_provider_manifest()
         if manifest_errors:
             return {
@@ -326,11 +315,7 @@ class CdpWalletProvider(WalletProvider):
         readiness = await self.mainnet_readiness()
         if not readiness["configured"]:
             return {"ready": False, "stage": "configuration", "missing": readiness["missing"]}
-        tokens = await self.bot.get_shared_api_tokens(CDP_MAINNET_TOKEN_NAMESPACE)
-        jwt_tokens = await self.bot.get_shared_api_tokens(JWT_TOKEN_NAMESPACE)
-        combined = dict(tokens)
-        combined["jwt_kid"] = jwt_tokens.get("kid")
-        credentials = CdpCredentials.from_tokens(combined)
+        credentials = await self.credentials()
         if credentials is None:
             return {"ready": False, "stage": "configuration", "missing": []}
         try:
@@ -444,7 +429,7 @@ class CdpWalletProvider(WalletProvider):
         return updated
 
     async def ensure_mainnet_account(self, profile: dict) -> dict:
-        """Attach Base mainnet only after isolated credentials prove the same smart account."""
+        """Attach Base mainnet only after the shared project proves the same smart account."""
         accounts = [dict(item) for item in profile.get("accounts") or []]
         test_account = next(
             (item for item in accounts if item.get("network") == BASE_SEPOLIA.key), None
@@ -489,7 +474,7 @@ class CdpWalletProvider(WalletProvider):
                 None,
             )
             if match is None:
-                raise ValueError("mainnet project does not contain the stored smart account")
+                raise ValueError("CDP project does not contain the stored smart account")
             # Reuse the normal owner-relationship validator against the isolated response.
             self._delegation_addresses(
                 end_user,
