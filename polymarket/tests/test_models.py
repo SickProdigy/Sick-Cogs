@@ -39,6 +39,8 @@ from polymarket.identity_verifier import (
     AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
 )
 from polymarket.relayer import BuilderCredentials, DepositWalletRelayerClient
+from polymarket.order_action import CancelApprovalRequest
+from polymarket.order_action_views import CancelApprovalView
 from polymarket.order_intent import (
     MarketBuyApproval, MarketOrderMetadata, OrderBookSnapshot, OrderIntentError,
 )
@@ -1022,6 +1024,36 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.assertRaises(OrderTransportError):
                 validate_signed_order(lifecycle, order)
+
+    async def test_cancel_prepared_keeps_ambiguous_pending_without_retry(self):
+        lifecycle = self._lifecycle().begin_submission(
+            datetime.fromtimestamp(110, timezone.utc)
+        ).record_submission(datetime.fromtimestamp(120, timezone.utc), {
+            "success": True, "orderID": "order-one", "status": "live",
+        }).request_cancel(datetime.fromtimestamp(130, timezone.utc))
+        calls = []
+
+        async def request(**kwargs):
+            calls.append(kwargs)
+            raise TimeoutError("provider timeout")
+
+        secret = base64.urlsafe_b64encode(
+            b"official-vector-secret-32-bytes!!"
+        ).decode()
+        transport = AuthenticatedOrderTransport(
+            credential_provider=AsyncMock(return_value=ClobCredentials(
+                "api-key", secret, "passphrase"
+            )),
+            request=request,
+        )
+        result = await transport.cancel_prepared(
+            lifecycle, now=datetime.fromtimestamp(140, timezone.utc),
+            timestamp=140,
+        )
+        self.assertEqual(result.state, OrderState.CANCEL_PENDING)
+        self.assertEqual(result, lifecycle)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["body"], {"orderID": "order-one"})
 
     async def test_authenticated_submit_cancel_and_reconcile_verify_exact_evidence(self):
         secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
@@ -2974,6 +3006,184 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             final_confirmation_required=final_confirmation,
         )
         return request, binding, lifecycle
+
+    def _active_order_fixture(self):
+        request, binding, session = self._trade_fixture()
+        order_binding = OrderBinding(
+            discord_user_id=7,
+            approval_fingerprint=request.approval.fingerprint,
+            condition_id=request.approval.condition_id,
+            token_id=request.approval.quote.token_id,
+            maker_address=binding.account_wallet_address,
+            session_signer_address=session.session_address,
+            exchange_address=POLYMARKET_PRODUCTION_MANIFEST.ctf_exchange,
+            protocol_version="2", side="BUY", order_type="FAK",
+            maximum_price=request.approval.max_price,
+            maximum_size=Decimal(request.approval.order_amounts[1]) / Decimal(10**6),
+            created_at=datetime.fromtimestamp(100, timezone.utc),
+            expires_at=datetime.fromtimestamp(220, timezone.utc),
+        )
+        active = OrderLifecycle.approved(order_binding).begin_submission(
+            datetime.fromtimestamp(110, timezone.utc)
+        ).record_submission(datetime.fromtimestamp(120, timezone.utc), {
+            "success": True, "orderID": "order-one", "status": "live",
+        })
+        return binding, session, active
+
+    async def test_cancel_is_default_closed_before_identity_or_network_access(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._active_order_context = AsyncMock()
+        await Polymarket.polymarket_cancel.callback(cog, ctx, None)
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        cog._active_order_context.assert_not_awaited()
+
+    async def test_cancel_persists_exact_live_order_card(self):
+        binding, session, active = self._active_order_fixture()
+        ctx = Context()
+        message = SimpleNamespace(edit=AsyncMock())
+        ctx.send = AsyncMock(return_value=message)
+        cog = Polymarket(object())
+        user_config = cog.config.user(ctx.author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({"cancel": True})
+        cog._active_order_context = AsyncMock(return_value=(
+            binding, SimpleNamespace(), session, active,
+        ))
+        with (
+            patch("polymarket.polymarket.time.time", return_value=130),
+            patch("polymarket.polymarket.secrets.token_urlsafe",
+                  return_value="cancel-request-one"),
+        ):
+            await Polymarket.polymarket_cancel.callback(
+                cog, ctx, "order-one"
+            )
+        stored = CancelApprovalRequest.from_record(
+            await user_config.cancel_approval()
+        )
+        self.assertEqual(stored.order_id, "order-one")
+        self.assertEqual(stored.order_revision, active.revision)
+        self.assertEqual(
+            stored.order_binding_key, active.binding.idempotency_key
+        )
+        self.assertTrue(stored.confirmation.final_confirmation_required)
+        self.assertIsInstance(
+            ctx.send.await_args.kwargs["view"], CancelApprovalView
+        )
+        self.assertIs(ctx.send.await_args.kwargs["view"].message, message)
+
+    async def test_cancel_buttons_require_default_second_confirmation(self):
+        _binding, _session, active = self._active_order_fixture()
+        request = CancelApprovalRequest.create(
+            request_id="cancel-request-one", requester_id=7,
+            order_id=active.order_id,
+            order_binding_key=active.binding.idempotency_key,
+            order_revision=active.revision, created_at=130, expires_at=250,
+            final_confirmation_required=True,
+        )
+        user = SimpleNamespace(id=7)
+        interaction = SimpleNamespace(
+            user=user, message=SimpleNamespace(edit=AsyncMock()),
+            response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(user)
+        cog.config.user = lambda _user: user_config
+        await user_config.cancel_approval.set(request.to_record())
+        cog._execute_cancel_approval = AsyncMock()
+        view = SimpleNamespace(
+            request_id=request.request_id, fingerprint=request.fingerprint,
+        )
+        with patch("polymarket.polymarket.time.time", return_value=140):
+            await cog.approve_cancel_interaction(interaction, view)
+        pending = CancelApprovalRequest.from_record(
+            await user_config.cancel_approval()
+        )
+        self.assertEqual(
+            pending.confirmation.state,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        )
+        cog._execute_cancel_approval.assert_not_awaited()
+        view.fingerprint = pending.fingerprint
+        with patch("polymarket.polymarket.time.time", return_value=141):
+            await cog.confirm_cancel_interaction(interaction, view)
+        cog._execute_cancel_approval.assert_awaited_once()
+
+    async def test_approved_cancel_persists_pending_before_transport_io(self):
+        binding, session, active = self._active_order_fixture()
+        request = CancelApprovalRequest.create(
+            request_id="cancel-request-one", requester_id=7,
+            order_id=active.order_id,
+            order_binding_key=active.binding.idempotency_key,
+            order_revision=active.revision, created_at=130, expires_at=250,
+            final_confirmation_required=False,
+        ).approve_primary(requester_id=7, now=140)
+        user = SimpleNamespace(id=7)
+        interaction = SimpleNamespace(
+            user=user, message=SimpleNamespace(edit=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+        )
+        cog = Polymarket(object())
+        user_config = cog.config.user(user)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({"cancel": True})
+        await user_config.active_order.set(active.to_record())
+        await user_config.cancel_approval.set(request.to_record())
+
+        async def cancel_prepared(pending, *, now, timestamp):
+            persisted = OrderLifecycle.from_record(
+                await user_config.active_order()
+            )
+            self.assertEqual(persisted.state, OrderState.CANCEL_PENDING)
+            self.assertEqual(persisted, pending)
+            return pending
+
+        transport = SimpleNamespace(
+            cancel_prepared=AsyncMock(side_effect=cancel_prepared)
+        )
+        cog._active_order_context = AsyncMock(return_value=(
+            binding, transport, session, active,
+        ))
+        with patch("polymarket.polymarket.time.time", return_value=150):
+            await cog._execute_cancel_approval(interaction, request)
+        stored = OrderLifecycle.from_record(await user_config.active_order())
+        self.assertEqual(stored.state, OrderState.CANCEL_PENDING)
+        self.assertIsNone(await user_config.cancel_approval())
+        self.assertIn(
+            "not final", interaction.followup.send.await_args.args[0]
+        )
+
+    async def test_orderstatus_reconciles_and_persists_exact_order(self):
+        binding, session, active = self._active_order_fixture()
+        ctx = Context()
+        cog = Polymarket(object())
+        user_config = cog.config.user(ctx.author)
+        cog.config.user = lambda _user: user_config
+        reconciled = active.request_cancel(
+            datetime.fromtimestamp(130, timezone.utc)
+        )
+        transport = SimpleNamespace(reconcile=AsyncMock(
+            return_value=reconciled
+        ))
+        cog._active_order_context = AsyncMock(return_value=(
+            binding, transport, session, active,
+        ))
+        with patch("polymarket.polymarket.time.time", return_value=140):
+            await Polymarket.polymarket_orderstatus.callback(cog, ctx)
+        persisted = OrderLifecycle.from_record(
+            await user_config.active_order()
+        )
+        self.assertEqual(persisted, reconciled)
+        transport.reconcile.assert_awaited_once()
+        self.assertEqual(
+            ctx.send.await_args.kwargs["embed"].title,
+            "Polymarket order status",
+        )
 
     async def test_group_shows_complete_guide_and_has_poly_alias(self):
         ctx = Context()

@@ -37,6 +37,8 @@ from .order_intent import (
 from .order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
 )
+from .order_action import CancelApprovalRequest
+from .order_action_views import CancelApprovalView
 from .order_protocol import OrderProtocolError, resolve_order_protocol
 from .order_signing import (
     OrderSigningError, UnsignedDepositWalletOrder, sign_deposit_wallet_order,
@@ -177,7 +179,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.39"
+    __version__ = "0.2.40"
 
     def __init__(self, bot):
         self.bot = bot
@@ -208,6 +210,7 @@ class Polymarket(commands.Cog):
             bridge_deposit_history=[], deposit_eligibility=None,
             trade_eligibility=None, trade_approval=None,
             active_order=None, order_history=[], trade_spend_history=[],
+            cancel_approval=None,
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
         self.bridge_client = PolymarketBridgeClient()
@@ -1455,6 +1458,266 @@ class Polymarket(commands.Cog):
         await user_config.deposit_wallet_creation.set(reconciled.to_record())
         return reconciled
 
+    async def _active_order_context(
+        self, user,
+    ) -> tuple[
+        BotFirstAccountBinding, AuthenticatedOrderTransport,
+        SessionKeyLifecycle, OrderLifecycle,
+    ]:
+        binding = await self._bot_first_account(user)
+        transport, session = await self._active_account_transport(user, binding)
+        user_config = self.config.user(user)
+        record = await user_config.active_order()
+        if not record:
+            raise OrderLifecycleError("No active Polymarket order is stored.")
+        lifecycle = OrderLifecycle.from_record(record).recover_after_restart(
+            datetime.fromtimestamp(int(time.time()), timezone.utc)
+        )
+        if (
+            lifecycle.binding.discord_user_id != user.id
+            or lifecycle.binding.maker_address
+                != binding.account_wallet_address
+            or lifecycle.binding.session_signer_address
+                != session.session_address
+        ):
+            raise OrderLifecycleError("Stored order identity changed.")
+        await user_config.active_order.set(lifecycle.to_record())
+        return binding, transport, session, lifecycle
+
+    def _active_order_embed(self, lifecycle: OrderLifecycle) -> discord.Embed:
+        embed = discord.Embed(
+            title="Polymarket order status",
+            description=f"State: **{lifecycle.state.value}**",
+            color=(
+                discord.Color.green()
+                if lifecycle.state in {
+                    OrderState.FILLED, OrderState.CANCELED,
+                }
+                else discord.Color.blurple()
+            ),
+        )
+        embed.add_field(
+            name="Order ID",
+            value=lifecycle.order_id or "Unavailable - manual review required",
+            inline=False,
+        )
+        embed.add_field(
+            name="Approved bound",
+            value=(
+                f"{lifecycle.binding.maximum_size:f} shares at no more than "
+                f"{lifecycle.binding.maximum_price:f} pUSD"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Matched", value=f"{lifecycle.matched_size:f} shares"
+        )
+        if lifecycle.last_error:
+            embed.add_field(
+                name="Last provider result",
+                value=lifecycle.last_error[:1024],
+                inline=False,
+            )
+        embed.set_footer(
+            text=f"Revision {lifecycle.revision} - authenticated account evidence"
+        )
+        return embed
+
+    async def _stored_cancel_request(
+        self, user,
+    ) -> CancelApprovalRequest | None:
+        record = await self.config.user(user).cancel_approval()
+        return CancelApprovalRequest.from_record(record) if record else None
+
+    async def _cancel_request_for_view(
+        self, user, view: CancelApprovalView,
+    ) -> CancelApprovalRequest:
+        request = await self._stored_cancel_request(user)
+        if (
+            request is None
+            or request.request_id != view.request_id
+            or request.fingerprint != view.fingerprint
+            or request.requester_id != user.id
+        ):
+            raise TradeConfirmationError(
+                "This cancellation card is no longer current."
+            )
+        return request
+
+    def _cancel_approval_embed(
+        self, request: CancelApprovalRequest,
+    ) -> discord.Embed:
+        state = request.confirmation.state
+        title = {
+            TradeConfirmationState.AWAITING_APPROVAL:
+                "Approve order cancellation",
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION:
+                "Are you sure?",
+            TradeConfirmationState.APPROVED: "Cancelling order",
+            TradeConfirmationState.DECLINED: "Cancellation declined",
+        }[state]
+        embed = discord.Embed(
+            title=title,
+            description=f"Cancel order {request.order_id}",
+            color=(
+                discord.Color.red()
+                if state is not TradeConfirmationState.DECLINED
+                else discord.Color.blurple()
+            ),
+        )
+        embed.add_field(
+            name="Bound order revision",
+            value=str(request.order_revision),
+        )
+        embed.add_field(
+            name="Expires", value=f"<t:{request.expires_at}:R>"
+        )
+        embed.set_footer(
+            text=f"Fingerprint {request.fingerprint[:12]} - order cannot change"
+        )
+        return embed
+
+    async def _execute_cancel_approval(
+        self, interaction: discord.Interaction,
+        request: CancelApprovalRequest,
+    ) -> None:
+        now = int(time.time())
+        request.require_approved(requester_id=interaction.user.id, now=now)
+        capabilities = await self.config.production_capabilities()
+        if (
+            not bool(await self.config.production_enabled())
+            or bool(await self.config.production_paused())
+            or not bool(capabilities.get("cancel"))
+            or validate_polymarket_production_manifest()
+        ):
+            raise AccountConnectionError(
+                "Polymarket cancellation is disabled or emergency-paused."
+            )
+        _binding, transport, _session, lifecycle = (
+            await self._active_order_context(interaction.user)
+        )
+        if (
+            lifecycle.order_id != request.order_id
+            or lifecycle.binding.idempotency_key
+                != request.order_binding_key
+            or lifecycle.revision != request.order_revision
+        ):
+            raise OrderLifecycleError(
+                "The active order changed; request a fresh cancellation."
+            )
+        pending = lifecycle.request_cancel(
+            datetime.fromtimestamp(now, timezone.utc)
+        )
+        user_config = self.config.user(interaction.user)
+        await user_config.active_order.set(pending.to_record())
+        result = await transport.cancel_prepared(
+            pending, now=datetime.fromtimestamp(now, timezone.utc),
+            timestamp=now,
+        )
+        await user_config.active_order.set(result.to_record())
+        await user_config.cancel_approval.set(None)
+        await interaction.message.edit(
+            embed=self._active_order_embed(result), view=None
+        )
+        await interaction.followup.send(
+            (
+                "Cancellation confirmed."
+                if result.state is OrderState.CANCELED
+                else "Cancellation outcome is not final; use poly orderstatus "
+                     "to reconcile before another action."
+            ),
+            ephemeral=True,
+        )
+
+    async def approve_cancel_interaction(
+        self, interaction: discord.Interaction, view: CancelApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._cancel_request_for_view(
+                interaction.user, view
+            )
+            request = request.approve_primary(
+                requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).cancel_approval.set(
+                request.to_record()
+            )
+            if (
+                request.confirmation.state
+                is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION
+            ):
+                replacement = CancelApprovalView(self, request)
+                replacement.message = interaction.message
+                await interaction.message.edit(
+                    embed=self._cancel_approval_embed(request),
+                    view=replacement,
+                )
+                await interaction.followup.send(
+                    "Please confirm once more. The order ID and revision "
+                    "have not changed.",
+                    ephemeral=True,
+                )
+                return
+            await self._execute_cancel_approval(interaction, request)
+        except (
+            AccountConnectionError, OrderLifecycleError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).cancel_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The order was not cancelled: {exc}", ephemeral=True
+            )
+
+    async def confirm_cancel_interaction(
+        self, interaction: discord.Interaction, view: CancelApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._cancel_request_for_view(
+                interaction.user, view
+            )
+            request = request.decide_final(
+                True, requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).cancel_approval.set(
+                request.to_record()
+            )
+            await self._execute_cancel_approval(interaction, request)
+        except (
+            AccountConnectionError, OrderLifecycleError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).cancel_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The order was not cancelled: {exc}", ephemeral=True
+            )
+
+    async def decline_cancel_interaction(
+        self, interaction: discord.Interaction, view: CancelApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            request = await self._cancel_request_for_view(
+                interaction.user, view
+            )
+            if (
+                request.confirmation.state
+                is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION
+            ):
+                request = request.decide_final(
+                    False, requester_id=interaction.user.id,
+                    now=int(time.time()),
+                )
+            await self.config.user(interaction.user).cancel_approval.set(None)
+            await interaction.message.edit(
+                embed=self._cancel_approval_embed(request), view=None
+            )
+        except TradeConfirmationError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+
     async def _reserve_trade_spend(
         self, user, request: TradeApprovalRequest, *, now: int,
     ) -> None:
@@ -2045,6 +2308,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Protected market buy", value=f"DM-only `{prefix}poly buy <market> <outcome> <max pUSD> [max price]` creates an immutable FAK approval card after protected eligibility. Trading remains default-off.", inline=False)
+        embed.add_field(name="Active order", value=f"DM-only `{prefix}poly orderstatus` reconciles the exact stored order. `{prefix}poly cancel [order ID]` creates an immutable cancellation card when its separate gate is enabled.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Fund Polymarket", value=f"DM-only `{prefix}poly deposit <ETH amount>` prepares a CryptoWallet approval card or resumes deposit status. Production gates remain default-off.", inline=False)
         embed.add_field(name="Your account", value=f"DM-only `{prefix}poly balance`, `{prefix}poly positions`, and `{prefix}poly orders` show identity-bound live account data when its gate is enabled.", inline=False)
@@ -2528,6 +2792,117 @@ class Polymarket(commands.Cog):
             await ctx.send(
                 f"The protected buy preview could not be prepared: {exc} "
                 "No order was signed or submitted."
+            )
+
+    @polymarket.command(name="orderstatus", aliases=["order"])
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_orderstatus(self, ctx: commands.Context):
+        """Reconcile the exact active order using authenticated evidence."""
+        try:
+            _binding, transport, _session, lifecycle = (
+                await self._active_order_context(ctx.author)
+            )
+            if lifecycle.state in {
+                OrderState.UNKNOWN, OrderState.LIVE,
+                OrderState.PARTIALLY_FILLED, OrderState.CANCEL_PENDING,
+            }:
+                if lifecycle.order_id:
+                    now = int(time.time())
+                    lifecycle = await transport.reconcile(
+                        lifecycle,
+                        now=datetime.fromtimestamp(now, timezone.utc),
+                        timestamp=now,
+                    )
+                    await self.config.user(ctx.author).active_order.set(
+                        lifecycle.to_record()
+                    )
+                else:
+                    await ctx.send(embed=self._active_order_embed(lifecycle))
+                    await ctx.send(
+                        "The provider did not return an order ID. No retry or "
+                        "cancellation was submitted; manual review is required."
+                    )
+                    return
+            await ctx.send(embed=self._active_order_embed(lifecycle))
+        except (
+            AccountConnectionError, OrderLifecycleError, OrderTransportError,
+            RuntimeError, TypeError, ValueError,
+        ) as exc:
+            await ctx.send(
+                f"The active order could not be reconciled: {exc} "
+                "No order action was submitted."
+            )
+
+    @polymarket.command(name="cancel")
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_cancel(
+        self, ctx: commands.Context, order_id: str | None = None,
+    ):
+        """Prepare protected cancellation of the exact active order."""
+        capabilities = await self.config.production_capabilities()
+        if (
+            not bool(await self.config.production_enabled())
+            or bool(await self.config.production_paused())
+            or not bool(capabilities.get("cancel"))
+            or validate_polymarket_production_manifest()
+        ):
+            await ctx.send(
+                "Polymarket cancellation is disabled or emergency-paused. "
+                "No order action was submitted."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        try:
+            now = int(time.time())
+            existing = await self._stored_cancel_request(ctx.author)
+            if existing is not None and now < existing.expires_at:
+                view = CancelApprovalView(self, existing)
+                view.message = await ctx.send(
+                    embed=self._cancel_approval_embed(existing), view=view
+                )
+                return
+            if existing is not None:
+                await user_config.cancel_approval.set(None)
+            _binding, _transport, _session, lifecycle = (
+                await self._active_order_context(ctx.author)
+            )
+            if lifecycle.state not in {
+                OrderState.LIVE, OrderState.PARTIALLY_FILLED,
+            } or not lifecycle.order_id:
+                raise OrderLifecycleError(
+                    "Only a live or partially filled order can be cancelled."
+                )
+            supplied = str(order_id or "").strip()
+            if supplied and supplied != lifecycle.order_id:
+                raise OrderLifecycleError(
+                    "The supplied order ID does not match the active order."
+                )
+            request = CancelApprovalRequest.create(
+                request_id=secrets.token_urlsafe(24),
+                requester_id=ctx.author.id,
+                order_id=lifecycle.order_id,
+                order_binding_key=lifecycle.binding.idempotency_key,
+                order_revision=lifecycle.revision,
+                created_at=now,
+                expires_at=now + 120,
+                final_confirmation_required=bool(
+                    await user_config.final_confirmation_required()
+                ),
+            )
+            await user_config.cancel_approval.set(request.to_record())
+            view = CancelApprovalView(self, request)
+            view.message = await ctx.send(
+                embed=self._cancel_approval_embed(request), view=view
+            )
+        except (
+            AccountConnectionError, OrderLifecycleError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+        ) as exc:
+            await ctx.send(
+                f"The cancellation could not be prepared: {exc} "
+                "No order action was submitted."
             )
 
     @polymarket.command(name="collateral")

@@ -226,7 +226,15 @@ class AuthenticatedOrderTransport:
     async def cancel(
         self, lifecycle: OrderLifecycle, *, now: datetime, timestamp: int,
     ) -> OrderLifecycle:
-        pending = lifecycle.request_cancel(now)
+        return await self.cancel_prepared(
+            lifecycle.request_cancel(now), now=now, timestamp=timestamp
+        )
+
+    async def cancel_prepared(
+        self, pending: OrderLifecycle, *, now: datetime, timestamp: int,
+    ) -> OrderLifecycle:
+        if pending.state is not OrderState.CANCEL_PENDING or not pending.order_id:
+            raise OrderTransportError("order is not in persisted cancel-pending state")
         try:
             response = await self._call(
                 "DELETE", CANCEL_ORDER_PATH, timestamp=timestamp,
@@ -234,8 +242,6 @@ class AuthenticatedOrderTransport:
                 session_signer_address=pending.binding.session_signer_address,
             )
             return pending.record_cancel(now, response)
-        except (OrderLifecycleError, OrderTransportError):
-            raise
         except Exception:
             return pending
 
