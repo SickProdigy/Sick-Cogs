@@ -4,7 +4,7 @@ A develop-only Sick-Cogs cog for prediction-market discovery and default-off pro
 
 ## Current boundary
 
-Version `0.2.15` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
+Version `0.2.16` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
 Production controls are owner-only: `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. General production enablement deliberately refuses. The separate `polyset onboardingcontrol` can open only protected account connection and eligibility after its exact acknowledgment; every transaction capability remains disabled.
 
@@ -13,6 +13,8 @@ Production controls are owner-only: `polyset productionstatus` shows the manifes
 The reviewed session-key policy is Deposit-Wallet-only, beta, CLOB-scoped, fixed at 180 days, non-withdrawing, server-secret-only, owner-approved, confirmation-checked, revocable, and still non-executable. Eligibility attestations must come from the protected user's request IP, expire after five minutes, and retain country/region and blocked status without retaining the IP address.
 
 New Deposit Wallet creation is modeled but non-executable. The design pins the current beacon-derived empty target, Polygon chain `137`, Deposit Wallet factory, relayer type `WALLET_CREATE`, metadata `Deploy Deposit Wallet`, server-only Builder/Relayer authentication, five-minute owner approval and eligibility evidence, idempotency, public transaction identifiers, restart recovery, and `STATE_CONFIRMED`/`STATE_FAILED`/`STATE_INVALID` reconciliation. No credential field or submission adapter exists.
+
+Connection start, verification, and disconnect events retain only an event name, UTC timestamp, and SHA-256 digest in a 50-entry per-user audit trail. `poly disconnect` remains available during emergency pause, and Red user-data deletion clears the connection, pending challenge, and audit records.
 
 The root command aliases are `polymarket` and `poly`.
 
@@ -33,6 +35,7 @@ The root command aliases are `polymarket` and `poly`.
 - `poly account` - show the caller's secret-free account connection state.
 - `poly connect <signer> <account wallet> <EOA|POLY_PROXY|GNOSIS_SAFE|DEPOSIT_WALLET>` - start default-off protected existing-account verification in DM.
 - `poly confirm` - consume and independently verify the protected result in DM.
+- `poly disconnect` - clear any pending challenge and disconnect the public account binding even while production is paused.
 - `poly status` - the current safety boundary.
 
 The category browser uses Polymarket's public Gamma API tags for Politics, Crypto, and Sports. General discovery remains available through explicit search and `trending`, so `markets` no longer starts with an unrelated mixed list.

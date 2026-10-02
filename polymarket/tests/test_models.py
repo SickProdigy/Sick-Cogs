@@ -594,7 +594,7 @@ class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedA
         )
         self.user_config = SimpleNamespace(
             onboarding_challenge=_Value(self.challenge.to_record()),
-            account_connection=_Value(None),
+            account_connection=_Value(None), audit_events=_Value([]),
         )
         self.config.user = lambda _user: self.user_config
         self.cog = Polymarket(SimpleNamespace())
@@ -633,6 +633,8 @@ class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedA
         stored = self.user_config.account_connection.value
         self.assertEqual(stored["account_wallet_address"], self.signer)
         self.assertNotIn(signature, repr(stored))
+        self.assertEqual(self.user_config.audit_events.value[-1]["event"], "connect_verified")
+        self.assertNotIn(signature, repr(self.user_config.audit_events.value))
         verify.assert_awaited_once()
 
     async def test_blocked_result_burns_challenge_before_any_polygon_verification(self):
@@ -849,7 +851,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "connect", "confirm", "quote", "collateral"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "connect", "confirm", "disconnect", "quote", "collateral"):
             self.assertIn(command, fields)
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
@@ -889,6 +891,40 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any(capabilities[name] for name in (
             "deposit_wallet_create", "collateral", "order", "cancel", "redeem",
         )))
+
+    async def test_disconnect_works_during_pause_and_keeps_only_public_terminal_record(self):
+        ctx = Context()
+        now = 200
+        connection = AccountConnection.pending(
+            connection_id="connection-one", discord_user_id=7,
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40,
+            wallet_type=WalletType.DEPOSIT_WALLET,
+            created_at=100, expires_at=300,
+        ).mark_verified(discord_user_id=7, now=150)
+        user_config = SimpleNamespace(
+            onboarding_challenge=_Value({"public": "pending"}),
+            account_connection=_Value(connection.to_record()), audit_events=_Value([]),
+        )
+        cog = Polymarket(object())
+        cog.config.user = lambda _user: user_config
+        with patch("polymarket.polymarket.time.time", return_value=now):
+            await Polymarket.polymarket_disconnect.callback(cog, ctx)
+        stored = AccountConnection.from_record(user_config.account_connection.value)
+        self.assertEqual(stored.state, ConnectionState.DISCONNECTED)
+        self.assertIsNone(user_config.onboarding_challenge.value)
+        self.assertEqual(user_config.audit_events.value[-1]["event"], "disconnected")
+        self.assertIn("No session key", ctx.send.await_args.args[0])
+
+    async def test_user_data_deletion_clears_all_polymarket_user_config(self):
+        clear = AsyncMock()
+        cog = SimpleNamespace(
+            config=SimpleNamespace(user_from_id=lambda _user_id: SimpleNamespace(clear=clear))
+        )
+        await Polymarket.red_delete_data_for_user(
+            cog, requester="discord_deleted_user", user_id=7
+        )
+        clear.assert_awaited_once_with()
 
     async def test_live_quote_builds_public_bounded_preview_without_execution(self):
         ctx = Context()

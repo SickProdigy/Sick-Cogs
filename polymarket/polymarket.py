@@ -1,3 +1,4 @@
+import hashlib
 import json
 import secrets
 import time
@@ -8,7 +9,9 @@ import aiohttp
 import discord
 from redbot.core import Config, checks, commands
 
-from .account_connection import AccountConnection, AccountConnectionError, WalletType
+from .account_connection import (
+    AccountConnection, AccountConnectionError, ConnectionState, WalletType,
+)
 from .collateral import CollateralPlanError, collateral_plan
 from .handoff import MarketSnapshot, MarketSnapshotError
 from .identity_verifier import PolygonAccountIdentityVerifier
@@ -120,7 +123,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.15"
+    __version__ = "0.2.16"
 
     def __init__(self, bot):
         self.bot = bot
@@ -132,7 +135,9 @@ class Polymarket(commands.Cog):
             production_paused=True,
             production_capabilities={name: False for name in PRODUCTION_CAPABILITIES},
         )
-        self.config.register_user(account_connection=None, onboarding_challenge=None)
+        self.config.register_user(
+            account_connection=None, onboarding_challenge=None, audit_events=[]
+        )
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -151,6 +156,17 @@ class Polymarket(commands.Cog):
             and bool(capabilities.get("eligibility"))
             and not validate_polymarket_production_manifest()
         )
+
+    async def _append_audit(self, user, event: str, binding: dict[str, Any]) -> None:
+        allowed = {"connect_started", "connect_verified", "disconnected"}
+        if event not in allowed:
+            raise AccountConnectionError("Polymarket audit event is invalid.")
+        digest = hashlib.sha256(
+            json.dumps(binding, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        events = list(await self.config.user(user).audit_events() or [])[-49:]
+        events.append({"event": event, "timestamp": int(time.time()), "digest": digest})
+        await self.config.user(user).audit_events.set(events)
 
     async def _polygon_rpc(self, method: str, params: list[Any]):
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
@@ -208,6 +224,7 @@ class Polymarket(commands.Cog):
         if not await self._account_connect_allowed():
             raise AccountConnectionError("Protected Polymarket connection was paused.")
         await self.config.user(user).account_connection.set(connection.to_record())
+        await self._append_audit(user, "connect_verified", connection.to_record())
         return connection
 
     async def _get_clob_json(self, path: str, params: dict | None = None):
@@ -237,7 +254,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Account connection", value=f"`{prefix}poly account` · DM-only `{prefix}poly connect` and `{prefix}poly confirm`\nProtected verification is default-off; never send secrets in Discord.", inline=False)
+        embed.add_field(name="Account connection", value=f"`{prefix}poly account` · DM-only `{prefix}poly connect` `{prefix}poly confirm`, and `{prefix}poly disconnect`\nProtected verification is default-off; never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -599,6 +616,16 @@ class Polymarket(commands.Cog):
         if not await self._account_connect_allowed():
             await ctx.send("Protected Polymarket connection is disabled or emergency-paused.")
             return
+        existing_record = await self.config.user(ctx.author).account_connection()
+        if existing_record:
+            try:
+                existing = AccountConnection.from_record(existing_record)
+            except AccountConnectionError:
+                await ctx.send("The stored Polymarket connection is invalid and must be cleared.")
+                return
+            if existing.state is ConnectionState.VERIFIED:
+                await ctx.send("Disconnect the current Polymarket account before replacing it.")
+                return
         cryptowallet = self.bot.get_cog("CryptoWallet")
         required = (
             "recovery_relay_status", "create_external_companion_handoff",
@@ -634,6 +661,7 @@ class Polymarket(commands.Cog):
             await self.config.user(ctx.author).onboarding_challenge.set(
                 challenge.to_record()
             )
+            await self._append_audit(ctx.author, "connect_started", challenge.to_record())
             link = (
                 f"{status['approval_base_url']}/polymarket-connect.html"
                 f"#handoff={quote(handoff, safe='')}"
@@ -676,6 +704,39 @@ class Polymarket(commands.Cog):
             "Polymarket account connected with independent signer, wallet-derivation, "
             "Polygon deployment, and eligibility checks. No funds moved and no order was placed."
         )
+
+    @polymarket.command(name="disconnect")
+    @commands.dm_only()
+    async def polymarket_disconnect(self, ctx: commands.Context):
+        """Disconnect the caller's public Polymarket account binding."""
+        user_config = self.config.user(ctx.author)
+        await user_config.onboarding_challenge.set(None)
+        record = await user_config.account_connection()
+        if not record:
+            await ctx.send("No Polymarket account is connected.")
+            return
+        try:
+            connection = AccountConnection.from_record(record)
+        except AccountConnectionError:
+            await user_config.account_connection.set(None)
+            await ctx.send("The invalid Polymarket account record was cleared.")
+            return
+        if connection.state is ConnectionState.DISCONNECTED:
+            await ctx.send("The Polymarket account is already disconnected.")
+            return
+        disconnected = connection.disconnect(
+            discord_user_id=ctx.author.id, now=int(time.time())
+        )
+        await user_config.account_connection.set(disconnected.to_record())
+        await self._append_audit(ctx.author, "disconnected", disconnected.to_record())
+        await ctx.send(
+            "Polymarket account disconnected. No session key or trading credential "
+            "was created by this release, and no transaction was submitted."
+        )
+
+    async def red_delete_data_for_user(self, *, requester, user_id: int) -> None:
+        """Delete the user's Polymarket connection, challenge, and audit records."""
+        await self.config.user_from_id(user_id).clear()
 
     @commands.group(name="polyset")
     @checks.is_owner()
