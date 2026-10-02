@@ -17,6 +17,7 @@ RECOVERY_RELAY_MAX_RESPONSE_BYTES = 16 * 1024
 RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS = 5 * 60
 RECOVERY_RELAY_TOTP_LIFETIME_SECONDS = 10 * 60
 RECOVERY_RELAY_TERMS_LIFETIME_SECONDS = 10 * 60
+RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS = 5 * 60
 
 
 def _relay_signature(secret: str, timestamp: int, nonce: str, body: bytes) -> str:
@@ -55,6 +56,7 @@ class RecoveryRelayMixin:
             "standard": RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
             "totp_enroll": RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
             "wallet_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
+            "polymarket_connect": RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS,
         }
         max_lifetime = lifetimes.get(purpose)
         now = int(time.time())

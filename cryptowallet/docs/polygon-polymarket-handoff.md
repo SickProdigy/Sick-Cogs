@@ -16,7 +16,7 @@ This is a develop-only design boundary. It does not enable Polygon in CryptoWall
 - Public RPC reads from a reviewed HTTPS endpoint: chain ID, native balance, token metadata/balance, transaction lookup, and explorer links.
 - Public Polymarket market discovery, immutable snapshots, bounded future-intent data, and readiness cards.
 - A typed user-scoped Polygon context containing only the Discord user ID, opaque wallet profile ID, optional public address, and an explicitly empty reviewed-capability set.
-- One-time handoff state that stores only an opaque-handle digest and public bindings, including chain 137, purpose, intent fingerprint, expiry, and replay state.
+- One-time handoff state that stores only an opaque-handle digest and public bindings, including chain 137, purpose, intent fingerprint, expiry, and replay state. The shared companion signer and encrypted one-time relay recognize a dedicated five-minute `polymarket_connect` purpose and reject fields outside the exact public onboarding schema; browser proof and result transport remain disabled.
 
 ## Prohibited until the protected execution flow is implemented, tested, and explicitly enabled
 

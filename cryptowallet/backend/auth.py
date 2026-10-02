@@ -18,6 +18,7 @@ JWT_LIFETIME_SECONDS = 5 * 60
 CLAIM_HANDOFF_LIFETIME_SECONDS = 3 * 60
 TOTP_ENROLLMENT_LIFETIME_SECONDS = 10 * 60
 WALLET_TERMS_LIFETIME_SECONDS = 10 * 60
+POLYMARKET_ONBOARDING_LIFETIME_SECONDS = 5 * 60
 
 
 def _base64url(value: bytes) -> str:
@@ -184,6 +185,7 @@ class JwtAuthMixin:
             "tokenfactory_external": "sickwallet_tokenfactory",
             "totp_enroll": "sickwallet_totp",
             "wallet_terms": "sickwallet_terms",
+            "polymarket_connect": "sickwallet_polymarket",
         }
         claim_name = claim_names.get(purpose)
         if claim_name is None or not isinstance(payload, dict):
@@ -198,6 +200,37 @@ class JwtAuthMixin:
                 or not 32 <= len(payload["result_handle"]) <= 128
             ):
                 raise ValueError("The CryptoWallet terms handoff binding is invalid")
+        if purpose == "polymarket_connect":
+            expected = {
+                "connection_id", "result_handle", "discord_user_id",
+                "signer_address", "account_wallet_address", "wallet_type",
+                "challenge", "created_at", "expires_at", "chain_id", "purpose",
+            }
+            wallet_types = {"EOA", "POLY_PROXY", "GNOSIS_SAFE", "DEPOSIT_WALLET"}
+            try:
+                signer = normalize_evm_address(payload.get("signer_address", ""))
+                wallet = normalize_evm_address(payload.get("account_wallet_address", ""))
+            except (AttributeError, ValueError) as exc:
+                raise ValueError("The Polymarket onboarding binding is invalid") from exc
+            if (
+                set(payload) != expected
+                or payload.get("purpose") != "polymarket_connect"
+                or payload.get("chain_id") != 137
+                or payload.get("discord_user_id") != discord_user_id
+                or payload.get("wallet_type") not in wallet_types
+                or not isinstance(payload.get("connection_id"), str)
+                or not 1 <= len(payload["connection_id"]) <= 128
+                or not isinstance(payload.get("result_handle"), str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["result_handle"]) is None
+                or not isinstance(payload.get("challenge"), str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["challenge"]) is None
+                or not isinstance(payload.get("created_at"), int)
+                or not isinstance(payload.get("expires_at"), int)
+                or payload["expires_at"] != payload["created_at"] + POLYMARKET_ONBOARDING_LIFETIME_SECONDS
+                or (payload["wallet_type"] == "EOA" and signer.casefold() != wallet.casefold())
+                or (payload["wallet_type"] != "EOA" and signer.casefold() == wallet.casefold())
+            ):
+                raise ValueError("The Polymarket onboarding binding is invalid")
         configuration = await self.jwt_configuration()
         if configuration is None:
             raise RuntimeError("The protected companion signing key is not configured")
@@ -206,7 +239,14 @@ class JwtAuthMixin:
         if not deployment_id or application_id is None:
             raise RuntimeError("The protected companion identity is incomplete")
         now = int(time.time())
+        if purpose == "polymarket_connect" and (
+            payload["created_at"] < now - 5 or payload["created_at"] > now + 5
+        ):
+            raise ValueError("The Polymarket onboarding binding is stale")
         lifetime = (
+            POLYMARKET_ONBOARDING_LIFETIME_SECONDS
+            if purpose == "polymarket_connect"
+            else
             WALLET_TERMS_LIFETIME_SECONDS
             if purpose == "wallet_terms"
             else TOTP_ENROLLMENT_LIFETIME_SECONDS

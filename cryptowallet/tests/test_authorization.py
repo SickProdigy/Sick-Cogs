@@ -19,12 +19,14 @@ from redbot.core import commands
 
 from ..backend.auth import (
     CLAIM_HANDOFF_LIFETIME_SECONDS,
+    POLYMARKET_ONBOARDING_LIFETIME_SECONDS,
     TOTP_ENROLLMENT_LIFETIME_SECONDS,
     WALLET_TERMS_LIFETIME_SECONDS,
     JwtAuthMixin,
     _key_id,
 )
 from ..backend.recovery_relay import (
+    RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS,
     RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
     RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
     RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
@@ -775,6 +777,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
             TOTP_ENROLLMENT_LIFETIME_SECONDS,
         )
         self.assertEqual(RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS, 5 * 60)
+        self.assertEqual(RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS, 5 * 60)
         endpoint = (
             Path(__file__).resolve().parents[1] / "web" / "api" / "recovery-handoff.php"
         ).read_text(encoding="utf-8")
@@ -782,6 +785,7 @@ class AuthorizationViewTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600", endpoint)
         self.assertIn("$expiresAt > $signedAt + $maxLifetime", endpoint)
         self.assertIn("totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS", endpoint)
+        self.assertIn("polymarket_connect' => RECOVERY_HANDOFF_POLYMARKET_LIFETIME_SECONDS", endpoint)
 
     async def test_totp_setup_reports_relay_failure_separately_from_dm_failure(self):
         author = SimpleNamespace(id=7, send=AsyncMock())
@@ -1019,6 +1023,42 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         handoff["requester_id"] = "8"
         with self.assertRaisesRegex(ValueError, "binding"):
             await harness.create_clanker_external_handoff(7, handoff)
+
+    async def test_polymarket_handoff_is_exact_user_bound_and_has_no_signer_authority(self):
+        harness = _JwtHarness(self.configuration)
+        now = int(time.time())
+        payload = {
+            "connection_id": "connection-one", "result_handle": "r" * 32,
+            "discord_user_id": 7, "signer_address": "0x" + "1" * 40,
+            "account_wallet_address": "0x" + "2" * 40,
+            "wallet_type": "DEPOSIT_WALLET", "challenge": "c" * 32,
+            "created_at": now,
+            "expires_at": now + POLYMARKET_ONBOARDING_LIFETIME_SECONDS,
+            "chain_id": 137, "purpose": "polymarket_connect",
+        }
+        token, expires_at = await harness.create_external_companion_handoff(
+            7, "polymarket_connect", payload
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_purpose"], "polymarket_connect")
+        self.assertEqual(claims["sickwallet_polymarket"], payload)
+        self.assertEqual(claims["sickwallet_discord_user"], "7")
+        self.assertNotIn("sickwallet_accounts", claims)
+        self.assertNotIn("sickwallet_address", claims)
+        self.assertLessEqual(expires_at, now + POLYMARKET_ONBOARDING_LIFETIME_SECONDS)
+        for changes in (
+            {"discord_user_id": 8}, {"chain_id": 1}, {"purpose": "other"},
+            {"wallet_type": "EOA"}, {"private_key": "forbidden"},
+            {"created_at": now - 10},
+        ):
+            changed = {**payload, **changes}
+            with self.assertRaisesRegex(ValueError, "Polymarket onboarding binding"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_connect", changed
+                )
 
     async def test_totp_enrollment_handoff_contains_only_public_metadata(self):
         harness = _JwtHarness(self.configuration)
