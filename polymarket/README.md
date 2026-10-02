@@ -4,9 +4,9 @@ A develop-only Sick-Cogs cog for prediction-market discovery and default-off pro
 
 ## Current boundary
 
-Version `0.2.16` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
+Version `0.2.17` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. It deliberately does **not** create or custody wallets, accept deposits, derive credentials, sign transactions, or place orders.
 
-Production controls are owner-only: `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. General production enablement deliberately refuses. The separate `polyset onboardingcontrol` can open only protected account connection and eligibility after its exact acknowledgment; every transaction capability remains disabled.
+Production controls are owner-only. Monetary caps default to all-zero and must satisfy per-order <= per-user-day <= installation-day before storage; changing them never enables a capability.  `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. General production enablement deliberately refuses. The separate `polyset onboardingcontrol` can open only protected account connection and eligibility after its exact acknowledgment; every transaction capability remains disabled.
 
 `poly account` reports the caller's connection state without accepting secrets. The develop-only account model keeps the immutable Discord user, signer address, account-wallet address, wallet type, and pending/verified/disconnected lifecycle separate. When the installation, emergency-pause, account-connect, and eligibility gates are deliberately opened for develop testing, the DM-only `poly connect` and `poly confirm` flow can connect an existing account without accepting secrets in Discord. The protected-onboarding contract requires exact signed-companion challenge binding, reviewed signer proof and account-relationship evidence, and a current browser-IP eligibility attestation before producing a verified public connection record. Its signed companion, browser proof, encrypted one-time result relay, independent Polygon derivation/deployment verification, and final public-record storage are connected; all defaults remain off and no transaction capability is enabled. Account relationship verification independently reproduces the official SDK's EOA, Proxy, Safe, legacy UUPS Deposit Wallet, and current beacon Deposit Wallet derivations, pins the SDK production RPC and factories, and requires deployed Polygon bytecode for smart wallets. Transient official ClobAuth EIP-712 signatures are independently recovered with challenge-derived nonces, strict expiry, and canonical low-S checks; only their digest is retained, and verified signer, account relationship, and eligibility evidence must agree before connection completion.
 
@@ -14,7 +14,7 @@ The reviewed session-key policy is Deposit-Wallet-only, beta, CLOB-scoped, fixed
 
 New Deposit Wallet creation is modeled but non-executable. The design pins the current beacon-derived empty target, Polygon chain `137`, Deposit Wallet factory, relayer type `WALLET_CREATE`, metadata `Deploy Deposit Wallet`, server-only Builder/Relayer authentication, five-minute owner approval and eligibility evidence, idempotency, public transaction identifiers, restart recovery, and `STATE_CONFIRMED`/`STATE_FAILED`/`STATE_INVALID` reconciliation. No credential field or submission adapter exists.
 
-Connection start, verification, and disconnect events retain only an event name, UTC timestamp, and SHA-256 digest in a 50-entry per-user audit trail. `poly disconnect` remains available during emergency pause, and Red user-data deletion clears the connection, pending challenge, and audit records.
+Terms start and acceptance plus connection start, verification, and disconnect events retain only an event name, UTC timestamp, and SHA-256 digest in a 50-entry per-user audit trail. `poly audit` shows the caller the latest ten digest-only events. `poly disconnect` remains available during emergency pause, and Red user-data deletion clears the connection, pending challenges, terms acceptance, and audit records.
 
 The root command aliases are `polymarket` and `poly`.
 
@@ -32,11 +32,14 @@ The root command aliases are `polymarket` and `poly`.
 - `poly readiness <market>` - public technical readiness details for one market.
 - `poly quote <market> <outcome> <max pUSD> [max price]` - fetch the live public CLOB book and fee rate and display a two-minute, all-in bounded approval preview. It never connects an account, signs, or submits.
 - `poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>` - inspect exact six-decimal asset, token, spender, amount, action contract, and revocation values without approving or transacting.
-- `poly account` - show the caller's secret-free account connection state.
+- `poly terms` and `poly termsconfirm` - review and record the current product-specific terms through a protected, one-time companion flow. Current acceptance is required before connection.
+- `poly audit` - show the caller their latest ten digest-only safety events.
+- `poly account` - show the caller.s secret-free account connection state.
 - `poly connect <signer> <account wallet> <EOA|POLY_PROXY|GNOSIS_SAFE|DEPOSIT_WALLET>` - start default-off protected existing-account verification in DM.
 - `poly confirm` - consume and independently verify the protected result in DM.
 - `poly disconnect` - clear any pending challenge and disconnect the public account binding even while production is paused.
 - `poly status` - the current safety boundary.
+- `polyset limits <per order> <per user/day> <installation/day>` - store ordered six-decimal pUSD caps without enabling execution. All defaults are zero.
 
 The category browser uses Polymarket's public Gamma API tags for Politics, Crypto, and Sports. General discovery remains available through explicit search and `trending`, so `markets` no longer starts with an unrelated mixed list.
 

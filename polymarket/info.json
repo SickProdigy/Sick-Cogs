@@ -2,7 +2,7 @@
   "author": ["SickProdigy"],
   "description": "Develop-only prediction-market discovery with default-off protected existing-account verification.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores per-user public Polymarket account connection records, short-lived public onboarding challenges, and a bounded digest-only safety audit, plus installation-wide production safety settings. It does not store wallet credentials or place trades.",
+  "end_user_data_statement": "This cog stores per-user public Polymarket account connection and versioned terms acceptance records, short-lived public onboarding challenges, and a bounded digest-only safety audit, plus installation-wide production safety settings. It does not store wallet credentials or place trades.",
   "hidden": false,
   "install_msg": "Public prediction-market discovery is available. Protected existing-account verification is default-off and emergency-paused; no transaction or order capability is enabled.",
   "min_bot_version": "3.5.0",
@@ -12,5 +12,5 @@
   "short": "Discovery and protected account verification",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.2.16"
+  "version": "0.2.17"
 }

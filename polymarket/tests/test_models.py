@@ -31,6 +31,11 @@ from polymarket.onboarding_verification import finalize_onboarding_evidence
 from polymarket.signer_proof import (
     CURVE_N, clob_auth_digest, recover_signer_address, verify_clob_auth_proof,
 )
+from polymarket.safety import ProductionLimits, SafetyLimitError
+from polymarket.terms import (
+    POLYMARKET_TERMS_VERSION, create_polymarket_terms_acceptance,
+    is_current_polymarket_terms_acceptance,
+)
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
     validate_session_key_policy,
@@ -565,6 +570,37 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             with self.subTest(manifest=changed):
                 self.assertTrue(validate_polymarket_production_manifest(changed))
 
+    def test_terms_acceptance_is_exact_versioned_and_user_bound(self):
+        record = create_polymarket_terms_acceptance(
+            7, now=100, acceptance_id="acceptance-one"
+        )
+        self.assertTrue(is_current_polymarket_terms_acceptance(record, 7))
+        self.assertFalse(is_current_polymarket_terms_acceptance(record, 8))
+        self.assertFalse(is_current_polymarket_terms_acceptance(
+            {**record, "version": "old"}, 7
+        ))
+        self.assertFalse(is_current_polymarket_terms_acceptance(
+            {**record, "extra": True}, 7
+        ))
+        self.assertEqual(record["version"], POLYMARKET_TERMS_VERSION)
+
+    def test_production_limits_default_zero_and_enforce_ordered_caps(self):
+        disabled = ProductionLimits("0", "0", "0")
+        self.assertTrue(disabled.execution_disabled)
+        self.assertFalse(disabled.permits(
+            order_pusd="1", user_day_pusd="0", installation_day_pusd="0"
+        ))
+        limits = ProductionLimits("5", "10", "20")
+        self.assertTrue(limits.permits(
+            order_pusd="5", user_day_pusd="5", installation_day_pusd="10"
+        ))
+        self.assertFalse(limits.permits(
+            order_pusd="5.000001", user_day_pusd="0", installation_day_pusd="0"
+        ))
+        for values in (("1", "0", "1"), ("10", "5", "20"), ("1.0000001", "2", "3")):
+            with self.assertRaises(SafetyLimitError):
+                ProductionLimits(*values)
+
     def test_cog_accepts_red_bot_instance(self):
         bot = object()
         self.assertIs(Polymarket(bot).bot, bot)
@@ -851,7 +887,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "connect", "confirm", "disconnect", "quote", "collateral"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "terms", "termsconfirm", "audit", "connect", "confirm", "disconnect", "quote", "collateral"):
             self.assertIn(command, fields)
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
@@ -869,6 +905,91 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
         bot.get_cog.assert_not_called()
+
+    async def test_protected_terms_flow_records_current_acceptance_and_digest_audit(self):
+        ctx = Context()
+        user_config = SimpleNamespace(
+            account_connection=_Value(None), onboarding_challenge=_Value(None),
+            terms_challenge=_Value(None), terms_acceptance=_Value(None),
+            audit_events=_Value([]),
+        )
+        crypto = SimpleNamespace(
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True, "approval_base_url": "https://wallet.example.test",
+            }),
+            create_external_companion_handoff=AsyncMock(
+                return_value=("signed-token", 700)
+            ),
+            register_recovery_handoff=AsyncMock(return_value="h" * 43),
+            poll_polymarket_terms_result=AsyncMock(return_value={
+                "status": "submitted", "product": "polymarket",
+                "version": POLYMARKET_TERMS_VERSION,
+                "acceptance_id": "a" * 32,
+            }),
+        )
+        bot = SimpleNamespace(get_cog=lambda _name: crypto)
+        cog = Polymarket(bot)
+        cog.config.user = lambda _user: user_config
+        with patch("polymarket.polymarket.time.time", return_value=100):
+            await Polymarket.polymarket_terms.callback(cog, ctx)
+        challenge = user_config.terms_challenge.value
+        self.assertEqual(challenge["version"], POLYMARKET_TERMS_VERSION)
+        self.assertIn("polymarket-terms.html", ctx.send.await_args.args[0])
+        self.assertEqual(user_config.audit_events.value[-1]["event"], "terms_started")
+        with patch("polymarket.polymarket.time.time", return_value=200):
+            await Polymarket.polymarket_terms_confirm.callback(cog, ctx)
+        self.assertIsNone(user_config.terms_challenge.value)
+        self.assertTrue(is_current_polymarket_terms_acceptance(
+            user_config.terms_acceptance.value, 7
+        ))
+        self.assertEqual(user_config.audit_events.value[-1]["event"], "terms_accepted")
+        self.assertNotIn("signed-token", repr(user_config.audit_events.value))
+
+    async def test_enabled_connect_requires_current_terms_before_companion_access(self):
+        ctx = Context()
+        bot = SimpleNamespace(get_cog=AsyncMock())
+        cog = Polymarket(bot)
+        cog.config.production_enabled.value = True
+        cog.config.production_paused.value = False
+        cog.config.production_capabilities.value = {
+            **cog.config.production_capabilities.value,
+            "account_connect": True, "eligibility": True,
+        }
+        await Polymarket.polymarket_connect.callback(
+            cog, ctx, "0x" + "1" * 40, "0x" + "1" * 40, "EOA"
+        )
+        self.assertIn("Accept the current Polymarket terms", ctx.send.await_args.args[0])
+        bot.get_cog.assert_not_called()
+
+    async def test_limit_control_validates_without_enabling_capabilities(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        await Polymarket.polymarketset_limits.callback(cog, ctx, "5", "10", "20")
+        self.assertEqual(await cog.config.production_limits(), {
+            "per_order_pusd": "5", "per_user_day_pusd": "10",
+            "installation_day_pusd": "20",
+        })
+        self.assertFalse(await cog.config.production_enabled())
+        self.assertFalse(any((await cog.config.production_capabilities()).values()))
+        await Polymarket.polymarketset_limits.callback(cog, ctx, "10", "5", "20")
+        self.assertIn("Limits were not changed", ctx.send.await_args.args[0])
+        self.assertEqual((await cog.config.production_limits())["per_order_pusd"], "5")
+
+    async def test_audit_is_bounded_to_fifty_digest_only_events(self):
+        cog = Polymarket(object())
+        user_config = SimpleNamespace(audit_events=_Value([]))
+        cog.config.user = lambda _user: user_config
+        user = SimpleNamespace(id=7)
+        with patch("polymarket.polymarket.time.time", return_value=100):
+            for sequence in range(55):
+                await cog._append_audit(
+                    user, "connect_started", {"sequence": sequence}
+                )
+        self.assertEqual(len(user_config.audit_events.value), 50)
+        self.assertEqual(set(user_config.audit_events.value[0]), {
+            "event", "timestamp", "digest",
+        })
+        self.assertEqual(len(user_config.audit_events.value[0]["digest"]), 64)
 
     async def test_onboarding_control_requires_exact_ack_and_enables_no_transaction_capability(self):
         ctx = Context()

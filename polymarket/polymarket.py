@@ -28,6 +28,11 @@ from .security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, EligibilityAttestation, validate_session_key_policy,
 )
 from .signer_proof import verify_clob_auth_proof
+from .safety import ProductionLimits, SafetyLimitError
+from .terms import (
+    POLYMARKET_TERMS_PRODUCT, POLYMARKET_TERMS_VERSION,
+    create_polymarket_terms_acceptance, is_current_polymarket_terms_acceptance,
+)
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
@@ -123,7 +128,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.16"
+    __version__ = "0.2.17"
 
     def __init__(self, bot):
         self.bot = bot
@@ -134,9 +139,14 @@ class Polymarket(commands.Cog):
             production_enabled=False,
             production_paused=True,
             production_capabilities={name: False for name in PRODUCTION_CAPABILITIES},
+            production_limits={
+                "per_order_pusd": "0", "per_user_day_pusd": "0",
+                "installation_day_pusd": "0",
+            },
         )
         self.config.register_user(
-            account_connection=None, onboarding_challenge=None, audit_events=[]
+            account_connection=None, onboarding_challenge=None, terms_challenge=None,
+            terms_acceptance=None, audit_events=[]
         )
 
     async def _get_json(self, path: str, params: dict | None = None):
@@ -158,7 +168,10 @@ class Polymarket(commands.Cog):
         )
 
     async def _append_audit(self, user, event: str, binding: dict[str, Any]) -> None:
-        allowed = {"connect_started", "connect_verified", "disconnected"}
+        allowed = {
+            "terms_started", "terms_accepted", "connect_started",
+            "connect_verified", "disconnected",
+        }
         if event not in allowed:
             raise AccountConnectionError("Polymarket audit event is invalid.")
         digest = hashlib.sha256(
@@ -254,7 +267,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Account connection", value=f"`{prefix}poly account` · DM-only `{prefix}poly connect` `{prefix}poly confirm`, and `{prefix}poly disconnect`\nProtected verification is default-off; never send secrets in Discord.", inline=False)
+        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly connect`, `{prefix}poly confirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` shows public connection state. Never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -582,6 +595,117 @@ class Polymarket(commands.Cog):
         embed.set_footer(text="No wallet creation, credentials, approvals, signatures, deposits, or orders")
         await ctx.send(embed=embed)
 
+    @polymarket.command(name="terms")
+    @commands.dm_only()
+    async def polymarket_terms(self, ctx: commands.Context):
+        """Open the protected, product-specific Polymarket terms acceptance."""
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        required = (
+            "recovery_relay_status", "create_external_companion_handoff",
+            "register_recovery_handoff", "poll_polymarket_terms_result",
+        )
+        if cryptowallet is None or not all(
+            callable(getattr(cryptowallet, name, None)) for name in required
+        ):
+            await ctx.send("The protected CryptoWallet companion is unavailable.")
+            return
+        try:
+            status = await cryptowallet.recovery_relay_status()
+            base_url = status.get("approval_base_url")
+            if not status.get("configured") or not base_url:
+                raise RuntimeError("companion unavailable")
+            result_handle = secrets.token_urlsafe(32)
+            payload = {
+                "product": POLYMARKET_TERMS_PRODUCT,
+                "version": POLYMARKET_TERMS_VERSION,
+                "result_handle": result_handle,
+            }
+            token, expires_at = await cryptowallet.create_external_companion_handoff(
+                ctx.author.id, "polymarket_terms", payload
+            )
+            handoff = await cryptowallet.register_recovery_handoff(
+                token, expires_at, purpose="polymarket_terms"
+            )
+            challenge = {
+                "result_handle": result_handle, "expires_at": expires_at,
+                "version": POLYMARKET_TERMS_VERSION,
+            }
+            await self.config.user(ctx.author).terms_challenge.set(challenge)
+            await self._append_audit(ctx.author, "terms_started", challenge)
+            encoded_handoff = quote(handoff, safe="")
+            link = f"{base_url}/polymarket-terms.html#handoff={encoded_handoff}"
+        except (KeyError, RuntimeError, ValueError):
+            await ctx.send("Protected Polymarket terms acceptance could not be prepared.")
+            return
+        await ctx.send(
+            f"Open this one-time protected link: {link}\n"
+            f"It expires <t:{expires_at}:R>. Then run "
+            f"`{ctx.clean_prefix}poly termsconfirm`."
+        )
+
+    @polymarket.command(name="termsconfirm")
+    @commands.dm_only()
+    async def polymarket_terms_confirm(self, ctx: commands.Context):
+        """Consume one protected Polymarket terms acceptance."""
+        user_config = self.config.user(ctx.author)
+        challenge = await user_config.terms_challenge()
+        if (
+            not isinstance(challenge, dict)
+            or set(challenge) != {"result_handle", "expires_at", "version"}
+            or challenge.get("version") != POLYMARKET_TERMS_VERSION
+            or int(challenge.get("expires_at", 0)) <= int(time.time())
+        ):
+            await user_config.terms_challenge.set(None)
+            await ctx.send("No current protected Polymarket terms acceptance is pending.")
+            return
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        poll = getattr(cryptowallet, "poll_polymarket_terms_result", None)
+        if not callable(poll):
+            await ctx.send("The protected CryptoWallet companion is unavailable.")
+            return
+        try:
+            result = await poll(challenge["result_handle"])
+        except RuntimeError:
+            await ctx.send("The protected terms result could not be verified.")
+            return
+        if result is None:
+            await ctx.send("Complete the protected page first, then run this command again.")
+            return
+        try:
+            acceptance = create_polymarket_terms_acceptance(
+                ctx.author.id, now=int(time.time()),
+                acceptance_id=result["acceptance_id"],
+            )
+        except (KeyError, TypeError, ValueError):
+            await user_config.terms_challenge.set(None)
+            await ctx.send("The protected terms result had an invalid binding.")
+            return
+        await user_config.terms_challenge.set(None)
+        await user_config.terms_acceptance.set(acceptance)
+        await self._append_audit(ctx.author, "terms_accepted", acceptance)
+        await ctx.send(
+            f"Polymarket terms **{POLYMARKET_TERMS_VERSION}** accepted. "
+            "No account was connected and no transaction was submitted."
+        )
+
+    @polymarket.command(name="audit")
+    @commands.dm_only()
+    async def polymarket_audit(self, ctx: commands.Context):
+        """Show the caller their bounded, digest-only Polymarket safety audit."""
+        events = list(await self.config.user(ctx.author).audit_events() or [])[-10:]
+        lines = [
+            "<t:{}:f> `{}` `{}...`".format(
+                int(item.get("timestamp")), item.get("event"),
+                item.get("digest", "")[:12],
+            )
+            for item in events if isinstance(item, dict)
+            and set(item) == {"event", "timestamp", "digest"}
+        ]
+        await ctx.send(
+            "**Polymarket safety audit (latest 10)**\n" + "\n".join(lines)
+            if lines else "No Polymarket safety events are recorded."
+        )
+
     @polymarket.command(name="account")
     async def polymarket_account(self, ctx: commands.Context):
         """Show the caller's secret-free Polymarket connection state."""
@@ -615,6 +739,14 @@ class Polymarket(commands.Cog):
         """Start protected existing-account verification in DM."""
         if not await self._account_connect_allowed():
             await ctx.send("Protected Polymarket connection is disabled or emergency-paused.")
+            return
+        if not is_current_polymarket_terms_acceptance(
+            await self.config.user(ctx.author).terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"`{ctx.clean_prefix}poly terms`."
+            )
             return
         existing_record = await self.config.user(ctx.author).account_connection()
         if existing_record:
@@ -756,6 +888,9 @@ class Polymarket(commands.Cog):
             f"Emergency paused: **{bool(await self.config.production_paused())}**\n"
             f"Enabled capabilities: **{', '.join(enabled) if enabled else 'none'}**\n"
             f"Session-key policy: **{'valid, beta, non-executable' if not validate_session_key_policy() else 'drift detected'}**\n"
+            f"Limits: **{(await self.config.production_limits())['per_order_pusd']} / "
+            f"{(await self.config.production_limits())['per_user_day_pusd']} / "
+            f"{(await self.config.production_limits())['installation_day_pusd']} pUSD**\n"
             "Order execution: **code-disabled**"
         )
 
@@ -795,6 +930,28 @@ class Polymarket(commands.Cog):
         await ctx.send(
             "Protected existing-account onboarding is enabled. Transaction, collateral, "
             "wallet-creation, order, cancel, and redeem capabilities remain disabled."
+        )
+
+    @polymarketset.command(name="limits")
+    async def polymarketset_limits(
+        self, ctx: commands.Context, per_order_pusd: str,
+        per_user_day_pusd: str, installation_day_pusd: str,
+    ):
+        """Set bounded pUSD limits without enabling any capability."""
+        try:
+            limits = ProductionLimits(
+                per_order_pusd, per_user_day_pusd, installation_day_pusd
+            )
+        except SafetyLimitError as exc:
+            await ctx.send(f"Limits were not changed: {exc}.")
+            return
+        await self.config.production_limits.set(limits.to_record())
+        await ctx.send(
+            "Polymarket limits stored: "
+            f"{limits.per_order_pusd} per order, "
+            f"{limits.per_user_day_pusd} per user/day, "
+            f"{limits.installation_day_pusd} installation/day pUSD. "
+            "No production capability was enabled."
         )
 
     @polymarketset.command(name="productioncontrol")
