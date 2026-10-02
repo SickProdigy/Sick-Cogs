@@ -6,7 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
-from dataclasses import dataclass, field, field
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 import aiohttp

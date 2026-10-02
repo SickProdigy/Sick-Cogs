@@ -7,12 +7,15 @@ import secrets
 from dataclasses import dataclass
 from typing import Literal
 
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, utils
 from eth_hash.auto import keccak
 
 from .account_connection import AccountConnectionError, normalize_evm_address
 from .security_policy import SESSION_KEY_LIFETIME_SECONDS
-from .signer_proof import CURVE_N
+from .signer_proof import (
+    CURVE_N, HALF_CURVE_N, clob_auth_digest, recover_signer_address,
+)
 
 
 BATCH_LIFETIME_SECONDS = 5 * 60
@@ -58,6 +61,35 @@ def generate_session_key() -> tuple[bytes, str]:
         scalar = int.from_bytes(private_key, "big")
         if 1 <= scalar < CURVE_N:
             return private_key, session_address_from_private_key(private_key)
+
+
+def sign_session_clob_auth(
+    private_key: bytes, *, timestamp: int, nonce: int,
+) -> tuple[str, str]:
+    """Sign exact ClobAuth locally and recover it to the generated session EOA."""
+
+    address = session_address_from_private_key(private_key)
+    digest = clob_auth_digest(
+        signer_address=address, timestamp=timestamp, nonce=nonce
+    )
+    scalar = int.from_bytes(private_key, "big")
+    der = ec.derive_private_key(scalar, ec.SECP256K1()).sign(
+        digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+    )
+    r, s = utils.decode_dss_signature(der)
+    if s > HALF_CURVE_N:
+        s = CURVE_N - s
+    for recovery_id in (0, 1):
+        signature = "0x" + (
+            r.to_bytes(32, "big") + s.to_bytes(32, "big")
+            + bytes([27 + recovery_id])
+        ).hex()
+        try:
+            if recover_signer_address(digest, signature) == address:
+                return signature, address
+        except AccountConnectionError:
+            continue
+    raise AccountConnectionError("Session ClobAuth signature could not be recovered.")
 
 
 def _address_word(address: str) -> bytes:

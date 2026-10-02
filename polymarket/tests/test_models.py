@@ -44,14 +44,19 @@ from polymarket.terms import (
     POLYMARKET_TERMS_VERSION, create_polymarket_terms_acceptance,
     is_current_polymarket_terms_acceptance,
 )
+from polymarket.session_transport import SessionKeyTransport
 from polymarket.session_authorization import (
     AUTHORIZATION_PATH, REVOCATION_PATH, SessionKeyOwnerApproval,
-    generate_session_key, session_address_from_private_key,
+    generate_session_key, session_address_from_private_key, sign_session_clob_auth,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
     POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
     validate_session_key_policy,
+)
+from polymarket.session_credential_store import (
+    EncryptedSessionCredentials, protect_session_credentials,
+    reveal_session_credentials,
 )
 from polymarket.session_key_store import (
     EncryptedSessionKey, SessionKeyStoreError, protect_session_private_key,
@@ -1188,6 +1193,12 @@ class SessionKeyAuthorizationTests(unittest.TestCase):
         ):
             generated, address = generate_session_key()
         self.assertEqual((generated, address), (private_key, expected))
+        signature, recovered = sign_session_clob_auth(
+            private_key, timestamp=100, nonce=0
+        )
+        self.assertEqual(recovered, expected)
+        self.assertEqual(len(signature), 132)
+        int(signature[2:], 16)
 
     def test_authorization_pins_exact_batch_and_request_contract(self):
         approval = self._approval()
@@ -1226,6 +1237,130 @@ class SessionKeyAuthorizationTests(unittest.TestCase):
         ):
             with self.assertRaises(AccountConnectionError):
                 self._approval(**changes)
+
+
+
+class SessionKeyTransportTests(unittest.IsolatedAsyncioTestCase):
+    def _approval(self, action="authorize"):
+        return SessionKeyOwnerApproval(
+            action=action, discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40, nonce=9, created_at=100,
+            deadline=400, idempotency_key="i" * 32,
+            valid_until=100 + SESSION_KEY_LIFETIME_SECONDS
+                if action == "authorize" else None,
+        )
+
+    async def test_nonce_uses_exact_owner_and_wallet_type(self):
+        request = AsyncMock(return_value={"address": "0x" + "4" * 40, "nonce": "9"})
+        nonce = await SessionKeyTransport(request).get_wallet_nonce("0x" + "1" * 40)
+        self.assertEqual(nonce, 9)
+        self.assertEqual(request.await_args.kwargs["params"], {
+            "address": "0x" + "1" * 40, "type": "WALLET",
+        })
+        self.assertTrue(request.await_args.args[1].endswith(
+            "/v1/account/transactions/params"
+        ))
+
+    async def test_authorization_submission_binds_builder_hmac_and_idempotency(self):
+        request = AsyncMock(return_value={
+            "operationId": "operation-1", "status": "SUBMITTED",
+            "transactionHash": "0x" + "a" * 64,
+            "transactionId": "transaction-1",
+        })
+        credentials = BuilderCredentials(
+            "builder-key", "YnVpbGRlci1zZWNyZXQ=", "builder-passphrase"
+        )
+        result = await SessionKeyTransport(request).submit(
+            self._approval(), "0x" + "1" * 130, credentials, timestamp=101
+        )
+        self.assertEqual(result["transaction_id"], "transaction-1")
+        sent = request.await_args
+        self.assertTrue(sent.args[1].endswith(AUTHORIZATION_PATH))
+        self.assertEqual(sent.kwargs["headers"]["Idempotency-Key"], "i" * 32)
+        self.assertIn("POLY_BUILDER_SIGNATURE", sent.kwargs["headers"])
+        self.assertEqual(json.loads(sent.kwargs["body"])["scopes"], ["CLOB"])
+
+    async def test_revocation_must_be_fenced(self):
+        credentials = BuilderCredentials(
+            "builder-key", "YnVpbGRlci1zZWNyZXQ=", "builder-passphrase"
+        )
+        response = {
+            "operationId": "operation-1", "status": "SUBMITTED",
+            "transactionId": "transaction-1", "fenced": False,
+        }
+        with self.assertRaisesRegex(AccountConnectionError, "not fenced"):
+            await SessionKeyTransport(AsyncMock(return_value=response)).submit(
+                self._approval("revoke"), "0x" + "1" * 130,
+                credentials, timestamp=101,
+            )
+
+    async def test_session_clob_credentials_use_exact_create_and_derive_routes(self):
+        private_key = (1).to_bytes(32, "big")
+        secret = base64.urlsafe_b64encode(b"c" * 32).decode()
+        request = AsyncMock(return_value={
+            "apiKey": "session-api-key", "secret": secret,
+            "passphrase": "session-passphrase",
+        })
+        transport = SessionKeyTransport(request)
+        created = await transport.session_credentials(
+            private_key, timestamp=100, nonce=0
+        )
+        self.assertEqual(created.key, "session-api-key")
+        create_call = request.await_args
+        self.assertEqual(create_call.args[0], "POST")
+        self.assertTrue(create_call.args[1].endswith("/auth/api-key"))
+        self.assertEqual(
+            create_call.kwargs["headers"]["POLY_ADDRESS"],
+            "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+        )
+        self.assertNotIn(secret, repr(created))
+
+        await transport.session_credentials(
+            private_key, timestamp=101, nonce=0, derive=True
+        )
+        derive_call = request.await_args
+        self.assertEqual(derive_call.args[0], "GET")
+        self.assertTrue(derive_call.args[1].endswith("/auth/derive-api-key"))
+
+    async def test_transaction_and_registry_require_exact_identity_scope_and_expiry(self):
+        approval = self._approval()
+        credentials = ClobCredentials(
+            "clob-key", base64.urlsafe_b64encode(b"c" * 32).decode(), "clob-pass"
+        )
+        request = AsyncMock(side_effect=[
+            {"transaction_id": "transaction-1", "transaction_hash": "0x" + "a" * 64,
+             "state": "STATE_CONFIRMED", "error_msg": None},
+            {"wallet": approval.wallet_address, "signers": [{
+                "address": approval.session_address, "scopes": ["CLOB"],
+                "valid_until": approval.valid_until,
+            }]},
+        ])
+        transport = SessionKeyTransport(request)
+        transaction = await transport.transaction("transaction-1")
+        self.assertEqual(transaction["state"], "STATE_CONFIRMED")
+        active = await transport.require_active(
+            approval, credentials=credentials, timestamp=102
+        )
+        self.assertEqual(active["address"], approval.session_address)
+        registry_call = request.await_args_list[1]
+        self.assertTrue(registry_call.args[1].endswith("/v1/user/session-signers"))
+        self.assertEqual(
+            registry_call.kwargs["headers"]["POLY_ADDRESS"], approval.owner_address
+        )
+
+        bad = AsyncMock(return_value={
+            "wallet": approval.wallet_address, "signers": [{
+                "address": approval.session_address, "scopes": ["ALL"],
+                "valid_until": approval.valid_until,
+            }]
+        })
+        with self.assertRaisesRegex(AccountConnectionError, "scope changed"):
+            await SessionKeyTransport(bad).active_session_keys(
+                owner_address=approval.owner_address,
+                wallet_address=approval.wallet_address,
+                credentials=credentials, timestamp=103,
+            )
 
 
 class SessionKeyStoreTests(unittest.TestCase):
@@ -1275,6 +1410,58 @@ class SessionKeyStoreTests(unittest.TestCase):
         changed["expires_at"] -= 1
         with self.assertRaises(SessionKeyStoreError):
             EncryptedSessionKey.from_record(changed)
+
+
+
+class SessionCredentialStoreTests(unittest.TestCase):
+    def setUp(self):
+        self.wrapping_key = bytes(range(32))
+        self.credentials = ClobCredentials(
+            "session-key", base64.urlsafe_b64encode(b"s" * 32).decode(),
+            "session-passphrase",
+        )
+        self.binding = {
+            "deployment_id": "sickgaming-test", "discord_user_id": 7,
+            "profile_id": "profile-seven",
+            "signer_address": "0x" + "1" * 40,
+            "account_wallet_address": "0x" + "2" * 40,
+            "session_address": "0x" + "3" * 40,
+        }
+
+    def test_credentials_round_trip_only_as_identity_bound_ciphertext(self):
+        record = protect_session_credentials(
+            self.wrapping_key, self.credentials, **self.binding,
+            created_at=100, expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        stored = record.to_record()
+        self.assertNotIn(self.credentials.key, repr(stored))
+        self.assertNotIn(self.credentials.secret, repr(stored))
+        self.assertNotIn(self.credentials.passphrase, repr(stored))
+        restored = reveal_session_credentials(
+            self.wrapping_key, stored, **self.binding
+        )
+        self.assertEqual(
+            (restored.key, restored.secret, restored.passphrase),
+            (self.credentials.key, self.credentials.secret,
+             self.credentials.passphrase),
+        )
+        self.assertEqual(EncryptedSessionCredentials.from_record(stored), record)
+
+    def test_credentials_reject_wrong_identity_key_or_metadata(self):
+        record = protect_session_credentials(
+            self.wrapping_key, self.credentials, **self.binding,
+            created_at=100, expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        for key, binding in (
+            (self.wrapping_key, {**self.binding, "discord_user_id": 8}),
+            (b"x" * 32, self.binding),
+        ):
+            with self.assertRaises(SessionKeyStoreError):
+                reveal_session_credentials(key, record, **binding)
+        changed = record.to_record()
+        changed["scope"] = "ALL"
+        with self.assertRaises(SessionKeyStoreError):
+            EncryptedSessionCredentials.from_record(changed)
 
 
 class TradeConfirmationTests(unittest.TestCase):
