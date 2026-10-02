@@ -44,6 +44,10 @@ from polymarket.terms import (
     POLYMARKET_TERMS_VERSION, create_polymarket_terms_acceptance,
     is_current_polymarket_terms_acceptance,
 )
+from polymarket.session_lifecycle import (
+    ROTATION_LEAD_SECONDS, SessionKeyLifecycle, SessionKeyOperation,
+    SessionKeyStatus, SessionOperationState,
+)
 from polymarket.session_transport import SessionKeyTransport
 from polymarket.session_authorization import (
     AUTHORIZATION_PATH, REVOCATION_PATH, SessionKeyOwnerApproval,
@@ -1411,6 +1415,94 @@ class SessionKeyStoreTests(unittest.TestCase):
         with self.assertRaises(SessionKeyStoreError):
             EncryptedSessionKey.from_record(changed)
 
+
+
+
+class SessionKeyLifecycleTests(unittest.TestCase):
+    def _approval(self, action="authorize", session="0x" + "3" * 40):
+        return SessionKeyOwnerApproval(
+            action=action, discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address=session, nonce=9, created_at=100, deadline=400,
+            idempotency_key="i" * 32,
+            valid_until=100 + SESSION_KEY_LIFETIME_SECONDS
+                if action == "authorize" else None,
+        )
+
+    def _complete(self, action="authorize"):
+        operation = SessionKeyOperation(self._approval(action)).approve(
+            "0x" + "1" * 130, now=101
+        ).begin_submission(now=102).record_submission({
+            "operation_id": "operation-1", "transaction_id": "transaction-1",
+            "transaction_hash": None,
+        }).reconcile_transaction({
+            "transaction_id": "transaction-1", "state": "STATE_CONFIRMED",
+            "transaction_hash": "0x" + "a" * 64, "error_msg": None,
+        })
+        return operation.confirm_registry(
+            active=action == "authorize", now=110
+        )
+
+    def test_operation_persists_only_signature_digest_and_recovers_restart(self):
+        signature = "0x" + "1" * 130
+        approved = SessionKeyOperation(self._approval()).approve(signature, now=101)
+        self.assertNotIn(signature, repr(approved.to_record()))
+        submitting = approved.begin_submission(now=102)
+        unknown = SessionKeyOperation.from_record(
+            json.loads(json.dumps(submitting.to_record()))
+        ).recover_after_restart()
+        self.assertEqual(unknown.state, SessionOperationState.UNKNOWN)
+
+    def test_authorization_requires_transaction_then_registry_before_activation(self):
+        operation = self._complete()
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40, created_at=100,
+            expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+        ).activate(operation)
+        self.assertEqual(lifecycle.status, SessionKeyStatus.ACTIVE)
+        self.assertEqual(lifecycle.activated_at, 110)
+        restored = SessionKeyLifecycle.from_record(
+            json.loads(json.dumps(lifecycle.to_record()))
+        )
+        self.assertEqual(restored, lifecycle)
+
+    def test_rotation_is_due_seven_days_early_and_old_key_waits_for_replacement(self):
+        lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40, created_at=100,
+            expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+            status=SessionKeyStatus.ACTIVE, activated_at=110,
+        )
+        self.assertEqual(lifecycle.maintenance_action(
+            now=lifecycle.expires_at - ROTATION_LEAD_SECONDS - 1
+        ), "none")
+        self.assertEqual(lifecycle.maintenance_action(
+            now=lifecycle.expires_at - ROTATION_LEAD_SECONDS
+        ), "rotate")
+        rotating = lifecycle.begin_rotation("0x" + "4" * 40)
+        with self.assertRaisesRegex(AccountConnectionError, "Replacement must be active"):
+            rotating.begin_revocation()
+        revoking = rotating.begin_revocation(replacement_active=True)
+        revoked = revoking.revoke(self._complete("revoke"))
+        self.assertEqual(revoked.status, SessionKeyStatus.REVOKED)
+        self.assertEqual(revoked.revoked_at, 110)
+
+    def test_failed_transaction_keeps_only_failure_digest(self):
+        operation = SessionKeyOperation(self._approval()).approve(
+            "0x" + "1" * 130, now=101
+        ).begin_submission(now=102).record_submission({
+            "operation_id": "operation-1", "transaction_id": "transaction-1",
+            "transaction_hash": None,
+        }).reconcile_transaction({
+            "transaction_id": "transaction-1", "state": "STATE_FAILED",
+            "transaction_hash": None, "error_msg": "sensitive provider detail",
+        })
+        self.assertEqual(operation.state, SessionOperationState.FAILED)
+        self.assertNotIn("sensitive provider detail", repr(operation))
+        self.assertEqual(len(operation.failure_digest), 64)
 
 
 class SessionCredentialStoreTests(unittest.TestCase):

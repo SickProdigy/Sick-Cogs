@@ -134,7 +134,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.24"
+    __version__ = "0.2.25"
 
     def __init__(self, bot):
         self.bot = bot
@@ -153,6 +153,10 @@ class Polymarket(commands.Cog):
         self.config.register_user(
             account_connection=None, onboarding_challenge=None, terms_challenge=None,
             terms_acceptance=None, audit_events=[], encrypted_session_key=None,
+            encrypted_session_credentials=None, session_lifecycle=None,
+            session_operation=None, replacement_session_lifecycle=None,
+            replacement_encrypted_session_key=None,
+            replacement_encrypted_session_credentials=None,
             bot_first_account=None, deposit_wallet_creation=None,
             final_confirmation_required=True
         )
