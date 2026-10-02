@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from enum import Enum
 from typing import Any, Mapping
 
 from eth_hash.auto import keccak
@@ -19,6 +20,15 @@ _HEX32 = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _HEX31 = re.compile(r"^0x[0-9a-fA-F]{62}$")
 _ID = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _BATCH_LIFETIME_SECONDS = 10 * 60
+class SettlementState(str, Enum):
+    APPROVED = "approved"
+    SUBMITTING = "submitting"
+    SUBMITTED = "submitted"
+    CONFIRMED = "confirmed"
+    FAILED = "failed"
+    UNKNOWN = "unknown"
+
+
 _BATCH_TYPES = {
     "Call": [
         {"name": "target", "type": "address"},
@@ -226,3 +236,149 @@ class SettlementPlan:
             return cls(**values)
         except (KeyError, TypeError, ValueError) as exc:
             raise AccountConnectionError("Stored settlement is invalid.") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementOperation:
+    """Restart-safe public lifecycle; raw owner signatures never persist."""
+
+    plan: SettlementPlan
+    state: SettlementState = SettlementState.APPROVED
+    owner_signature_digest: str | None = None
+    transaction_id: str | None = None
+    transaction_hash: str | None = None
+    failure_digest: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.plan, SettlementPlan) or not isinstance(
+            self.state, SettlementState
+        ):
+            raise AccountConnectionError("Settlement operation is invalid.")
+        for value in (self.owner_signature_digest, self.failure_digest):
+            if value is not None and re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise AccountConnectionError("Settlement operation digest is invalid.")
+        if self.transaction_id is not None and (
+            not isinstance(self.transaction_id, str)
+            or not self.transaction_id or len(self.transaction_id) > 128
+        ):
+            raise AccountConnectionError("Settlement transaction ID is invalid.")
+        if self.transaction_hash is not None and re.fullmatch(
+            r"0x[0-9a-f]{64}", self.transaction_hash
+        ) is None:
+            raise AccountConnectionError("Settlement transaction hash is invalid.")
+        if self.state is SettlementState.APPROVED and any((
+            self.owner_signature_digest, self.transaction_id,
+            self.transaction_hash, self.failure_digest,
+        )):
+            raise AccountConnectionError("Approved settlement contains results.")
+        if self.state is SettlementState.SUBMITTING and not self.owner_signature_digest:
+            raise AccountConnectionError("Submitting settlement lacks owner approval.")
+        if self.state in {SettlementState.SUBMITTED, SettlementState.CONFIRMED} and (
+            not self.owner_signature_digest or not self.transaction_id
+        ):
+            raise AccountConnectionError("Submitted settlement lacks identity.")
+        if self.state is SettlementState.CONFIRMED and not self.transaction_hash:
+            raise AccountConnectionError("Confirmed settlement lacks a transaction hash.")
+        if self.state is SettlementState.FAILED and not self.failure_digest:
+            raise AccountConnectionError("Failed settlement lacks a digest.")
+
+    def begin_submission(self, signature: str, *, now: int) -> "SettlementOperation":
+        if self.state is not SettlementState.APPROVED:
+            raise AccountConnectionError("Settlement is not approved.")
+        if now < self.plan.created_at or now >= self.plan.deadline:
+            raise AccountConnectionError("Settlement approval expired.")
+        self.plan.relayer_request(signature)
+        return replace(
+            self, state=SettlementState.SUBMITTING,
+            owner_signature_digest=hashlib.sha256(
+                bytes.fromhex(signature[2:])
+            ).hexdigest(),
+        )
+
+    def recover_after_restart(self) -> "SettlementOperation":
+        if self.state is SettlementState.SUBMITTING:
+            return replace(self, state=SettlementState.UNKNOWN)
+        return self
+
+    def record_submission(self, response: Mapping[str, Any]) -> "SettlementOperation":
+        if self.state is not SettlementState.SUBMITTING:
+            raise AccountConnectionError("Settlement is not submitting.")
+        transaction_id = response.get("transaction_id")
+        transaction_hash = response.get("transaction_hash")
+        if not isinstance(transaction_id, str) or not transaction_id or len(transaction_id) > 128:
+            return replace(self, state=SettlementState.UNKNOWN)
+        if transaction_hash is not None and (
+            not isinstance(transaction_hash, str)
+            or re.fullmatch(r"0x[0-9a-fA-F]{64}", transaction_hash) is None
+        ):
+            return replace(
+                self, state=SettlementState.UNKNOWN,
+                transaction_id=transaction_id,
+            )
+        return replace(
+            self, state=SettlementState.SUBMITTED,
+            transaction_id=transaction_id,
+            transaction_hash=transaction_hash.lower() if transaction_hash else None,
+        )
+
+    def reconcile(self, response: Mapping[str, Any]) -> "SettlementOperation":
+        if self.state not in {SettlementState.SUBMITTED, SettlementState.UNKNOWN}:
+            raise AccountConnectionError("Settlement cannot be reconciled.")
+        transaction_id = response.get("transaction_id")
+        if not isinstance(transaction_id, str) or not transaction_id:
+            raise AccountConnectionError("Settlement transaction identity is missing.")
+        if self.transaction_id and transaction_id != self.transaction_id:
+            raise AccountConnectionError("Settlement transaction identity changed.")
+        if any((
+            response.get("from") != self.plan.owner_address,
+            response.get("to") != POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
+            response.get("proxy_address") != self.plan.wallet_address,
+            response.get("type") != "WALLET",
+        )):
+            raise AccountConnectionError("Settlement relayer identity changed.")
+        state = response.get("state")
+        if state in {"STATE_FAILED", "STATE_INVALID"}:
+            reason = str(response.get("error_msg") or state)
+            return replace(
+                self, state=SettlementState.FAILED,
+                transaction_id=transaction_id,
+                failure_digest=hashlib.sha256(reason.encode("utf-8")).hexdigest(),
+            )
+        if state == "STATE_CONFIRMED":
+            transaction_hash = response.get("transaction_hash") or self.transaction_hash
+            if not isinstance(transaction_hash, str) or re.fullmatch(
+                r"0x[0-9a-fA-F]{64}", transaction_hash
+            ) is None:
+                raise AccountConnectionError(
+                    "Confirmed settlement lacks a transaction hash."
+                )
+            return replace(
+                self, state=SettlementState.CONFIRMED,
+                transaction_id=transaction_id,
+                transaction_hash=transaction_hash.lower(),
+            )
+        if state not in {"STATE_NEW", "STATE_EXECUTED", "STATE_MINED"}:
+            raise AccountConnectionError("Settlement relayer state is invalid.")
+        return replace(
+            self, state=SettlementState.SUBMITTED,
+            transaction_id=transaction_id,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "plan": self.plan.to_record(), "state": self.state.value,
+            "owner_signature_digest": self.owner_signature_digest,
+            "transaction_id": self.transaction_id,
+            "transaction_hash": self.transaction_hash,
+            "failure_digest": self.failure_digest,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "SettlementOperation":
+        try:
+            values = dict(record)
+            values["plan"] = SettlementPlan.from_record(values["plan"])
+            values["state"] = SettlementState(values["state"])
+            return cls(**values)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AccountConnectionError("Stored settlement operation is invalid.") from exc

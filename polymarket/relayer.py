@@ -1,4 +1,4 @@
-"""Exact Polymarket Builder/Relayer transport for Deposit Wallet creation."""
+"""Exact Polymarket Builder/Relayer transport for Deposit Wallet operations."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ import aiohttp
 from .account_connection import AccountConnectionError
 from .deposit_wallet import DepositWalletCreationPlan
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
+from .settlement import SettlementPlan
 
 
 SUBMIT_PATH = "/submit"
@@ -59,7 +60,7 @@ class BuilderCredentials:
 
 
 class DepositWalletRelayerClient:
-    """Submit and read only the reviewed Deposit Wallet creation operation."""
+    """Submit and read only reviewed Deposit Wallet operations."""
 
     def __init__(self, transport: Transport | None = None):
         self._transport = transport or self._http_transport
@@ -96,6 +97,67 @@ class DepositWalletRelayerClient:
         return {
             "transaction_id": payload.get("transactionID"),
             "transaction_hash": payload.get("transactionHash") or None,
+        }
+
+    async def submit_settlement(
+        self, plan: SettlementPlan, signature: str,
+        credentials: BuilderCredentials, *, timestamp: int,
+    ) -> dict:
+        body = json.dumps(
+            plan.relayer_request(signature), separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        headers = credentials.headers("POST", SUBMIT_PATH, body, timestamp)
+        headers.update({
+            "Content-Type": "application/json",
+            "Idempotency-Key": plan.idempotency_key,
+        })
+        payload = await self._transport(
+            "POST", POLYMARKET_PRODUCTION_MANIFEST.relayer_api + SUBMIT_PATH,
+            headers=headers, body=body, params=None,
+        )
+        allowed = {"transactionID", "transactionHash", "state", "hash"}
+        if not isinstance(payload, dict) or set(payload) - allowed:
+            raise AccountConnectionError("Polymarket settlement submission is invalid.")
+        transaction_id = payload.get("transactionID")
+        if not isinstance(transaction_id, str) or not transaction_id or len(transaction_id) > 128:
+            raise AccountConnectionError("Settlement transaction identity is invalid.")
+        transaction_hash = payload.get("transactionHash") or None
+        if transaction_hash is not None and (
+            not isinstance(transaction_hash, str)
+            or len(transaction_hash) != 66 or not transaction_hash.startswith("0x")
+        ):
+            raise AccountConnectionError("Settlement transaction hash is invalid.")
+        return {
+            "transaction_id": transaction_id,
+            "transaction_hash": transaction_hash.lower() if transaction_hash else None,
+        }
+
+    async def get_settlement(
+        self, plan: SettlementPlan, transaction_id: str,
+    ) -> dict:
+        if not isinstance(transaction_id, str) or not transaction_id or len(transaction_id) > 128:
+            raise AccountConnectionError("Settlement transaction identity is invalid.")
+        payload = await self._transport(
+            "GET", POLYMARKET_PRODUCTION_MANIFEST.relayer_api + TRANSACTION_PATH,
+            headers={"Accept": "application/json"}, body=None,
+            params={"id": transaction_id},
+        )
+        if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+            raise AccountConnectionError("Settlement transaction is unavailable.")
+        item = payload[0]
+        required = {"transactionID", "state", "from", "to", "proxyAddress", "type"}
+        if not required.issubset(item):
+            raise AccountConnectionError("Settlement transaction is incomplete.")
+        return {
+            "transaction_id": item["transactionID"],
+            "transaction_hash": item.get("transactionHash") or None,
+            "state": item["state"],
+            "from": str(item["from"]).lower(),
+            "to": str(item["to"]).lower(),
+            "proxy_address": str(item["proxyAddress"]).lower(),
+            "type": item["type"],
+            "error_msg": item.get("errorMsg"),
         }
 
     async def get_creation(self, plan: DepositWalletCreationPlan) -> dict:

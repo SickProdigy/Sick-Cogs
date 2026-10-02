@@ -86,8 +86,8 @@ from polymarket.session_authorization import (
     sign_session_clob_auth, verify_session_batch_signature,
 )
 from polymarket.settlement import (
-    SettlementCall, SettlementPlan, ctf_redeem_calldata,
-    decode_v3_position_id, router_redeem_calldata,
+    SettlementCall, SettlementOperation, SettlementPlan, SettlementState,
+    ctf_redeem_calldata, decode_v3_position_id, router_redeem_calldata,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
@@ -674,6 +674,52 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
                 **plan.to_record(),
                 "calls": [{**call.to_record(), "target": "0x" + "9" * 40}],
             })
+
+    def test_settlement_operation_is_restart_safe_and_identity_bound(self):
+        condition = "0x" + "ab" * 32
+        plan = SettlementPlan(
+            settlement_id="s" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="42",
+            condition_id=condition, token_id=str(1 << 80), outcome="Yes",
+            amount_atomic=4_000_000, protocol="2", negative_risk=False,
+            nonce=9, created_at=100, deadline=700,
+            idempotency_key="i" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter,
+                ctf_redeem_calldata(condition),
+            ),),
+        )
+        signature = "0x" + "12" * 65
+        submitting = SettlementOperation(plan).begin_submission(signature, now=101)
+        self.assertEqual(submitting.state, SettlementState.SUBMITTING)
+        self.assertNotIn(signature, repr(submitting))
+        unknown = SettlementOperation.from_record(
+            submitting.to_record()
+        ).recover_after_restart()
+        self.assertEqual(unknown.state, SettlementState.UNKNOWN)
+
+        submitted = submitting.record_submission({
+            "transaction_id": "settlement-1", "transaction_hash": None,
+        })
+        evidence = {
+            "transaction_id": "settlement-1",
+            "transaction_hash": "0x" + "d" * 64,
+            "state": "STATE_CONFIRMED", "from": plan.owner_address,
+            "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
+            "proxy_address": plan.wallet_address, "type": "WALLET",
+            "error_msg": None,
+        }
+        confirmed = submitted.reconcile(evidence)
+        self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
+        self.assertEqual(SettlementOperation.from_record(confirmed.to_record()), confirmed)
+        with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
+            submitted.reconcile({**evidence, "proxy_address": "0x" + "9" * 40})
+        failed = submitted.reconcile({
+            **evidence, "state": "STATE_FAILED", "error_msg": "private detail",
+        })
+        self.assertEqual(failed.state, SettlementState.FAILED)
+        self.assertNotIn("private detail", repr(failed))
 
     def test_collateral_plans_bind_exact_assets_spenders_amounts_and_revocation(self):
         wallet = "0x" + "9" * 40
@@ -1860,6 +1906,54 @@ class DepositWalletRelayerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
             plan.reconcile(changed)
 
+
+    async def test_settlement_submit_and_status_are_exact_and_strict(self):
+        condition = "0x" + "ab" * 32
+        plan = SettlementPlan(
+            settlement_id="s" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="42",
+            condition_id=condition, token_id=str(1 << 80), outcome="Yes",
+            amount_atomic=4_000_000, protocol="2", negative_risk=False,
+            nonce=9, created_at=100, deadline=700,
+            idempotency_key="i" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter,
+                ctf_redeem_calldata(condition),
+            ),),
+        )
+        signature = "0x" + "12" * 65
+        transport = AsyncMock(side_effect=[
+            {"transactionID": "settlement-1", "transactionHash": "", "state": "STATE_NEW"},
+            [{
+                "transactionID": "settlement-1", "transactionHash": "0x" + "d" * 64,
+                "state": "STATE_CONFIRMED", "from": plan.owner_address.upper(),
+                "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.upper(),
+                "proxyAddress": plan.wallet_address.upper(), "type": "WALLET",
+            }],
+        ])
+        client = DepositWalletRelayerClient(transport)
+        credentials = BuilderCredentials(
+            "builder-key", "YnVpbGRlci1zZWNyZXQ=", "builder-passphrase"
+        )
+        result = await client.submit_settlement(
+            plan, signature, credentials, timestamp=100
+        )
+        self.assertEqual(result, {
+            "transaction_id": "settlement-1", "transaction_hash": None,
+        })
+        request = transport.await_args_list[0]
+        self.assertEqual(request.args[1], POLYMARKET_PRODUCTION_MANIFEST.relayer_api + "/submit")
+        self.assertEqual(request.kwargs["headers"]["Idempotency-Key"], plan.idempotency_key)
+        self.assertEqual(json.loads(request.kwargs["body"]), plan.relayer_request(signature))
+
+        evidence = await client.get_settlement(plan, "settlement-1")
+        self.assertEqual(evidence["from"], plan.owner_address)
+        self.assertEqual(evidence["proxy_address"], plan.wallet_address)
+        confirmed = SettlementOperation(plan).begin_submission(
+            signature, now=101
+        ).record_submission(result).reconcile(evidence)
+        self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
 
     async def test_cog_submission_is_default_off_before_identity_or_secrets(self):
         cog = Polymarket.__new__(Polymarket)
