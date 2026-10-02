@@ -30,7 +30,7 @@ This is a develop-only design boundary. It does not enable Polygon in CryptoWall
 2. Polymarket derives the current official Deposit Wallet address from that verified EOA automatically. Ordinary users do not connect a separate account; the prior protected existing-account flow remains compatibility-only.
 3. Deposit Wallet deployment will use the official Builder/Relayer model with server-held builder credentials and exact user approval. Derivation alone never claims deployment.
 4. Scoped 180-day CLOB-only session keys are the selected routine order-signing model. They remain non-withdrawing and disabled until authorization, revocation, encrypted credential storage, and recovery pass testing.
-5. CDP owner signing is reserved for the narrow account-creation/authorization operations that require it; routine orders use the approved session key.
+5. CDP owner signing is reserved for the narrow account-creation/authorization operations that require it; routine orders use the approved session key. The adapter accepts only Polymarket's exact chain-137 ClobAuth EIP-712 structure, requires active CryptoWallet delegation, uses the documented end-user typed-data endpoint, and remains default-off.
 
 The pinned non-executable manifest lives in `polymarket/production_manifest.py`. It records current official endpoints, wallet types, pUSD metadata, and contract addresses and rejects drift before any future execution path can become available.
 

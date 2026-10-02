@@ -119,6 +119,8 @@ from ..core.polymarket import (
     PolymarketHandoffContext,
     PolymarketHandoffSession,
     PolymarketSignerContext,
+    polymarket_clob_auth_typed_data,
+    validate_polymarket_clob_auth_typed_data,
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
@@ -1998,6 +2000,124 @@ class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
             "no TXID or provider operation hash", ctx.send.await_args.args[0]
         )
         cog._refresh_submitted_intent.assert_not_awaited()
+
+
+class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
+    def test_clob_auth_builder_is_exact_and_rejects_drift(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        typed = polymarket_clob_auth_typed_data(
+            signer, timestamp=100, nonce=7
+        )
+        self.assertEqual(typed["domain"], {
+            "name": "ClobAuthDomain", "version": "1", "chainId": 137,
+        })
+        self.assertEqual(
+            validate_polymarket_clob_auth_typed_data(typed, signer), (100, 7)
+        )
+        changed = copy.deepcopy(typed)
+        changed["domain"]["chainId"] = 1
+        with self.assertRaisesRegex(ValueError, "changed"):
+            validate_polymarket_clob_auth_typed_data(changed, signer)
+
+    async def test_api_uses_documented_delegated_typed_data_route(self):
+        client = object.__new__(CdpApiClient)
+        client._request = AsyncMock(return_value={"signature": "0x" + "1" * 130})
+        typed = {"domain": {}, "types": {}, "primaryType": "X", "message": {}}
+
+        await client.sign_end_user_evm_typed_data(
+            "profile-7", "0x" + "1" * 40, "project-7", typed, "attempt-7"
+        )
+
+        client._request.assert_awaited_once_with(
+            "POST",
+            "/v2/embedded-wallet-api/end-users/profile-7/evm/sign/typed-data",
+            body={"address": "0x" + "1" * 40, "typedData": typed},
+            query={"projectID": "project-7"}, developer_auth=True,
+            idempotency_key="attempt-7",
+        )
+
+    async def test_provider_signs_only_exact_bound_clob_auth(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        typed = polymarket_clob_auth_typed_data(
+            signer, timestamp=100, nonce=7
+        )
+        signature = "0x" + "1" * 128 + "1b"
+        client = SimpleNamespace(
+            sign_end_user_evm_typed_data=AsyncMock(
+                return_value={"signature": signature}
+            )
+        )
+        credentials = SimpleNamespace(project_id="project-7")
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.polymarket_signer_context = AsyncMock(return_value={
+            "provider_user_id": "profile-7", "signer_address": signer,
+        })
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        provider.credentials_for_network = AsyncMock(return_value=credentials)
+        provider._api_client = lambda _credentials: client
+
+        result = await provider.sign_polymarket_clob_auth(
+            {"profile_id": "profile-7"}, 7, signer, typed, "attempt-7"
+        )
+
+        self.assertEqual(result["signature"], signature)
+        client.sign_end_user_evm_typed_data.assert_awaited_once_with(
+            "profile-7", signer, "project-7", typed, "attempt-7"
+        )
+        changed = copy.deepcopy(typed)
+        changed["message"]["address"] = "0x" + "2" * 40
+        with self.assertRaises(ValueError):
+            await provider.sign_polymarket_clob_auth(
+                {"profile_id": "profile-7"}, 7, signer, changed, "attempt-8"
+            )
+
+    async def test_cryptowallet_signing_gate_fails_before_profile_access(self):
+        config = SimpleNamespace(
+            polymarket_typed_signing_enabled=_Value(False),
+            provider_paused=_Value(False),
+            user=lambda _user: SimpleNamespace(security_locked=_Value(False)),
+        )
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.config = config
+        cog.get_or_create_wallet_profile = AsyncMock()
+        with self.assertRaisesRegex(RuntimeError, "remains disabled"):
+            await cog.polymarket_sign_clob_auth(
+                SimpleNamespace(id=7), typed_data={},
+                approval_fingerprint="a" * 64,
+            )
+        cog.get_or_create_wallet_profile.assert_not_awaited()
+
+
+    async def test_cryptowallet_enabled_route_uses_one_profile_and_exact_idempotency(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        typed = polymarket_clob_auth_typed_data(
+            signer, timestamp=100, nonce=7
+        )
+        user = SimpleNamespace(id=7)
+        profile = {"profile_id": "profile-7"}
+        provider = SimpleNamespace(sign_polymarket_clob_auth=AsyncMock(
+            return_value={"signature": "0x" + "1" * 128 + "1b",
+                          "signer_address": signer}
+        ))
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.config = SimpleNamespace(
+            polymarket_typed_signing_enabled=_Value(True),
+            provider_paused=_Value(False),
+            user=lambda _user: SimpleNamespace(security_locked=_Value(False)),
+        )
+        cog.wallet_provider = provider
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+
+        result = await cog.polymarket_sign_clob_auth(
+            user, typed_data=typed, approval_fingerprint="a" * 64,
+        )
+
+        self.assertEqual(result["signer_address"], signer)
+        cog.get_or_create_wallet_profile.assert_awaited_once_with(user)
+        provider.sign_polymarket_clob_auth.assert_awaited_once_with(
+            profile, 7, signer, typed,
+            "polymarket-clob-auth-" + "a" * 64,
+        )
 
 
 class PolymarketSignerContextTests(unittest.IsolatedAsyncioTestCase):

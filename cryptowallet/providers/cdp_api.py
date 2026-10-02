@@ -377,6 +377,24 @@ class CdpApiClient:
                 return
             raise
 
+
+    async def sign_end_user_evm_typed_data(
+        self, user_id: str, address: str, project_id: str, typed_data: dict,
+        idempotency_key: str,
+    ) -> dict:
+        """Sign one EIP-712 payload through an existing end-user delegation."""
+
+        path = (
+            f"/v2/embedded-wallet-api/end-users/{quote(user_id, safe='')}"
+            "/evm/sign/typed-data"
+        )
+        return await self._request(
+            "POST", path,
+            body={"address": address, "typedData": typed_data},
+            query={"projectID": project_id}, developer_auth=True,
+            idempotency_key=idempotency_key,
+        )
+
     async def send_smart_account_user_operation(
         self,
         user_id: str,

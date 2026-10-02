@@ -1149,6 +1149,42 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await user_config.final_confirmation_required())
         self.assertIn("**off**", ctx.send.await_args.args[0])
 
+    async def test_cdp_clob_auth_signature_is_recovered_to_bound_owner(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        challenge = ProtectedOnboardingChallenge(
+            connection_id="proof-vector", result_handle="r" * 32,
+            discord_user_id=7, signer_address=signer,
+            account_wallet_address=signer, wallet_type=WalletType.EOA,
+            challenge="c" * 32, created_at=100,
+            expires_at=100 + ONBOARDING_LIFETIME_SECONDS,
+        )
+        signature = (
+            "0x99d78d15b6c892b2e3bcaaee8835f2abf61447be309d5a3bc85ae2d1f5a039d6"
+            "46e1507a48bfe0904962391c1cb36b749254724b21a7aeb8df48042a114f48e21b"
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=signer, account_wallet_address="0x" + "2" * 40,
+            created_at=90,
+        )
+        crypto = SimpleNamespace(polymarket_sign_clob_auth=AsyncMock(
+            return_value={"signature": signature, "signer_address": signer}
+        ))
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: crypto if name == "CryptoWallet" else None
+        ))
+
+        result = await cog._request_cdp_clob_auth_signature(
+            SimpleNamespace(id=7), binding, timestamp=100,
+            nonce=challenge.auth_nonce,
+        )
+
+        self.assertEqual(result, signature)
+        request = crypto.polymarket_sign_clob_auth.await_args.kwargs
+        self.assertEqual(request["typed_data"]["domain"]["chainId"], 137)
+        self.assertEqual(request["typed_data"]["message"]["address"], signer)
+        self.assertEqual(len(request["approval_fingerprint"]), 64)
+
     async def test_account_automatically_binds_cryptowallet_owner_and_deposit_wallet(self):
         ctx = Context()
         owner = "0x" + "1" * 40

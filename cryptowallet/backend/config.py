@@ -92,6 +92,7 @@ def create_config(cog) -> Config:
         operating_mode="testnet",
         default_network=DEFAULT_NETWORK,
         provider_paused=False,
+        polymarket_typed_signing_enabled=False,
         base_mainnet_policy=BASE_MAINNET_POLICY_DEFAULT,
         base_mainnet_daily_usage={
             "day": None,

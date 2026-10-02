@@ -28,7 +28,10 @@ from .production_manifest import (
 from .security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, EligibilityAttestation, validate_session_key_policy,
 )
-from .signer_proof import verify_clob_auth_proof
+from .signer_proof import (
+    clob_auth_digest, recover_signer_address, verify_clob_auth_proof,
+)
+from cryptowallet.core.polymarket import polymarket_clob_auth_typed_data
 from .safety import ProductionLimits, SafetyLimitError
 from .terms import (
     POLYMARKET_TERMS_PRODUCT, POLYMARKET_TERMS_VERSION,
@@ -129,7 +132,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.20"
+    __version__ = "0.2.21"
 
     def __init__(self, bot):
         self.bot = bot
@@ -198,6 +201,51 @@ class Polymarket(commands.Cog):
         )
         await user_config.bot_first_account.set(binding.to_record())
         return binding
+
+    async def _request_cdp_clob_auth_signature(
+        self, user, binding: BotFirstAccountBinding, *,
+        timestamp: int, nonce: int,
+    ) -> str:
+        """Request and independently recover one exact transient ClobAuth signature."""
+
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        signer = getattr(cryptowallet, "polymarket_sign_clob_auth", None)
+        if not callable(signer):
+            raise AccountConnectionError("CryptoWallet signing is unavailable.")
+        typed_data = polymarket_clob_auth_typed_data(
+            binding.signer_address, timestamp=timestamp, nonce=nonce
+        )
+        approval_fingerprint = hashlib.sha256(
+            (
+                f"{binding.fingerprint}|{timestamp}|{nonce}|"
+                "eip712_clob_auth"
+            ).encode("ascii")
+        ).hexdigest()
+        try:
+            result = await signer(
+                user, typed_data=typed_data,
+                approval_fingerprint=approval_fingerprint,
+            )
+        except RuntimeError as exc:
+            raise AccountConnectionError(
+                "CryptoWallet Polymarket signing is unavailable."
+            ) from exc
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"signature", "signer_address"}
+            or result["signer_address"] != binding.signer_address
+        ):
+            raise AccountConnectionError("CryptoWallet returned an invalid signer result.")
+        digest = clob_auth_digest(
+            signer_address=binding.signer_address,
+            timestamp=timestamp, nonce=nonce,
+        )
+        recovered = recover_signer_address(digest, str(result["signature"]))
+        if recovered != binding.signer_address:
+            raise AccountConnectionError(
+                "CDP signature does not match the bound CryptoWallet owner."
+            )
+        return str(result["signature"])
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:

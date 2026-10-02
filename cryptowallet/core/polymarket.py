@@ -11,6 +11,74 @@ POLYMARKET_COLLATERAL_SYMBOL = "pUSD"
 POLYMARKET_HANDOFF_PURPOSE = "polymarket-order-review"
 
 
+CLOB_AUTH_MESSAGE = "This message attests that I control the given wallet"
+CLOB_AUTH_DOMAIN = {"name": "ClobAuthDomain", "version": "1", "chainId": 137}
+CLOB_AUTH_TYPES = {
+    "ClobAuth": [
+        {"name": "address", "type": "address"},
+        {"name": "timestamp", "type": "string"},
+        {"name": "nonce", "type": "uint256"},
+        {"name": "message", "type": "string"},
+    ]
+}
+
+
+def polymarket_clob_auth_typed_data(
+    signer_address: str, *, timestamp: int, nonce: int
+) -> dict:
+    """Build the exact current Polymarket L1 ClobAuth EIP-712 payload."""
+
+    address = signer_address.lower()
+    raw = address.removeprefix("0x")
+    if (
+        len(raw) != 40
+        or any(character not in "0123456789abcdef" for character in raw)
+        or timestamp <= 0
+        or not 0 <= nonce < 2**256
+    ):
+        raise ValueError("Polymarket ClobAuth identity or timing is invalid.")
+    return {
+        "domain": dict(CLOB_AUTH_DOMAIN),
+        "types": {
+            "ClobAuth": [dict(field) for field in CLOB_AUTH_TYPES["ClobAuth"]]
+        },
+        "primaryType": "ClobAuth",
+        "message": {
+            "address": address,
+            "timestamp": str(timestamp),
+            "nonce": str(nonce),
+            "message": CLOB_AUTH_MESSAGE,
+        },
+    }
+
+
+def validate_polymarket_clob_auth_typed_data(
+    typed_data: dict, signer_address: str
+) -> tuple[int, int]:
+    """Reject every EIP-712 payload outside the exact Polymarket proof."""
+
+    if not isinstance(typed_data, dict) or set(typed_data) != {
+        "domain", "types", "primaryType", "message"
+    }:
+        raise ValueError("Polymarket ClobAuth typed data has an invalid shape.")
+    message = typed_data.get("message")
+    if not isinstance(message, dict) or set(message) != {
+        "address", "timestamp", "nonce", "message"
+    }:
+        raise ValueError("Polymarket ClobAuth message has an invalid shape.")
+    try:
+        timestamp = int(message["timestamp"])
+        nonce = int(message["nonce"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Polymarket ClobAuth timing is invalid.") from exc
+    expected = polymarket_clob_auth_typed_data(
+        signer_address, timestamp=timestamp, nonce=nonce
+    )
+    if typed_data != expected:
+        raise ValueError("Polymarket ClobAuth typed data changed.")
+    return timestamp, nonce
+
+
 @dataclass(frozen=True, slots=True)
 class PolymarketHandoffAvailability:
     """Public state of the intentionally unavailable Polygon handoff."""

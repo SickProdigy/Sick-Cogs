@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import re
 import secrets
 import time
 
@@ -17,6 +18,7 @@ from .backend.usage import ProviderUsageMixin
 from .commands import WalletAdminCommands, WalletCommands
 from .core.clanker import signing_intent_from_clanker_launch
 from .core.models import IntentStatus
+from .core.polymarket import validate_polymarket_clob_auth_typed_data
 from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
 from .core.networks import BASE_MAINNET, BASE_SEPOLIA, KNOWN_NETWORKS
@@ -132,6 +134,33 @@ class CryptoWallet(
             await self.wallet_provider.polymarket_signer_context(profile, user.id)
         ))
         return context.to_dict()
+
+    async def polymarket_sign_clob_auth(
+        self, user, *, typed_data: dict, approval_fingerprint: str,
+    ) -> dict:
+        """Use the verified CDP EOA for one exact, user-approved ClobAuth proof."""
+
+        if not bool(await self.config.polymarket_typed_signing_enabled()):
+            raise RuntimeError("CryptoWallet Polymarket signing remains disabled.")
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if not re.fullmatch(r"[0-9a-f]{64}", approval_fingerprint):
+            raise RuntimeError("Polymarket signing approval is invalid.")
+        try:
+            message = typed_data.get("message") if isinstance(typed_data, dict) else None
+            signer_address = normalize_evm_address(
+                str((message or {}).get("address") or "")
+            ).lower()
+            validate_polymarket_clob_auth_typed_data(typed_data, signer_address)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("Polymarket ClobAuth typed data is invalid.") from exc
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.sign_polymarket_clob_auth(
+            profile, user.id, signer_address, typed_data,
+            f"polymarket-clob-auth-{approval_fingerprint}",
+        )
 
     async def estimate_base_mainnet_call_fee(
         self, *, from_address: str, to_address: str, value_wei: int, data: str
