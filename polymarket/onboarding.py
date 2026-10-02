@@ -82,6 +82,10 @@ class ProtectedOnboardingChallenge:
             raise AccountConnectionError("Onboarding target is invalid.")
 
     @property
+    def auth_nonce(self) -> int:
+        return int.from_bytes(hashlib.sha256(self.challenge.encode("ascii")).digest(), "big")
+
+    @property
     def fingerprint(self) -> str:
         return _fingerprint(self.to_record())
 

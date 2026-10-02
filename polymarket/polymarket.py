@@ -105,7 +105,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.12"
+    __version__ = "0.2.13"
 
     def __init__(self, bot):
         self.bot = bot

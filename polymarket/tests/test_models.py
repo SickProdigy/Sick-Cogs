@@ -12,7 +12,9 @@ from polymarket.account_connection import (
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
-from polymarket.identity_verifier import PolygonAccountIdentityVerifier
+from polymarket.identity_verifier import (
+    AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
+)
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
@@ -20,6 +22,10 @@ from polymarket.order_lifecycle import (
 from polymarket.onboarding import (
     ONBOARDING_LIFETIME_SECONDS, ProtectedOnboardingChallenge,
     ProtectedOnboardingResult, complete_protected_onboarding,
+)
+from polymarket.onboarding_verification import finalize_onboarding_evidence
+from polymarket.signer_proof import (
+    CURVE_N, clob_auth_digest, recover_signer_address, verify_clob_auth_proof,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
@@ -178,6 +184,89 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
                 account_wallet_address="0x" + "2" * 40,
                 wallet_type=WalletType.EOA, created_at=100, expires_at=200,
             )
+
+    def test_clob_auth_signer_proof_matches_viem_and_discards_raw_signature(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        challenge = ProtectedOnboardingChallenge(
+            connection_id="proof-vector", result_handle="r" * 32,
+            discord_user_id=7, signer_address=signer,
+            account_wallet_address=signer, wallet_type=WalletType.EOA,
+            challenge="c" * 32, created_at=100,
+            expires_at=100 + ONBOARDING_LIFETIME_SECONDS,
+        )
+        signature = (
+            "0x99d78d15b6c892b2e3bcaaee8835f2abf61447be309d5a3bc85ae2d1f5a039d6"
+            "46e1507a48bfe0904962391c1cb36b749254724b21a7aeb8df48042a114f48e21b"
+        )
+        digest = clob_auth_digest(
+            signer_address=signer, timestamp=100, nonce=challenge.auth_nonce
+        )
+        self.assertEqual(
+            digest.hex(),
+            "bf5483d8748c28b64987972e2aa548d283f9411dfca1ad457ea9b65ac64dcf60",
+        )
+        self.assertEqual(recover_signer_address(digest, signature), signer)
+        evidence = verify_clob_auth_proof(
+            challenge, signature=signature, discord_user_id=7, now=150
+        )
+        self.assertEqual(evidence.signer_address, signer)
+        self.assertEqual(evidence.auth_nonce, challenge.auth_nonce)
+        self.assertFalse(hasattr(evidence, "signature"))
+        relationship = AccountRelationshipEvidence(
+            signer_address=signer, account_wallet_address=signer,
+            wallet_type=WalletType.EOA, block_number=100,
+            code_hash="0x" + "0" * 64, evidence_digest="b" * 64,
+        )
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="IE", region="",
+            checked_at=150, expires_at=150 + ELIGIBILITY_LIFETIME_SECONDS,
+        )
+        with self.assertRaises(AccountConnectionError):
+            finalize_onboarding_evidence(
+                challenge, signer_proof=evidence, account_relationship=relationship,
+                eligibility=replace(
+                    eligibility, checked_at=99,
+                    expires_at=99 + ELIGIBILITY_LIFETIME_SECONDS,
+                ),
+                discord_user_id=7, now=151,
+            )
+        result = finalize_onboarding_evidence(
+            challenge, signer_proof=evidence, account_relationship=relationship,
+            eligibility=eligibility, discord_user_id=7, now=151,
+        )
+        connection = complete_protected_onboarding(
+            challenge, result, discord_user_id=7, now=151
+        )
+        self.assertEqual(connection.state, ConnectionState.VERIFIED)
+
+    def test_clob_auth_signer_proof_rejects_replay_malleability_and_identity_drift(self):
+        signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        challenge = ProtectedOnboardingChallenge(
+            connection_id="proof-vector", result_handle="r" * 32,
+            discord_user_id=7, signer_address=signer,
+            account_wallet_address=signer, wallet_type=WalletType.EOA,
+            challenge="c" * 32, created_at=100,
+            expires_at=100 + ONBOARDING_LIFETIME_SECONDS,
+        )
+        signature = (
+            "0x99d78d15b6c892b2e3bcaaee8835f2abf61447be309d5a3bc85ae2d1f5a039d6"
+            "46e1507a48bfe0904962391c1cb36b749254724b21a7aeb8df48042a114f48e21b"
+        )
+        raw = bytes.fromhex(signature[2:])
+        high_s = CURVE_N - int.from_bytes(raw[32:64], "big")
+        high_s_signature = "0x" + (
+            raw[:32] + high_s.to_bytes(32, "big") + bytes([raw[64] ^ 1])
+        ).hex()
+        for changed, user_id, now, candidate in (
+            (replace(challenge, challenge="d" * 32), 7, 150, signature),
+            (challenge, 8, 150, signature),
+            (challenge, 7, challenge.expires_at, signature),
+            (challenge, 7, 150, high_s_signature),
+        ):
+            with self.assertRaises(AccountConnectionError):
+                verify_clob_auth_proof(
+                    changed, signature=candidate, discord_user_id=user_id, now=now
+                )
 
     def test_session_key_policy_is_scoped_non_executable_and_drift_checked(self):
         policy = POLYMARKET_SESSION_KEY_POLICY
