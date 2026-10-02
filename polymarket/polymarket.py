@@ -38,7 +38,9 @@ from .session_authorization import (
     BATCH_LIFETIME_SECONDS, SessionKeyOwnerApproval, generate_session_key,
     verify_session_batch_signature,
 )
-from .session_credential_store import protect_session_credentials
+from .session_credential_store import (
+    EncryptedSessionCredentials, protect_session_credentials,
+)
 from .session_key_store import (
     EncryptedSessionKey, SESSION_KEY_TOKEN_NAMESPACE, decode_wrapping_key,
     encode_wrapping_key, protect_session_private_key, reveal_session_private_key,
@@ -149,7 +151,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.27"
+    __version__ = "0.2.28"
 
     def __init__(self, bot):
         self.bot = bot
@@ -170,8 +172,10 @@ class Polymarket(commands.Cog):
             terms_acceptance=None, audit_events=[], encrypted_session_key=None,
             encrypted_session_credentials=None, session_lifecycle=None,
             session_operation=None, replacement_session_lifecycle=None,
+            replacement_session_operation=None,
             replacement_encrypted_session_key=None,
             replacement_encrypted_session_credentials=None,
+            session_lifecycle_history=[],
             bot_first_account=None, deposit_wallet_creation=None,
             final_confirmation_required=True
         )
@@ -379,8 +383,285 @@ class Polymarket(commands.Cog):
         await user_config.session_operation.set(submitted.to_record())
         return submitted
 
+    async def _maintain_session_key(
+        self, user, eligibility: EligibilityAttestation | None = None,
+    ) -> str:
+        """Advance exactly one persisted lifecycle step without hidden retries."""
+
+        lifecycle_record = await self.config.user(user).session_lifecycle()
+        if not lifecycle_record:
+            return "none"
+        lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+        action = lifecycle.maintenance_action(now=int(time.time()))
+        if action == "reconcile":
+            operation_record = await self.config.user(user).session_operation()
+            if not operation_record:
+                raise AccountConnectionError(
+                    "Polymarket session operation is missing."
+                )
+            operation = SessionKeyOperation.from_record(
+                operation_record
+            ).recover_after_restart()
+            if operation.state is SessionOperationState.PENDING_OWNER_APPROVAL:
+                await self._submit_pending_session_key(user)
+                return "approval_submitted"
+            await self._reconcile_session_key(user)
+            return "reconciled"
+        if action == "rotate":
+            if eligibility is None:
+                raise AccountConnectionError(
+                    "Fresh protected eligibility is required for session rotation."
+                )
+            await self._begin_session_rotation(user, eligibility)
+            return "rotation_submitted"
+        if action == "activate_replacement":
+            replacement_record = (
+                await self.config.user(user).replacement_session_lifecycle()
+            )
+            if not replacement_record:
+                raise AccountConnectionError(
+                    "Polymarket replacement session is missing."
+                )
+            replacement = SessionKeyLifecycle.from_record(replacement_record)
+            if replacement.status is SessionKeyStatus.ACTIVE:
+                await self._begin_session_revocation(user)
+                return "old_key_revocation_submitted"
+            operation_record = await self.config.user(user).session_operation()
+            if not operation_record:
+                raise AccountConnectionError(
+                    "Polymarket replacement operation is missing."
+                )
+            operation = SessionKeyOperation.from_record(
+                operation_record
+            ).recover_after_restart()
+            if operation.state is SessionOperationState.PENDING_OWNER_APPROVAL:
+                await self._submit_pending_session_key(user)
+                return "replacement_approval_submitted"
+            await self._reconcile_replacement_session_key(user)
+            return "replacement_reconciled"
+        if action == "revoke_expired":
+            await self._begin_session_revocation(user)
+            return "expired_key_revocation_submitted"
+        return "none"
+
+    async def _begin_session_rotation(
+        self, user, eligibility: EligibilityAttestation,
+    ) -> SessionKeyOperation:
+        """Authorize a replacement while retaining the current active session."""
+
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session rotation is disabled.")
+        now = int(time.time())
+        eligibility.require_current(discord_user_id=user.id, now=now)
+        user_config = self.config.user(user)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), user.id
+        ):
+            raise AccountConnectionError("Current Polymarket terms are required.")
+        lifecycle_record = await user_config.session_lifecycle()
+        encrypted_record = await user_config.encrypted_session_key()
+        credential_record = await user_config.encrypted_session_credentials()
+        if not all((lifecycle_record, encrypted_record, credential_record)):
+            raise AccountConnectionError("The active Polymarket session is incomplete.")
+        lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+        encrypted = EncryptedSessionKey.from_record(encrypted_record)
+        encrypted_credentials = EncryptedSessionCredentials.from_record(
+            credential_record
+        )
+        if lifecycle.maintenance_action(now=now) != "rotate":
+            raise AccountConnectionError("Polymarket session rotation is not due.")
+        binding = await self._bot_first_account(user)
+        if (
+            lifecycle.discord_user_id != user.id
+            or lifecycle.profile_id != binding.profile_id
+            or lifecycle.owner_address != binding.signer_address
+            or lifecycle.wallet_address != binding.account_wallet_address
+            or encrypted.session_address != lifecycle.session_address
+            or encrypted_credentials.profile_id != lifecycle.profile_id
+            or encrypted_credentials.signer_address != lifecycle.owner_address
+            or encrypted_credentials.account_wallet_address != lifecycle.wallet_address
+            or encrypted_credentials.session_address != lifecycle.session_address
+        ):
+            raise AccountConnectionError("Polymarket session identity changed.")
+        wrapping_key, deployment_id = await self._session_storage_material()
+        builder_tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            BuilderCredentials(
+                builder_tokens["api_key"], builder_tokens["secret"],
+                builder_tokens["passphrase"],
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        nonce = await self.session_transport.get_wallet_nonce(binding.signer_address)
+        private_key, session_address = generate_session_key()
+        approval = SessionKeyOwnerApproval(
+            action="authorize", discord_user_id=user.id,
+            profile_id=binding.profile_id,
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address=session_address, nonce=nonce, created_at=now,
+            deadline=now + BATCH_LIFETIME_SECONDS,
+            valid_until=now + SESSION_KEY_LIFETIME_SECONDS,
+            idempotency_key=secrets.token_urlsafe(32),
+        )
+        encrypted_replacement = protect_session_private_key(
+            wrapping_key, private_key, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=binding.profile_id,
+            signer_address=binding.signer_address,
+            account_wallet_address=binding.account_wallet_address,
+            session_address=session_address, created_at=now,
+            expires_at=approval.valid_until,
+        )
+        replacement = SessionKeyLifecycle(
+            discord_user_id=user.id, profile_id=binding.profile_id,
+            owner_address=binding.signer_address,
+            wallet_address=binding.account_wallet_address,
+            session_address=session_address, created_at=now,
+            expires_at=approval.valid_until,
+        )
+        operation = SessionKeyOperation(approval)
+        rotating = lifecycle.begin_rotation(session_address)
+        async with user_config.all() as values:
+            current = SessionKeyLifecycle.from_record(values["session_lifecycle"])
+            if current != lifecycle or any(values.get(field) for field in (
+                "replacement_session_lifecycle",
+                "replacement_session_operation",
+                "replacement_encrypted_session_key",
+                "replacement_encrypted_session_credentials",
+            )):
+                raise AccountConnectionError("Polymarket session rotation state changed.")
+            values["session_lifecycle"] = rotating.to_record()
+            values["session_operation"] = operation.to_record()
+            values["replacement_session_lifecycle"] = replacement.to_record()
+            values["replacement_session_operation"] = operation.to_record()
+            values["replacement_encrypted_session_key"] = (
+                encrypted_replacement.to_record()
+            )
+        return await self._submit_pending_session_key(user)
+
+    async def _reconcile_replacement_session_key(
+        self, user,
+    ) -> SessionKeyLifecycle:
+        """Activate a replacement without revoking the current key early."""
+
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session rotation is disabled.")
+        user_config = self.config.user(user)
+        operation_record = await user_config.session_operation()
+        lifecycle_record = await user_config.session_lifecycle()
+        replacement_record = await user_config.replacement_session_lifecycle()
+        encrypted_record = await user_config.replacement_encrypted_session_key()
+        if not all((
+            operation_record, lifecycle_record, replacement_record, encrypted_record,
+        )):
+            raise AccountConnectionError("Polymarket replacement session is incomplete.")
+        operation = SessionKeyOperation.from_record(
+            operation_record
+        ).recover_after_restart()
+        lifecycle = SessionKeyLifecycle.from_record(lifecycle_record)
+        replacement = SessionKeyLifecycle.from_record(replacement_record)
+        encrypted = EncryptedSessionKey.from_record(encrypted_record)
+        if (
+            lifecycle.status is not SessionKeyStatus.ROTATING
+            or lifecycle.replacement_session_address != replacement.session_address
+            or operation.approval.session_address != replacement.session_address
+            or encrypted.profile_id != replacement.profile_id
+            or encrypted.signer_address != replacement.owner_address
+            or encrypted.account_wallet_address != replacement.wallet_address
+            or encrypted.session_address != replacement.session_address
+        ):
+            raise AccountConnectionError("Polymarket replacement identity changed.")
+        binding = await self._bot_first_account(user)
+        if (
+            replacement.discord_user_id != user.id
+            or replacement.profile_id != binding.profile_id
+            or replacement.owner_address != binding.signer_address
+            or replacement.wallet_address != binding.account_wallet_address
+        ):
+            raise AccountConnectionError("Polymarket replacement binding changed.")
+        if operation.state is SessionOperationState.UNKNOWN and not operation.transaction_id:
+            await user_config.session_operation.set(operation.to_record())
+            await user_config.replacement_session_operation.set(operation.to_record())
+            raise AccountConnectionError(
+                "Replacement authorization has no transaction identity; "
+                "manual review is required."
+            )
+        if operation.state in {
+            SessionOperationState.SUBMITTED, SessionOperationState.UNKNOWN,
+        }:
+            evidence = await self.session_transport.transaction(operation.transaction_id)
+            operation = operation.reconcile_transaction(evidence)
+            await user_config.session_operation.set(operation.to_record())
+            await user_config.replacement_session_operation.set(operation.to_record())
+        if operation.state is SessionOperationState.FAILED:
+            lifecycle = lifecycle.abort_rotation(operation)
+            async with user_config.all() as values:
+                values["session_lifecycle"] = lifecycle.to_record()
+                values["replacement_session_lifecycle"] = None
+                values["replacement_session_operation"] = None
+                values["replacement_encrypted_session_key"] = None
+                values["replacement_encrypted_session_credentials"] = None
+            return lifecycle
+        if (
+            operation.state is SessionOperationState.COMPLETE
+            and replacement.status is SessionKeyStatus.ACTIVE
+        ):
+            return replacement
+        if operation.state is not SessionOperationState.CONFIRMING_REGISTRY:
+            return replacement
+
+        wrapping_key, deployment_id = await self._session_storage_material()
+        private_key = reveal_session_private_key(
+            wrapping_key, encrypted, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=replacement.profile_id,
+            signer_address=replacement.owner_address,
+            account_wallet_address=replacement.wallet_address,
+            session_address=replacement.session_address,
+        )
+        now = int(time.time())
+        owner_signature = await self._request_cdp_clob_auth_signature(
+            user, binding, timestamp=now, nonce=0,
+        )
+        owner_credentials = await self.session_transport.create_or_derive_clob_credentials(
+            address=replacement.owner_address, signature=owner_signature,
+            timestamp=now, nonce=0,
+        )
+        await self.session_transport.require_active(
+            operation.approval, credentials=owner_credentials, timestamp=now
+        )
+        session_credentials = (
+            await self.session_transport.create_or_derive_session_credentials(
+                private_key, timestamp=now, nonce=0
+            )
+        )
+        encrypted_credentials = protect_session_credentials(
+            wrapping_key, session_credentials, deployment_id=deployment_id,
+            discord_user_id=user.id, profile_id=replacement.profile_id,
+            signer_address=replacement.owner_address,
+            account_wallet_address=replacement.wallet_address,
+            session_address=replacement.session_address,
+            created_at=replacement.created_at, expires_at=replacement.expires_at,
+        )
+        operation = operation.confirm_registry(active=True, now=now)
+        replacement = replacement.activate(operation)
+        if not await self._session_capability_allowed():
+            raise AccountConnectionError("Polymarket session rotation was paused.")
+        async with user_config.all() as values:
+            current = SessionKeyOperation.from_record(values["session_operation"])
+            if current.state is not SessionOperationState.CONFIRMING_REGISTRY:
+                raise AccountConnectionError("Polymarket replacement operation changed.")
+            values["session_operation"] = operation.to_record()
+            values["replacement_session_operation"] = operation.to_record()
+            values["replacement_session_lifecycle"] = replacement.to_record()
+            values["replacement_encrypted_session_credentials"] = (
+                encrypted_credentials.to_record()
+            )
+        return replacement
+
     async def _begin_session_revocation(
-        self, user, *, replacement_active: bool = False,
+        self, user,
     ) -> SessionKeyOperation:
         """Persist and submit one exact revocation for the current session key."""
 
@@ -428,6 +709,32 @@ class Polymarket(commands.Cog):
             idempotency_key=secrets.token_urlsafe(32),
         )
         operation = SessionKeyOperation(approval)
+        replacement_active = False
+        if lifecycle.status is SessionKeyStatus.ROTATING:
+            replacement_record = await user_config.replacement_session_lifecycle()
+            replacement_credentials = (
+                await user_config.replacement_encrypted_session_credentials()
+            )
+            if replacement_record and replacement_credentials:
+                replacement = SessionKeyLifecycle.from_record(replacement_record)
+                encrypted_replacement_credentials = (
+                    EncryptedSessionCredentials.from_record(
+                        replacement_credentials
+                    )
+                )
+                replacement_active = (
+                    replacement.status is SessionKeyStatus.ACTIVE
+                    and replacement.session_address
+                    == lifecycle.replacement_session_address
+                    and encrypted_replacement_credentials.profile_id
+                    == replacement.profile_id
+                    and encrypted_replacement_credentials.signer_address
+                    == replacement.owner_address
+                    and encrypted_replacement_credentials.account_wallet_address
+                    == replacement.wallet_address
+                    and encrypted_replacement_credentials.session_address
+                    == replacement.session_address
+                )
         lifecycle = lifecycle.begin_revocation(
             replacement_active=replacement_active
         )
@@ -543,6 +850,7 @@ class Polymarket(commands.Cog):
             lifecycle = lifecycle.revoke(operation)
         if not await self._session_capability_allowed():
             raise AccountConnectionError("Polymarket session reconciliation was paused.")
+        result_lifecycle = lifecycle
         async with user_config.all() as values:
             current = SessionKeyOperation.from_record(values["session_operation"])
             if current.state is not SessionOperationState.CONFIRMING_REGISTRY:
@@ -551,10 +859,58 @@ class Polymarket(commands.Cog):
             values["session_lifecycle"] = lifecycle.to_record()
             if encrypted_credentials is not None:
                 values["encrypted_session_credentials"] = encrypted_credentials.to_record()
-            else:
+            elif lifecycle.replacement_session_address is None:
                 values["encrypted_session_key"] = None
                 values["encrypted_session_credentials"] = None
-        return lifecycle
+            else:
+                replacement = SessionKeyLifecycle.from_record(
+                    values["replacement_session_lifecycle"]
+                )
+                replacement_operation = SessionKeyOperation.from_record(
+                    values["replacement_session_operation"]
+                )
+                replacement_key = EncryptedSessionKey.from_record(
+                    values["replacement_encrypted_session_key"]
+                )
+                replacement_credentials = EncryptedSessionCredentials.from_record(
+                    values["replacement_encrypted_session_credentials"]
+                )
+                if (
+                    replacement.status is not SessionKeyStatus.ACTIVE
+                    or replacement.session_address
+                    != lifecycle.replacement_session_address
+                    or replacement_operation.state
+                    is not SessionOperationState.COMPLETE
+                    or replacement_operation.approval.session_address
+                    != replacement.session_address
+                    or replacement_key.session_address
+                    != replacement.session_address
+                    or replacement_credentials.profile_id != replacement.profile_id
+                    or replacement_credentials.signer_address
+                    != replacement.owner_address
+                    or replacement_credentials.account_wallet_address
+                    != replacement.wallet_address
+                    or replacement_credentials.session_address
+                    != replacement.session_address
+                ):
+                    raise AccountConnectionError(
+                        "Active replacement session evidence is incomplete."
+                    )
+                history = list(values.get("session_lifecycle_history") or ())
+                history.append(lifecycle.to_record())
+                values["session_lifecycle_history"] = history[-10:]
+                values["session_lifecycle"] = replacement.to_record()
+                values["session_operation"] = replacement_operation.to_record()
+                values["encrypted_session_key"] = replacement_key.to_record()
+                values["encrypted_session_credentials"] = (
+                    replacement_credentials.to_record()
+                )
+                values["replacement_session_lifecycle"] = None
+                values["replacement_session_operation"] = None
+                values["replacement_encrypted_session_key"] = None
+                values["replacement_encrypted_session_credentials"] = None
+                result_lifecycle = replacement
+        return result_lifecycle
 
     async def _bot_first_account(self, user) -> BotFirstAccountBinding:
         """Resolve and persist the user's CryptoWallet-owned Deposit Wallet identity."""

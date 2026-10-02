@@ -284,6 +284,21 @@ class SessionKeyLifecycle:
             replacement_session_address=replacement_session_address,
         )
 
+    def abort_rotation(
+        self, failed_operation: SessionKeyOperation,
+    ) -> "SessionKeyLifecycle":
+        if (
+            self.status is not SessionKeyStatus.ROTATING
+            or failed_operation.state is not SessionOperationState.FAILED
+            or failed_operation.approval.session_address
+            != self.replacement_session_address
+        ):
+            raise AccountConnectionError("Session rotation failure evidence is invalid.")
+        return replace(
+            self, status=SessionKeyStatus.ACTIVE,
+            replacement_session_address=None,
+        )
+
     def begin_revocation(
         self, *, replacement_active: bool = False,
     ) -> "SessionKeyLifecycle":

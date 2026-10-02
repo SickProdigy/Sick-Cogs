@@ -87,6 +87,28 @@ from polymarket.polymarket import (
 )
 
 
+def _owner_batch_signature(approval, scalar=1):
+    digest = session_batch_digest(approval)
+    der = ec.derive_private_key(scalar, ec.SECP256K1()).sign(
+        digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+    )
+    r, s = utils.decode_dss_signature(der)
+    if s > HALF_CURVE_N:
+        s = CURVE_N - s
+    owner = session_address_from_private_key(scalar.to_bytes(32, "big"))
+    for recovery_id in (0, 1):
+        candidate = "0x" + (
+            r.to_bytes(32, "big") + s.to_bytes(32, "big")
+            + bytes([27 + recovery_id])
+        ).hex()
+        try:
+            if verify_session_batch_signature(approval, candidate) == owner:
+                return candidate
+        except AccountConnectionError:
+            continue
+    raise AssertionError("Batch signature did not recover to fixture owner")
+
+
 class _Value:
     def __init__(self, value):
         self.value = value
@@ -1780,6 +1802,208 @@ class SessionProvisioningTests(unittest.IsolatedAsyncioTestCase):
         terminal = await cog._reconcile_session_key(user)
         self.assertEqual(terminal.status, SessionKeyStatus.REVOKED)
 
+    async def test_rotation_keeps_old_key_until_active_replacement_then_promotes(self):
+        cog, user, values = self._cog(enabled=True)
+        owner = session_address_from_private_key((1).to_bytes(32, "big"))
+        wallet = "0x" + "2" * 40
+        old_private = (7).to_bytes(32, "big")
+        old_session = session_address_from_private_key(old_private)
+        replacement_private = (8).to_bytes(32, "big")
+        replacement_session = session_address_from_private_key(replacement_private)
+        wrapping_key = bytes(range(32))
+        deployment_id = "deployment-7"
+        created_at = 100
+        expires_at = created_at + SESSION_KEY_LIFETIME_SECONDS
+        due_at = expires_at - ROTATION_LEAD_SECONDS
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=owner, account_wallet_address=wallet, created_at=80,
+        )
+        old_lifecycle = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address=owner, wallet_address=wallet,
+            session_address=old_session, created_at=created_at,
+            expires_at=expires_at, status=SessionKeyStatus.ACTIVE,
+            activated_at=110,
+        )
+        old_key = protect_session_private_key(
+            wrapping_key, old_private, deployment_id=deployment_id,
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=owner, account_wallet_address=wallet,
+            session_address=old_session, created_at=created_at,
+            expires_at=expires_at,
+        )
+        old_credentials = protect_session_credentials(
+            wrapping_key, ClobCredentials(
+                "old-key", base64.urlsafe_b64encode(b"o" * 32).decode(),
+                "old-pass",
+            ), deployment_id=deployment_id, discord_user_id=7,
+            profile_id="profile-7", signer_address=owner,
+            account_wallet_address=wallet, session_address=old_session,
+            created_at=created_at, expires_at=expires_at,
+        )
+        values.update({
+            "session_lifecycle": old_lifecycle.to_record(),
+            "encrypted_session_key": old_key.to_record(),
+            "encrypted_session_credentials": old_credentials.to_record(),
+            "session_operation": None,
+            "replacement_session_lifecycle": None,
+            "replacement_session_operation": None,
+            "replacement_encrypted_session_key": None,
+            "replacement_encrypted_session_credentials": None,
+            "session_lifecycle_history": [],
+        })
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._session_storage_material = AsyncMock(
+            return_value=(wrapping_key, deployment_id)
+        )
+        cog.session_transport = SimpleNamespace(
+            get_wallet_nonce=AsyncMock(return_value=11),
+            submit=AsyncMock(return_value={
+                "operation_id": "replacement-operation",
+                "transaction_id": "replacement-transaction",
+                "transaction_hash": None,
+            }),
+        )
+
+        replacement_approval = SessionKeyOwnerApproval(
+            action="authorize", discord_user_id=7, profile_id="profile-7",
+            owner_address=owner, wallet_address=wallet,
+            session_address=replacement_session, nonce=11,
+            created_at=due_at, deadline=due_at + 300,
+            idempotency_key="r" * 32,
+            valid_until=due_at + SESSION_KEY_LIFETIME_SECONDS,
+        )
+        replacement_signature = _owner_batch_signature(replacement_approval)
+
+        async def sign_replacement(_user, **kwargs):
+            self.assertEqual(kwargs["session_address"], replacement_session)
+            return {"signature": replacement_signature, "signer_address": owner}
+
+        cryptowallet = SimpleNamespace(
+            polymarket_sign_session_batch=sign_replacement
+        )
+        cog.bot = SimpleNamespace(
+            get_cog=lambda name: cryptowallet if name == "CryptoWallet" else None,
+            get_shared_api_tokens=AsyncMock(return_value={
+                "api_key": "builder-key", "secret": "YnVpbGRlci1zZWNyZXQ=",
+                "passphrase": "builder-passphrase",
+            }),
+        )
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="US", region="NY",
+            checked_at=due_at - 10, expires_at=due_at + 290,
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=due_at),
+            patch("polymarket.polymarket.generate_session_key",
+                  return_value=(replacement_private, replacement_session)),
+        ):
+            submitted = await cog._begin_session_rotation(user, eligibility)
+        self.assertEqual(submitted.state, SessionOperationState.SUBMITTED)
+        self.assertEqual(
+            SessionKeyLifecycle.from_record(values["session_lifecycle"]).status,
+            SessionKeyStatus.ROTATING,
+        )
+        self.assertEqual(
+            EncryptedSessionKey.from_record(
+                values["encrypted_session_key"]
+            ).session_address,
+            old_session,
+        )
+
+        new_credentials = ClobCredentials(
+            "replacement-key", base64.urlsafe_b64encode(b"n" * 32).decode(),
+            "replacement-pass",
+        )
+        cog._request_cdp_clob_auth_signature = AsyncMock(
+            return_value="0x" + "2" * 130
+        )
+        cog.session_transport.transaction = AsyncMock(return_value={
+            "transaction_id": "replacement-transaction",
+            "transaction_hash": "0x" + "a" * 64,
+            "state": "STATE_CONFIRMED", "error_msg": None,
+        })
+        cog.session_transport.create_or_derive_clob_credentials = AsyncMock(
+            return_value=ClobCredentials(
+                "owner-key", base64.urlsafe_b64encode(b"c" * 32).decode(),
+                "owner-pass",
+            )
+        )
+        cog.session_transport.require_active = AsyncMock(return_value={
+            "address": replacement_session, "scopes": ("CLOB",),
+            "valid_until": replacement_approval.valid_until,
+        })
+        cog.session_transport.create_or_derive_session_credentials = AsyncMock(
+            return_value=new_credentials
+        )
+        with patch("polymarket.polymarket.time.time", return_value=due_at + 10):
+            active_replacement = await cog._reconcile_replacement_session_key(user)
+        self.assertEqual(active_replacement.status, SessionKeyStatus.ACTIVE)
+        self.assertEqual(
+            EncryptedSessionKey.from_record(
+                values["encrypted_session_key"]
+            ).session_address,
+            old_session,
+        )
+
+        revoke_at = due_at + 20
+        revoke_approval = SessionKeyOwnerApproval(
+            action="revoke", discord_user_id=7, profile_id="profile-7",
+            owner_address=owner, wallet_address=wallet,
+            session_address=old_session, nonce=12,
+            created_at=revoke_at, deadline=revoke_at + 300,
+            idempotency_key="v" * 32,
+        )
+        revoke_signature = _owner_batch_signature(revoke_approval)
+
+        async def sign_revoke(_user, **kwargs):
+            self.assertEqual(kwargs["session_address"], old_session)
+            return {"signature": revoke_signature, "signer_address": owner}
+
+        cryptowallet.polymarket_sign_session_batch = sign_revoke
+        cog.session_transport.get_wallet_nonce.return_value = 12
+        cog.session_transport.submit.return_value = {
+            "operation_id": "revoke-operation",
+            "transaction_id": "revoke-transaction",
+            "transaction_hash": None, "fenced": True,
+        }
+        with patch("polymarket.polymarket.time.time", return_value=revoke_at):
+            maintenance = await cog._maintain_session_key(user)
+        self.assertEqual(maintenance, "old_key_revocation_submitted")
+        self.assertEqual(
+            EncryptedSessionKey.from_record(
+                values["encrypted_session_key"]
+            ).session_address,
+            old_session,
+        )
+
+        cog.session_transport.transaction.return_value = {
+            "transaction_id": "revoke-transaction",
+            "transaction_hash": "0x" + "b" * 64,
+            "state": "STATE_CONFIRMED", "error_msg": None,
+        }
+        cog.session_transport.require_absent = AsyncMock(return_value=None)
+        with patch("polymarket.polymarket.time.time", return_value=revoke_at + 10):
+            promoted = await cog._reconcile_session_key(user)
+        self.assertEqual(promoted.session_address, replacement_session)
+        self.assertEqual(promoted.status, SessionKeyStatus.ACTIVE)
+        self.assertEqual(
+            EncryptedSessionKey.from_record(
+                values["encrypted_session_key"]
+            ).session_address,
+            replacement_session,
+        )
+        self.assertIsNone(values["replacement_session_lifecycle"])
+        self.assertIsNone(values["replacement_encrypted_session_key"])
+        self.assertEqual(len(values["session_lifecycle_history"]), 1)
+        self.assertEqual(
+            SessionKeyLifecycle.from_record(
+                values["session_lifecycle_history"][0]
+            ).status,
+            SessionKeyStatus.REVOKED,
+        )
+
     async def test_initialize_creates_or_validates_only_server_side_wrapping_key(self):
         cog = Polymarket.__new__(Polymarket)
         tokens = {}
@@ -1877,6 +2101,29 @@ class SessionKeyLifecycleTests(unittest.TestCase):
         revoked = revoking.revoke(self._complete("revoke"))
         self.assertEqual(revoked.status, SessionKeyStatus.REVOKED)
         self.assertEqual(revoked.revoked_at, 110)
+
+    def test_failed_replacement_returns_old_lifecycle_to_active(self):
+        old = SessionKeyLifecycle(
+            discord_user_id=7, profile_id="profile-7",
+            owner_address="0x" + "1" * 40, wallet_address="0x" + "2" * 40,
+            session_address="0x" + "3" * 40, created_at=100,
+            expires_at=100 + SESSION_KEY_LIFETIME_SECONDS,
+            status=SessionKeyStatus.ACTIVE, activated_at=110,
+        ).begin_rotation("0x" + "4" * 40)
+        failed = SessionKeyOperation(
+            self._approval(session="0x" + "4" * 40)
+        ).approve(
+            "0x" + "1" * 130, now=101
+        ).begin_submission(now=102).record_submission({
+            "operation_id": "operation-1", "transaction_id": "transaction-1",
+            "transaction_hash": None,
+        }).reconcile_transaction({
+            "transaction_id": "transaction-1", "state": "STATE_FAILED",
+            "transaction_hash": None, "error_msg": "failed",
+        })
+        restored = old.abort_rotation(failed)
+        self.assertEqual(restored.status, SessionKeyStatus.ACTIVE)
+        self.assertIsNone(restored.replacement_session_address)
 
     def test_failed_transaction_keeps_only_failure_digest(self):
         operation = SessionKeyOperation(self._approval()).approve(
