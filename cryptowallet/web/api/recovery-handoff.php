@@ -4,6 +4,7 @@ declare(strict_types=1);
 const RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS = 300;
 const RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS = 600;
 const RECOVERY_HANDOFF_TERMS_LIFETIME_SECONDS = 600;
+const RECOVERY_HANDOFF_POLYMARKET_TERMS_LIFETIME_SECONDS = 600;
 const RECOVERY_HANDOFF_POLYMARKET_LIFETIME_SECONDS = 300;
 
 require_once dirname(__DIR__) . '/server/recovery-config.php';
@@ -143,6 +144,7 @@ try {
             'standard' => RECOVERY_HANDOFF_STANDARD_LIFETIME_SECONDS,
             'totp_enroll' => RECOVERY_HANDOFF_TOTP_LIFETIME_SECONDS,
             'wallet_terms' => RECOVERY_HANDOFF_TERMS_LIFETIME_SECONDS,
+            'polymarket_terms' => RECOVERY_HANDOFF_POLYMARKET_TERMS_LIFETIME_SECONDS,
             'polymarket_connect' => RECOVERY_HANDOFF_POLYMARKET_LIFETIME_SECONDS,
             default => 0,
         };

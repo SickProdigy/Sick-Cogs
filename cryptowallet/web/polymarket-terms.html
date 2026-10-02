@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polymarket Terms · SickGaming</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="card terms-card">
+    <p class="eyebrow">SickGaming Polymarket</p>
+    <h1>Polymarket terms</h1>
+    <p><strong>Terms version:</strong> 2026-10-02.1</p>
+    <p>These terms apply only to SickGaming Polymarket features. Polymarket also has its own platform terms and policies.</p>
+    <h2>Account and authorization model</h2>
+    <p>You control the signer connected to your Polymarket account wallet. SickGaming does not ask for or store private keys, recovery phrases, raw signatures, or CLOB API credentials. Discord commands express intent but do not authorize a transaction.</p>
+    <h2>Your responsibilities</h2>
+    <ul>
+      <li>Use Polymarket only where lawful and where Polymarket permits access.</li>
+      <li>Protect your Discord account, signer, session keys, and account recovery material.</li>
+      <li>Verify the market, outcome, side, price, size, fees, expiry, and account before approval.</li>
+      <li>Review and revoke token allowances or session-key permissions you no longer need.</li>
+    </ul>
+    <h2>Risk</h2>
+    <p>Prediction-market and blockchain activity can cause partial or total loss. Orders may fill partially, fail, remain open, settle unexpectedly, or become difficult to cancel. Blockchain actions may be irreversible. Network, contract, oracle, platform, liquidity, software, account, and user errors may cause delay or permanent loss.</p>
+    <h2>No advice or investment promise</h2>
+    <p>SickGaming does not provide financial, investment, tax, or legal advice and does not recommend any market or outcome. Eligibility checks are point-in-time safeguards, not legal advice or a guarantee of access.</p>
+    <h2>Experimental service</h2>
+    <p>This integration is provided as-is and without warranties to the extent allowed by law. Liability is limited to the maximum extent allowed by applicable law. Nothing here excuses fraud, intentional misconduct, or obligations that cannot legally be waived.</p>
+    <h2>Changes, suspension, and privacy</h2>
+    <p>Unsafe, abusive, unavailable, or unsupported capabilities may be paused or disabled. A material terms change requires a new acceptance. Acceptance records contain the terms version, Discord user ID, UTC time, and a non-secret identifier; they do not contain wallet keys, authenticator codes, or provider credentials.</p>
+    <p class="notice">Reading this page does not itself accept these terms. Acceptance is recorded only through a protected, user-bound Polymarket flow.</p>
+    <section id="terms-controls" hidden>
+      <label><input id="terms-understood" type="checkbox"> I have read and accept these Polymarket terms.</label>
+      <p><button id="accept-terms" type="button" disabled>Accept Polymarket terms</button></p>
+    </section>
+    <p id="terms-status" class="notice">Checking for a protected acceptance link…</p>
+    <p><a href="./">Return to SickGaming</a></p>
+  </main>
+  <script type="module" src="polymarket-terms.js"></script>
+</body>
+</html>

@@ -1142,6 +1142,33 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, "binding"):
                 await harness.create_external_companion_handoff(7, "wallet_terms", changed)
 
+    async def test_polymarket_terms_handoff_is_exact_and_ten_minutes(self):
+        harness = _JwtHarness(self.configuration)
+        payload = {
+            "product": "polymarket",
+            "version": "2026-10-02.1",
+            "result_handle": "p" * 32,
+        }
+        token, expires_at = await harness.create_external_companion_handoff(
+            7, "polymarket_terms", payload
+        )
+        claims = jwt.decode(
+            token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(claims["sickwallet_polymarket_terms"], payload)
+        self.assertEqual(claims["sickwallet_purpose"], "polymarket_terms")
+        self.assertEqual(expires_at - claims["iat"], WALLET_TERMS_LIFETIME_SECONDS)
+        for changed in (
+            {**payload, "product": "cryptowallet"},
+            {**payload, "version": "old"},
+            {**payload, "extra": True},
+        ):
+            with self.assertRaisesRegex(ValueError, "binding"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_terms", changed
+                )
+
     async def test_authorization_handoff_accepts_requested_default_days(self):
         harness = _JwtHarness(self.configuration)
         token, _ = await harness.create_authorization_handoff(
@@ -3755,6 +3782,20 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("FOR UPDATE", endpoint)
         self.assertNotIn("discord_user", endpoint)
 
+    def test_polymarket_terms_page_has_protected_product_specific_acceptance(self):
+        root = Path(__file__).resolve().parents[1]
+        page = (root / "web" / "polymarket-terms.html").read_text(encoding="utf-8")
+        source = (root / "web" / "src" / "polymarket-terms.js").read_text(encoding="utf-8")
+        endpoint = (root / "web" / "api" / "polymarket-terms.php").read_text(encoding="utf-8")
+        self.assertIn("I have read and accept these Polymarket terms", page)
+        self.assertIn("Polymarket also has its own platform terms", page)
+        self.assertIn("sickwallet_polymarket_terms", source)
+        self.assertIn("polymarket_terms", source)
+        self.assertIn("sickwallet_polymarket_terms_acceptances", endpoint)
+        self.assertIn("sickwallet_relay_nonces", endpoint)
+        self.assertIn("FOR UPDATE", endpoint)
+        self.assertNotIn("discord_user", endpoint)
+
     def test_polymarket_companion_encrypts_proofs_and_checks_browser_ip(self):
         root = Path(__file__).resolve().parents[1]
         page = (root / "web" / "polymarket-connect.html").read_text(encoding="utf-8")
@@ -3778,7 +3819,7 @@ class ClankerLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [path.name for path in migrations],
             ["0001_initial_relay.sql", "0002_totp_enrollments.sql", "0003_wallet_terms.sql",
-             "0004_polymarket_onboarding.sql"],
+             "0004_polymarket_onboarding.sql", "0005_polymarket_terms.sql"],
         )
         self.assertTrue(all("CREATE TABLE IF NOT EXISTS" in path.read_text(
             encoding="utf-8"

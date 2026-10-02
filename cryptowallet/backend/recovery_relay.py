@@ -57,6 +57,7 @@ class RecoveryRelayMixin:
             "standard": RECOVERY_RELAY_STANDARD_LIFETIME_SECONDS,
             "totp_enroll": RECOVERY_RELAY_TOTP_LIFETIME_SECONDS,
             "wallet_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
+            "polymarket_terms": RECOVERY_RELAY_TERMS_LIFETIME_SECONDS,
             "polymarket_connect": RECOVERY_RELAY_POLYMARKET_LIFETIME_SECONDS,
         }
         max_lifetime = lifetimes.get(purpose)
@@ -186,6 +187,24 @@ class RecoveryRelayMixin:
             or len(acceptance_id) > 128
         ):
             raise RuntimeError("The CryptoWallet terms relay returned an invalid binding")
+        return result
+
+    async def poll_polymarket_terms_result(self, handle: str) -> dict | None:
+        """Consume one browser-submitted Polymarket terms acceptance."""
+        result = await self._poll_structured_relay_result(
+            handle, path="/api/polymarket-terms.php", label="Polymarket terms",
+        )
+        if result is None:
+            return None
+        acceptance_id = result.get("acceptance_id")
+        if (
+            set(result) != {"status", "product", "version", "acceptance_id"}
+            or result.get("product") != "polymarket"
+            or result.get("version") != "2026-10-02.1"
+            or not isinstance(acceptance_id, str)
+            or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", acceptance_id) is None
+        ):
+            raise RuntimeError("The Polymarket terms relay returned an invalid binding")
         return result
 
     async def poll_polymarket_onboarding_result(self, handle: str) -> dict | None:

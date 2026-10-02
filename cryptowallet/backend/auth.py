@@ -185,6 +185,7 @@ class JwtAuthMixin:
             "tokenfactory_external": "sickwallet_tokenfactory",
             "totp_enroll": "sickwallet_totp",
             "wallet_terms": "sickwallet_terms",
+            "polymarket_terms": "sickwallet_polymarket_terms",
             "polymarket_connect": "sickwallet_polymarket",
         }
         claim_name = claim_names.get(purpose)
@@ -200,6 +201,16 @@ class JwtAuthMixin:
                 or not 32 <= len(payload["result_handle"]) <= 128
             ):
                 raise ValueError("The CryptoWallet terms handoff binding is invalid")
+        if purpose == "polymarket_terms":
+            expected = {"product", "version", "result_handle"}
+            if (
+                set(payload) != expected
+                or payload.get("product") != "polymarket"
+                or payload.get("version") != "2026-10-02.1"
+                or not isinstance(payload.get("result_handle"), str)
+                or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["result_handle"]) is None
+            ):
+                raise ValueError("The Polymarket terms handoff binding is invalid")
         if purpose == "polymarket_connect":
             expected = {
                 "connection_id", "result_handle", "discord_user_id",
@@ -248,7 +259,7 @@ class JwtAuthMixin:
             if purpose == "polymarket_connect"
             else
             WALLET_TERMS_LIFETIME_SECONDS
-            if purpose == "wallet_terms"
+            if purpose in {"wallet_terms", "polymarket_terms"}
             else TOTP_ENROLLMENT_LIFETIME_SECONDS
             if purpose == "totp_enroll"
             else CLAIM_HANDOFF_LIFETIME_SECONDS
