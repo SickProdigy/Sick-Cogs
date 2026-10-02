@@ -7,6 +7,7 @@ import aiohttp
 import discord
 from redbot.core import Config, checks, commands
 
+from .collateral import CollateralPlanError, collateral_plan
 from .handoff import MarketSnapshot, MarketSnapshotError
 from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from .production_manifest import (
@@ -104,7 +105,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.8"
+    __version__ = "0.2.9"
 
     def __init__(self, bot):
         self.bot = bot
@@ -151,6 +152,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="One specific market", value=f"`{prefix}poly market <ID, slug, or Polymarket link>`\nProbabilities, rules, resolution source, and link.", inline=False)
         embed.add_field(name="Future compatibility", value=f"`{prefix}poly compatible [words]` and `{prefix}poly readiness <market>`\nTechnical metadata only; trading is disabled.", inline=False)
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
+        embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
         embed.add_field(name="Account connection", value=f"`{prefix}poly account`\nPublic identity status only; protected connection is not available yet.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
@@ -353,6 +355,50 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Approval fingerprint", value=f"`{approval.fingerprint}`", inline=False)
         embed.add_field(name="Expires", value=f"<t:{approval.expires_at}:R>", inline=True)
         embed.add_field(name="Execution", value="Preview only. No account, balance, allowance, signature, credential, or order was used.", inline=False)
+        await ctx.send(embed=embed)
+
+    @polymarket.command(name="collateral")
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_collateral(self, ctx: commands.Context, mode: str, amount: str,
+                                    account_wallet: str):
+        """Inspect exact collateral approvals and revocations without executing them."""
+        choice = mode.casefold()
+        action = "trading" if choice in {"standard", "negative-risk"} else choice
+        try:
+            plan = collateral_plan(
+                action, amount, account_wallet, negative_risk=choice == "negative-risk"
+            )
+        except (CollateralPlanError, ValueError):
+            await ctx.send(
+                "Choose wrap, unwrap, standard, or negative-risk; provide a positive amount "
+                "with at most six decimals and a complete Polygon account-wallet address."
+            )
+            return
+        embed = discord.Embed(
+            title="Polymarket collateral disclosure",
+            description=f"{plan.action.title()} {plan.display_amount} {plan.source_asset} to {plan.destination_asset}",
+        )
+        embed.add_field(name="Account wallet", value=plan.account_wallet, inline=False)
+        embed.add_field(name="Action contract", value=f"{plan.contract}\n{plan.function}", inline=False)
+        for index, approval in enumerate(plan.approvals, 1):
+            amount_text = (
+                f"exactly {approval.amount_base_units} base units ({plan.display_amount} {approval.asset})"
+                if approval.amount_base_units is not None else "operator access: true"
+            )
+            embed.add_field(
+                name=f"Approval {index}: {approval.asset}",
+                value=(
+                    f"Token: {approval.token}\nSpender: {approval.spender}\n"
+                    f"Permission: {amount_text}\nPurpose: {approval.purpose}\n"
+                    f"Revoke: set value to {approval.revoke_value}"
+                ),
+                inline=False,
+            )
+        embed.add_field(
+            name="Execution",
+            value="Disclosure only. No allowance, operator permission, wrap, unwrap, transfer, or transaction occurs.",
+            inline=False,
+        )
         await ctx.send(embed=embed)
 
     @polymarket.command(name="market", aliases=["info"])

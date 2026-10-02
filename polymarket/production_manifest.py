@@ -12,6 +12,7 @@ class PolymarketProductionManifest:
     network_key: str = "polygon"
     collateral_symbol: str = "pUSD"
     collateral_decimals: int = 6
+    usdce_token: str = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
     collateral_token: str = "0xC011a7E12a19f7B1f670d46F03B03f3342E82DFB"
     collateral_onramp: str = "0x93070a847efEf7F70739046A929D47a521F5B8ee"
     collateral_offramp: str = "0x2957922Eb93258b93368531d39fAcCA3B4dC5854"
@@ -42,6 +43,7 @@ def validate_polymarket_production_manifest(
 
     errors = []
     expected_addresses = {
+        "usdce_token": "0x2791bca1f2de4661ed88a30c99a7a9449aa84174",
         "collateral_token": "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb",
         "collateral_onramp": "0x93070a847efef7f70739046a929d47a521f5b8ee",
         "collateral_offramp": "0x2957922eb93258b93368531d39facca3b4dc5854",

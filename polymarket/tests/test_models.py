@@ -7,6 +7,7 @@ from polymarket import setup
 from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
+from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.security_policy import (
@@ -159,6 +160,21 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         with self.assertRaises(OrderIntentError):
             approval.require_fresh(quote, base_fee_bps=100, now=220)
 
+    def test_collateral_plans_bind_exact_assets_spenders_amounts_and_revocation(self):
+        wallet = "0x" + "9" * 40
+        wrap = collateral_plan("wrap", "12.345678", wallet)
+        self.assertEqual(wrap.amount_base_units, 12_345_678)
+        self.assertEqual(wrap.source_asset, "USDC.e")
+        self.assertEqual(wrap.approvals[0].spender, POLYMARKET_PRODUCTION_MANIFEST.collateral_onramp.lower())
+        self.assertEqual(wrap.approvals[0].revoke_value, "0")
+        trading = collateral_plan("trading", "10", wallet, negative_risk=True)
+        self.assertEqual(trading.contract, POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower())
+        self.assertEqual([item.standard for item in trading.approvals], ["ERC-20", "ERC-1155"])
+        self.assertEqual([item.revoke_value for item in trading.approvals], ["0", "false"])
+        self.assertFalse(trading.executable)
+        with self.assertRaises(CollateralPlanError):
+            collateral_plan("wrap", "1.0000001", wallet)
+
     def test_json_list_accepts_api_encoded_arrays(self):
         self.assertEqual(_json_list('["Yes", "No"]'), ["Yes", "No"])
         self.assertEqual(_json_list(["Yes"]), ["Yes"])
@@ -225,6 +241,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
+        self.assertEqual(manifest.usdce_token.lower(), "0x2791bca1f2de4661ed88a30c99a7a9449aa84174")
         self.assertEqual(manifest.default_new_wallet_type, "DEPOSIT_WALLET")
         self.assertTrue(manifest.signer_and_wallet_are_distinct)
         self.assertTrue(manifest.session_keys_documented)
@@ -235,6 +252,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         for changed in (
             replace(POLYMARKET_PRODUCTION_MANIFEST, chain_id=8453),
             replace(POLYMARKET_PRODUCTION_MANIFEST, collateral_decimals=18),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, usdce_token="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, ctf_exchange="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, default_new_wallet_type="EOA"),
             replace(POLYMARKET_PRODUCTION_MANIFEST, signer_and_wallet_are_distinct=False),
@@ -291,7 +309,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(embed.title, "Polymarket discovery")
         self.assertIn("poly", Polymarket.polymarket.aliases)
         fields = "\n".join(field.name + " " + field.value for field in embed.fields)
-        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "quote"):
+        for command in ("search", "trending", "market", "compatible", "readiness", "status", "account", "quote", "collateral"):
             self.assertIn(command, fields)
 
     async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
@@ -328,6 +346,18 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("base fee 400 bps", fields["Fee reserve"])
         self.assertIn("Preview only", fields["Execution"])
         self.assertEqual(len(fields["Approval fingerprint"].strip("`")), 64)
+
+    async def test_collateral_command_discloses_exact_revocation_without_execution(self):
+        ctx = Context()
+        await Polymarket.polymarket_collateral.callback(
+            Polymarket(object()), ctx, "negative-risk", "10", "0x" + "9" * 40
+        )
+        embed = ctx.send.await_args.kwargs["embed"]
+        fields = {field.name: field.value for field in embed.fields}
+        self.assertIn(POLYMARKET_PRODUCTION_MANIFEST.neg_risk_exchange.lower(), fields["Action contract"])
+        self.assertIn("Revoke: set value to 0", fields["Approval 1: pUSD"])
+        self.assertIn("Revoke: set value to false", fields["Approval 2: Outcome tokens"])
+        self.assertIn("Disclosure only", fields["Execution"])
 
     async def test_status_reports_valid_default_off_deposit_wallet_boundary(self):
         ctx = Context()
