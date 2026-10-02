@@ -16,8 +16,7 @@ from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 FINGERPRINT = re.compile(r"^[0-9a-f]{64}$")
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 HEX_32 = re.compile(r"^0x[0-9a-f]{64}$")
-RELAYER_REQUEST_TYPE = "WALLET_CREATE"
-RELAYER_METADATA = "Deploy Deposit Wallet"
+RELAYER_REQUEST_TYPE = "WALLET-CREATE"
 PLAN_LIFETIME_SECONDS = 5 * 60
 
 
@@ -87,7 +86,6 @@ class DepositWalletCreationPlan:
     chain_id: int = 137
     request_type: str = RELAYER_REQUEST_TYPE
     request_to: str = POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory
-    metadata: str = RELAYER_METADATA
     builder_auth_location: str = "server_only"
     user_controlled_approval: bool = True
     executable: bool = False
@@ -127,7 +125,6 @@ class DepositWalletCreationPlan:
             self.chain_id != POLYMARKET_PRODUCTION_MANIFEST.chain_id
             or self.request_type != RELAYER_REQUEST_TYPE
             or self.request_to != POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower()
-            or self.metadata != RELAYER_METADATA
             or self.builder_auth_location != "server_only"
             or not self.user_controlled_approval
             or self.executable
@@ -202,6 +199,13 @@ class DepositWalletCreationPlan:
             raise AccountConnectionError("Relayer transaction identity is missing.")
         if self.relayer_transaction_id and transaction_id != self.relayer_transaction_id:
             raise AccountConnectionError("Relayer transaction identity changed.")
+        if any((
+            response.get("from") != self.signer_address,
+            response.get("to") != self.request_to,
+            response.get("type") != self.request_type,
+            response.get("proxy_address") != self.deposit_wallet_address,
+        )):
+            raise AccountConnectionError("Relayer deployment identity changed.")
         if state == "STATE_CONFIRMED":
             transaction_hash = response.get("transaction_hash") or self.transaction_hash
             if not isinstance(transaction_hash, str) or re.fullmatch(
@@ -228,7 +232,6 @@ class DepositWalletCreationPlan:
     def relayer_request(self) -> dict[str, str]:
         return {
             "from": self.signer_address,
-            "metadata": self.metadata,
             "to": self.request_to,
             "type": self.request_type,
         }

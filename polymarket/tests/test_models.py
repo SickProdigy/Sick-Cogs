@@ -16,13 +16,13 @@ from polymarket.account_connection import (
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.deposit_wallet import (
-    DepositWalletCreationPlan, DepositWalletCreationState, RELAYER_METADATA,
-    RELAYER_REQUEST_TYPE,
+    DepositWalletCreationPlan, DepositWalletCreationState, RELAYER_REQUEST_TYPE,
 )
 from polymarket.handoff import FutureHandoffIntent, MarketSnapshot, MarketSnapshotError
 from polymarket.identity_verifier import (
     AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
 )
+from polymarket.relayer import BuilderCredentials, DepositWalletRelayerClient
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
 from polymarket.order_transport import (
     AuthenticatedOrderTransport, ClobCredentials, OrderTransportError,
@@ -868,13 +868,11 @@ class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
             created_at=100, expires_at=400,
         )
         self.assertEqual(plan.request_type, RELAYER_REQUEST_TYPE)
-        self.assertEqual(plan.metadata, RELAYER_METADATA)
         self.assertEqual(plan.request_to, POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower())
         self.assertEqual(plan.relayer_request(), {
             "from": "0x" + "1" * 40,
-            "metadata": "Deploy Deposit Wallet",
             "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
-            "type": "WALLET_CREATE",
+            "type": "WALLET-CREATE",
         })
         self.assertEqual(plan.builder_auth_location, "server_only")
         self.assertTrue(plan.user_controlled_approval)
@@ -892,6 +890,8 @@ class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(submitted.state, DepositWalletCreationState.SUBMITTED)
         confirmed = submitted.reconcile({
             "state": "STATE_CONFIRMED", "transaction_id": "relayer-1",
+            "from": plan.signer_address, "to": plan.request_to,
+            "type": plan.request_type, "proxy_address": plan.deposit_wallet_address,
             "transaction_hash": "0x" + "d" * 64,
         })
         self.assertEqual(confirmed.state, DepositWalletCreationState.CONFIRMED)
@@ -899,6 +899,8 @@ class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
             submitted.reconcile({
                 "state": "STATE_CONFIRMED", "transaction_id": "relayer-2",
+                "from": plan.signer_address, "to": plan.request_to,
+                "type": plan.request_type, "proxy_address": plan.deposit_wallet_address,
                 "transaction_hash": "0x" + "d" * 64,
             })
 
@@ -918,11 +920,156 @@ class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(unknown.relayer_transaction_id, "relayer-1")
         failed = unknown.reconcile({
             "state": "STATE_INVALID", "transaction_id": "relayer-1",
+            "from": plan.signer_address, "to": plan.request_to,
+            "type": plan.request_type, "proxy_address": plan.deposit_wallet_address,
             "error_msg": "provider detail must not persist",
         })
         self.assertEqual(failed.state, DepositWalletCreationState.FAILED)
         self.assertEqual(len(failed.failure_digest), 64)
         self.assertNotIn("provider detail", repr(failed))
+
+
+class DepositWalletRelayerTests(unittest.IsolatedAsyncioTestCase):
+    def _plan(self):
+        return DepositWalletCreationPlan(
+            creation_id="c" * 32, discord_user_id=7,
+            signer_address="0x" + "1" * 40,
+            deposit_wallet_address="0x574548bc296a44a39a7828343fc262244f37a7e5",
+            idempotency_key="i" * 32, owner_approval_fingerprint="a" * 64,
+            eligibility_fingerprint="b" * 64, target_evidence_digest="c" * 64,
+            created_at=100, expires_at=400,
+        )
+
+    async def test_submit_uses_exact_official_body_and_fixed_builder_hmac(self):
+        transport = AsyncMock(return_value={
+            "transactionID": "relayer-1", "transactionHash": "",
+            "state": "STATE_NEW",
+        })
+        client = DepositWalletRelayerClient(transport)
+        credentials = BuilderCredentials(
+            "builder-key", "YnVpbGRlci1zZWNyZXQ=", "builder-passphrase"
+        )
+        self.assertNotIn("builder-key", repr(credentials))
+        self.assertNotIn("YnVpbGRlci1zZWNyZXQ=", repr(credentials))
+        self.assertNotIn("builder-passphrase", repr(credentials))
+        self.assertNotIn("builder-key", repr(credentials))
+        self.assertNotIn("YnVpbGRlci1zZWNyZXQ=", repr(credentials))
+        self.assertNotIn("builder-passphrase", repr(credentials))
+        result = await client.submit_creation(
+            self._plan(), credentials, timestamp=100
+        )
+
+        self.assertEqual(result, {
+            "transaction_id": "relayer-1", "transaction_hash": None,
+        })
+        request = transport.await_args
+        self.assertEqual(request.args, (
+            "POST", POLYMARKET_PRODUCTION_MANIFEST.relayer_api + "/submit",
+        ))
+        self.assertEqual(
+            request.kwargs["body"],
+            '{"from":"0x1111111111111111111111111111111111111111",'
+            '"to":"0x00000000000fb5c9adea0298d729a0cb3823cc07",'
+            '"type":"WALLET-CREATE"}',
+        )
+        self.assertEqual(
+            request.kwargs["headers"]["POLY_BUILDER_SIGNATURE"],
+            "h3L8aF7nFARbSW9DFJ1Hq9EelG6t__OeT_qnY0fG4YU=",
+        )
+        self.assertNotIn("metadata", request.kwargs["body"])
+
+    async def test_status_normalizes_full_identity_for_strict_reconciliation(self):
+        plan = self._plan().begin_submission(now=150).record_submission({
+            "transaction_id": "relayer-1", "transaction_hash": None,
+        })
+        transport = AsyncMock(return_value=[{
+            "transactionID": "relayer-1", "transactionHash": "0x" + "d" * 64,
+            "state": "STATE_CONFIRMED", "from": plan.signer_address.upper(),
+            "to": plan.request_to.upper(),
+            "proxyAddress": plan.deposit_wallet_address.upper(),
+            "type": "WALLET-CREATE",
+        }])
+        evidence = await DepositWalletRelayerClient(transport).get_creation(plan)
+        confirmed = plan.reconcile(evidence)
+        self.assertEqual(confirmed.state, DepositWalletCreationState.CONFIRMED)
+        changed = dict(evidence, proxy_address="0x" + "9" * 40)
+        with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
+            plan.reconcile(changed)
+
+
+    async def test_cog_submission_is_default_off_before_identity_or_secrets(self):
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(
+            production_capabilities=_Value({"deposit_wallet_create": False}),
+            production_enabled=_Value(False), production_paused=_Value(True),
+        )
+        cog.bot = SimpleNamespace(get_shared_api_tokens=AsyncMock())
+        cog._bot_first_account = AsyncMock()
+
+        with self.assertRaisesRegex(AccountConnectionError, "disabled"):
+            await cog._submit_approved_deposit_wallet_creation(
+                SimpleNamespace(id=7), self._plan()
+            )
+
+        cog._bot_first_account.assert_not_awaited()
+        cog.bot.get_shared_api_tokens.assert_not_awaited()
+
+    async def test_cog_persists_submission_and_independently_verifies_confirmation(self):
+        user = SimpleNamespace(id=7)
+        approved = self._plan()
+        value = _Value(approved.to_record())
+        user_config = SimpleNamespace(deposit_wallet_creation=value)
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(
+            production_capabilities=_Value({"deposit_wallet_create": True}),
+            production_enabled=_Value(True), production_paused=_Value(False),
+            user=lambda _user: user_config,
+        )
+        cog.bot = SimpleNamespace(get_shared_api_tokens=AsyncMock(return_value={
+            "api_key": "builder-key", "secret": "YnVpbGRlci1zZWNyZXQ=",
+            "passphrase": "builder-passphrase",
+        }))
+        cog._bot_first_account = AsyncMock(return_value=BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=approved.signer_address,
+            account_wallet_address=approved.deposit_wallet_address,
+            created_at=90,
+        ))
+        cog.deposit_wallet_relayer = SimpleNamespace(
+            submit_creation=AsyncMock(return_value={
+                "transaction_id": "relayer-1", "transaction_hash": None,
+            }),
+            get_creation=AsyncMock(),
+        )
+        with patch("polymarket.polymarket.time.time", return_value=150):
+            submitted = await cog._submit_approved_deposit_wallet_creation(
+                user, approved
+            )
+        self.assertEqual(submitted.state, DepositWalletCreationState.SUBMITTED)
+        self.assertEqual(
+            DepositWalletCreationPlan.from_record(value.value).state,
+            DepositWalletCreationState.SUBMITTED,
+        )
+
+        cog.deposit_wallet_relayer.get_creation.return_value = {
+            "transaction_id": "relayer-1", "transaction_hash": "0x" + "d" * 64,
+            "state": "STATE_CONFIRMED", "from": approved.signer_address,
+            "to": approved.request_to, "proxy_address": approved.deposit_wallet_address,
+            "type": approved.request_type, "error_msg": None,
+        }
+        verification = SimpleNamespace(block_number=123)
+        with patch(
+            "polymarket.polymarket.PolygonAccountIdentityVerifier.verify",
+            new=AsyncMock(return_value=verification),
+        ) as verify:
+            confirmed = await cog._reconcile_deposit_wallet_creation(user)
+        self.assertEqual(confirmed.state, DepositWalletCreationState.CONFIRMED)
+        verify.assert_awaited_once_with(
+            signer_address=approved.signer_address,
+            account_wallet_address=approved.deposit_wallet_address,
+            wallet_type=WalletType.DEPOSIT_WALLET,
+        )
+
 class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def _rpc(self, method, params):
         if method == "eth_chainId":

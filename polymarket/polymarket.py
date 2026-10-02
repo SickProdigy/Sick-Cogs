@@ -14,6 +14,7 @@ from .account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from .collateral import CollateralPlanError, collateral_plan
+from .deposit_wallet import DepositWalletCreationPlan, DepositWalletCreationState
 from .handoff import MarketSnapshot, MarketSnapshotError
 from .identity_verifier import PolygonAccountIdentityVerifier
 from .onboarding import (
@@ -22,6 +23,7 @@ from .onboarding import (
 )
 from .onboarding_verification import finalize_onboarding_evidence
 from .order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from .relayer import BuilderCredentials, DepositWalletRelayerClient
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
 )
@@ -132,7 +134,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.21"
+    __version__ = "0.2.22"
 
     def __init__(self, bot):
         self.bot = bot
@@ -151,9 +153,10 @@ class Polymarket(commands.Cog):
         self.config.register_user(
             account_connection=None, onboarding_challenge=None, terms_challenge=None,
             terms_acceptance=None, audit_events=[], encrypted_session_key=None,
-            bot_first_account=None,
+            bot_first_account=None, deposit_wallet_creation=None,
             final_confirmation_required=True
         )
+        self.deposit_wallet_relayer = DepositWalletRelayerClient()
 
     async def _bot_first_account(self, user) -> BotFirstAccountBinding:
         """Resolve and persist the user's CryptoWallet-owned Deposit Wallet identity."""
@@ -246,6 +249,86 @@ class Polymarket(commands.Cog):
                 "CDP signature does not match the bound CryptoWallet owner."
             )
         return str(result["signature"])
+
+    async def _submit_approved_deposit_wallet_creation(
+        self, user, plan: DepositWalletCreationPlan,
+    ) -> DepositWalletCreationPlan:
+        """Submit one persisted, exact, currently approved creation plan."""
+
+        capabilities = await self.config.production_capabilities()
+        if (
+            not bool(await self.config.production_enabled())
+            or bool(await self.config.production_paused())
+            or not bool(capabilities.get("deposit_wallet_create"))
+            or validate_polymarket_production_manifest()
+        ):
+            raise AccountConnectionError("Deposit Wallet creation is disabled.")
+        binding = await self._bot_first_account(user)
+        if (
+            plan.discord_user_id != user.id
+            or plan.signer_address != binding.signer_address
+            or plan.deposit_wallet_address != binding.account_wallet_address
+        ):
+            raise AccountConnectionError("Deposit Wallet creation identity changed.")
+        user_config = self.config.user(user)
+        stored = await user_config.deposit_wallet_creation()
+        if not stored or DepositWalletCreationPlan.from_record(stored) != plan:
+            raise AccountConnectionError("Approved Deposit Wallet creation is not persisted.")
+        tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            credentials = BuilderCredentials(
+                tokens["api_key"], tokens["secret"], tokens["passphrase"]
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        submitting = plan.begin_submission(now=int(time.time()))
+        await user_config.deposit_wallet_creation.set(submitting.to_record())
+        try:
+            response = await self.deposit_wallet_relayer.submit_creation(
+                submitting, credentials, timestamp=int(time.time())
+            )
+        except (aiohttp.ClientError, AccountConnectionError, TimeoutError):
+            unknown = submitting.recover_after_restart()
+            await user_config.deposit_wallet_creation.set(unknown.to_record())
+            raise AccountConnectionError(
+                "Deposit Wallet submission outcome is unknown; reconcile before retry."
+            ) from None
+        submitted = submitting.record_submission(response)
+        await user_config.deposit_wallet_creation.set(submitted.to_record())
+        return submitted
+
+    async def _reconcile_deposit_wallet_creation(
+        self, user,
+    ) -> DepositWalletCreationPlan:
+        """Reconcile public relayer state and independently verify a confirmed wallet."""
+
+        user_config = self.config.user(user)
+        stored = await user_config.deposit_wallet_creation()
+        if not stored:
+            raise AccountConnectionError("No Deposit Wallet creation is pending.")
+        plan = DepositWalletCreationPlan.from_record(stored).recover_after_restart()
+        if plan.discord_user_id != user.id:
+            raise AccountConnectionError("Deposit Wallet creation belongs to another user.")
+        if plan.state is DepositWalletCreationState.SUBMITTING:
+            raise AccountConnectionError("Deposit Wallet creation state is invalid.")
+        if plan.state not in {
+            DepositWalletCreationState.SUBMITTED, DepositWalletCreationState.UNKNOWN,
+        }:
+            return plan
+        evidence = await self.deposit_wallet_relayer.get_creation(plan)
+        reconciled = plan.reconcile(evidence)
+        if reconciled.state is DepositWalletCreationState.CONFIRMED:
+            verified = await PolygonAccountIdentityVerifier(self._polygon_rpc).verify(
+                signer_address=plan.signer_address,
+                account_wallet_address=plan.deposit_wallet_address,
+                wallet_type=WalletType.DEPOSIT_WALLET,
+            )
+            if verified.block_number < 0:
+                raise AccountConnectionError("Deposit Wallet deployment was not verified.")
+        await user_config.deposit_wallet_creation.set(reconciled.to_record())
+        return reconciled
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
