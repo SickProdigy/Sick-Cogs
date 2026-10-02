@@ -2389,7 +2389,13 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             account_wallet_address="0x" + "2" * 40, created_at=80,
         )
         cog._bot_first_account = AsyncMock(return_value=binding)
-        with patch("polymarket.polymarket.time.time", return_value=100):
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.PolygonAccountIdentityVerifier") as verifier,
+        ):
+            verifier.return_value.verify = AsyncMock(
+                return_value=SimpleNamespace(block_number=99)
+            )
             await Polymarket.polymarket_session.callback(cog, ctx)
         sent = ctx.send.await_args.kwargs
         self.assertIsInstance(sent["view"], SessionApprovalView)
@@ -2456,6 +2462,106 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         consumed = SessionApprovalRequest.from_record(values["session_approval"])
         self.assertEqual(consumed.state, SessionApprovalState.CONSUMED)
         self.assertIsNone(message.edit.await_args.kwargs["view"])
+
+    async def test_deploy_approval_persists_exact_plan_before_relayer_submission(self):
+        user = SimpleNamespace(id=7)
+        eligibility = EligibilityAttestation(7, False, "IE", "", 100, 400)
+        request = SessionApprovalRequest(
+            request_id="q" * 32, result_handle="r" * 32,
+            handoff_handle="h" * 32, requester_id=7, action="deploy",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=90,
+            expires_at=390, final_confirmation_required=True,
+            state=SessionApprovalState.APPROVED, eligibility=eligibility,
+            primary_approved_at=105, final_decided_at=106,
+        )
+        values = {
+            "session_approval": request.to_record(),
+            "deposit_wallet_creation": None,
+        }
+        user_config = _SessionUserConfig(values)
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address=request.signer_address,
+            account_wallet_address=request.account_wallet_address, created_at=80,
+        )
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(
+            user=lambda _user: user_config,
+            production_capabilities=_Value({"deposit_wallet_create": True}),
+            production_enabled=_Value(True), production_paused=_Value(False),
+        )
+        cog.bot = SimpleNamespace(get_shared_api_tokens=AsyncMock(return_value={
+            "api_key": "builder-key", "secret": "YnVpbGRlci1zZWNyZXQ=",
+            "passphrase": "builder-passphrase",
+        }))
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._polygon_rpc = AsyncMock()
+        cog.deposit_wallet_relayer = SimpleNamespace(
+            submit_creation=AsyncMock(return_value={
+                "transaction_id": "relayer-1", "transaction_hash": None,
+            })
+        )
+        interaction = SimpleNamespace(
+            user=user, response=SimpleNamespace(defer=AsyncMock()),
+            followup=SimpleNamespace(send=AsyncMock()),
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+        target = SimpleNamespace(
+            deposit_wallet_address=request.account_wallet_address,
+            evidence_digest="e" * 64,
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=110),
+            patch("polymarket.polymarket.PolygonAccountIdentityVerifier") as verifier,
+        ):
+            verifier.return_value.verify_deposit_wallet_creation_target = AsyncMock(
+                return_value=target
+            )
+            await cog._execute_session_approval(interaction, request)
+        plan = DepositWalletCreationPlan.from_record(values["deposit_wallet_creation"])
+        self.assertEqual(plan.state, DepositWalletCreationState.SUBMITTED)
+        self.assertEqual(plan.owner_approval_fingerprint, request.fingerprint)
+        self.assertEqual(plan.deposit_wallet_address, request.account_wallet_address)
+        self.assertEqual(len(plan.eligibility_fingerprint), 64)
+        self.assertEqual(
+            SessionApprovalRequest.from_record(values["session_approval"]).state,
+            SessionApprovalState.CONSUMED,
+        )
+        cog.deposit_wallet_relayer.submit_creation.assert_awaited_once()
+
+    async def test_existing_submitted_deployment_reconciles_without_resubmission(self):
+        user = SimpleNamespace(id=7)
+        request = SessionApprovalRequest(
+            request_id="q" * 32, result_handle="r" * 32,
+            handoff_handle="h" * 32, requester_id=7, action="deploy",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=90,
+            expires_at=390, final_confirmation_required=False,
+            state=SessionApprovalState.APPROVED,
+            eligibility=EligibilityAttestation(7, False, "IE", "", 100, 400),
+            primary_approved_at=105, final_decided_at=105,
+        )
+        plan = DepositWalletCreationPlan(
+            creation_id="c" * 32, discord_user_id=7,
+            signer_address=request.signer_address,
+            deposit_wallet_address=request.account_wallet_address,
+            idempotency_key="i" * 32,
+            owner_approval_fingerprint=request.fingerprint,
+            eligibility_fingerprint="b" * 64, target_evidence_digest="e" * 64,
+            created_at=90, expires_at=390,
+        ).begin_submission(now=110).record_submission({
+            "transaction_id": "relayer-1", "transaction_hash": None,
+        })
+        user_config = _SessionUserConfig({
+            "deposit_wallet_creation": plan.to_record(),
+        })
+        cog = Polymarket.__new__(Polymarket)
+        cog.config = SimpleNamespace(user=lambda _user: user_config)
+        cog._reconcile_deposit_wallet_creation = AsyncMock(return_value=plan)
+        result = await cog._execute_deposit_wallet_approval(user, request)
+        self.assertEqual(result, plan)
+        cog._reconcile_deposit_wallet_creation.assert_awaited_once_with(user)
 
     async def test_stale_session_card_cannot_advance_replaced_request(self):
         user = SimpleNamespace(id=7)

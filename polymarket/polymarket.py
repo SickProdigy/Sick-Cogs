@@ -153,7 +153,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.29"
+    __version__ = "0.2.30"
 
     def __init__(self, bot):
         self.bot = bot
@@ -251,13 +251,16 @@ class Polymarket(commands.Cog):
         embed = discord.Embed(
             title=titles[request.state],
             description=(
-                "Authorize a CLOB-only session signer for routine Polymarket orders. "
-                "It cannot withdraw funds and expires after 180 days."
+                ("Create the user's derived Polymarket Deposit Wallet through the "
+                 "official gasless Builder/Relayer path." if request.action == "deploy"
+                 else "Authorize a CLOB-only session signer for routine Polymarket "
+                      "orders. It cannot withdraw funds and expires after 180 days.")
             ),
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Action", value=(
-            "Renew session authorization" if request.action == "rotate"
+            "Create Deposit Wallet" if request.action == "deploy"
+            else "Renew session authorization" if request.action == "rotate"
             else "Set up session authorization"
         ), inline=False)
         embed.add_field(name="Network", value="Polygon (137)", inline=True)
@@ -266,7 +269,12 @@ class Polymarket(commands.Cog):
             name="Deposit Wallet", value=f"`{request.account_wallet_address}`",
             inline=False,
         )
-        embed.add_field(name="Scope", value="CLOB orders only; no withdrawals", inline=False)
+        embed.add_field(
+            name="Scope",
+            value=("Create this Deposit Wallet only" if request.action == "deploy"
+                   else "CLOB orders only; no withdrawals"),
+            inline=False,
+        )
         embed.add_field(name="Expires", value=f"<t:{request.expires_at}:R>", inline=True)
         embed.set_footer(text=f"Request {request.fingerprint[:12]} · Exact details remain unchanged")
         return embed
@@ -425,6 +433,61 @@ class Polymarket(commands.Cog):
             view=None,
         )
 
+    async def _execute_deposit_wallet_approval(
+        self, user, request: SessionApprovalRequest,
+    ) -> DepositWalletCreationPlan:
+        """Persist and submit the exact user-approved Deposit Wallet creation."""
+
+        if request.eligibility is None:
+            raise AccountConnectionError("Protected eligibility evidence is missing.")
+        user_config = self.config.user(user)
+        stored = await user_config.deposit_wallet_creation()
+        if stored:
+            plan = DepositWalletCreationPlan.from_record(stored).recover_after_restart()
+            if plan.state in {
+                DepositWalletCreationState.SUBMITTED,
+                DepositWalletCreationState.UNKNOWN,
+            }:
+                return await self._reconcile_deposit_wallet_creation(user)
+            if plan.state is DepositWalletCreationState.CONFIRMED:
+                return plan
+            if plan.state is not DepositWalletCreationState.APPROVED:
+                raise AccountConnectionError(
+                    "The prior Deposit Wallet deployment failed; owner review is required."
+                )
+        else:
+            evidence = await PolygonAccountIdentityVerifier(
+                self._polygon_rpc
+            ).verify_deposit_wallet_creation_target(request.signer_address)
+            if evidence.deposit_wallet_address != request.account_wallet_address:
+                raise AccountConnectionError(
+                    "Derived Deposit Wallet identity changed before submission."
+                )
+            eligibility_record = request.to_record()["eligibility"]
+            eligibility_fingerprint = hashlib.sha256(json.dumps(
+                eligibility_record, sort_keys=True, separators=(",", ":")
+            ).encode("ascii")).hexdigest()
+            plan = DepositWalletCreationPlan(
+                creation_id=secrets.token_urlsafe(32),
+                discord_user_id=user.id,
+                signer_address=request.signer_address,
+                deposit_wallet_address=request.account_wallet_address,
+                idempotency_key=secrets.token_urlsafe(32),
+                owner_approval_fingerprint=request.fingerprint,
+                eligibility_fingerprint=eligibility_fingerprint,
+                target_evidence_digest=evidence.evidence_digest,
+                created_at=request.created_at, expires_at=request.expires_at,
+            )
+            await user_config.deposit_wallet_creation.set(plan.to_record())
+        if (plan.owner_approval_fingerprint != request.fingerprint
+                or plan.discord_user_id != user.id
+                or plan.signer_address != request.signer_address
+                or plan.deposit_wallet_address != request.account_wallet_address):
+            raise AccountConnectionError(
+                "Persisted Deposit Wallet approval does not match this request."
+            )
+        return await self._submit_approved_deposit_wallet_creation(user, plan)
+
     async def _execute_session_approval(
         self, interaction: discord.Interaction, request: SessionApprovalRequest,
     ) -> None:
@@ -438,7 +501,9 @@ class Polymarket(commands.Cog):
         request.eligibility.require_current(
             discord_user_id=interaction.user.id, now=approved_at
         )
-        if request.action == "provision":
+        if request.action == "deploy":
+            await self._execute_deposit_wallet_approval(interaction.user, request)
+        elif request.action == "provision":
             await self._provision_session_key(interaction.user, request.eligibility)
         else:
             await self._begin_session_rotation(interaction.user, request.eligibility)
@@ -451,7 +516,11 @@ class Polymarket(commands.Cog):
         )
         await self._edit_session_card(
             interaction, consumed,
-            content="Session authorization was submitted and will be reconciled before use.",
+            content=(
+                "Deposit Wallet deployment was submitted and will be reconciled "
+                "before session setup." if request.action == "deploy" else
+                "Session authorization was submitted and will be reconciled before use."
+            ),
         )
 
     async def _provision_session_key(
@@ -1925,6 +1994,25 @@ class Polymarket(commands.Cog):
             if request is not None and now >= request.expires_at:
                 await user_config.session_approval.set(None)
                 request = None
+            if (request is not None
+                    and request.state is SessionApprovalState.CONSUMED
+                    and request.action == "deploy"):
+                deployment = await self._reconcile_deposit_wallet_creation(ctx.author)
+                if deployment.state is DepositWalletCreationState.CONFIRMED:
+                    await user_config.session_approval.set(None)
+                    request = None
+                elif deployment.state is DepositWalletCreationState.FAILED:
+                    await ctx.send(
+                        "Deposit Wallet deployment failed. No retry was submitted; "
+                        "owner review is required."
+                    )
+                    return
+                else:
+                    await ctx.send(
+                        "Deposit Wallet deployment is still being reconciled. "
+                        "No duplicate submission was made."
+                    )
+                    return
             if request is not None and (
                 request.signer_address != binding.signer_address
                 or request.account_wallet_address != binding.account_wallet_address
@@ -1945,6 +2033,23 @@ class Polymarket(commands.Cog):
                         )
                         return
                     action = "rotate"
+                else:
+                    verifier = PolygonAccountIdentityVerifier(self._polygon_rpc)
+                    try:
+                        await verifier.verify(
+                            signer_address=binding.signer_address,
+                            account_wallet_address=binding.account_wallet_address,
+                            wallet_type=WalletType.DEPOSIT_WALLET,
+                        )
+                    except AccountConnectionError:
+                        target = await verifier.verify_deposit_wallet_creation_target(
+                            binding.signer_address
+                        )
+                        if target.deposit_wallet_address != binding.account_wallet_address:
+                            raise AccountConnectionError(
+                                "Derived Deposit Wallet identity changed."
+                            )
+                        action = "deploy"
                 cryptowallet = self.bot.get_cog("CryptoWallet")
                 required = (
                     "recovery_relay_status", "create_external_companion_handoff",

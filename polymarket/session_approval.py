@@ -44,7 +44,7 @@ class SessionApprovalRequest:
                 or not IDENTIFIER.fullmatch(self.result_handle)
                 or not IDENTIFIER.fullmatch(self.handoff_handle)):
             raise AccountConnectionError("Session approval identity is invalid.")
-        if self.requester_id <= 0 or self.action not in {"provision", "rotate"}:
+        if self.requester_id <= 0 or self.action not in {"deploy", "provision", "rotate"}:
             raise AccountConnectionError("Session approval binding is invalid.")
         if (not ADDRESS.fullmatch(self.signer_address)
                 or not ADDRESS.fullmatch(self.account_wallet_address)

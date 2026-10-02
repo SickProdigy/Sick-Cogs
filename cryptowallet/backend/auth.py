@@ -228,7 +228,7 @@ class JwtAuthMixin:
                 or payload.get("purpose") != "polymarket_eligibility"
                 or payload.get("chain_id") != 137
                 or payload.get("discord_user_id") != discord_user_id
-                or payload.get("action") not in {"provision", "rotate"}
+                or payload.get("action") not in {"deploy", "provision", "rotate"}
                 or not isinstance(payload.get("request_id"), str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["request_id"]) is None
                 or not isinstance(payload.get("result_handle"), str)

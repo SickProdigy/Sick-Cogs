@@ -22,6 +22,7 @@ function claims(changes = {}) {
 test("accepts exact user-bound eligibility request", () => {
   const result = validateEligibilityBinding(claims(), now);
   assert.equal(result.action, "provision");
+  assert.equal(validateEligibilityBinding(claims({ action: "deploy" }), now).action, "deploy");
   assert.ok(Object.isFrozen(result));
 });
 

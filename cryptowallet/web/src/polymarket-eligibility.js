@@ -74,8 +74,9 @@ confirmButton.addEventListener("click", async () => {
 
 Promise.resolve().then(consumeHandoff).then(async (value) => {
   binding = value;
-  document.querySelector("#polymarket-action").textContent = binding.action === "rotate"
-    ? "Renew session authorization" : "Set up session authorization";
+  document.querySelector("#polymarket-action").textContent = binding.action === "deploy" ? "Create Deposit Wallet"
+    : binding.action === "rotate" ? "Renew session authorization"
+      : "Set up session authorization";
   document.querySelector("#polymarket-signer").textContent = binding.signer_address;
   document.querySelector("#polymarket-wallet").textContent = binding.account_wallet_address;
   eligibility = await checkEligibility();
