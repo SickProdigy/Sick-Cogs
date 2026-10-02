@@ -233,3 +233,39 @@ def draw_high_card(deck: Optional[List[Card]] = None) -> HighCardResult:
     else:
         result = "Tie — same rank."
     return HighCardResult(player, dealer, result)
+
+
+@dataclass(frozen=True)
+class CrapsResult:
+    rolls: Tuple[Tuple[int, int], ...]
+    point: Optional[int]
+    won: bool
+    result: str
+
+
+def play_pass_line_craps() -> CrapsResult:
+    rolls: List[Tuple[int, int]] = []
+
+    def roll() -> int:
+        pair = (secrets.randbelow(6) + 1, secrets.randbelow(6) + 1)
+        rolls.append(pair)
+        return sum(pair)
+
+    come_out = roll()
+    if come_out in {7, 11}:
+        return CrapsResult(tuple(rolls), None, True, "Natural — you win!")
+    if come_out in {2, 3, 12}:
+        return CrapsResult(tuple(rolls), None, False, "Craps — house wins.")
+
+    point = come_out
+    for _ in range(100):
+        total = roll()
+        if total == point:
+            return CrapsResult(
+                tuple(rolls), point, True, f"Point {point} made — you win!"
+            )
+        if total == 7:
+            return CrapsResult(
+                tuple(rolls), point, False, "Seven out — house wins."
+            )
+    raise RuntimeError("Craps did not resolve within the safety limit.")

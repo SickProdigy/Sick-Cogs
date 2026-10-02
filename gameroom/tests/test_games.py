@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 
 from gameroom import remove_conflicting_aliases
 from gameroom.gameroom import GameRoom
@@ -11,8 +11,16 @@ from gameroom.games import (
     draw_high_card,
     hand_value,
     parse_dice,
+    play_pass_line_craps,
 )
 from gameroom.views import BlackjackView, GameMenuView
+
+
+def make_cog(bot=None):
+    config = Mock()
+    with patch("gameroom.gameroom.Config.get_conf", return_value=config):
+        cog = GameRoom(bot or Mock())
+    return cog
 
 
 class DiceTests(unittest.TestCase):
@@ -136,6 +144,28 @@ class HigherLowerTests(unittest.TestCase):
         self.assertIn("ties", game.last_result)
 
 
+class CrapsTests(unittest.TestCase):
+    def test_natural_seven_wins(self):
+        with patch("gameroom.games.secrets.randbelow", side_effect=[2, 3]):
+            result = play_pass_line_craps()
+        self.assertTrue(result.won)
+        self.assertIsNone(result.point)
+        self.assertEqual(len(result.rolls), 1)
+
+    def test_craps_two_loses(self):
+        with patch("gameroom.games.secrets.randbelow", side_effect=[0, 0]):
+            result = play_pass_line_craps()
+        self.assertFalse(result.won)
+        self.assertIn("Craps", result.result)
+
+    def test_point_repeats_before_seven(self):
+        with patch("gameroom.games.secrets.randbelow", side_effect=[0, 2, 1, 1]):
+            result = play_pass_line_craps()
+        self.assertTrue(result.won)
+        self.assertEqual(result.point, 4)
+        self.assertEqual(len(result.rolls), 2)
+
+
 class InteractionTests(unittest.IsolatedAsyncioTestCase):
     async def test_launcher_rejects_other_users_privately(self):
         view = GameMenuView(100, "!", Mock())
@@ -154,7 +184,7 @@ class InteractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await view.interaction_check(interaction))
 
     async def test_session_limit_and_release(self):
-        cog = GameRoom(Mock())
+        cog = make_cog()
         first = SimpleNamespace(
             guild_id=1,
             channel_id=2,
@@ -200,6 +230,13 @@ class CommandTests(unittest.TestCase):
                 "highcard",
                 "blackjack",
                 "higherlower",
+                "craps",
+                "gameroomset",
+                "wagering",
+                "minimum",
+                "maximum",
+                "dailyloss",
+                "ledger",
             },
         )
         self.assertIn("games", commands["gameroom"].aliases)
@@ -209,14 +246,14 @@ class CommandTests(unittest.TestCase):
     def test_native_game_discovery_only_lists_loaded_commands(self):
         bot = Mock()
         bot.get_command.side_effect = lambda name: object() if name in {"roll", "rps"} else None
-        cog = GameRoom(bot)
+        cog = make_cog(bot)
         listed = cog._native_games("!")
         self.assertEqual(listed, ["`!roll` — Roll", "`!rps` — Rock Paper Scissors"])
 
     def test_optional_aliases_drop_cleanly_on_collision(self):
         bot = Mock()
         bot.get_command.side_effect = lambda name: object() if name in {"games", "21"} else None
-        cog = GameRoom(bot)
+        cog = make_cog(bot)
         remove_conflicting_aliases(cog, bot)
         commands = {command.name: command for command in cog.__cog_commands__}
         self.assertNotIn("games", commands["gameroom"].aliases)
