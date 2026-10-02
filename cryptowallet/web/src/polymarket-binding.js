@@ -54,7 +54,7 @@ export function validateEligibilityBinding(claims, nowSeconds) {
       || Object.keys(value).sort().join(",") !== ELIGIBILITY_KEYS.join(",")
       || value.purpose !== "polymarket_eligibility" || value.chain_id !== 137
       || String(value.discord_user_id) !== userId || !HANDLE.test(value.request_id)
-      || !HANDLE.test(value.result_handle) || !["deploy", "provision", "rotate"].includes(value.action)
+      || !HANDLE.test(value.result_handle) || !["deploy", "provision", "rotate", "deposit"].includes(value.action)
       || !ADDRESS.test(value.signer_address) || !ADDRESS.test(value.account_wallet_address)
       || value.signer_address === value.account_wallet_address
       || !Number.isSafeInteger(value.created_at) || !Number.isSafeInteger(value.expires_at)

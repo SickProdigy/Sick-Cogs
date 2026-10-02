@@ -3127,6 +3127,66 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
         cog.bridge_client.supported_assets.assert_not_awaited()
 
+    async def test_deposit_starts_exact_protected_eligibility_before_bridge(self):
+        author = SimpleNamespace(id=7)
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock(),
+            embed_color=AsyncMock(return_value=None),
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        companion = SimpleNamespace(
+            recovery_relay_status=AsyncMock(return_value={
+                "configured": True,
+                "approval_base_url": "https://wallet.example.test/cryptowallet",
+            }),
+            create_external_companion_handoff=AsyncMock(
+                return_value=("signed-token", 400)
+            ),
+            register_recovery_handoff=AsyncMock(return_value="h" * 32),
+            poll_polymarket_eligibility_result=AsyncMock(),
+        )
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: companion if name == "CryptoWallet" else None
+        ))
+        cog.bridge_client = SimpleNamespace(supported_assets=AsyncMock())
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({"deposit": True, "eligibility": True})
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(7, now=100, acceptance_id="terms-7")
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.secrets.token_urlsafe",
+                  side_effect=["q" * 32, "r" * 32]),
+            patch("polymarket.polymarket.PolygonAccountIdentityVerifier") as verifier,
+        ):
+            verifier.return_value.verify = AsyncMock(
+                return_value=SimpleNamespace(block_number=99)
+            )
+            await Polymarket.polymarket_deposit.callback(
+                cog, ctx, amount="0.01"
+            )
+
+        cog.bridge_client.supported_assets.assert_not_awaited()
+        payload = companion.create_external_companion_handoff.await_args.args[2]
+        self.assertEqual(payload["action"], "deposit")
+        self.assertEqual(payload["discord_user_id"], 7)
+        self.assertEqual(payload["account_wallet_address"],
+                         binding.account_wallet_address)
+        challenge = await user_config.deposit_eligibility()
+        self.assertEqual(challenge["amount_atomic"], 10**16)
+        self.assertEqual(challenge["result_handle"], "r" * 32)
+        self.assertIn("#handoff=" + "h" * 32, ctx.send.await_args.args[0])
+        self.assertIn("No deposit address", ctx.send.await_args.args[0])
+
     async def test_deposit_builds_exact_cryptowallet_approval_card_and_persists(self):
         author = SimpleNamespace(id=7)
         message = SimpleNamespace()
@@ -3156,6 +3216,18 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         )
         view = SimpleNamespace(message=None)
         cryptowallet = SimpleNamespace(
+            poll_polymarket_eligibility_result=AsyncMock(return_value={
+                "status": "submitted", "blocked": False, "country": "IE",
+                "region": "", "checked_at": 100,
+            }),
+            polymarket_deposit_intent_evidence=AsyncMock(return_value={
+                "intent_id": "poly-fixed-deposit", "profile_id": "profile-7",
+                "network": "base-mainnet", "to_address": "0x" + "3" * 40,
+                "value_atomic": 10**16, "asset_kind": "native",
+                "asset_symbol": "ETH", "asset_decimals": 18,
+                "approval_fingerprint": "b" * 64, "status": "pending",
+                "transaction_hash": None,
+            }),
             polymarket_prepare_deposit_intent=AsyncMock(return_value={
                 "intent_id": "poly-fixed-deposit",
                 "approval_fingerprint": "b" * 64,
@@ -3175,10 +3247,17 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         cog.config.user = lambda _user: user_config
         await cog.config.production_enabled.set(True)
         await cog.config.production_paused.set(False)
-        await cog.config.production_capabilities.set({"deposit": True})
+        await cog.config.production_capabilities.set({"deposit": True, "eligibility": True})
         await user_config.terms_acceptance.set(
             create_polymarket_terms_acceptance(7, now=100, acceptance_id="terms-7")
         )
+        await user_config.deposit_eligibility.set({
+            "request_id": "q" * 32, "result_handle": "r" * 32,
+            "discord_user_id": 7, "profile_id": "profile-7",
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "amount_atomic": 10**16, "created_at": 90, "expires_at": 390,
+        })
         with (
             patch("polymarket.polymarket.time.time", return_value=100),
             patch("polymarket.polymarket.secrets.token_urlsafe",
@@ -3189,8 +3268,17 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
                 return_value=SimpleNamespace(block_number=99)
             )
             await Polymarket.polymarket_deposit.callback(
-                cog, ctx, amount="0.01"
+                cog, ctx, amount=""
             )
+            ctx.send.reset_mock()
+            cryptowallet.polymarket_deposit_approval_card.reset_mock()
+            await Polymarket.polymarket_deposit.callback(
+                cog, ctx, amount=""
+            )
+            self.assertEqual(
+                cryptowallet.polymarket_deposit_approval_card.await_count, 1
+            )
+            self.assertIs(view.message, message)
 
         bridge.quote.assert_awaited_once_with(
             amount_atomic=10**16, source_chain_id=8453,

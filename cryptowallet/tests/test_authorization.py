@@ -1163,6 +1163,17 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             deploy_claims["sickwallet_polymarket_eligibility"]["action"], "deploy"
         )
+        deposit_token, _ = await harness.create_external_companion_handoff(
+            7, "polymarket_eligibility", {**payload, "action": "deposit"}
+        )
+        deposit_claims = jwt.decode(
+            deposit_token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(
+            deposit_claims["sickwallet_polymarket_eligibility"]["action"],
+            "deposit",
+        )
         for changes in (
             {"discord_user_id": 8}, {"chain_id": 1}, {"action": "trade"},
             {"purpose": "polymarket_connect"}, {"private_key": "forbidden"},
