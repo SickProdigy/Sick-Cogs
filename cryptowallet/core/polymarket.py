@@ -22,6 +22,53 @@ class PolymarketHandoffAvailability:
     reason: str = "Polygon mainnet handoff has not passed the required security, eligibility, and release reviews."
 
 
+
+@dataclass(frozen=True, slots=True)
+class PolymarketSignerContext:
+    """Public CDP ownership evidence for one bot-first Polymarket signer."""
+
+    requester_id: int
+    profile_id: str
+    provider_user_id: str
+    smart_account_address: str
+    signer_address: str
+    chain_id: int = POLYMARKET_CHAIN_ID
+    source: str = "cdp_smart_account_owner"
+
+    def __post_init__(self):
+        if (
+            self.requester_id <= 0
+            or not self.profile_id
+            or self.provider_user_id != self.profile_id
+            or self.chain_id != POLYMARKET_CHAIN_ID
+            or self.source != "cdp_smart_account_owner"
+        ):
+            raise ValueError("Polymarket signer context identity is invalid.")
+        for value in (self.smart_account_address, self.signer_address):
+            address = value.removeprefix("0x")
+            if (
+                len(address) != 40
+                or any(character not in "0123456789abcdefABCDEF" for character in address)
+            ):
+                raise ValueError("Polymarket signer context contains an invalid address.")
+        object.__setattr__(
+            self, "smart_account_address", self.smart_account_address.lower()
+        )
+        object.__setattr__(self, "signer_address", self.signer_address.lower())
+        if self.smart_account_address == self.signer_address:
+            raise ValueError("CDP smart account and owner signer must remain separate.")
+
+    def to_dict(self) -> dict:
+        return {
+            "requester_id": self.requester_id,
+            "profile_id": self.profile_id,
+            "provider_user_id": self.provider_user_id,
+            "smart_account_address": self.smart_account_address,
+            "signer_address": self.signer_address,
+            "chain_id": self.chain_id,
+            "source": self.source,
+        }
+
 @dataclass(frozen=True, slots=True)
 class PolymarketHandoffContext:
     """User-scoped public identity and reviewed capabilities; never signer material."""

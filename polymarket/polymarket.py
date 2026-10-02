@@ -9,6 +9,7 @@ import aiohttp
 import discord
 from redbot.core import Config, checks, commands
 
+from .account_binding import BotFirstAccountBinding
 from .account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
@@ -128,7 +129,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.19"
+    __version__ = "0.2.20"
 
     def __init__(self, bot):
         self.bot = bot
@@ -147,8 +148,56 @@ class Polymarket(commands.Cog):
         self.config.register_user(
             account_connection=None, onboarding_challenge=None, terms_challenge=None,
             terms_acceptance=None, audit_events=[], encrypted_session_key=None,
+            bot_first_account=None,
             final_confirmation_required=True
         )
+
+    async def _bot_first_account(self, user) -> BotFirstAccountBinding:
+        """Resolve and persist the user's CryptoWallet-owned Deposit Wallet identity."""
+
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        resolver = getattr(cryptowallet, "polymarket_wallet_context", None)
+        if not callable(resolver):
+            raise AccountConnectionError("CryptoWallet is unavailable.")
+        try:
+            context = await resolver(user)
+        except RuntimeError as exc:
+            raise AccountConnectionError(
+                "CryptoWallet could not verify the wallet owner."
+            ) from exc
+        expected = {
+            "requester_id", "profile_id", "provider_user_id",
+            "smart_account_address", "signer_address", "chain_id", "source",
+        }
+        if not isinstance(context, dict) or set(context) != expected:
+            raise AccountConnectionError("CryptoWallet returned an invalid owner binding.")
+        if (
+            context["requester_id"] != user.id
+            or context["provider_user_id"] != context["profile_id"]
+            or context["chain_id"] != 137
+            or context["source"] != "cdp_smart_account_owner"
+        ):
+            raise AccountConnectionError("CryptoWallet owner binding has drifted.")
+        signer = str(context["signer_address"])
+        deposit_wallet = (
+            await PolygonAccountIdentityVerifier(self._polygon_rpc).derive_wallets(signer)
+        )[WalletType.DEPOSIT_WALLET][-1]
+        user_config = self.config.user(user)
+        stored = await user_config.bot_first_account()
+        if stored:
+            binding = BotFirstAccountBinding.from_record(stored)
+            binding.require_same_identity(
+                discord_user_id=user.id, profile_id=str(context["profile_id"]),
+                signer_address=signer, account_wallet_address=deposit_wallet,
+            )
+            return binding
+        binding = BotFirstAccountBinding(
+            discord_user_id=user.id, profile_id=str(context["profile_id"]),
+            signer_address=signer, account_wallet_address=deposit_wallet,
+            created_at=int(time.time()),
+        )
+        await user_config.bot_first_account.set(binding.to_record())
+        return binding
 
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
@@ -268,7 +317,7 @@ class Polymarket(commands.Cog):
         embed.add_field(name="Live approval preview", value=f"`{prefix}poly quote <market> <outcome> <max pUSD> [max price]`\nPublic quote only; nothing is signed or submitted.", inline=False)
         embed.add_field(name="Collateral disclosures", value=f"`{prefix}poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>`", inline=False)
         embed.add_field(name="Safety status", value=f"`{prefix}poly status`", inline=False)
-        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly connect`, `{prefix}poly confirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` shows public connection state. `{prefix}poly confirmations [on|off]` controls the default-on second trade check. Never send secrets in Discord.", inline=False)
+        embed.add_field(name="Protected account", value=f"DM-only `{prefix}poly terms`, `{prefix}poly termsconfirm`, `{prefix}poly disconnect`, and `{prefix}poly audit`\n`{prefix}poly account` automatically derives the CryptoWallet-owned Deposit Wallet. Existing-account `connect`/`confirm` is compatibility-only. `{prefix}poly confirmations [on|off]` controls the default-on second trade check. Never send secrets in Discord.", inline=False)
         embed.set_footer(text="Read-only: no wallets, deposits, signatures, or trading.")
         await ctx.send(embed=embed)
 
@@ -581,7 +630,7 @@ class Polymarket(commands.Cog):
         )
         embed.add_field(
             name="Wallet model",
-            value="Signer and Polymarket account wallet are separate identities. New accounts use Deposit Wallets; legacy Proxy and Safe wallets remain explicit types.",
+            value="CryptoWallet's verified CDP EOA is the signer. Its separately derived Deposit Wallet is the Polymarket account; legacy Proxy and Safe connections remain compatibility-only.",
             inline=False,
         )
         embed.add_field(
@@ -709,26 +758,42 @@ class Polymarket(commands.Cog):
 
     @polymarket.command(name="account")
     async def polymarket_account(self, ctx: commands.Context):
-        """Show the caller's secret-free Polymarket connection state."""
-        record = await self.config.user(ctx.author).account_connection()
-        if not record:
-            await ctx.send(
-                "No Polymarket account is connected; never send a private key, "
-                "recovery phrase, signature, or API credential in Discord."
-            )
-            return
+        """Automatically prepare and show the caller's CryptoWallet-owned account."""
         try:
-            connection = AccountConnection.from_record(record)
+            binding = await self._bot_first_account(ctx.author)
         except AccountConnectionError:
-            await ctx.send("The stored Polymarket connection is invalid and cannot be used.")
+            record = await self.config.user(ctx.author).account_connection()
+            if not record:
+                await ctx.send(
+                    "The Polymarket account could not be prepared from CryptoWallet. "
+                    "No wallet was connected and no transaction was submitted."
+                )
+                return
+            try:
+                connection = AccountConnection.from_record(record)
+            except AccountConnectionError:
+                await ctx.send(
+                    "The stored Polymarket connection is invalid and cannot be used."
+                )
+                return
+            await ctx.send(
+                "**Polymarket account (existing-account compatibility)**\n"
+                f"State: **{connection.state.value}**\n"
+                f"Wallet type: **{connection.wallet_type.value}**\n"
+                f"Signer: `{connection.signer_address}`\n"
+                f"Account wallet: `{connection.account_wallet_address}`\n"
+                "Order execution remains disabled."
+            )
             return
         await ctx.send(
             "**Polymarket account**\n"
-            f"State: **{connection.state.value}**\n"
-            f"Wallet type: **{connection.wallet_type.value}**\n"
-            f"Signer: `{connection.signer_address}`\n"
-            f"Account wallet: `{connection.account_wallet_address}`\n"
-            "Order execution remains disabled."
+            "Source: **CryptoWallet CDP owner**\n"
+            "State: **derived; deployment not submitted**\n"
+            f"Wallet type: **{binding.wallet_type.value}**\n"
+            f"Signer: `{binding.signer_address}`\n"
+            f"Deposit Wallet: `{binding.account_wallet_address}`\n"
+            "No separate Polymarket setup is required. No funds moved, signature "
+            "was requested, or transaction was submitted."
         )
 
     @polymarket.command(name="confirmations", aliases=["doublecheck"])

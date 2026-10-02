@@ -751,6 +751,74 @@ class CdpWalletProvider(WalletProvider):
             raise ValueError("No delegation accounts were resolved")
         return resolved
 
+
+    async def polymarket_signer_context(
+        self, profile: dict, discord_user_id: int
+    ) -> dict:
+        """Resolve one stored CDP smart account to its unique public EOA owner."""
+
+        profile_id = str(profile.get("profile_id") or "")
+        provider_user_id = str(profile.get("provider_user_id") or "")
+        if (
+            int(discord_user_id) <= 0
+            or not profile_id
+            or provider_user_id != profile_id
+        ):
+            raise WalletProviderError("The CryptoWallet profile identity is incomplete.")
+        try:
+            stored_smart_accounts = {
+                normalize_evm_address(str(item.get("address") or "")).lower()
+                for item in profile.get("accounts") or []
+                if item.get("network") in {BASE_SEPOLIA.key, BASE_MAINNET.key}
+            }
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CryptoWallet contains an invalid EVM smart account."
+            ) from exc
+        if len(stored_smart_accounts) != 1:
+            raise WalletProviderError(
+                "CryptoWallet must contain exactly one consistent EVM smart account."
+            )
+        credentials = await self.credentials_for_network(BASE_SEPOLIA.key)
+        if credentials is None:
+            raise WalletProviderError("CDP credentials are not completely configured.")
+        try:
+            end_user = await self._api_client(credentials).get_end_user(provider_user_id)
+            if str(end_user.get("userId") or "") != provider_user_id:
+                raise ValueError("CDP returned a different end user")
+            eoa_addresses = {
+                normalize_evm_address(str(item.get("address") or "")).lower()
+                for item in end_user.get("evmAccountObjects") or []
+            }
+            smart_address = next(iter(stored_smart_accounts))
+            matching = [
+                item for item in end_user.get("evmSmartAccountObjects") or []
+                if normalize_evm_address(str(item.get("address") or "")).lower()
+                == smart_address
+            ]
+            if len(matching) != 1:
+                raise ValueError("CDP did not return the stored smart account")
+            eligible_owners = {
+                normalize_evm_address(str(owner)).lower()
+                for owner in matching[0].get("ownerAddresses") or []
+            }.intersection(eoa_addresses)
+            if len(eligible_owners) != 1:
+                raise ValueError("CDP did not return one EOA owner for the smart account")
+            signer_address = next(iter(eligible_owners))
+        except (CdpApiError, KeyError, TypeError, ValueError) as exc:
+            raise WalletProviderError(
+                "CDP could not verify the CryptoWallet owner signer."
+            ) from exc
+        return {
+            "requester_id": int(discord_user_id),
+            "profile_id": profile_id,
+            "provider_user_id": provider_user_id,
+            "smart_account_address": smart_address,
+            "signer_address": signer_address,
+            "chain_id": 137,
+            "source": "cdp_smart_account_owner",
+        }
+
     async def get_delegation_status(self, profile: dict, network: str) -> dict:
         """Read a legacy profile grant or the complete account-scoped grant set."""
         if network not in {BASE_SEPOLIA.key, BASE_MAINNET.key, SOLANA_DEVNET.key}:

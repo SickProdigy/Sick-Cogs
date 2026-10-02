@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
 from polymarket import setup
+from polymarket.account_binding import BotFirstAccountBinding
 from polymarket.account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
@@ -992,6 +993,25 @@ class PolygonIdentityVerifierTests(unittest.IsolatedAsyncioTestCase):
             )
 
 
+class BotFirstAccountBindingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_binding_round_trip_and_identity_replacement_block(self):
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=100,
+        )
+        self.assertEqual(
+            BotFirstAccountBinding.from_record(binding.to_record()), binding
+        )
+        self.assertEqual(len(binding.fingerprint), 64)
+        with self.assertRaisesRegex(AccountConnectionError, "replacement"):
+            binding.require_same_identity(
+                discord_user_id=7, profile_id="profile-7",
+                signer_address="0x" + "3" * 40,
+                account_wallet_address="0x" + "2" * 40,
+            )
+
+
 class SessionKeyStoreTests(unittest.TestCase):
     def setUp(self):
         self.key = bytes(range(32))
@@ -1129,12 +1149,39 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await user_config.final_confirmation_required())
         self.assertIn("**off**", ctx.send.await_args.args[0])
 
-    async def test_account_status_accepts_no_secrets_and_stays_disconnected(self):
+    async def test_account_automatically_binds_cryptowallet_owner_and_deposit_wallet(self):
         ctx = Context()
-        await Polymarket.polymarket_account.callback(Polymarket(object()), ctx)
-        message = ctx.send.await_args.args[0]
-        self.assertIn("No Polymarket account is connected", message)
-        self.assertIn("never send a private key", message)
+        owner = "0x" + "1" * 40
+        crypto = SimpleNamespace(polymarket_wallet_context=AsyncMock(return_value={
+            "requester_id": 7, "profile_id": "profile-7",
+            "provider_user_id": "profile-7",
+            "smart_account_address": "0x" + "9" * 40,
+            "signer_address": owner, "chain_id": 137,
+            "source": "cdp_smart_account_owner",
+        }))
+        bot = SimpleNamespace(get_cog=lambda name: crypto if name == "CryptoWallet" else None)
+        cog = Polymarket(bot)
+        user_config = cog.config.user(ctx.author)
+        cog.config.user = lambda _user: user_config
+
+        with patch("polymarket.polymarket.time.time", return_value=100):
+            await Polymarket.polymarket_account.callback(cog, ctx)
+
+        binding = BotFirstAccountBinding.from_record(
+            user_config.bot_first_account.value
+        )
+        self.assertEqual(binding.signer_address, owner)
+        self.assertNotEqual(binding.account_wallet_address, owner)
+        self.assertIn("No separate Polymarket setup is required", ctx.send.await_args.args[0])
+        crypto.polymarket_wallet_context.assert_awaited_once_with(ctx.author)
+
+    async def test_account_fails_closed_when_cryptowallet_is_unavailable(self):
+        ctx = Context()
+        bot = SimpleNamespace(get_cog=lambda _name: None)
+        await Polymarket.polymarket_account.callback(Polymarket(bot), ctx)
+        self.assertIn(
+            "could not be prepared from CryptoWallet", ctx.send.await_args.args[0]
+        )
 
     async def test_connect_command_is_default_off_before_companion_or_rpc_access(self):
         ctx = Context()
@@ -1334,7 +1381,8 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         fields = {field.name: field.value for field in embed.fields}
         self.assertIn("137", fields["Production target"])
         self.assertIn("pUSD", fields["Production target"])
-        self.assertIn("Deposit Wallets", fields["Wallet model"])
+        self.assertIn("verified CDP EOA", fields["Wallet model"])
+        self.assertIn("Deposit Wallet", fields["Wallet model"])
         self.assertIn("execution disabled", fields["Reviewed boundary"])
 
     async def test_production_controls_default_closed_pause_and_refuse_enable(self):

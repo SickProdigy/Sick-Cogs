@@ -26,10 +26,11 @@ This is a develop-only design boundary. It does not enable Polygon in CryptoWall
 
 ## Selected integration direction
 
-1. Existing Polymarket users connect their explicit account wallet plus signer through a protected handoff; neither identity is inferred from a Base address.
-2. New users may later create a Polymarket Deposit Wallet only through the official Builder/Relayer model with server-held builder credentials and user-controlled signing.
-3. Scoped, time-limited session keys are the preferred future delegated-trading model, but remain disabled until their exact permissions, expiry, revocation, storage, and recovery behavior pass review.
-4. Direct CDP Polygon signing remains an adapter candidate only if CDP can produce every required EIP-712 signature without exposing keys and the resulting signer is proven to control the separately recorded Polymarket account wallet.
+1. CryptoWallet re-reads the CDP end user and accepts only the unique registered EOA owner of the user's stored smart account as the Polymarket signer. The Base smart-account address itself is never used as the signer.
+2. Polymarket derives the current official Deposit Wallet address from that verified EOA automatically. Ordinary users do not connect a separate account; the prior protected existing-account flow remains compatibility-only.
+3. Deposit Wallet deployment will use the official Builder/Relayer model with server-held builder credentials and exact user approval. Derivation alone never claims deployment.
+4. Scoped 180-day CLOB-only session keys are the selected routine order-signing model. They remain non-withdrawing and disabled until authorization, revocation, encrypted credential storage, and recovery pass testing.
+5. CDP owner signing is reserved for the narrow account-creation/authorization operations that require it; routine orders use the approved session key.
 
 The pinned non-executable manifest lives in `polymarket/production_manifest.py`. It records current official endpoints, wallet types, pUSD metadata, and contract addresses and rejects drift before any future execution path can become available.
 

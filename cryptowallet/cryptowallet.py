@@ -122,6 +122,17 @@ class CryptoWallet(
             "chain_id": selected.chain_id,
         }
 
+    async def polymarket_wallet_context(self, user) -> dict:
+        """Return the user's verified public CDP owner for Polygon derivation."""
+
+        from .core.polymarket import PolymarketSignerContext
+
+        profile = await self.get_or_create_wallet_profile(user)
+        context = PolymarketSignerContext(**(
+            await self.wallet_provider.polymarket_signer_context(profile, user.id)
+        ))
+        return context.to_dict()
+
     async def estimate_base_mainnet_call_fee(
         self, *, from_address: str, to_address: str, value_wei: int, data: str
     ) -> dict:

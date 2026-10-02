@@ -118,6 +118,7 @@ from ..core.polymarket import (
     PolymarketHandoffAvailability,
     PolymarketHandoffContext,
     PolymarketHandoffSession,
+    PolymarketSignerContext,
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
@@ -1997,6 +1998,88 @@ class UncertainReconciliationTests(unittest.IsolatedAsyncioTestCase):
             "no TXID or provider operation hash", ctx.send.await_args.args[0]
         )
         cog._refresh_submitted_intent.assert_not_awaited()
+
+
+class PolymarketSignerContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_resolves_exact_stored_smart_account_owner(self):
+        smart = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        owner = "0x1111111111111111111111111111111111111111"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [
+                {"network": BASE_SEPOLIA.key, "address": smart},
+                {"network": BASE_MAINNET.key, "address": smart},
+            ],
+        }
+        client = SimpleNamespace(get_end_user=AsyncMock(return_value={
+            "userId": "profile-7",
+            "evmAccountObjects": [{"address": owner}],
+            "evmSmartAccountObjects": [{
+                "address": smart, "ownerAddresses": [owner],
+            }],
+        }))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="project")
+        )
+        provider._api_client = lambda _credentials: client
+
+        result = await provider.polymarket_signer_context(profile, 7)
+
+        self.assertEqual(result["signer_address"], owner)
+        self.assertEqual(result["smart_account_address"], smart)
+        self.assertEqual(result["chain_id"], 137)
+        self.assertNotIn("credential", repr(result).lower())
+
+    async def test_provider_rejects_ambiguous_or_unregistered_owner(self):
+        smart = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        owner = "0x1111111111111111111111111111111111111111"
+        other = "0x2222222222222222222222222222222222222222"
+        profile = {
+            "profile_id": "profile-7", "provider_user_id": "profile-7",
+            "accounts": [{"network": BASE_SEPOLIA.key, "address": smart}],
+        }
+        client = SimpleNamespace(get_end_user=AsyncMock(return_value={
+            "userId": "profile-7",
+            "evmAccountObjects": [{"address": owner}, {"address": other}],
+            "evmSmartAccountObjects": [{
+                "address": smart, "ownerAddresses": [owner, other],
+            }],
+        }))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="project")
+        )
+        provider._api_client = lambda _credentials: client
+        with self.assertRaisesRegex(WalletProviderError, "verify"):
+            await provider.polymarket_signer_context(profile, 7)
+
+        malformed = copy.deepcopy(profile)
+        malformed["accounts"][0]["address"] = "not-an-address"
+        with self.assertRaisesRegex(WalletProviderError, "invalid EVM"):
+            await provider.polymarket_signer_context(malformed, 7)
+
+    async def test_cryptowallet_exposes_validated_public_context(self):
+        smart = "0x7930fb6e9853b3835cf047f36855993cb82d4387"
+        owner = "0x1111111111111111111111111111111111111111"
+        profile = {"profile_id": "profile-7"}
+        provider = SimpleNamespace(polymarket_signer_context=AsyncMock(
+            return_value={
+                "requester_id": 7, "profile_id": "profile-7",
+                "provider_user_id": "profile-7",
+                "smart_account_address": smart, "signer_address": owner,
+                "chain_id": 137, "source": "cdp_smart_account_owner",
+            }
+        ))
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.wallet_provider = provider
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+
+        result = await cog.polymarket_wallet_context(SimpleNamespace(id=7))
+
+        self.assertEqual(result["signer_address"], owner)
+        self.assertEqual(result["requester_id"], 7)
+        provider.polymarket_signer_context.assert_awaited_once_with(profile, 7)
 
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):
