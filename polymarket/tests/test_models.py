@@ -1,3 +1,6 @@
+import base64
+import hashlib
+import hmac
 import json
 import unittest
 from dataclasses import replace
@@ -20,6 +23,10 @@ from polymarket.identity_verifier import (
     AccountRelationshipEvidence, PolygonAccountIdentityVerifier,
 )
 from polymarket.order_intent import MarketBuyApproval, OrderBookSnapshot, OrderIntentError
+from polymarket.order_transport import (
+    AuthenticatedOrderTransport, ClobCredentials, OrderTransportError,
+    _hmac_signature, validate_signed_order,
+)
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
 )
@@ -615,6 +622,127 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             _active_search_markets(payload),
             [{"id": "active", "active": True, "closed": False}],
         )
+
+
+class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
+    def _lifecycle(self):
+        binding = OrderBinding(
+            discord_user_id=7, approval_fingerprint="a" * 64,
+            condition_id="condition-one", token_id="123",
+            maker_address="0x" + "1" * 40,
+            session_signer_address="0x" + "2" * 40, side="BUY",
+            maximum_price=Decimal("0.55"), maximum_size=Decimal("10"),
+            created_at=datetime.fromtimestamp(100, timezone.utc),
+            expires_at=datetime.fromtimestamp(400, timezone.utc),
+        )
+        return OrderLifecycle.approved(binding)
+
+    def _signed_order(self, **changes):
+        order = {
+            "salt": "1", "maker": "0x" + "1" * 40,
+            "signer": "0x" + "2" * 40, "taker": "0x" + "0" * 40,
+            "tokenId": "123", "makerAmount": "5000000",
+            "takerAmount": "10000000", "expiration": "0", "nonce": "0",
+            "feeRateBps": "400", "side": "BUY", "signatureType": 2,
+            "signature": "0x" + "3" * 130,
+        }
+        order.update(changes)
+        return order
+
+    def test_hmac_matches_official_canonical_contract_and_credentials_hide_repr(self):
+        secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
+        expected = base64.urlsafe_b64encode(hmac.new(
+            base64.urlsafe_b64decode(secret),
+            b"100POST/order{\"order\":1}", hashlib.sha256,
+        ).digest()).decode()
+        self.assertEqual(
+            _hmac_signature(secret, 100, "POST", "/order", "{\"order\":1}"),
+            expected,
+        )
+        credentials = ClobCredentials("key", secret, "passphrase")
+        self.assertNotIn(secret, repr(credentials))
+        self.assertNotIn("passphrase", repr(credentials))
+
+    def test_signed_order_is_exact_and_cannot_exceed_approval(self):
+        lifecycle = self._lifecycle()
+        self.assertEqual(validate_signed_order(lifecycle, self._signed_order())["tokenId"], "123")
+        for order in (
+            self._signed_order(makerAmount="6000000"),
+            self._signed_order(takerAmount="11000000"),
+            self._signed_order(signer="0x" + "4" * 40),
+            {**self._signed_order(), "extra": True},
+        ):
+            with self.assertRaises(OrderTransportError):
+                validate_signed_order(lifecycle, order)
+
+    async def test_authenticated_submit_cancel_and_reconcile_verify_exact_evidence(self):
+        secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
+        credentials = ClobCredentials("api-key", secret, "passphrase")
+        calls = []
+
+        async def request(**kwargs):
+            calls.append(kwargs)
+            if kwargs["method"] == "POST":
+                return {"success": True, "orderID": "order-one", "status": "live"}
+            if kwargs["method"] == "DELETE":
+                return {"canceled": ["order-one"], "not_canceled": {}}
+            if kwargs["path"].startswith("/data/order/"):
+                return {
+                    "id": "order-one", "status": "LIVE",
+                    "maker_address": "0x" + "1" * 40,
+                    "market": "condition-one", "asset_id": "123", "side": "BUY",
+                    "original_size": "10", "size_matched": "2", "price": "0.5",
+                    "associate_trades": ["trade-one"],
+                }
+            return {"data": [{
+                "id": "trade-one", "market": "condition-one", "asset_id": "123",
+                "maker_address": "0x" + "1" * 40,
+                "transaction_hash": "0x" + "f" * 64,
+            }], "next_cursor": "LTE="}
+
+        provider = AsyncMock(return_value=credentials)
+        transport = AuthenticatedOrderTransport(
+            credential_provider=provider, request=request
+        )
+        now = datetime.fromtimestamp(150, timezone.utc)
+        live = await transport.submit(
+            self._lifecycle(), self._signed_order(), now=now, timestamp=150
+        )
+        self.assertEqual(live.state, OrderState.LIVE)
+        self.assertEqual(provider.await_count, 1)
+        self.assertEqual(calls[0]["body"]["owner"], "api-key")
+        self.assertEqual(set(calls[0]["headers"]), {
+            "POLY_ADDRESS", "POLY_SIGNATURE", "POLY_TIMESTAMP",
+            "POLY_API_KEY", "POLY_PASSPHRASE",
+        })
+        reconciled = await transport.reconcile(
+            live, now=datetime.fromtimestamp(160, timezone.utc), timestamp=160
+        )
+        self.assertEqual(reconciled.state, OrderState.PARTIALLY_FILLED)
+        self.assertEqual(reconciled.trade_ids, ("trade-one",))
+        self.assertEqual(reconciled.transaction_hashes, ("0x" + "f" * 64,))
+        canceled = await transport.cancel(
+            reconciled, now=datetime.fromtimestamp(170, timezone.utc), timestamp=170
+        )
+        self.assertEqual(canceled.state, OrderState.CANCELED)
+
+    async def test_submission_timeout_becomes_unknown_without_secret_or_retry(self):
+        secret = base64.urlsafe_b64encode(b"official-vector-secret-32-bytes!!").decode()
+        async def request(**_kwargs):
+            raise TimeoutError("secret provider detail")
+        transport = AuthenticatedOrderTransport(
+            credential_provider=AsyncMock(return_value=ClobCredentials(
+                "api-key", secret, "passphrase"
+            )), request=request,
+        )
+        result = await transport.submit(
+            self._lifecycle(), self._signed_order(),
+            now=datetime.fromtimestamp(150, timezone.utc), timestamp=150,
+        )
+        self.assertEqual(result.state, OrderState.UNKNOWN)
+        self.assertNotIn("secret provider detail", repr(result))
+        with self.assertRaises(OrderLifecycleError):
+            result.begin_submission(datetime.fromtimestamp(151, timezone.utc))
 
 
 class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
