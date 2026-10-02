@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, utils
+from eth_hash.auto import keccak
 
 from cryptowallet.core.polymarket import (
     validate_polymarket_session_batch_typed_data,
@@ -83,6 +84,10 @@ from polymarket.session_authorization import (
     AUTHORIZATION_PATH, REVOCATION_PATH, SessionKeyOwnerApproval,
     generate_session_key, session_address_from_private_key, session_batch_digest,
     sign_session_clob_auth, verify_session_batch_signature,
+)
+from polymarket.settlement import (
+    SettlementCall, SettlementPlan, ctf_redeem_calldata,
+    decode_v3_position_id, router_redeem_calldata,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
@@ -593,6 +598,83 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             with self.subTest(tick=tick):
                 self.assertEqual(approval.order_amounts, expected)
 
+    def test_settlement_plan_matches_sdk_ctf_and_v3_routes(self):
+        condition = "0x" + "ab" * 32
+        legacy = SettlementPlan(
+            settlement_id="s" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="42",
+            condition_id=condition, token_id=str(1 << 80), outcome="Yes",
+            amount_atomic=4_000_000, protocol="2", negative_risk=False,
+            nonce=9, created_at=100, deadline=700,
+            idempotency_key="i" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter,
+                ctf_redeem_calldata(condition),
+            ),),
+        )
+        call = legacy.calls[0]
+        self.assertEqual(call.target, POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter.lower())
+        self.assertEqual(call.data[:10], "0x" + keccak(
+            b"redeemPositions(address,bytes32,bytes32,uint256[])"
+        )[:4].hex())
+        words = [call.data[index:index + 64] for index in range(10, len(call.data), 64)]
+        self.assertEqual(words[-3:], [f"{2:064x}", f"{1:064x}", f"{2:064x}"])
+        self.assertEqual(SettlementPlan.from_record(legacy.to_record()), legacy)
+        self.assertEqual(legacy.typed_data()["message"]["calls"], [call.to_record()])
+        self.assertEqual(legacy.relayer_request("0x" + "12" * 65)["type"], "WALLET")
+
+        position_id = str(1 << 248)
+        v3_condition, outcome_index = decode_v3_position_id(position_id)
+        self.assertEqual(outcome_index, 0)
+        v3 = SettlementPlan(
+            settlement_id="v" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="43",
+            condition_id=v3_condition, token_id=position_id, outcome="Yes",
+            amount_atomic=4_000_000, protocol="3", negative_risk=False,
+            nonce=10, created_at=100, deadline=700,
+            idempotency_key="j" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.protocol_v2_router,
+                router_redeem_calldata(position_id, 4_000_000),
+            ),),
+        )
+        self.assertEqual(v3.calls[0].data[:10], "0x" + keccak(
+            b"redeem(bytes31,uint256,uint256)"
+        )[:4].hex())
+        self.assertEqual(v3.calls[0].data[-64:], f"{4_000_000:064x}")
+        self.assertNotEqual(v3.fingerprint, legacy.fingerprint)
+        with self.assertRaises(AccountConnectionError):
+            SettlementPlan.from_record({
+                **v3.to_record(), "amount_atomic": 4_000_001,
+            })
+
+    def test_settlement_plan_pins_negative_risk_adapter_and_manifest_drift(self):
+        condition = "0x" + "cd" * 32
+        call = SettlementCall(
+            POLYMARKET_PRODUCTION_MANIFEST.neg_risk_collateral_adapter,
+            ctf_redeem_calldata(condition),
+        )
+        plan = SettlementPlan(
+            settlement_id="n" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="44",
+            condition_id=condition, token_id=str(1 << 80), outcome="No",
+            amount_atomic=2_000_000, protocol="2", negative_risk=True,
+            nonce=11, created_at=100, deadline=700,
+            idempotency_key="k" * 32, calls=(call,),
+        )
+        self.assertEqual(
+            plan.calls[0].target,
+            POLYMARKET_PRODUCTION_MANIFEST.neg_risk_collateral_adapter.lower(),
+        )
+        with self.assertRaises(AccountConnectionError):
+            SettlementPlan.from_record({
+                **plan.to_record(),
+                "calls": [{**call.to_record(), "target": "0x" + "9" * 40}],
+            })
+
     def test_collateral_plans_bind_exact_assets_spenders_amounts_and_revocation(self):
         wallet = "0x" + "9" * 40
         wrap = collateral_plan("wrap", "12.345678", wallet)
@@ -823,7 +905,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         self.assertEqual(manifest.chain_id, 137)
         self.assertEqual(manifest.collateral_symbol, "pUSD")
         self.assertEqual(manifest.collateral_decimals, 6)
-        self.assertEqual(manifest.schema_version, 6)
+        self.assertEqual(manifest.schema_version, 7)
         self.assertEqual(manifest.bridge_api, "https://bridge.polymarket.com")
         self.assertEqual(manifest.data_api, "https://data-api.polymarket.com")
         self.assertEqual(manifest.polygon_rpc, "https://polygon.drpc.org")
@@ -846,6 +928,18 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             manifest.position_manager.lower(),
             "0x006f54f7f9a22e0000cc2ab60031000000ae9fef",
         )
+        self.assertEqual(
+            manifest.collateral_adapter.lower(),
+            "0xada100db00ca00073811820692005400218fce1f",
+        )
+        self.assertEqual(
+            manifest.neg_risk_collateral_adapter.lower(),
+            "0xada2005600dec949baf300f4c6120000bdb6eaab",
+        )
+        self.assertEqual(
+            manifest.neg_risk_adapter.lower(),
+            "0xd91e80cf2e7be2e162c6513ced06f1dd0da35296",
+        )
         self.assertEqual(manifest.order_signature_scheme, "ERC-7739_SESSION_KEY")
         self.assertFalse(manifest.execution_enabled)
         self.assertEqual(manifest.executable_capabilities, ())
@@ -859,6 +953,9 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             replace(POLYMARKET_PRODUCTION_MANIFEST, exchange_v3="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, protocol_v2_router="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, position_manager="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, collateral_adapter="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, neg_risk_collateral_adapter="0x" + "1" * 40),
+            replace(POLYMARKET_PRODUCTION_MANIFEST, neg_risk_adapter="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, deposit_wallet_beacon="0x" + "1" * 40),
             replace(POLYMARKET_PRODUCTION_MANIFEST, safe_init_code_hash="0x" + "1" * 64),
             replace(POLYMARKET_PRODUCTION_MANIFEST, polygon_rpc="https://example.invalid"),
