@@ -27,7 +27,10 @@ from polymarket.account_connection import (
 )
 from polymarket.collateral import CollateralPlanError, collateral_plan
 from polymarket.bridge import (
-    BridgeAsset, BridgeQuote, BridgeTransaction, NATIVE_EVM_TOKEN, PolymarketBridgeClient,
+    BridgeAsset, BridgeQuote, BridgeTransaction, BridgeWithdrawalPlan,
+    NATIVE_EVM_TOKEN, PolymarketBridgeClient, verify_withdrawal_batch_signature,
+    withdrawal_approve_calldata, withdrawal_transfer_calldata,
+    withdrawal_unwrap_calldata,
 )
 from polymarket.deposit_lifecycle import (
     BridgeDeposit, DepositState, funding_request_fingerprint,
@@ -1685,6 +1688,93 @@ class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedA
         verify.assert_not_awaited()
 
 
+
+
+class BridgeWithdrawalPlanTests(unittest.TestCase):
+    def _plan(self, **changes):
+        wallet = "0x" + "2" * 40
+        bridge = "0x" + "4" * 40
+        amount = 25_000_000
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        values = {
+            "withdrawal_id": "withdrawal_" + "a" * 32,
+            "discord_user_id": 7,
+            "profile_id": "profile_" + "b" * 32,
+            "owner_address": "0x" + "1" * 40,
+            "wallet_address": wallet,
+            "recipient_address": "0x" + "3" * 40,
+            "bridge_address": bridge,
+            "destination_chain_id": 8453,
+            "destination_token_address": "0x" + "5" * 40,
+            "destination_symbol": "USDC",
+            "destination_decimals": 6,
+            "amount_atomic": amount,
+            "quote_id": "0x" + "a" * 64,
+            "quoted_output_atomic": 24_900_000,
+            "minimum_received_usd": Decimal("24.8"),
+            "nonce": 9,
+            "created_at": 1_800_000_000,
+            "deadline": 1_800_000_300,
+            "idempotency_key": "withdrawal-submit-" + "c" * 32,
+            "calls": (
+                SettlementCall(manifest.collateral_token, withdrawal_approve_calldata(amount)),
+                SettlementCall(manifest.collateral_offramp, withdrawal_unwrap_calldata(wallet, amount)),
+                SettlementCall(manifest.usdce_token, withdrawal_transfer_calldata(bridge, amount)),
+            ),
+        }
+        values.update(changes)
+        return BridgeWithdrawalPlan(**values)
+
+    def test_exact_three_call_batch_round_trips(self):
+        plan = self._plan()
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        self.assertEqual(tuple(call.target for call in plan.calls), (
+            manifest.collateral_token.lower(), manifest.collateral_offramp.lower(),
+            manifest.usdce_token.lower(),
+        ))
+        self.assertEqual(plan.calls[0].data[:10], "0x" + keccak(b"approve(address,uint256)")[:4].hex())
+        self.assertEqual(plan.calls[1].data[:10], "0x" + keccak(b"unwrap(address,address,uint256)")[:4].hex())
+        self.assertEqual(plan.calls[2].data[:10], "0x" + keccak(b"transfer(address,uint256)")[:4].hex())
+        self.assertEqual(BridgeWithdrawalPlan.from_record(plan.to_record()), plan)
+        self.assertEqual(plan.typed_data()["message"]["calls"], [call.to_record() for call in plan.calls])
+        self.assertEqual(len(plan.digest()), 32)
+
+    def test_changed_call_or_bound_destination_fails_closed(self):
+        plan = self._plan()
+        with self.assertRaises(AccountConnectionError):
+            self._plan(calls=plan.calls[:-1])
+        changed = self._plan(recipient_address="0x" + "6" * 40)
+        self.assertNotEqual(changed.fingerprint, plan.fingerprint)
+        with self.assertRaises(AccountConnectionError):
+            BridgeWithdrawalPlan.from_record({**plan.to_record(), "amount_atomic": 1})
+
+    def test_relayer_envelope_is_exact_and_signature_is_owner_bound(self):
+        plan = self._plan()
+        private_key = ec.derive_private_key(1, ec.SECP256K1())
+        owner_numbers = private_key.public_key().public_numbers()
+        owner = "0x" + keccak(
+            owner_numbers.x.to_bytes(32, "big") + owner_numbers.y.to_bytes(32, "big")
+        )[-20:].hex()
+        plan = self._plan(owner_address=owner)
+        der = private_key.sign(plan.digest(), ec.ECDSA(utils.Prehashed(hashes.SHA256())))
+        r, s = utils.decode_dss_signature(der)
+        if s > HALF_CURVE_N:
+            s = CURVE_N - s
+        signature = None
+        for recovery in (0, 1):
+            candidate = "0x" + r.to_bytes(32, "big").hex() + s.to_bytes(32, "big").hex() + bytes([27 + recovery]).hex()
+            try:
+                if verify_withdrawal_batch_signature(plan, candidate) == owner:
+                    signature = candidate
+                    break
+            except AccountConnectionError:
+                pass
+        self.assertIsNotNone(signature)
+        request = plan.relayer_request(signature)
+        self.assertEqual(request["type"], "WALLET")
+        self.assertEqual(request["depositWalletParams"]["calls"], [call.to_record() for call in plan.calls])
+        with self.assertRaises(AccountConnectionError):
+            verify_withdrawal_batch_signature(self._plan(nonce=10), signature)
 
 
 class PolymarketBridgeTests(unittest.IsolatedAsyncioTestCase):

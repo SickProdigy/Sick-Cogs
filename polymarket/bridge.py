@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from decimal import Decimal, InvalidOperation
+import hashlib
 import json
 import re
 from typing import Any, Awaitable, Callable
 
 import aiohttp
+from eth_hash.auto import keccak
 
 from .account_connection import AccountConnectionError, normalize_evm_address
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
+from .settlement import SettlementCall, deposit_wallet_batch_digest
+from .signer_proof import recover_signer_address
 
 SUPPORTED_ASSETS_PATH = "/supported-assets"
 DEPOSIT_PATH = "/deposit"
@@ -209,6 +213,181 @@ class BridgeTransaction:
             normalize_evm_address(payload["toTokenAddress"], "Bridge destination token"),
             status, tx_hash.lower() if tx_hash else None, created,
         )
+
+
+
+def _address_word(address: str) -> bytes:
+    return bytes(12) + bytes.fromhex(normalize_evm_address(address, "address")[2:])
+
+
+def _uint_word(value: int) -> bytes:
+    if type(value) is not int or not 0 <= value < 2**256:
+        raise AccountConnectionError("Withdrawal amount is invalid.")
+    return value.to_bytes(32, "big")
+
+
+def withdrawal_approve_calldata(amount_atomic: int) -> str:
+    manifest = POLYMARKET_PRODUCTION_MANIFEST
+    return "0x" + (keccak(b"approve(address,uint256)")[:4]
+        + _address_word(manifest.collateral_offramp) + _uint_word(amount_atomic)).hex()
+
+
+def withdrawal_unwrap_calldata(wallet_address: str, amount_atomic: int) -> str:
+    manifest = POLYMARKET_PRODUCTION_MANIFEST
+    return "0x" + (keccak(b"unwrap(address,address,uint256)")[:4]
+        + _address_word(manifest.usdce_token) + _address_word(wallet_address)
+        + _uint_word(amount_atomic)).hex()
+
+
+def withdrawal_transfer_calldata(bridge_address: str, amount_atomic: int) -> str:
+    return "0x" + (keccak(b"transfer(address,uint256)")[:4]
+        + _address_word(bridge_address) + _uint_word(amount_atomic)).hex()
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeWithdrawalPlan:
+    withdrawal_id: str
+    discord_user_id: int
+    profile_id: str
+    owner_address: str
+    wallet_address: str
+    recipient_address: str
+    bridge_address: str
+    destination_chain_id: int
+    destination_token_address: str
+    destination_symbol: str
+    destination_decimals: int
+    amount_atomic: int
+    quote_id: str
+    quoted_output_atomic: int
+    minimum_received_usd: Decimal
+    nonce: int
+    created_at: int
+    deadline: int
+    idempotency_key: str
+    calls: tuple[SettlementCall, ...]
+    chain_id: int = 137
+
+    def __post_init__(self) -> None:
+        for field, label in (
+            ("owner_address", "CryptoWallet owner"),
+            ("wallet_address", "Deposit Wallet"),
+            ("recipient_address", "CryptoWallet withdrawal recipient"),
+            ("bridge_address", "Bridge withdrawal address"),
+            ("destination_token_address", "Bridge destination token"),
+        ):
+            object.__setattr__(self, field, normalize_evm_address(getattr(self, field), label))
+        if (
+            not isinstance(self.withdrawal_id, str) or IDENTIFIER.fullmatch(self.withdrawal_id) is None
+            or not isinstance(self.profile_id, str) or IDENTIFIER.fullmatch(self.profile_id) is None
+            or type(self.discord_user_id) is not int or self.discord_user_id <= 0
+            or self.owner_address == self.wallet_address
+            or type(self.destination_chain_id) is not int or self.destination_chain_id <= 0
+            or not isinstance(self.destination_symbol, str) or not 1 <= len(self.destination_symbol) <= 64
+            or type(self.destination_decimals) is not int or not 0 <= self.destination_decimals <= 36
+            or type(self.amount_atomic) is not int or self.amount_atomic <= 0
+            or not isinstance(self.quote_id, str) or HEX_32.fullmatch(self.quote_id.lower()) is None
+            or type(self.quoted_output_atomic) is not int or self.quoted_output_atomic <= 0
+            or not isinstance(self.minimum_received_usd, Decimal)
+            or not self.minimum_received_usd.is_finite() or self.minimum_received_usd < 0
+            or type(self.nonce) is not int or self.nonce < 0
+            or type(self.created_at) is not int or self.created_at <= 0
+            or type(self.deadline) is not int or self.deadline <= self.created_at
+            or self.deadline - self.created_at > 600
+            or not isinstance(self.idempotency_key, str) or IDENTIFIER.fullmatch(self.idempotency_key) is None
+            or self.chain_id != POLYMARKET_PRODUCTION_MANIFEST.chain_id
+            or self.calls != self.expected_calls()
+        ):
+            raise AccountConnectionError("Bridge withdrawal plan is invalid.")
+        object.__setattr__(self, "quote_id", self.quote_id.lower())
+
+    def expected_calls(self) -> tuple[SettlementCall, ...]:
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        return (
+            SettlementCall(manifest.collateral_token, withdrawal_approve_calldata(self.amount_atomic)),
+            SettlementCall(manifest.collateral_offramp, withdrawal_unwrap_calldata(self.wallet_address, self.amount_atomic)),
+            SettlementCall(manifest.usdce_token, withdrawal_transfer_calldata(self.bridge_address, self.amount_atomic)),
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        return hashlib.sha256(json.dumps(
+            self.to_record(), sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
+
+    def typed_data(self) -> dict[str, Any]:
+        return {
+            "domain": {"name": "DepositWallet", "version": "1", "chainId": self.chain_id,
+                       "verifyingContract": self.wallet_address},
+            "types": {
+                "Call": [
+                    {"name": "target", "type": "address"},
+                    {"name": "value", "type": "uint256"},
+                    {"name": "data", "type": "bytes"},
+                ],
+                "Batch": [
+                    {"name": "wallet", "type": "address"},
+                    {"name": "nonce", "type": "uint256"},
+                    {"name": "deadline", "type": "uint256"},
+                    {"name": "calls", "type": "Call[]"},
+                ],
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+            },
+            "primaryType": "Batch",
+            "message": {"wallet": self.wallet_address, "nonce": str(self.nonce),
+                        "deadline": str(self.deadline),
+                        "calls": [call.to_record() for call in self.calls]},
+        }
+
+    def digest(self) -> bytes:
+        return deposit_wallet_batch_digest(
+            wallet_address=self.wallet_address, chain_id=self.chain_id,
+            nonce=self.nonce, deadline=self.deadline, calls=self.calls,
+        )
+
+    def relayer_request(self, signature: str) -> dict[str, Any]:
+        if not isinstance(signature, str) or re.fullmatch(r"0x[0-9a-fA-F]{130}", signature) is None:
+            raise AccountConnectionError("Withdrawal owner signature is invalid.")
+        return {
+            "depositWalletParams": {"calls": [call.to_record() for call in self.calls],
+                                    "deadline": str(self.deadline), "depositWallet": self.wallet_address},
+            "from": self.owner_address,
+            "metadata": f"Withdraw Polymarket collateral to {self.destination_symbol}",
+            "nonce": str(self.nonce), "signature": signature.lower(),
+            "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(), "type": "WALLET",
+        }
+
+    def to_record(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["minimum_received_usd"] = str(self.minimum_received_usd)
+        result["calls"] = [call.to_record() for call in self.calls]
+        return result
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> "BridgeWithdrawalPlan":
+        try:
+            values = dict(record)
+            values["minimum_received_usd"] = Decimal(values["minimum_received_usd"])
+            values["calls"] = tuple(SettlementCall(
+                item["target"], item["data"], int(item["value"])
+            ) for item in values["calls"])
+            return cls(**values)
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise AccountConnectionError("Stored Bridge withdrawal is invalid.") from exc
+
+
+def verify_withdrawal_batch_signature(plan: BridgeWithdrawalPlan, signature: str) -> str:
+    if not isinstance(plan, BridgeWithdrawalPlan):
+        raise AccountConnectionError("Bridge withdrawal plan is invalid.")
+    recovered = recover_signer_address(plan.digest(), signature)
+    if recovered != plan.owner_address:
+        raise AccountConnectionError("Withdrawal owner signature does not match CryptoWallet.")
+    return recovered
 
 
 class PolymarketBridgeClient:

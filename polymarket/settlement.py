@@ -371,37 +371,51 @@ def _address_word(address: str) -> bytes:
     )
 
 
-def settlement_batch_digest(plan: SettlementPlan) -> bytes:
-    if not isinstance(plan, SettlementPlan):
-        raise AccountConnectionError("Settlement plan is invalid.")
+def deposit_wallet_batch_digest(
+    *, wallet_address: str, chain_id: int, nonce: int, deadline: int,
+    calls: tuple[SettlementCall, ...],
+) -> bytes:
+    """Hash one exact Deposit Wallet Batch for purpose-specific validators."""
+
+    if not isinstance(calls, tuple) or not calls or not all(
+        isinstance(call, SettlementCall) for call in calls
+    ):
+        raise AccountConnectionError("Deposit Wallet Batch calls are invalid.")
     domain_type = keccak(
         b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
     )
     domain_separator = keccak(
         domain_type + keccak(b"DepositWallet") + keccak(b"1")
-        + _uint(plan.chain_id, "Settlement chain")
-        + _address_word(plan.wallet_address)
+        + _uint(chain_id, "Batch chain") + _address_word(wallet_address)
     )
     call_type = keccak(b"Call(address target,uint256 value,bytes data)")
     call_hashes = b"".join(
         keccak(
             call_type + _address_word(call.target)
-            + _uint(call.value, "Settlement call value")
+            + _uint(call.value, "Batch call value")
             + keccak(bytes.fromhex(call.data[2:]))
         )
-        for call in plan.calls
+        for call in calls
     )
     batch_type = keccak(
         b"Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)"
         b"Call(address target,uint256 value,bytes data)"
     )
     batch_hash = keccak(
-        batch_type + _address_word(plan.wallet_address)
-        + _uint(plan.nonce, "Settlement nonce")
-        + _uint(plan.deadline, "Settlement deadline")
+        batch_type + _address_word(wallet_address)
+        + _uint(nonce, "Batch nonce") + _uint(deadline, "Batch deadline")
         + keccak(call_hashes)
     )
     return keccak(b"\x19\x01" + domain_separator + batch_hash)
+
+
+def settlement_batch_digest(plan: SettlementPlan) -> bytes:
+    if not isinstance(plan, SettlementPlan):
+        raise AccountConnectionError("Settlement plan is invalid.")
+    return deposit_wallet_batch_digest(
+        wallet_address=plan.wallet_address, chain_id=plan.chain_id,
+        nonce=plan.nonce, deadline=plan.deadline, calls=plan.calls,
+    )
 
 
 def verify_settlement_batch_signature(plan: SettlementPlan, signature: str) -> str:
