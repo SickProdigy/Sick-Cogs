@@ -149,6 +149,66 @@ def validate_polymarket_settlement_batch_typed_data(
 
 
 
+WITHDRAWAL_PUSD = SETTLEMENT_COLLATERAL
+WITHDRAWAL_USDCE = "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+WITHDRAWAL_OFFRAMP = "0x2957922eb93258b93368531d39facca3b4dc5854"
+WITHDRAWAL_APPROVE_SELECTOR = "095ea7b3"
+WITHDRAWAL_UNWRAP_SELECTOR = "8cc7104f"
+WITHDRAWAL_TRANSFER_SELECTOR = "a9059cbb"
+WITHDRAWAL_BATCH_LIFETIME_SECONDS = 10 * 60
+
+
+def validate_polymarket_withdrawal_batch_typed_data(
+    typed_data: dict, *, wallet_address: str, bridge_address: str,
+    amount_atomic: int,
+) -> tuple[int, int]:
+    """Accept only exact pUSD approval, unwrap, and Bridge transfer calls."""
+
+    wallet = _polymarket_address(wallet_address, "Deposit Wallet")
+    bridge = _polymarket_address(bridge_address, "Bridge withdrawal address")
+    if type(amount_atomic) is not int or not 0 < amount_atomic < 2**256:
+        raise ValueError("Polymarket withdrawal amount is invalid.")
+    if not isinstance(typed_data, dict) or set(typed_data) != {
+        "domain", "types", "primaryType", "message"
+    }:
+        raise ValueError("Polymarket withdrawal Batch has an invalid shape.")
+    domain = typed_data.get("domain")
+    message = typed_data.get("message")
+    calls = message.get("calls") if isinstance(message, dict) else None
+    if (
+        domain != {"name": "DepositWallet", "version": "1", "chainId": 137,
+                   "verifyingContract": wallet}
+        or typed_data.get("types") != SETTLEMENT_BATCH_TYPES
+        or typed_data.get("primaryType") != "Batch"
+        or not isinstance(message, dict)
+        or set(message) != {"wallet", "nonce", "deadline", "calls"}
+        or message.get("wallet") != wallet
+        or not isinstance(calls, list) or len(calls) != 3
+    ):
+        raise ValueError("Polymarket withdrawal Batch has an invalid shape.")
+    try:
+        nonce = int(message["nonce"])
+        deadline = int(message["deadline"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Polymarket withdrawal timing is invalid.") from exc
+    if not 0 <= nonce < 2**256 or not 0 < deadline < 2**256:
+        raise ValueError("Polymarket withdrawal timing is invalid.")
+    normalized = tuple(_settlement_call(call) for call in calls)
+    amount_word = f"{amount_atomic:064x}"
+    wallet_word = "0" * 24 + wallet[2:]
+    bridge_word = "0" * 24 + bridge[2:]
+    offramp_word = "0" * 24 + WITHDRAWAL_OFFRAMP[2:]
+    usdce_word = "0" * 24 + WITHDRAWAL_USDCE[2:]
+    expected = (
+        (WITHDRAWAL_PUSD, "0x" + WITHDRAWAL_APPROVE_SELECTOR + offramp_word + amount_word),
+        (WITHDRAWAL_OFFRAMP, "0x" + WITHDRAWAL_UNWRAP_SELECTOR + usdce_word + wallet_word + amount_word),
+        (WITHDRAWAL_USDCE, "0x" + WITHDRAWAL_TRANSFER_SELECTOR + bridge_word + amount_word),
+    )
+    if normalized != expected:
+        raise ValueError("Polymarket withdrawal calls changed.")
+    return nonce, deadline
+
+
 
 
 def _polymarket_address(value: str, label: str) -> str:

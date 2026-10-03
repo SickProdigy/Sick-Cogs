@@ -22,6 +22,7 @@ from .core.polymarket import (
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
     validate_polymarket_settlement_batch_typed_data,
+    validate_polymarket_withdrawal_batch_typed_data,
 )
 from .core.validation import normalize_evm_address
 from .providers.clanker import validate_clanker_deployment_call
@@ -238,6 +239,43 @@ class CryptoWallet(
         return await self.wallet_provider.sign_polymarket_settlement_batch(
             profile, user.id, owner, wallet, typed_data,
             f"polymarket-settlement-{approval_fingerprint}",
+        )
+
+
+    async def polymarket_sign_withdrawal_batch(
+        self, user, *, owner_address: str, wallet_address: str,
+        bridge_address: str, amount_atomic: int, typed_data: dict,
+        approval_fingerprint: str,
+    ) -> dict:
+        """Sign one exact user-approved Deposit Wallet withdrawal Batch."""
+
+        if not bool(await self.config.polymarket_typed_signing_enabled()):
+            raise RuntimeError("CryptoWallet Polymarket signing remains disabled.")
+        if await self.config.provider_paused():
+            raise RuntimeError("CryptoWallet provider operations are paused.")
+        if await self.config.user(user).security_locked():
+            raise RuntimeError("This CryptoWallet profile is security locked.")
+        if not re.fullmatch(r"[0-9a-f]{64}", approval_fingerprint):
+            raise RuntimeError("Polymarket withdrawal approval is invalid.")
+        try:
+            owner = normalize_evm_address(owner_address).lower()
+            wallet = normalize_evm_address(wallet_address).lower()
+            bridge = normalize_evm_address(bridge_address).lower()
+            if len({owner, wallet, bridge}) != 3:
+                raise ValueError("Withdrawal identities must remain separate.")
+            _nonce, deadline = validate_polymarket_withdrawal_batch_typed_data(
+                typed_data, wallet_address=wallet, bridge_address=bridge,
+                amount_atomic=amount_atomic,
+            )
+            now = int(time.time())
+            if not now < deadline <= now + 10 * 60:
+                raise ValueError("Polymarket withdrawal approval is not current.")
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("Polymarket withdrawal Batch typed data is invalid.") from exc
+        profile = await self.get_or_create_wallet_profile(user)
+        return await self.wallet_provider.sign_polymarket_withdrawal_batch(
+            profile, user.id, owner, wallet, bridge, amount_atomic, typed_data,
+            f"polymarket-withdrawal-{approval_fingerprint}",
         )
 
     @staticmethod

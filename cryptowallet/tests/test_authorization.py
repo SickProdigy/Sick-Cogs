@@ -123,6 +123,7 @@ from ..core.polymarket import (
     validate_polymarket_clob_auth_typed_data,
     validate_polymarket_session_batch_typed_data,
     validate_polymarket_settlement_batch_typed_data,
+    validate_polymarket_withdrawal_batch_typed_data,
 )
 from ..providers.base import WalletProviderError
 from ..providers.cdp import (
@@ -2235,6 +2236,44 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
         }
         return typed, wallet
 
+
+    @staticmethod
+    def _withdrawal_batch():
+        wallet = "0x" + "2" * 40
+        bridge = "0x" + "4" * 40
+        amount = 25_000_000
+        word = lambda address: "0" * 24 + address[2:]
+        pusd = "0xc011a7e12a19f7b1f670d46f03b03f3342e82dfb"
+        usdce = "0x2791bca1f2de4661ed88a30c99a7a9449aa84174"
+        offramp = "0x2957922eb93258b93368531d39facca3b4dc5854"
+        amount_word = f"{amount:064x}"
+        calls = [
+            {"target": pusd, "value": "0", "data": "0x095ea7b3" + word(offramp) + amount_word},
+            {"target": offramp, "value": "0", "data": "0x8cc7104f" + word(usdce) + word(wallet) + amount_word},
+            {"target": usdce, "value": "0", "data": "0xa9059cbb" + word(bridge) + amount_word},
+        ]
+        typed = {
+            "domain": {"name": "DepositWallet", "version": "1", "chainId": 137,
+                       "verifyingContract": wallet},
+            "types": {
+                "Call": [{"name": "target", "type": "address"},
+                         {"name": "value", "type": "uint256"},
+                         {"name": "data", "type": "bytes"}],
+                "Batch": [{"name": "wallet", "type": "address"},
+                          {"name": "nonce", "type": "uint256"},
+                          {"name": "deadline", "type": "uint256"},
+                          {"name": "calls", "type": "Call[]"}],
+                "EIP712Domain": [{"name": "name", "type": "string"},
+                                 {"name": "version", "type": "string"},
+                                 {"name": "chainId", "type": "uint256"},
+                                 {"name": "verifyingContract", "type": "address"}],
+            },
+            "primaryType": "Batch",
+            "message": {"wallet": wallet, "nonce": "13",
+                        "deadline": str(int(time.time()) + 600), "calls": calls},
+        }
+        return typed, wallet, bridge, amount
+
     def test_session_batch_validator_rejects_chain_wallet_and_action_drift(self):
         typed, wallet, session, valid_until = self._batch()
         self.assertEqual(validate_polymarket_session_batch_typed_data(
@@ -2280,6 +2319,31 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
                 validate_polymarket_settlement_batch_typed_data(
                     changed, wallet_address=wallet
                 )
+
+
+    def test_withdrawal_validator_accepts_only_exact_bound_batch(self):
+        typed, wallet, bridge, amount = self._withdrawal_batch()
+        self.assertEqual(validate_polymarket_withdrawal_batch_typed_data(
+            typed, wallet_address=wallet, bridge_address=bridge,
+            amount_atomic=amount,
+        ), (13, int(typed["message"]["deadline"])))
+        with self.assertRaises(ValueError):
+            validate_polymarket_withdrawal_batch_typed_data(
+                typed, wallet_address=wallet, bridge_address=bridge,
+                amount_atomic=amount + 1,
+            )
+        with self.assertRaises(ValueError):
+            validate_polymarket_withdrawal_batch_typed_data(
+                typed, wallet_address=wallet,
+                bridge_address="0x" + "5" * 40, amount_atomic=amount,
+            )
+        changed = copy.deepcopy(typed)
+        changed["message"]["calls"].reverse()
+        with self.assertRaisesRegex(ValueError, "calls changed"):
+            validate_polymarket_withdrawal_batch_typed_data(
+                changed, wallet_address=wallet, bridge_address=bridge,
+                amount_atomic=amount,
+            )
 
     def test_clob_auth_builder_is_exact_and_rejects_drift(self):
         signer = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
@@ -2425,6 +2489,38 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(client.sign_end_user_evm_typed_data.await_count, 1)
 
+
+    async def test_provider_signs_only_exact_bound_withdrawal_batch(self):
+        typed, wallet, bridge, amount = self._withdrawal_batch()
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        signature = "0x" + "1" * 128 + "1b"
+        client = SimpleNamespace(sign_end_user_evm_typed_data=AsyncMock(
+            return_value={"signature": signature}
+        ))
+        provider = CdpWalletProvider(SimpleNamespace())
+        provider.polymarket_signer_context = AsyncMock(return_value={
+            "provider_user_id": "profile-7", "signer_address": owner,
+        })
+        provider.get_delegation_status = AsyncMock(return_value={"active": True})
+        provider.credentials_for_network = AsyncMock(
+            return_value=SimpleNamespace(project_id="project-7")
+        )
+        provider._api_client = lambda _credentials: client
+        result = await provider.sign_polymarket_withdrawal_batch(
+            {"profile_id": "profile-7"}, 7, owner, wallet, bridge, amount,
+            typed, "polymarket-withdrawal-" + "a" * 64,
+        )
+        self.assertEqual(result, {"signature": signature, "signer_address": owner})
+        client.sign_end_user_evm_typed_data.assert_awaited_once()
+        changed = copy.deepcopy(typed)
+        changed["message"]["calls"][2]["data"] = "0xdeadbeef"
+        with self.assertRaises(ValueError):
+            await provider.sign_polymarket_withdrawal_batch(
+                {"profile_id": "profile-7"}, 7, owner, wallet, bridge,
+                amount, changed, "polymarket-withdrawal-" + "b" * 64,
+            )
+        self.assertEqual(client.sign_end_user_evm_typed_data.await_count, 1)
+
     async def test_cryptowallet_signing_gate_fails_before_profile_access(self):
         config = SimpleNamespace(
             polymarket_typed_signing_enabled=_Value(False),
@@ -2454,6 +2550,15 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
             await cog.polymarket_sign_settlement_batch(
                 SimpleNamespace(id=7), owner_address="0x" + "1" * 40,
                 wallet_address=wallet, typed_data=settlement,
+                approval_fingerprint="a" * 64,
+            )
+        cog.get_or_create_wallet_profile.assert_not_awaited()
+        withdrawal, wallet, bridge, amount = self._withdrawal_batch()
+        with self.assertRaisesRegex(RuntimeError, "remains disabled"):
+            await cog.polymarket_sign_withdrawal_batch(
+                SimpleNamespace(id=7), owner_address="0x" + "1" * 40,
+                wallet_address=wallet, bridge_address=bridge,
+                amount_atomic=amount, typed_data=withdrawal,
                 approval_fingerprint="a" * 64,
             )
         cog.get_or_create_wallet_profile.assert_not_awaited()
@@ -2517,6 +2622,35 @@ class PolymarketTypedSigningTests(unittest.IsolatedAsyncioTestCase):
         provider.sign_polymarket_clob_auth.assert_awaited_once_with(
             profile, 7, signer, typed,
             "polymarket-clob-auth-" + "a" * 64,
+        )
+
+
+    async def test_cryptowallet_withdrawal_route_binds_exact_approval(self):
+        typed, wallet, bridge, amount = self._withdrawal_batch()
+        owner = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        user = SimpleNamespace(id=7)
+        profile = {"profile_id": "profile-7"}
+        provider = SimpleNamespace(sign_polymarket_withdrawal_batch=AsyncMock(
+            return_value={"signature": "0x" + "1" * 128 + "1b",
+                          "signer_address": owner}
+        ))
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.config = SimpleNamespace(
+            polymarket_typed_signing_enabled=_Value(True),
+            provider_paused=_Value(False),
+            user=lambda _user: SimpleNamespace(security_locked=_Value(False)),
+        )
+        cog.wallet_provider = provider
+        cog.get_or_create_wallet_profile = AsyncMock(return_value=profile)
+        result = await cog.polymarket_sign_withdrawal_batch(
+            user, owner_address=owner, wallet_address=wallet,
+            bridge_address=bridge, amount_atomic=amount, typed_data=typed,
+            approval_fingerprint="a" * 64,
+        )
+        self.assertEqual(result["signer_address"], owner)
+        provider.sign_polymarket_withdrawal_batch.assert_awaited_once_with(
+            profile, 7, owner, wallet, bridge, amount, typed,
+            "polymarket-withdrawal-" + "a" * 64,
         )
 
     async def test_cryptowallet_routes_exact_session_batch_with_distinct_idempotency(self):
