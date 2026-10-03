@@ -86,8 +86,10 @@ from polymarket.session_authorization import (
     sign_session_clob_auth, verify_session_batch_signature,
 )
 from polymarket.settlement import (
+    PositionBalanceEvidence, ResolvedMarket, SettlementApprovalRequest,
     SettlementCall, SettlementOperation, SettlementPlan, SettlementState,
-    ctf_redeem_calldata, decode_v3_position_id, router_redeem_calldata,
+    ctf_redeem_calldata,
+    decode_v3_position_id, read_v3_position_balance, router_redeem_calldata,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
@@ -598,6 +600,26 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
             with self.subTest(tick=tick):
                 self.assertEqual(approval.order_amounts, expected)
 
+    def test_resolved_market_requires_exact_closed_binary_identity(self):
+        payload = {
+            "id": "42", "conditionId": "0x" + "ab" * 32,
+            "question": "Did it happen?", "closed": True,
+            "negRisk": False, "outcomes": "[\"Yes\",\"No\"]",
+            "clobTokenIds": ["123", "456"],
+        }
+        market = ResolvedMarket.from_market(payload)
+        self.assertEqual(market.select("yes"), ("Yes", "123"))
+        self.assertEqual(market.select("2"), ("No", "456"))
+        for changed in (
+            {**payload, "closed": False},
+            {**payload, "negRisk": "false"},
+            {**payload, "outcomes": ["Yes", "Yes"]},
+            {**payload, "clobTokenIds": ["123", "123"]},
+            {**payload, "conditionId": "condition"},
+        ):
+            with self.assertRaises(AccountConnectionError):
+                ResolvedMarket.from_market(changed)
+
     def test_settlement_plan_matches_sdk_ctf_and_v3_routes(self):
         condition = "0x" + "ab" * 32
         legacy = SettlementPlan(
@@ -674,6 +696,49 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
                 **plan.to_record(),
                 "calls": [{**call.to_record(), "target": "0x" + "9" * 40}],
             })
+
+    def test_settlement_request_reuses_exact_optional_two_step_confirmation(self):
+        condition = "0x" + "ab" * 32
+        plan = SettlementPlan(
+            settlement_id="s" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address="0x" + "1" * 40,
+            wallet_address="0x" + "2" * 40, market_id="42",
+            condition_id=condition, token_id=str(1 << 80), outcome="Yes",
+            amount_atomic=4_000_000, protocol="2", negative_risk=False,
+            nonce=9, created_at=100, deadline=700,
+            idempotency_key="i" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter,
+                ctf_redeem_calldata(condition),
+            ),),
+        )
+        eligibility = EligibilityAttestation(7, False, "US", "CA", 90, 390)
+        request = SettlementApprovalRequest.create(
+            request_id="r" * 32, plan=plan, question="Did it happen?",
+            eligibility=eligibility, final_confirmation_required=True,
+            balance_source="data_api",
+        )
+        self.assertEqual(request.confirmation.expires_at, 220)
+        awaiting_final = request.approve_primary(requester_id=7, now=101)
+        self.assertEqual(
+            awaiting_final.confirmation.state,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        )
+        approved = awaiting_final.decide_final(True, requester_id=7, now=102)
+        approved.require_approved(requester_id=7, now=102)
+        self.assertEqual(
+            SettlementApprovalRequest.from_record(approved.to_record()), approved
+        )
+        changed = approved.to_record()
+        changed["plan"]["amount_atomic"] += 1
+        with self.assertRaises(TradeConfirmationError):
+            SettlementApprovalRequest.from_record(changed)
+        with self.assertRaises(TradeConfirmationError):
+            SettlementApprovalRequest.create(
+                request_id="x" * 32, plan=plan, question="Did it happen?",
+                eligibility=eligibility, final_confirmation_required=False,
+                balance_source="polygon_position_manager", balance_block_number=9,
+            )
 
     def test_settlement_operation_is_restart_safe_and_identity_bound(self):
         condition = "0x" + "ab" * 32
@@ -1840,6 +1905,38 @@ class DepositWalletCreationDesignTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DepositWalletRelayerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_v3_position_balance_reads_exact_pinned_contract(self):
+        wallet = "0x" + "2" * 40
+        token_id = str(1 << 248)
+        rpc = AsyncMock(side_effect=["0x89", "0x123", "0x" + f"{4000000:064x}"])
+        evidence = await read_v3_position_balance(
+            rpc, wallet_address=wallet, token_id=token_id
+        )
+        self.assertEqual(evidence, PositionBalanceEvidence(
+            wallet, token_id, 4_000_000, 0x123
+        ))
+        call = rpc.await_args_list[2]
+        self.assertEqual(call.args[0], "eth_call")
+        self.assertEqual(call.args[1][1], "0x123")
+        self.assertEqual(
+            call.args[1][0]["to"],
+            POLYMARKET_PRODUCTION_MANIFEST.position_manager.lower(),
+        )
+        data = call.args[1][0]["data"]
+        self.assertEqual(data[:10], "0x" + keccak(b"balanceOf(address,uint256)")[:4].hex())
+        self.assertEqual(data[10:74], "0" * 24 + wallet[2:])
+        self.assertEqual(data[-64:], f"{int(token_id):064x}")
+
+        with self.assertRaisesRegex(AccountConnectionError, "chain ID"):
+            await read_v3_position_balance(
+                AsyncMock(side_effect=["0x1", "0x123", "0x" + "0" * 63 + "1"]),
+                wallet_address=wallet, token_id=token_id,
+            )
+        with self.assertRaises(AccountConnectionError):
+            await read_v3_position_balance(
+                AsyncMock(), wallet_address=wallet, token_id="123"
+            )
+
     def _plan(self):
         return DepositWalletCreationPlan(
             creation_id="c" * 32, discord_user_id=7,

@@ -7,19 +7,23 @@ import json
 import re
 from dataclasses import asdict, dataclass, replace
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from eth_hash.auto import keccak
 
 from .account_connection import AccountConnectionError, normalize_evm_address
 from .order_protocol import is_protocol_v3_position_id
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
+from .security_policy import EligibilityAttestation
+from .trade_confirmation import TradeConfirmation, TradeConfirmationError
 
 _UINT256_MAX = (1 << 256) - 1
 _HEX32 = re.compile(r"^0x[0-9a-fA-F]{64}$")
 _HEX31 = re.compile(r"^0x[0-9a-fA-F]{62}$")
 _ID = re.compile(r"^[A-Za-z0-9_-]{32,128}$")
 _BATCH_LIFETIME_SECONDS = 10 * 60
+
+
 class SettlementState(str, Enum):
     APPROVED = "approved"
     SUBMITTING = "submitting"
@@ -60,6 +64,128 @@ def _condition(value: str) -> bytes:
     if not isinstance(value, str) or _HEX32.fullmatch(value) is None:
         raise AccountConnectionError("Settlement condition ID is invalid.")
     return bytes.fromhex(value[2:])
+
+
+def _string_list(value: Any, label: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise AccountConnectionError(f"{label} is invalid.") from exc
+    if (
+        not isinstance(value, list) or len(value) != 2
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise AccountConnectionError(f"{label} is invalid.")
+    return tuple(value)
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMarket:
+    market_id: str
+    condition_id: str
+    question: str
+    outcomes: tuple[str, str]
+    token_ids: tuple[str, str]
+    negative_risk: bool
+
+    @classmethod
+    def from_market(cls, market: Mapping[str, Any]) -> "ResolvedMarket":
+        if not isinstance(market, Mapping) or market.get("closed") is not True:
+            raise AccountConnectionError("Settlement market is not closed.")
+        market_id = str(market.get("id") or "").strip()
+        condition_id = str(market.get("conditionId") or "").lower()
+        question = str(market.get("question") or "").strip()
+        if (
+            not market_id or len(market_id) > 128
+            or _HEX32.fullmatch(condition_id) is None
+            or not question or len(question) > 512
+            or not isinstance(market.get("negRisk"), bool)
+        ):
+            raise AccountConnectionError("Settlement market identity is invalid.")
+        outcomes = _string_list(market.get("outcomes"), "Settlement outcomes")
+        token_ids = _string_list(market.get("clobTokenIds"), "Settlement tokens")
+        if len(set(item.casefold() for item in outcomes)) != 2:
+            raise AccountConnectionError("Settlement outcomes are ambiguous.")
+        if len(set(token_ids)) != 2 or not all(
+            token.isdigit() and 0 < int(token) <= _UINT256_MAX for token in token_ids
+        ):
+            raise AccountConnectionError("Settlement token identity is invalid.")
+        return cls(
+            market_id, condition_id, question, outcomes, token_ids,
+            market["negRisk"],
+        )
+
+    def select(self, outcome: str) -> tuple[str, str]:
+        if not isinstance(outcome, str):
+            raise AccountConnectionError("Settlement outcome is invalid.")
+        matches = [
+            index for index, label in enumerate(self.outcomes)
+            if label.casefold() == outcome.casefold()
+        ]
+        if not matches and outcome.isdigit() and 1 <= int(outcome) <= 2:
+            matches = [int(outcome) - 1]
+        if len(matches) != 1:
+            raise AccountConnectionError("Settlement outcome is not in this market.")
+        index = matches[0]
+        return self.outcomes[index], self.token_ids[index]
+
+
+@dataclass(frozen=True, slots=True)
+class PositionBalanceEvidence:
+    wallet_address: str
+    token_id: str
+    amount_atomic: int
+    block_number: int
+    chain_id: int = 137
+    source: str = "polygon_position_manager"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "wallet_address",
+            normalize_evm_address(self.wallet_address, "Deposit Wallet"),
+        )
+        if (
+            not is_protocol_v3_position_id(self.token_id)
+            or not 0 < self.amount_atomic <= _UINT256_MAX
+            or self.block_number < 0 or self.chain_id != 137
+            or self.source != "polygon_position_manager"
+        ):
+            raise AccountConnectionError("Position Manager balance evidence is invalid.")
+
+
+async def read_v3_position_balance(
+    rpc: Callable[[str, list[Any]], Awaitable[Any]], *,
+    wallet_address: str, token_id: str,
+) -> PositionBalanceEvidence:
+    wallet = normalize_evm_address(wallet_address, "Deposit Wallet")
+    if not is_protocol_v3_position_id(token_id):
+        raise AccountConnectionError("Position Manager token is not protocol v3.")
+    selector = keccak(b"balanceOf(address,uint256)")[:4]
+    data = "0x" + (
+        selector + bytes(12) + bytes.fromhex(wallet[2:])
+        + _uint(int(token_id), "Position Manager token")
+    ).hex()
+    chain_raw = await rpc("eth_chainId", [])
+    block_raw = await rpc("eth_blockNumber", [])
+    try:
+        chain_id = int(str(chain_raw), 16)
+        block_number = int(str(block_raw), 16)
+    except (TypeError, ValueError) as exc:
+        raise AccountConnectionError("Position Manager chain response is invalid.") from exc
+    if chain_id != 137:
+        raise AccountConnectionError("Polygon RPC chain ID does not match.")
+    result = await rpc("eth_call", [{
+        "to": POLYMARKET_PRODUCTION_MANIFEST.position_manager.lower(),
+        "data": data,
+    }, hex(block_number)])
+    try:
+        if not isinstance(result, str) or re.fullmatch(r"0x[0-9a-fA-F]{64}", result) is None:
+            raise ValueError
+        amount = int(result, 16)
+    except (TypeError, ValueError) as exc:
+        raise AccountConnectionError("Position Manager balance response is invalid.") from exc
+    return PositionBalanceEvidence(wallet, token_id, amount, block_number, chain_id)
 
 
 def ctf_redeem_calldata(condition_id: str) -> str:
@@ -236,6 +362,122 @@ class SettlementPlan:
             return cls(**values)
         except (KeyError, TypeError, ValueError) as exc:
             raise AccountConnectionError("Stored settlement is invalid.") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class SettlementApprovalRequest:
+    request_id: str
+    plan: SettlementPlan
+    question: str
+    eligibility: EligibilityAttestation
+    confirmation: TradeConfirmation
+    balance_source: str
+    balance_block_number: int | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not _ID.fullmatch(self.request_id)
+            or not isinstance(self.plan, SettlementPlan)
+            or not isinstance(self.question, str) or not self.question
+            or len(self.question) > 512
+            or not isinstance(self.eligibility, EligibilityAttestation)
+            or not isinstance(self.confirmation, TradeConfirmation)
+            or self.balance_source not in {"data_api", "polygon_position_manager"}
+            or self.balance_source == "data_api" and self.balance_block_number is not None
+            or self.balance_source == "polygon_position_manager" and (
+                self.balance_block_number is None or self.balance_block_number < 0
+            )
+            or (self.plan.protocol == "3") != (
+                self.balance_source == "polygon_position_manager"
+            )
+        ):
+            raise TradeConfirmationError("Settlement request is invalid.")
+        if (
+            self.eligibility.discord_user_id != self.plan.discord_user_id
+            or self.eligibility.blocked
+            or self.eligibility.checked_at > self.plan.created_at
+            or self.eligibility.expires_at < self.confirmation.expires_at
+            or self.confirmation.requester_id != self.plan.discord_user_id
+            or self.confirmation.order_fingerprint != self.plan.fingerprint
+            or self.confirmation.created_at != self.plan.created_at
+            or self.confirmation.expires_at > self.plan.deadline
+        ):
+            raise TradeConfirmationError("Settlement approval bindings disagree.")
+
+    @classmethod
+    def create(
+        cls, *, request_id: str, plan: SettlementPlan, question: str,
+        eligibility: EligibilityAttestation, final_confirmation_required: bool,
+        balance_source: str, balance_block_number: int | None = None,
+    ) -> "SettlementApprovalRequest":
+        expires_at = min(
+            plan.created_at + 120, plan.deadline, eligibility.expires_at
+        )
+        confirmation = TradeConfirmation(
+            requester_id=plan.discord_user_id,
+            order_fingerprint=plan.fingerprint,
+            final_confirmation_required=final_confirmation_required,
+            created_at=plan.created_at, expires_at=expires_at,
+        )
+        return cls(
+            request_id, plan, question, eligibility, confirmation,
+            balance_source, balance_block_number,
+        )
+
+    def approve_primary(
+        self, *, requester_id: int, now: int,
+    ) -> "SettlementApprovalRequest":
+        return replace(self, confirmation=self.confirmation.approve_primary(
+            requester_id=requester_id,
+            order_fingerprint=self.plan.fingerprint, now=now,
+        ))
+
+    def decide_final(
+        self, approved: bool, *, requester_id: int, now: int,
+    ) -> "SettlementApprovalRequest":
+        return replace(self, confirmation=self.confirmation.decide_final(
+            requester_id=requester_id,
+            order_fingerprint=self.plan.fingerprint,
+            approved=approved, now=now,
+        ))
+
+    def require_approved(self, *, requester_id: int, now: int) -> None:
+        self.eligibility.require_current(discord_user_id=requester_id, now=now)
+        self.confirmation.require_approved(
+            requester_id=requester_id,
+            order_fingerprint=self.plan.fingerprint, now=now,
+        )
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "request_id": self.request_id, "plan": self.plan.to_record(),
+            "question": self.question,
+            "eligibility": asdict(self.eligibility),
+            "confirmation": self.confirmation.to_record(),
+            "balance_source": self.balance_source,
+            "balance_block_number": self.balance_block_number,
+        }
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> "SettlementApprovalRequest":
+        expected = {
+            "request_id", "plan", "question", "eligibility",
+            "confirmation", "balance_source", "balance_block_number",
+        }
+        if not isinstance(record, Mapping) or set(record) != expected:
+            raise TradeConfirmationError("Stored settlement request has an invalid shape.")
+        try:
+            return cls(
+                request_id=str(record["request_id"]),
+                plan=SettlementPlan.from_record(record["plan"]),
+                question=str(record["question"]),
+                eligibility=EligibilityAttestation(**dict(record["eligibility"])),
+                confirmation=TradeConfirmation.from_record(record["confirmation"]),
+                balance_source=str(record["balance_source"]),
+                balance_block_number=record["balance_block_number"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise TradeConfirmationError("Stored settlement request is invalid.") from exc
 
 
 @dataclass(frozen=True, slots=True)
