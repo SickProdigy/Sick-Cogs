@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Central guild allowlisting and role, user, VIP-sponsored, and expiring feature entitlements for Sick-Cogs.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores guild, role, and user IDs used for access grants and sponsorship, entitlement issue and expiry timestamps, and a bounded administrative audit history. It stores no payment details or credentials. User-data deletion removes direct grants and anonymizes sponsorship and audit references.",
+  "hidden": false,
+  "install_msg": "AccessControl installs with enforcement disabled. The bot owner should run [p]accesscontrol, configure mappings and grants, verify decisions with [p]accesscontrol check, and only then enable enforcement.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "AccessControl",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Central bot and premium feature access policy.",
+  "tags": ["access", "permissions", "roles", "vip", "entitlements"],
+  "type": "COG",
+  "version": "0.2.0"
+}
