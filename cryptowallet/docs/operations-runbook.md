@@ -13,6 +13,22 @@ This covers companion relay and bot controls. It does not authorize mainnet or p
 7. Restart the test bot and verify configuration hashes, loaded cogs, connection, logs, pending-intent recovery, and migration idempotency.
 8. Stage through main only after the issue checklist and release review are complete.
 
+## Base stack pre-acceptance checkpoint
+
+This checkpoint covers CryptoWallet, TokenFactory, and Clanker together. It is read-only and nontransactional. Stop before any `enable` command, capability change, factory deployment, token creation, Clanker launch, or real-value send unless the maintainer separately authorizes controlled acceptance.
+
+1. Record the exact clean `develop` commit and the versions from `cryptowallet/info.json`, `tokenfactory/info.json`, and `clanker/info.json`.
+2. Verify the target process is the authorized `agentictest` SGBTestAgent and that no process owned by `terry` will be touched.
+3. Back up the exact affected cog and core configuration files plus the companion database and private `recovery-config.local.php`. Record SHA-256 hashes without printing file contents or secret values.
+4. Run the CryptoWallet, TokenFactory, Clanker, and companion browser suites in the representative environment. Validate cog JSON, compile changed Python, run `pip check`, and reproduce the pinned TokenFactory contract artifacts.
+5. Run `[p]walletset cdpstatus`, `[p]walletset cdpcheck`, `[p]walletset jwtstatus`, `[p]walletset mainnet preflight`, and `[p]walletset mainnet status`. The checks must remain read-only; Base mainnet stays disabled and paused with every capability off.
+6. Run `[p]tokenfactoryset mainnetstatus`. The pinned factory remains undeployed until separately authorized; TokenFactory remains disabled and paused.
+7. Run `[p]clankerset mainnetstatus`. Clanker remains disabled and paused, with its reviewed contract manifest intact.
+8. Restart SGBTestAgent with its canonical command, then confirm the process owner, Discord connection, complete baseline cog set, configuration hashes, migration idempotency, and absence of attempted mainnet submission in logs.
+9. Record only non-secret evidence: revision, versions, test totals, configuration hashes, public manifest or bytecode hashes, command status, and timestamps.
+
+A failed preflight, changed identity, manifest drift, unexpected configuration mutation, missing backup, dependency conflict, or provider call from a status-only command blocks acceptance. Do not compensate by opening a gate or submitting a probe transaction.
+
 The setup page detects an existing private configuration and exposes only the database-update action; it does not display connection or migration details. Never edit a released migration; add the next numbered migration.
 
 ## Routine monitoring
