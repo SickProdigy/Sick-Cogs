@@ -15,6 +15,7 @@ from .account_connection import AccountConnectionError
 from .deposit_wallet import DepositWalletCreationPlan
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 from .settlement import SettlementPlan
+from .bridge import BridgeWithdrawalPlan
 
 
 SUBMIT_PATH = "/submit"
@@ -158,6 +159,61 @@ class DepositWalletRelayerClient:
             "proxy_address": str(item["proxyAddress"]).lower(),
             "type": item["type"],
             "error_msg": item.get("errorMsg"),
+        }
+
+
+    async def submit_withdrawal(
+        self, plan: BridgeWithdrawalPlan, signature: str,
+        credentials: BuilderCredentials, *, timestamp: int,
+    ) -> dict:
+        body = json.dumps(
+            plan.relayer_request(signature), separators=(",", ":"), ensure_ascii=True,
+        )
+        headers = credentials.headers("POST", SUBMIT_PATH, body, timestamp)
+        headers.update({"Content-Type": "application/json", "Idempotency-Key": plan.idempotency_key})
+        payload = await self._transport(
+            "POST", POLYMARKET_PRODUCTION_MANIFEST.relayer_api + SUBMIT_PATH,
+            headers=headers, body=body, params=None,
+        )
+        allowed = {"transactionID", "transactionHash", "state", "hash"}
+        if not isinstance(payload, dict) or set(payload) - allowed:
+            raise AccountConnectionError("Polymarket withdrawal submission is invalid.")
+        transaction_id = payload.get("transactionID")
+        if not isinstance(transaction_id, str) or not transaction_id or len(transaction_id) > 128:
+            raise AccountConnectionError("Withdrawal transaction identity is invalid.")
+        transaction_hash = payload.get("transactionHash") or None
+        if transaction_hash is not None and (
+            not isinstance(transaction_hash, str) or re.fullmatch(
+                r"0x[0-9a-fA-F]{64}", transaction_hash
+            ) is None
+        ):
+            raise AccountConnectionError("Withdrawal transaction hash is invalid.")
+        return {"transaction_id": transaction_id,
+                "transaction_hash": transaction_hash.lower() if transaction_hash else None}
+
+    async def get_withdrawal(
+        self, plan: BridgeWithdrawalPlan, transaction_id: str,
+    ) -> dict:
+        if not isinstance(transaction_id, str) or not transaction_id or len(transaction_id) > 128:
+            raise AccountConnectionError("Withdrawal transaction identity is invalid.")
+        payload = await self._transport(
+            "GET", POLYMARKET_PRODUCTION_MANIFEST.relayer_api + TRANSACTION_PATH,
+            headers={"Accept": "application/json"}, body=None,
+            params={"id": transaction_id},
+        )
+        if not isinstance(payload, list) or len(payload) != 1 or not isinstance(payload[0], dict):
+            raise AccountConnectionError("Withdrawal transaction is unavailable.")
+        item = payload[0]
+        required = {"transactionID", "state", "from", "to", "proxyAddress", "type"}
+        if not required.issubset(item):
+            raise AccountConnectionError("Withdrawal transaction is incomplete.")
+        return {
+            "transaction_id": item["transactionID"],
+            "transaction_hash": item.get("transactionHash") or None,
+            "state": item["state"], "from": str(item["from"]).lower(),
+            "to": str(item["to"]).lower(),
+            "proxy_address": str(item["proxyAddress"]).lower(),
+            "type": item["type"], "error_msg": item.get("errorMsg"),
         }
 
     async def get_creation(self, plan: DepositWalletCreationPlan) -> dict:

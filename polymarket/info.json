@@ -12,5 +12,5 @@
   "short": "Protected CryptoWallet-to-Polymarket connector",
   "tags": ["prediction", "markets", "polymarket", "information"],
   "type": "COG",
-  "version": "0.2.48"
+  "version": "0.2.49"
 }

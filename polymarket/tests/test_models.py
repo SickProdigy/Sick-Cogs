@@ -113,6 +113,7 @@ from polymarket.trade_confirmation import (
 )
 from polymarket.trade_request import TradeApprovalRequest
 from polymarket.trade_views import TradeApprovalView
+from polymarket.withdrawal import WithdrawalApprovalRequest, WithdrawalOperation
 from polymarket.session_approval import (
     SessionApprovalRequest, SessionApprovalState,
 )
@@ -1777,6 +1778,56 @@ class BridgeWithdrawalPlanTests(unittest.TestCase):
             verify_withdrawal_batch_signature(self._plan(nonce=10), signature)
 
 
+    def test_approval_reuses_two_step_confirmation_and_round_trips(self):
+        plan = self._plan()
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, country="CA", region=None, blocked=False,
+            checked_at=plan.created_at, expires_at=plan.deadline,
+        )
+        request = WithdrawalApprovalRequest.create(
+            request_id="request_" + "d" * 32, plan=plan, eligibility=eligibility,
+            final_confirmation_required=True,
+        )
+        first = request.approve_primary(requester_id=7, now=plan.created_at + 1)
+        self.assertEqual(first.confirmation.state, TradeConfirmationState.AWAITING_FINAL_CONFIRMATION)
+        approved = first.decide_final(True, requester_id=7, now=plan.created_at + 2)
+        approved.require_approved(requester_id=7, now=plan.created_at + 2)
+        self.assertEqual(WithdrawalApprovalRequest.from_record(approved.to_record()), approved)
+        with self.assertRaises(TradeConfirmationError):
+            WithdrawalApprovalRequest.from_record({**approved.to_record(), "extra": True})
+
+    def test_operation_is_restart_safe_and_identity_bound(self):
+        plan = self._plan()
+        signature = "0x" + "12" * 65
+        submitting = WithdrawalOperation(plan).begin_submission(
+            signature, now=plan.created_at + 1
+        )
+        self.assertEqual(submitting.state, SettlementState.SUBMITTING)
+        self.assertNotIn(signature, repr(submitting))
+        unknown = WithdrawalOperation.from_record(
+            submitting.to_record()
+        ).recover_after_restart()
+        self.assertEqual(unknown.state, SettlementState.UNKNOWN)
+        submitted = submitting.record_submission({
+            "transaction_id": "withdrawal-1", "transaction_hash": None,
+        })
+        evidence = {
+            "transaction_id": "withdrawal-1", "transaction_hash": "0x" + "d" * 64,
+            "state": "STATE_CONFIRMED", "from": plan.owner_address,
+            "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
+            "proxy_address": plan.wallet_address, "type": "WALLET", "error_msg": None,
+        }
+        confirmed = submitted.reconcile(evidence)
+        self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
+        self.assertEqual(WithdrawalOperation.from_record(confirmed.to_record()), confirmed)
+        with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
+            submitted.reconcile({**evidence, "proxy_address": "0x" + "9" * 40})
+        failed = submitted.reconcile({**evidence, "state": "STATE_FAILED",
+                                      "error_msg": "private provider detail"})
+        self.assertEqual(failed.state, SettlementState.FAILED)
+        self.assertNotIn("private provider detail", repr(failed))
+
+
 class PolymarketBridgeTests(unittest.IsolatedAsyncioTestCase):
     def _asset(self):
         return {
@@ -2312,6 +2363,33 @@ class DepositWalletRelayerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["proxy_address"], plan.wallet_address)
         confirmed = SettlementOperation(plan).begin_submission(
             signature, now=101
+        ).record_submission(result).reconcile(evidence)
+        self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
+
+
+    async def test_withdrawal_submit_and_status_are_exact_and_strict(self):
+        helper = BridgeWithdrawalPlanTests()
+        plan = helper._plan()
+        signature = "0x" + "12" * 65
+        transport = AsyncMock(side_effect=[
+            {"transactionID": "withdrawal-1", "transactionHash": "", "state": "STATE_NEW"},
+            [{"transactionID": "withdrawal-1", "transactionHash": "0x" + "d" * 64,
+              "state": "STATE_CONFIRMED", "from": plan.owner_address.upper(),
+              "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.upper(),
+              "proxyAddress": plan.wallet_address.upper(), "type": "WALLET"}],
+        ])
+        client = DepositWalletRelayerClient(transport)
+        credentials = BuilderCredentials(
+            "builder-key", "YnVpbGRlci1zZWNyZXQ=", "builder-passphrase"
+        )
+        result = await client.submit_withdrawal(plan, signature, credentials, timestamp=100)
+        self.assertEqual(result, {"transaction_id": "withdrawal-1", "transaction_hash": None})
+        request = transport.await_args_list[0]
+        self.assertEqual(request.kwargs["headers"]["Idempotency-Key"], plan.idempotency_key)
+        self.assertEqual(json.loads(request.kwargs["body"]), plan.relayer_request(signature))
+        evidence = await client.get_withdrawal(plan, "withdrawal-1")
+        confirmed = WithdrawalOperation(plan).begin_submission(
+            signature, now=plan.created_at + 1
         ).record_submission(result).reconcile(evidence)
         self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
 
