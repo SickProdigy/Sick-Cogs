@@ -1200,6 +1200,31 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
                 trade_claims["sickwallet_polymarket_eligibility"],
                 {**trade, "discord_user_id": "7"},
             )
+        claim = {
+            **payload, "action": "claim",
+            "market_path": "/markets/slug/example", "outcome": "yes",
+        }
+        claim_token, _ = await harness.create_external_companion_handoff(
+            7, "polymarket_eligibility", claim
+        )
+        claim_claims = jwt.decode(
+            claim_token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(
+            claim_claims["sickwallet_polymarket_eligibility"],
+            {**claim, "discord_user_id": "7"},
+        )
+        for invalid_claim in (
+            {**claim, "session_address": "0x" + "3" * 40},
+            {**claim, "shares": "4"},
+            {**claim, "private_key": "forbidden"},
+            {**claim, "market_path": "/events/example"},
+        ):
+            with self.assertRaisesRegex(ValueError, "Polymarket eligibility binding"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_eligibility", invalid_claim
+                )
         for invalid_trade in (
             {**trade_base, "action": "buy", "max_spend_pusd": "10"},
             {**trade_base, "action": "sell", "shares": "4", "min_price": "1"},

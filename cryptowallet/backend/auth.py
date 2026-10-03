@@ -220,7 +220,7 @@ class JwtAuthMixin:
                 "expires_at", "chain_id", "purpose",
             }
             action = payload.get("action")
-            trade_expected = (
+            action_expected = (
                 {
                     "session_address", "market_path", "outcome",
                     "max_spend_pusd", "max_price",
@@ -231,6 +231,8 @@ class JwtAuthMixin:
                     "shares", "min_price",
                 }
                 if action == "sell"
+                else {"market_path", "outcome"}
+                if action == "claim"
                 else set()
             )
             try:
@@ -238,7 +240,7 @@ class JwtAuthMixin:
                 wallet = normalize_evm_address(payload.get("account_wallet_address", ""))
                 session_address = (
                     normalize_evm_address(payload.get("session_address", ""))
-                    if trade_expected else None
+                    if action in {"buy", "sell"} else None
                 )
                 numeric_fields = (
                     ("max_spend_pusd", "max_price")
@@ -258,8 +260,8 @@ class JwtAuthMixin:
                 raise ValueError(
                     "The Polymarket eligibility binding is invalid"
                 ) from exc
-            trade_invalid = bool(trade_expected) and (
-                session_address in {signer, wallet}
+            action_invalid = bool(action_expected) and (
+                action in {"buy", "sell"} and session_address in {signer, wallet}
                 or not isinstance(payload.get("market_path"), str)
                 or re.fullmatch(
                     r"/markets/(?:[0-9]+|slug/[A-Za-z0-9_-]+)",
@@ -281,12 +283,12 @@ class JwtAuthMixin:
                 or action == "sell" and numbers["min_price"] >= 1
             )
             if (
-                set(payload) != base_expected | trade_expected
+                set(payload) != base_expected | action_expected
                 or payload.get("purpose") != "polymarket_eligibility"
                 or payload.get("chain_id") != 137
                 or payload.get("discord_user_id") != discord_user_id
                 or action not in {
-                    "deploy", "provision", "rotate", "deposit", "buy", "sell",
+                    "deploy", "provision", "rotate", "deposit", "buy", "sell", "claim",
                 }
                 or not isinstance(payload.get("request_id"), str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["request_id"]) is None
@@ -296,7 +298,7 @@ class JwtAuthMixin:
                 or not isinstance(payload.get("expires_at"), int)
                 or payload["expires_at"] != payload["created_at"] + POLYMARKET_ONBOARDING_LIFETIME_SECONDS
                 or signer.casefold() == wallet.casefold()
-                or trade_invalid
+                or action_invalid
             ):
                 raise ValueError("The Polymarket eligibility binding is invalid")
         if purpose == "polymarket_connect":

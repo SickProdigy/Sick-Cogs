@@ -44,9 +44,10 @@ const ELIGIBILITY_BASE_KEYS = [
   "account_wallet_address", "action", "chain_id", "created_at", "discord_user_id",
   "expires_at", "purpose", "request_id", "result_handle", "signer_address",
 ];
-const TRADE_KEYS = {
+const ACTION_KEYS = {
   buy: ["market_path", "max_price", "max_spend_pusd", "outcome", "session_address"],
   sell: ["market_path", "min_price", "outcome", "session_address", "shares"],
+  claim: ["market_path", "outcome"],
 };
 const DECIMAL = /^(?:0|[1-9][0-9]*)(?:[.][0-9]{1,6})?$/;
 const MARKET_PATH = /^[/]markets[/](?:[0-9]+|slug[/][A-Za-z0-9_-]+)$/;
@@ -62,12 +63,14 @@ function validPositiveDecimal(value, allowNull = false, belowOne = true) {
 export function validateEligibilityBinding(claims, nowSeconds) {
   const value = claims?.sickwallet_polymarket_eligibility;
   const userId = String(claims?.sickwallet_discord_user || "");
-  const tradeKeys = TRADE_KEYS[value?.action] || [];
-  const expectedKeys = [...ELIGIBILITY_BASE_KEYS, ...tradeKeys].sort();
-  const tradeInvalid = tradeKeys.length > 0 && (
-    !ADDRESS.test(value?.session_address)
-    || value.session_address === value.signer_address
-    || value.session_address === value.account_wallet_address
+  const actionKeys = ACTION_KEYS[value?.action] || [];
+  const expectedKeys = [...ELIGIBILITY_BASE_KEYS, ...actionKeys].sort();
+  const actionInvalid = actionKeys.length > 0 && (
+    (["buy", "sell"].includes(value.action) && (
+      !ADDRESS.test(value?.session_address)
+      || value.session_address === value.signer_address
+      || value.session_address === value.account_wallet_address
+    ))
     || !MARKET_PATH.test(value.market_path) || !OUTCOME.test(value.outcome)
     || (value.action === "buy" && (
       !validPositiveDecimal(value.max_spend_pusd, false, false)
@@ -85,9 +88,9 @@ export function validateEligibilityBinding(claims, nowSeconds) {
       || value.purpose !== "polymarket_eligibility" || value.chain_id !== 137
       || String(value.discord_user_id) !== userId || !HANDLE.test(value.request_id)
       || !HANDLE.test(value.result_handle)
-      || !["deploy", "provision", "rotate", "deposit", "buy", "sell"].includes(value.action)
+      || !["deploy", "provision", "rotate", "deposit", "buy", "sell", "claim"].includes(value.action)
       || !ADDRESS.test(value.signer_address) || !ADDRESS.test(value.account_wallet_address)
-      || value.signer_address === value.account_wallet_address || tradeInvalid
+      || value.signer_address === value.account_wallet_address || actionInvalid
       || !Number.isSafeInteger(value.created_at) || !Number.isSafeInteger(value.expires_at)
       || value.expires_at !== value.created_at + 300 || value.expires_at <= nowSeconds) {
     throw new Error("This Polymarket eligibility handoff is expired or has an invalid binding.");

@@ -79,7 +79,8 @@ Promise.resolve().then(consumeHandoff).then(async (value) => {
       : binding.action === "deposit" ? "Fund Polymarket account"
       : binding.action === "buy" ? "Check buy eligibility"
         : binding.action === "sell" ? "Check sell eligibility"
-          : "Set up session authorization";
+          : binding.action === "claim" ? "Check claim eligibility"
+            : "Set up session authorization";
   document.querySelector("#polymarket-signer").textContent = binding.signer_address;
   document.querySelector("#polymarket-wallet").textContent = binding.account_wallet_address;
   eligibility = await checkEligibility();

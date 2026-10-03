@@ -48,6 +48,25 @@ test("accepts exact public buy and sell intent bindings", () => {
   ]) assert.throws(() => validateEligibilityBinding(invalid, now), /invalid binding/);
 });
 
+test("accepts exact claim binding without session or amount authority", () => {
+  const claim = validateEligibilityBinding(claims({
+    action: "claim", market_path: "/markets/slug/example", outcome: "yes",
+  }), now);
+  assert.equal(claim.action, "claim");
+  assert.equal(claim.outcome, "yes");
+  for (const invalid of [
+    claims({
+      action: "claim", market_path: "/markets/slug/example", outcome: "yes",
+      session_address: "0x" + "3".repeat(40),
+    }),
+    claims({
+      action: "claim", market_path: "/markets/slug/example", outcome: "yes",
+      shares: "4",
+    }),
+    claims({ action: "claim", market_path: "/events/example", outcome: "yes" }),
+  ]) assert.throws(() => validateEligibilityBinding(invalid, now), /invalid binding/);
+});
+
 test("rejects drift, extra fields, wrong identity, and expiry", () => {
   for (const input of [
     claims({ action: "trade" }), claims({ chain_id: 1 }),
