@@ -70,6 +70,18 @@ def _hex_fingerprint(value: str) -> str:
     return cleaned
 
 
+def _order_hash(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    cleaned = _identifier(value, field).lower()
+    if (
+        len(cleaned) != 66 or not cleaned.startswith("0x")
+        or any(character not in "0123456789abcdef" for character in cleaned[2:])
+    ):
+        raise OrderLifecycleError(f"{field} must be a 32-byte hex order hash")
+    return cleaned
+
+
 def _string_tuple(value: Any, field: str) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -230,6 +242,7 @@ class OrderLifecycle:
     revision: int
     updated_at: datetime
     order_id: str | None = None
+    expected_order_id: str | None = None
     matched_size: Decimal = Decimal("0")
     trade_ids: tuple[str, ...] = ()
     transaction_hashes: tuple[str, ...] = ()
@@ -252,6 +265,15 @@ class OrderLifecycle:
         object.__setattr__(self, "updated_at", updated_at)
         if self.order_id is not None:
             object.__setattr__(self, "order_id", _identifier(self.order_id, "order_id"))
+        object.__setattr__(
+            self, "expected_order_id",
+            _order_hash(self.expected_order_id, "expected_order_id"),
+        )
+        if (
+            self.order_id is not None and self.expected_order_id is not None
+            and self.order_id.lower() != self.expected_order_id
+        ):
+            raise OrderLifecycleError("provider order ID does not match expected hash")
         requires_order_id = {
             OrderState.LIVE,
             OrderState.PARTIALLY_FILLED,
@@ -303,12 +325,17 @@ class OrderLifecycle:
             **changes,
         )
 
-    def begin_submission(self, now: datetime) -> "OrderLifecycle":
+    def begin_submission(
+        self, now: datetime, *, expected_order_id: str | None = None,
+    ) -> "OrderLifecycle":
         if self.state is not OrderState.APPROVED:
             raise OrderLifecycleError("only an approved order can begin submission")
         if self._at(now) >= self.binding.expires_at:
             raise OrderLifecycleError("the approval has expired")
-        return self._transition(now, state=OrderState.SUBMITTING, last_error=None)
+        return self._transition(
+            now, state=OrderState.SUBMITTING, last_error=None,
+            expected_order_id=_order_hash(expected_order_id, "expected_order_id"),
+        )
 
     def recover_after_restart(self, now: datetime) -> "OrderLifecycle":
         if self.state is OrderState.SUBMITTING:
@@ -340,6 +367,11 @@ class OrderLifecycle:
         if accepted is not True:
             raise OrderLifecycleError("submission response must include an explicit success result")
         order_id = _identifier(response.get("orderID") or response.get("order_id"), "order_id")
+        if (
+            self.expected_order_id is not None
+            and order_id.lower() != self.expected_order_id
+        ):
+            raise OrderLifecycleError("provider returned an unexpected order ID")
         status = _short_text(response.get("status"), "status", limit=32).lower()
         if status == "live":
             state = OrderState.LIVE
@@ -452,7 +484,9 @@ class OrderLifecycle:
         return {
             "binding": self.binding.to_record(), "state": self.state.value,
             "revision": self.revision, "updated_at": self.updated_at.isoformat(),
-            "order_id": self.order_id, "matched_size": str(self.matched_size),
+            "order_id": self.order_id,
+            "expected_order_id": self.expected_order_id,
+            "matched_size": str(self.matched_size),
             "trade_ids": list(self.trade_ids),
             "transaction_hashes": list(self.transaction_hashes),
             "last_error": self.last_error,
@@ -468,6 +502,7 @@ class OrderLifecycle:
                 state=OrderState(record["state"]), revision=record["revision"],
                 updated_at=datetime.fromisoformat(record["updated_at"]),
                 order_id=record.get("order_id"),
+                expected_order_id=record.get("expected_order_id"),
                 matched_size=record.get("matched_size", "0"),
                 trade_ids=tuple(record.get("trade_ids", ())),
                 transaction_hashes=tuple(record.get("transaction_hashes", ())),

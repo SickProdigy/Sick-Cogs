@@ -16,7 +16,7 @@ from .account_connection import normalize_evm_address
 from .order_lifecycle import OrderLifecycle, OrderLifecycleError, OrderState
 from .order_signing import (
     ZERO_BYTES32, OrderSigningError, UnsignedDepositWalletOrder,
-    verify_deposit_wallet_order_signature,
+    exchange_order_id, verify_deposit_wallet_order_signature,
 )
 
 POST_ORDER_PATH = "/order"
@@ -140,6 +140,28 @@ def validate_signed_order(lifecycle: OrderLifecycle, order: Mapping[str, Any]) -
     return dict(order)
 
 
+def expected_order_id(
+    lifecycle: OrderLifecycle, order: Mapping[str, Any],
+) -> str:
+    """Derive the public exchange hash after full signed-order validation."""
+
+    validated = validate_signed_order(lifecycle, order)
+    unsigned = UnsignedDepositWalletOrder(
+        exchange_address=lifecycle.binding.exchange_address,
+        maker=validated["maker"], token_id=str(validated["tokenId"]),
+        maker_amount=int(str(validated["makerAmount"])),
+        taker_amount=int(str(validated["takerAmount"])),
+        salt=int(str(validated["salt"])),
+        timestamp=int(str(validated["timestamp"])),
+        side=str(validated["side"]).upper(),
+        expiration=int(str(validated["expiration"])),
+        signature_type=int(validated["signatureType"]),
+        metadata=str(validated["metadata"]), builder=str(validated["builder"]),
+        protocol_version=lifecycle.binding.protocol_version,
+    )
+    return exchange_order_id(unsigned)
+
+
 class AuthenticatedOrderTransport:
     """Execute exact CLOB requests with ephemeral credentials and verified results."""
 
@@ -214,6 +236,11 @@ class AuthenticatedOrderTransport:
         if submitting.state is not OrderState.SUBMITTING:
             raise OrderTransportError("order is not in persisted submitting state")
         order = validate_signed_order(submitting, signed_order)
+        if (
+            submitting.expected_order_id is not None
+            and expected_order_id(submitting, order) != submitting.expected_order_id
+        ):
+            raise OrderTransportError("signed order hash changed after persistence")
         credentials = await self._credential_provider()
         payload = {
             "order": order, "owner": credentials.key,
@@ -252,6 +279,19 @@ class AuthenticatedOrderTransport:
             return pending.record_cancel(now, response)
         except Exception:
             return pending
+
+    async def recover_unknown(
+        self, lifecycle: OrderLifecycle, *, now: datetime, timestamp: int,
+    ) -> OrderLifecycle:
+        if (
+            lifecycle.state is not OrderState.UNKNOWN or lifecycle.order_id
+            or not lifecycle.expected_order_id
+        ):
+            raise OrderTransportError("order is not eligible for hash recovery")
+        candidate = OrderLifecycle.from_record({
+            **lifecycle.to_record(), "order_id": lifecycle.expected_order_id,
+        })
+        return await self.reconcile(candidate, now=now, timestamp=timestamp)
 
     async def reconcile(
         self, lifecycle: OrderLifecycle, *, now: datetime, timestamp: int,

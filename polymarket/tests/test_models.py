@@ -48,7 +48,7 @@ from polymarket.order_intent import (
 )
 from polymarket.order_transport import (
     AuthenticatedOrderTransport, ClobCredentials, OrderTransportError,
-    _hmac_signature, validate_signed_order,
+    _hmac_signature, expected_order_id, validate_signed_order,
 )
 from polymarket.order_lifecycle import (
     OrderBinding, OrderLifecycle, OrderLifecycleError, OrderState,
@@ -58,7 +58,7 @@ from polymarket.order_protocol import (
 )
 from polymarket.order_signing import (
     OrderSigningError, UnsignedDepositWalletOrder,
-    deposit_wallet_order_digest, sign_deposit_wallet_order,
+    deposit_wallet_order_digest, exchange_order_id, sign_deposit_wallet_order,
     verify_deposit_wallet_order_signature,
 )
 from polymarket.onboarding import (
@@ -1261,6 +1261,10 @@ class CurrentDepositWalletOrderSigningTests(unittest.TestCase):
             "0x" + deposit_wallet_order_digest(self._order()).hex(),
             "0x1b9566eedd9589a73275df23a3a9d9e2e9897e76d31cd46d436f1b824d161b33",
         )
+        self.assertEqual(
+            exchange_order_id(self._order()),
+            "0xff4d4ef39695d3af70202f62613fe57f97ffcb1f46d3027e6f326ab2cd13cc2c",
+        )
 
     def test_session_signature_has_exact_erc7739_and_wallet_wrappers(self):
         private_key = (7).to_bytes(32, "big")
@@ -1517,6 +1521,94 @@ class AuthenticatedOrderTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret provider detail", repr(result))
         with self.assertRaises(OrderLifecycleError):
             result.begin_submission(datetime.fromtimestamp(151, timezone.utc))
+
+
+    async def test_submission_rejects_provider_id_drift_without_retry(self):
+        lifecycle = self._lifecycle()
+        signed = self._signed_order()
+        order_hash = expected_order_id(lifecycle, signed)
+        submitting = lifecycle.begin_submission(
+            datetime.fromtimestamp(110, timezone.utc),
+            expected_order_id=order_hash,
+        )
+        calls = []
+
+        async def request(**kwargs):
+            calls.append(kwargs)
+            return {
+                "success": True, "orderID": "0x" + "b" * 64,
+                "status": "live",
+            }
+
+        secret = base64.urlsafe_b64encode(
+            b"official-vector-secret-32-bytes!!"
+        ).decode()
+        transport = AuthenticatedOrderTransport(
+            credential_provider=AsyncMock(return_value=ClobCredentials(
+                "api-key", secret, "passphrase"
+            )), request=request,
+        )
+        result = await transport.submit_prepared(
+            submitting, signed, now=datetime.fromtimestamp(120, timezone.utc),
+            timestamp=120,
+        )
+        self.assertEqual(result.state, OrderState.UNKNOWN)
+        self.assertIsNone(result.order_id)
+        self.assertEqual(result.expected_order_id, order_hash)
+        self.assertEqual(len(calls), 1)
+        with self.assertRaises(OrderLifecycleError):
+            result.begin_submission(datetime.fromtimestamp(121, timezone.utc))
+
+    async def test_unknown_submission_recovers_by_exact_hash_without_post(self):
+        lifecycle = self._lifecycle()
+        signed = self._signed_order()
+        order_hash = expected_order_id(lifecycle, signed)
+        unknown = lifecycle.begin_submission(
+            datetime.fromtimestamp(110, timezone.utc),
+            expected_order_id=order_hash,
+        ).submission_unknown(
+            datetime.fromtimestamp(120, timezone.utc), "timeout"
+        )
+        calls = []
+
+        async def request(**kwargs):
+            calls.append(kwargs)
+            if kwargs["path"] == "/data/order/" + order_hash:
+                return {
+                    "id": order_hash, "status": "FILLED",
+                    "maker_address": lifecycle.binding.maker_address,
+                    "market": lifecycle.binding.condition_id,
+                    "asset_id": lifecycle.binding.token_id,
+                    "side": lifecycle.binding.side, "original_size": "10",
+                    "size_matched": "10", "price": "0.5",
+                    "associate_trades": ["trade-recovered"],
+                }
+            return {"data": [{
+                "id": "trade-recovered",
+                "market": lifecycle.binding.condition_id,
+                "asset_id": lifecycle.binding.token_id,
+                "maker_address": lifecycle.binding.maker_address,
+                "transaction_hash": "0x" + "f" * 64,
+            }], "next_cursor": "LTE="}
+
+        secret = base64.urlsafe_b64encode(
+            b"official-vector-secret-32-bytes!!"
+        ).decode()
+        transport = AuthenticatedOrderTransport(
+            credential_provider=AsyncMock(return_value=ClobCredentials(
+                "api-key", secret, "passphrase"
+            )), request=request,
+        )
+        recovered = await transport.recover_unknown(
+            unknown, now=datetime.fromtimestamp(130, timezone.utc),
+            timestamp=130,
+        )
+        self.assertEqual(recovered.state, OrderState.FILLED)
+        self.assertEqual(recovered.order_id, order_hash)
+        self.assertEqual(recovered.expected_order_id, order_hash)
+        self.assertEqual(recovered.trade_ids, ("trade-recovered",))
+        self.assertEqual([item["method"] for item in calls], ["GET", "GET"])
+        self.assertNotIn("signature", repr(unknown.to_record()))
 
 
 class PolymarketOnboardingOrchestrationTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
@@ -3503,6 +3595,47 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
         cog._protected_claim_eligibility.assert_not_awaited()
 
+    async def test_orderstatus_recovers_idless_unknown_by_expected_hash(self):
+        binding, session, active = self._active_order_fixture()
+        order_hash = "0x" + "a" * 64
+        unknown = OrderLifecycle.approved(active.binding).begin_submission(
+            datetime.fromtimestamp(110, timezone.utc),
+            expected_order_id=order_hash,
+        ).submission_unknown(datetime.fromtimestamp(120, timezone.utc), "timeout")
+        candidate = OrderLifecycle.from_record({
+            **unknown.to_record(), "order_id": order_hash,
+        })
+        recovered = candidate.reconcile(
+            datetime.fromtimestamp(130, timezone.utc), {
+                "id": order_hash, "market": active.binding.condition_id,
+                "asset_id": active.binding.token_id,
+                "maker_address": active.binding.maker_address,
+                "side": active.binding.side, "price": "0.5",
+                "original_size": "10", "size_matched": "10",
+                "status": "FILLED", "associate_trades": [],
+                "transaction_hashes": [],
+            }, session_signer_address=session.session_address,
+        )
+        ctx = Context()
+        cog = Polymarket(object())
+        user_config = cog.config.user(ctx.author)
+        cog.config.user = lambda _user: user_config
+        transport = SimpleNamespace(
+            recover_unknown=AsyncMock(return_value=recovered),
+            reconcile=AsyncMock(),
+        )
+        cog._active_order_context = AsyncMock(return_value=(
+            binding, transport, session, unknown,
+        ))
+        with patch("polymarket.polymarket.time.time", return_value=130):
+            await Polymarket.polymarket_orderstatus.callback(cog, ctx)
+        stored = OrderLifecycle.from_record(await user_config.active_order())
+        self.assertEqual(stored.state, OrderState.FILLED)
+        self.assertEqual(stored.order_id, order_hash)
+        transport.recover_unknown.assert_awaited_once()
+        transport.reconcile.assert_not_awaited()
+        self.assertEqual(ctx.send.await_count, 1)
+
     async def test_cancel_is_default_closed_before_identity_or_network_access(self):
         ctx = Context()
         cog = Polymarket(object())
@@ -4618,7 +4751,8 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
                 request.approval.quote.token_id,
             )
             return submitting.record_submission(now, {
-                "success": True, "orderID": "order-one", "status": "live",
+                "success": True, "orderID": submitting.expected_order_id,
+                "status": "live",
             })
 
         transport.submit_prepared = AsyncMock(side_effect=submit_prepared)
@@ -4652,7 +4786,8 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             await cog._execute_trade_approval(interaction, request)
         stored = OrderLifecycle.from_record(await user_config.active_order())
         self.assertEqual(stored.state, OrderState.LIVE)
-        self.assertEqual(stored.order_id, "order-one")
+        self.assertEqual(stored.order_id, stored.expected_order_id)
+        self.assertRegex(stored.order_id, r"^0x[0-9a-f]{64}$")
         self.assertIsNone(await user_config.trade_approval())
         self.assertEqual(
             (await user_config.trade_spend_history())[0]["state"], "submitted"
@@ -4738,7 +4873,7 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             self.assertEqual(validated["makerAmount"], "4000000")
             self.assertEqual(validated["takerAmount"], "1800000")
             return submitting.record_submission(now, {
-                "success": True, "orderID": "sell-order-one",
+                "success": True, "orderID": submitting.expected_order_id,
                 "status": "live",
             })
 
@@ -4784,7 +4919,8 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             await cog._execute_trade_approval(interaction, request)
         stored = OrderLifecycle.from_record(await user_config.active_order())
         self.assertEqual(stored.state, OrderState.LIVE)
-        self.assertEqual(stored.order_id, "sell-order-one")
+        self.assertEqual(stored.order_id, stored.expected_order_id)
+        self.assertRegex(stored.order_id, r"^0x[0-9a-f]{64}$")
         self.assertIsNone(await user_config.trade_approval())
         self.assertEqual(await user_config.trade_spend_history(), [])
         self.assertEqual(await cog.config.trade_spend_history(), [])

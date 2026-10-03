@@ -158,6 +158,15 @@ def _domain_separator(order: UnsignedDepositWalletOrder) -> bytes:
     )
 
 
+def exchange_order_id(order: UnsignedDepositWalletOrder) -> str:
+    """Return the deterministic CLOB/exchange ID for an immutable order."""
+
+    digest = keccak(
+        b"\x19\x01" + _domain_separator(order) + _order_contents_hash(order)
+    )
+    return "0x" + digest.hex()
+
+
 def deposit_wallet_order_digest(order: UnsignedDepositWalletOrder) -> bytes:
     """Return the official ERC-7739 TypedDataSign digest for a Deposit Wallet."""
 

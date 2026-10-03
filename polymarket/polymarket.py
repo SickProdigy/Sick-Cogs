@@ -44,7 +44,10 @@ from .order_protocol import OrderProtocolError, resolve_order_protocol
 from .order_signing import (
     OrderSigningError, UnsignedDepositWalletOrder, sign_deposit_wallet_order,
 )
-from .order_transport import AuthenticatedOrderTransport, ClobCredentials, OrderTransportError
+from .order_transport import (
+    AuthenticatedOrderTransport, ClobCredentials, OrderTransportError,
+    expected_order_id,
+)
 from .relayer import BuilderCredentials, DepositWalletRelayerClient
 from .production_manifest import (
     POLYMARKET_PRODUCTION_MANIFEST, validate_polymarket_production_manifest,
@@ -2079,7 +2082,8 @@ class Polymarket(commands.Cog):
             del private_key
             await user_config.active_order.set(lifecycle.to_record())
             submitting = lifecycle.begin_submission(
-                datetime.fromtimestamp(now, timezone.utc)
+                datetime.fromtimestamp(now, timezone.utc),
+                expected_order_id=expected_order_id(lifecycle, signed_order),
             )
             await user_config.active_order.set(submitting.to_record())
         except Exception:
@@ -3761,9 +3765,13 @@ class Polymarket(commands.Cog):
                 OrderState.UNKNOWN, OrderState.LIVE,
                 OrderState.PARTIALLY_FILLED, OrderState.CANCEL_PENDING,
             }:
-                if lifecycle.order_id:
+                if lifecycle.order_id or lifecycle.expected_order_id:
                     now = int(time.time())
-                    lifecycle = await transport.reconcile(
+                    reconcile = (
+                        transport.reconcile if lifecycle.order_id
+                        else transport.recover_unknown
+                    )
+                    lifecycle = await reconcile(
                         lifecycle,
                         now=datetime.fromtimestamp(now, timezone.utc),
                         timestamp=now,
@@ -3774,8 +3782,9 @@ class Polymarket(commands.Cog):
                 else:
                     await ctx.send(embed=self._active_order_embed(lifecycle))
                     await ctx.send(
-                        "The provider did not return an order ID. No retry or "
-                        "cancellation was submitted; manual review is required."
+                        "This legacy ambiguous order has no deterministic order "
+                        "hash. No retry or cancellation was submitted; manual "
+                        "review is required."
                     )
                     return
             await ctx.send(embed=self._active_order_embed(lifecycle))
