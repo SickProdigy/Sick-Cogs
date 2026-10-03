@@ -1,10 +1,10 @@
 {
   "author": ["SickProdigy"],
-  "description": "Develop-only Polymarket connector with bot-first wallet and default-off trading foundations.",
+  "description": "Develop-only CryptoWallet connector with protected, default-off Polymarket trading workflows.",
   "disabled": false,
   "end_user_data_statement": "This cog stores per-user public Polymarket account and terms records, short-lived public challenges, optional encrypted session-key and CLOB-credential records with public provisioning, reconciliation, revocation, lifecycle, bounded retired-lifecycle history, and rotation state, Deposit Wallet deployment and Bridge funding records, immutable trade, cancellation, and withdrawal approvals, active order and digest-only withdrawal lifecycles, bounded order history, rolling spend reservations, confirmation preferences, and a bounded digest-only audit, plus installation-wide safety settings. It fetches identity-bound public portfolio data and authenticated balance and open-order data without persisting those responses. Session private keys are authenticated ciphertext bound to the user and wallet profile; production trading remains default-off.",
   "hidden": false,
-  "install_msg": "Polymarket is a default-off connector to CryptoWallet. Bot-first Deposit Wallet, session-key, deposit, trading, and withdrawal work remains staged; no production capability is enabled.",
+  "install_msg": "Polymarket is a develop-only connector to CryptoWallet. The account, session, deposit, trading, claim, and withdrawal flows are implemented and tested with simulated provider responses, but every production capability remains default-off and emergency-paused.",
   "min_bot_version": "3.5.0",
   "permissions": [],
   "name": "Polymarket",
