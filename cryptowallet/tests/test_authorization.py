@@ -1216,6 +1216,33 @@ class AuthorizationHandoffTests(unittest.IsolatedAsyncioTestCase):
             claim_claims["sickwallet_polymarket_eligibility"],
             {**claim, "discord_user_id": "7"},
         )
+        withdrawal = {
+            **payload, "action": "withdraw", "amount_pusd": "25",
+            "destination_chain_id": 8453,
+            "destination_token_address": "0x" + "4" * 40,
+            "recipient_address": "0x" + "3" * 40,
+        }
+        withdrawal_token, _ = await harness.create_external_companion_handoff(
+            7, "polymarket_eligibility", withdrawal
+        )
+        withdrawal_claims = jwt.decode(
+            withdrawal_token, self.key.public_key(), algorithms=["ES256"],
+            audience="project-id", issuer="https://wallet.example.test",
+        )
+        self.assertEqual(
+            withdrawal_claims["sickwallet_polymarket_eligibility"],
+            {**withdrawal, "discord_user_id": "7"},
+        )
+        for invalid_withdrawal in (
+            {**withdrawal, "amount_pusd": "0"},
+            {**withdrawal, "destination_chain_id": "8453"},
+            {**withdrawal, "recipient_address": payload["account_wallet_address"]},
+            {**withdrawal, "private_key": "forbidden"},
+        ):
+            with self.assertRaisesRegex(ValueError, "Polymarket eligibility binding"):
+                await harness.create_external_companion_handoff(
+                    7, "polymarket_eligibility", invalid_withdrawal
+                )
         for invalid_claim in (
             {**claim, "session_address": "0x" + "3" * 40},
             {**claim, "shares": "4"},
@@ -2880,6 +2907,23 @@ class PolymarketSignerContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["signer_address"], owner)
         self.assertEqual(result["requester_id"], 7)
         provider.polymarket_signer_context.assert_awaited_once_with(profile, 7)
+
+
+    async def test_withdrawal_destination_reuses_existing_evm_account_only(self):
+        user = SimpleNamespace(id=7)
+        cog = CryptoWallet.__new__(CryptoWallet)
+        cog.get_or_create_wallet_profile = AsyncMock(return_value={
+            "profile_id": "profile-7",
+            "accounts": [{"network": "base-sepolia", "address": "0x" + "5" * 40}],
+        })
+        result = await cog.polymarket_withdrawal_destination(user, 8453)
+        self.assertEqual(result, {
+            "profile_id": "profile-7", "network": "base-mainnet", "chain_id": 8453,
+            "address": "0x" + "5" * 40,
+        })
+        with self.assertRaisesRegex(RuntimeError, "does not support"):
+            await cog.polymarket_withdrawal_destination(user, 1)
+        self.assertEqual(cog.get_or_create_wallet_profile.await_count, 1)
 
 
 class NetworkArchitectureTests(unittest.IsolatedAsyncioTestCase):

@@ -141,6 +141,30 @@ class CryptoWallet(
         ))
         return context.to_dict()
 
+
+    async def polymarket_withdrawal_destination(self, user, chain_id: int) -> dict:
+        """Return an existing CryptoWallet EVM address without provisioning it."""
+
+        if chain_id != BASE_MAINNET.chain_id:
+            raise RuntimeError("CryptoWallet does not support that withdrawal chain.")
+        profile = await self.get_or_create_wallet_profile(user)
+        accounts = tuple(profile.get("accounts") or ())
+        account = next(
+            (item for item in accounts if item.get("network") == BASE_MAINNET.key),
+            None,
+        ) or next(
+            (item for item in accounts if item.get("network") == BASE_SEPOLIA.key),
+            None,
+        )
+        if not profile.get("profile_id") or not account or not account.get("address"):
+            raise RuntimeError("CryptoWallet has no EVM address for this user.")
+        return {
+            "profile_id": str(profile["profile_id"]),
+            "network": BASE_MAINNET.key, "chain_id": BASE_MAINNET.chain_id,
+            "address": normalize_evm_address(str(account["address"])).lower(),
+        }
+
+
     async def polymarket_sign_clob_auth(
         self, user, *, typed_data: dict, approval_fingerprint: str,
     ) -> dict:

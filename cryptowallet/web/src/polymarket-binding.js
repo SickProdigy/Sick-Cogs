@@ -48,6 +48,7 @@ const ACTION_KEYS = {
   buy: ["market_path", "max_price", "max_spend_pusd", "outcome", "session_address"],
   sell: ["market_path", "min_price", "outcome", "session_address", "shares"],
   claim: ["market_path", "outcome"],
+  withdraw: ["amount_pusd", "destination_chain_id", "destination_token_address", "recipient_address"],
 };
 const DECIMAL = /^(?:0|[1-9][0-9]*)(?:[.][0-9]{1,6})?$/;
 const MARKET_PATH = /^[/]markets[/](?:[0-9]+|slug[/][A-Za-z0-9_-]+)$/;
@@ -65,7 +66,7 @@ export function validateEligibilityBinding(claims, nowSeconds) {
   const userId = String(claims?.sickwallet_discord_user || "");
   const actionKeys = ACTION_KEYS[value?.action] || [];
   const expectedKeys = [...ELIGIBILITY_BASE_KEYS, ...actionKeys].sort();
-  const actionInvalid = actionKeys.length > 0 && (
+  const marketActionInvalid = ["buy", "sell", "claim"].includes(value?.action) && (
     (["buy", "sell"].includes(value.action) && (
       !ADDRESS.test(value?.session_address)
       || value.session_address === value.signer_address
@@ -81,6 +82,17 @@ export function validateEligibilityBinding(claims, nowSeconds) {
       || !validPositiveDecimal(value.min_price)
     ))
   );
+  const withdrawalInvalid = value?.action === "withdraw" && (
+    !validPositiveDecimal(value.amount_pusd, false, false)
+    || !Number.isSafeInteger(value.destination_chain_id)
+    || value.destination_chain_id <= 0
+    || !ADDRESS.test(value.destination_token_address)
+    || !ADDRESS.test(value.recipient_address)
+    || [value.signer_address, value.account_wallet_address].includes(value.destination_token_address)
+    || [value.signer_address, value.account_wallet_address].includes(value.recipient_address)
+  );
+  const actionInvalid = marketActionInvalid || withdrawalInvalid;
+
   if (claims?.sickwallet_purpose !== "polymarket_eligibility"
       || String(claims?.sub) !== userId || !/^[1-9][0-9]{5,24}$/.test(userId)
       || Number(claims?.exp) <= nowSeconds || !value
@@ -88,7 +100,7 @@ export function validateEligibilityBinding(claims, nowSeconds) {
       || value.purpose !== "polymarket_eligibility" || value.chain_id !== 137
       || String(value.discord_user_id) !== userId || !HANDLE.test(value.request_id)
       || !HANDLE.test(value.result_handle)
-      || !["deploy", "provision", "rotate", "deposit", "buy", "sell", "claim"].includes(value.action)
+      || !["deploy", "provision", "rotate", "deposit", "buy", "sell", "claim", "withdraw"].includes(value.action)
       || !ADDRESS.test(value.signer_address) || !ADDRESS.test(value.account_wallet_address)
       || value.signer_address === value.account_wallet_address || actionInvalid
       || !Number.isSafeInteger(value.created_at) || !Number.isSafeInteger(value.expires_at)

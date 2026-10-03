@@ -67,6 +67,22 @@ test("accepts exact claim binding without session or amount authority", () => {
   ]) assert.throws(() => validateEligibilityBinding(invalid, now), /invalid binding/);
 });
 
+
+test("accepts exact public withdrawal binding", () => {
+  const withdrawal = {
+    action: "withdraw", amount_pusd: "25", destination_chain_id: 8453,
+    destination_token_address: "0x" + "4".repeat(40),
+    recipient_address: "0x" + "3".repeat(40),
+  };
+  assert.equal(validateEligibilityBinding(claims(withdrawal), now).amount_pusd, "25");
+  for (const invalid of [
+    claims({ ...withdrawal, amount_pusd: "0" }),
+    claims({ ...withdrawal, destination_chain_id: "8453" }),
+    claims({ ...withdrawal, recipient_address: "0x" + "2".repeat(40) }),
+    claims({ ...withdrawal, private_key: "no" }),
+  ]) assert.throws(() => validateEligibilityBinding(invalid, now), /invalid binding/);
+});
+
 test("rejects drift, extra fields, wrong identity, and expiry", () => {
   for (const input of [
     claims({ action: "trade" }), claims({ chain_id: 1 }),

@@ -233,6 +233,11 @@ class JwtAuthMixin:
                 if action == "sell"
                 else {"market_path", "outcome"}
                 if action == "claim"
+                else {
+                    "destination_chain_id", "destination_token_address",
+                    "recipient_address", "amount_pusd",
+                }
+                if action == "withdraw"
                 else set()
             )
             try:
@@ -245,7 +250,16 @@ class JwtAuthMixin:
                 numeric_fields = (
                     ("max_spend_pusd", "max_price")
                     if action == "buy" else ("shares", "min_price")
-                    if action == "sell" else ()
+                    if action == "sell" else ("amount_pusd",)
+                    if action == "withdraw" else ()
+                )
+                destination_token = (
+                    normalize_evm_address(payload.get("destination_token_address", ""))
+                    if action == "withdraw" else None
+                )
+                recipient = (
+                    normalize_evm_address(payload.get("recipient_address", ""))
+                    if action == "withdraw" else None
                 )
                 numbers = {
                     field: (
@@ -260,7 +274,14 @@ class JwtAuthMixin:
                 raise ValueError(
                     "The Polymarket eligibility binding is invalid"
                 ) from exc
-            action_invalid = bool(action_expected) and (
+            invalid_number = any(
+                value is not None and (
+                    not value.is_finite() or value <= 0
+                    or value.as_tuple().exponent < -6
+                )
+                for value in numbers.values()
+            )
+            market_action_invalid = action in {"buy", "sell", "claim"} and (
                 action in {"buy", "sell"} and session_address in {signer, wallet}
                 or not isinstance(payload.get("market_path"), str)
                 or re.fullmatch(
@@ -269,19 +290,20 @@ class JwtAuthMixin:
                 ) is None
                 or not isinstance(payload.get("outcome"), str)
                 or re.fullmatch(r"[^\s/]{1,128}", payload["outcome"]) is None
-                or any(
-                    value is not None and (
-                        not value.is_finite() or value <= 0
-                        or value.as_tuple().exponent < -6
-                    )
-                    for value in numbers.values()
-                )
+                or invalid_number
                 or action == "buy" and (
-                    numbers["max_price"] is not None
-                    and numbers["max_price"] >= 1
+                    numbers["max_price"] is not None and numbers["max_price"] >= 1
                 )
                 or action == "sell" and numbers["min_price"] >= 1
             )
+            withdrawal_invalid = action == "withdraw" and (
+                invalid_number
+                or type(payload.get("destination_chain_id")) is not int
+                or payload["destination_chain_id"] <= 0
+                or destination_token in {signer, wallet}
+                or recipient in {signer, wallet}
+            )
+            action_invalid = market_action_invalid or withdrawal_invalid
             if (
                 set(payload) != base_expected | action_expected
                 or payload.get("purpose") != "polymarket_eligibility"
@@ -289,6 +311,7 @@ class JwtAuthMixin:
                 or payload.get("discord_user_id") != discord_user_id
                 or action not in {
                     "deploy", "provision", "rotate", "deposit", "buy", "sell", "claim",
+                    "withdraw",
                 }
                 or not isinstance(payload.get("request_id"), str)
                 or re.fullmatch(r"[A-Za-z0-9_-]{32,128}", payload["request_id"]) is None
