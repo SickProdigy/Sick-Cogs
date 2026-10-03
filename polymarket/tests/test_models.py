@@ -114,6 +114,7 @@ from polymarket.trade_confirmation import (
 from polymarket.trade_request import TradeApprovalRequest
 from polymarket.trade_views import TradeApprovalView
 from polymarket.withdrawal import WithdrawalApprovalRequest, WithdrawalOperation
+from polymarket.withdrawal_views import WithdrawalApprovalView
 from polymarket.session_approval import (
     SessionApprovalRequest, SessionApprovalState,
 )
@@ -1820,6 +1821,19 @@ class BridgeWithdrawalPlanTests(unittest.TestCase):
         confirmed = submitted.reconcile(evidence)
         self.assertEqual(confirmed.state, SettlementState.CONFIRMED)
         self.assertEqual(WithdrawalOperation.from_record(confirmed.to_record()), confirmed)
+        pending = confirmed.reconcile_bridge(())
+        self.assertIsNone(pending.bridge_status)
+        completed = confirmed.reconcile_bridge((BridgeTransaction(
+            source_chain_id=137,
+            source_token_address=POLYMARKET_PRODUCTION_MANIFEST.usdce_token.lower(),
+            source_amount_atomic=plan.amount_atomic,
+            destination_chain_id=plan.destination_chain_id,
+            destination_token_address=plan.destination_token_address,
+            status="COMPLETED", transaction_hash="0x" + "e" * 64,
+            created_time_ms=1_800_000_001_000,
+        ),))
+        self.assertEqual(completed.bridge_status, "COMPLETED")
+        self.assertEqual(WithdrawalOperation.from_record(completed.to_record()), completed)
         with self.assertRaisesRegex(AccountConnectionError, "identity changed"):
             submitted.reconcile({**evidence, "proxy_address": "0x" + "9" * 40})
         failed = submitted.reconcile({**evidence, "state": "STATE_FAILED",
@@ -5477,3 +5491,220 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         await Polymarket.polymarket_market.callback(cog, ctx, reference="bitcoin")
         ctx.invoke.assert_not_awaited()
         self.assertIn("poly search bitcoin", ctx.send.await_args.args[0])
+
+
+    async def test_withdraw_is_default_closed_before_wallet_or_bridge_access(self):
+        ctx = Context()
+        cog = Polymarket(SimpleNamespace(get_cog=AsyncMock()))
+        cog.bridge_client = SimpleNamespace(supported_assets=AsyncMock())
+        cog._bot_first_account = AsyncMock()
+        await Polymarket.polymarket_withdraw.callback(cog, ctx, "25", "USDC")
+        cog.bridge_client.supported_assets.assert_not_awaited()
+        cog._bot_first_account.assert_not_awaited()
+        self.assertIn("disabled", ctx.send.await_args.args[0])
+
+    async def test_withdraw_builds_exact_bound_two_step_card(self):
+        author = SimpleNamespace(id=7)
+        message = SimpleNamespace()
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!", send=AsyncMock(return_value=message)
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        destination = BridgeAsset(
+            8453, "Base", "USD Coin", "USDC", "0x" + "4" * 40,
+            6, Decimal("2"),
+        )
+        quote_result = BridgeQuote(
+            "0x" + "a" * 64, Decimal("25"), Decimal("24.75"),
+            24_750_000, Decimal("24.50"), Decimal("1"), Decimal("0.25"),
+            Decimal("0.01"), Decimal("0.5"), 27000,
+        )
+        cryptowallet = SimpleNamespace(
+            polymarket_withdrawal_destination=AsyncMock(return_value={
+                "profile_id": "profile-7", "network": "base-mainnet",
+                "chain_id": 8453, "address": "0x" + "3" * 40,
+            }),
+            poll_polymarket_eligibility_result=AsyncMock(return_value={
+                "status": "submitted", "blocked": False, "country": "IE",
+                "region": "", "checked_at": 100,
+            }),
+        )
+        cog = Polymarket(SimpleNamespace(
+            get_cog=lambda name: cryptowallet if name == "CryptoWallet" else None
+        ))
+        cog.bridge_client = SimpleNamespace(
+            supported_assets=AsyncMock(return_value=(destination,)),
+            withdrawal_quote=AsyncMock(return_value=quote_result),
+            withdrawal_addresses=AsyncMock(return_value=SimpleNamespace(
+                evm="0x" + "5" * 40
+            )),
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._pusd_balance = AsyncMock(return_value=30_000_000)
+        cog.session_transport = SimpleNamespace(
+            get_wallet_nonce=AsyncMock(return_value=9)
+        )
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "withdraw": True, "eligibility": True, "account_data": True,
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(7, now=100, acceptance_id="terms-7")
+        )
+        await user_config.withdrawal_eligibility.set({
+            "request_id": "q" * 32, "result_handle": "r" * 32,
+            "discord_user_id": 7, "profile_id": "profile-7",
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "action": "withdraw", "destination_chain_id": 8453,
+            "destination_token_address": destination.token_address,
+            "recipient_address": "0x" + "3" * 40, "amount_pusd": "25",
+            "created_at": 90, "expires_at": 390,
+        })
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.secrets.token_urlsafe",
+                  side_effect=("withdrawal-id-" + "a" * 24,
+                               "idempotency-" + "b" * 24,
+                               "request-id-" + "c" * 24)),
+        ):
+            await Polymarket.polymarket_withdraw.callback(
+                cog, ctx, "25", "USDC"
+            )
+        record = await user_config.withdrawal_approval()
+        request = WithdrawalApprovalRequest.from_record(record)
+        self.assertEqual(request.plan.amount_atomic, 25_000_000)
+        self.assertEqual(request.plan.recipient_address, "0x" + "3" * 40)
+        self.assertEqual(request.plan.bridge_address, "0x" + "5" * 40)
+        self.assertEqual(request.plan.destination_token_address, destination.token_address)
+        self.assertEqual(request.confirmation.state, TradeConfirmationState.AWAITING_APPROVAL)
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"], WithdrawalApprovalView)
+        self.assertIn("Approve Polymarket withdrawal", ctx.send.await_args.kwargs["embed"].title)
+        cog._pusd_balance.assert_awaited_once_with(author, binding)
+        cog.bridge_client.withdrawal_addresses.assert_awaited_once_with(
+            binding.account_wallet_address, destination=destination,
+            recipient="0x" + "3" * 40,
+        )
+
+
+    async def test_withdrawal_persists_before_relayer_and_status_never_retries(self):
+        author = SimpleNamespace(id=7)
+        plan = BridgeWithdrawalPlanTests()._plan()
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="IE", region="",
+            checked_at=plan.created_at, expires_at=plan.created_at + 300,
+        )
+        request = WithdrawalApprovalRequest.create(
+            request_id="request_" + "d" * 32, plan=plan,
+            eligibility=eligibility, final_confirmation_required=False,
+        ).approve_primary(requester_id=7, now=plan.created_at + 1)
+        signature = "0x" + "12" * 65
+        cryptowallet = SimpleNamespace(
+            polymarket_withdrawal_destination=AsyncMock(return_value={
+                "profile_id": plan.profile_id, "network": "base-mainnet",
+                "chain_id": plan.destination_chain_id,
+                "address": plan.recipient_address,
+            }),
+            polymarket_sign_withdrawal_batch=AsyncMock(return_value={
+                "signature": signature, "signer_address": plan.owner_address,
+            }),
+        )
+        bot = SimpleNamespace(
+            get_cog=lambda name: cryptowallet if name == "CryptoWallet" else None,
+            get_shared_api_tokens=AsyncMock(return_value={
+                "api_key": "builder-key", "secret": "YnVpbGRlci1zZWNyZXQ=",
+                "passphrase": "builder-passphrase",
+            }),
+        )
+        cog = Polymarket(bot)
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "withdraw": True, "eligibility": True, "account_data": True,
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(
+                7, now=plan.created_at, acceptance_id="terms-7"
+            )
+        )
+        await user_config.withdrawal_approval.set(request.to_record())
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id=plan.profile_id,
+            signer_address=plan.owner_address,
+            account_wallet_address=plan.wallet_address,
+            created_at=plan.created_at - 1,
+        )
+        cog._bot_first_account = AsyncMock(return_value=binding)
+        cog._pusd_balance = AsyncMock(return_value=plan.amount_atomic)
+        cog.session_transport = SimpleNamespace(
+            get_wallet_nonce=AsyncMock(return_value=plan.nonce)
+        )
+        asset = BridgeAsset(
+            plan.destination_chain_id, "Base", "USD Coin", plan.destination_symbol,
+            plan.destination_token_address, plan.destination_decimals, Decimal("2"),
+        )
+        cog.bridge_client = SimpleNamespace(
+            supported_assets=AsyncMock(return_value=(asset,)),
+            status=AsyncMock(return_value=(BridgeTransaction(
+                137, POLYMARKET_PRODUCTION_MANIFEST.usdce_token.lower(),
+                plan.amount_atomic, plan.destination_chain_id,
+                plan.destination_token_address, "COMPLETED", "0x" + "e" * 64,
+                1_800_000_001_000,
+            ),)),
+        )
+
+        async def submit(_plan, _signature, _credentials, *, timestamp):
+            persisted = WithdrawalOperation.from_record(
+                await user_config.withdrawal_operation()
+            )
+            self.assertEqual(persisted.state, SettlementState.SUBMITTING)
+            self.assertIsNone(persisted.transaction_id)
+            return {"transaction_id": "withdrawal-1", "transaction_hash": None}
+
+        cog.deposit_wallet_relayer = SimpleNamespace(
+            submit_withdrawal=AsyncMock(side_effect=submit),
+            get_withdrawal=AsyncMock(return_value={
+                "transaction_id": "withdrawal-1",
+                "transaction_hash": "0x" + "d" * 64,
+                "state": "STATE_CONFIRMED", "from": plan.owner_address,
+                "to": POLYMARKET_PRODUCTION_MANIFEST.deposit_wallet_factory.lower(),
+                "proxy_address": plan.wallet_address, "type": "WALLET",
+                "error_msg": None,
+            }),
+        )
+        interaction = SimpleNamespace(
+            user=author,
+            message=SimpleNamespace(edit=AsyncMock()),
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=plan.created_at + 2),
+            patch("polymarket.polymarket.verify_withdrawal_batch_signature"),
+        ):
+            await cog._execute_withdrawal_approval(interaction, request)
+        submitted = WithdrawalOperation.from_record(
+            await user_config.withdrawal_operation()
+        )
+        self.assertEqual(submitted.state, SettlementState.SUBMITTED)
+        self.assertIsNone(await user_config.withdrawal_approval())
+
+        ctx = SimpleNamespace(author=author, send=AsyncMock())
+        await Polymarket.polymarket_withdrawstatus.callback(cog, ctx)
+        complete = WithdrawalOperation.from_record(
+            await user_config.withdrawal_operation()
+        )
+        self.assertEqual(complete.state, SettlementState.CONFIRMED)
+        self.assertEqual(complete.bridge_status, "COMPLETED")
+        cog.deposit_wallet_relayer.get_withdrawal.assert_awaited_once_with(
+            plan, "withdrawal-1"
+        )
+        cog.deposit_wallet_relayer.submit_withdrawal.assert_awaited_once()
+        cog.bridge_client.status.assert_awaited_once_with(plan.bridge_address)

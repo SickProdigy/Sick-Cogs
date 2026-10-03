@@ -21,7 +21,12 @@ from .account_connection import (
     AccountConnection, AccountConnectionError, ConnectionState, WalletType,
 )
 from .collateral import CollateralPlanError, collateral_plan
-from .bridge import BridgeAsset, BridgeQuote, NATIVE_EVM_TOKEN, PolymarketBridgeClient
+from .bridge import (
+    BridgeAsset, BridgeQuote, BridgeWithdrawalPlan, NATIVE_EVM_TOKEN,
+    PolymarketBridgeClient, withdrawal_approve_calldata,
+    withdrawal_transfer_calldata, withdrawal_unwrap_calldata,
+    verify_withdrawal_batch_signature,
+)
 from .deposit_lifecycle import BridgeDeposit, DepositState, funding_request_fingerprint
 from .deposit_wallet import DepositWalletCreationPlan, DepositWalletCreationState
 from .handoff import MarketSnapshot, MarketSnapshotError
@@ -94,12 +99,14 @@ from .terms import (
 from .trade_confirmation import TradeConfirmationError, TradeConfirmationState
 from .trade_request import TradeApprovalRequest
 from .trade_views import TradeApprovalView
+from .withdrawal import WithdrawalApprovalRequest, WithdrawalOperation
+from .withdrawal_views import WithdrawalApprovalView
 
 CONFIG_IDENTIFIER = 1531372026
 PRODUCTION_CAPABILITIES = (
     "account_connect", "deposit_wallet_create", "session", "eligibility",
     "account_data",
-    "collateral", "deposit", "order", "cancel", "redeem",
+    "collateral", "deposit", "order", "cancel", "redeem", "withdraw",
 )
 ONBOARDING_ENABLE_ACKNOWLEDGEMENT = (
     "I understand protected Polymarket onboarding uses Polygon mainnet "
@@ -190,7 +197,7 @@ class Polymarket(commands.Cog):
     """Read-only prediction-market discovery and information."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.44"
+    __version__ = "0.2.50"
 
     def __init__(self, bot):
         self.bot = bot
@@ -223,6 +230,8 @@ class Polymarket(commands.Cog):
             active_order=None, order_history=[], trade_spend_history=[],
             cancel_approval=None, settlement_eligibility=None,
             settlement_approval=None, settlement_operation=None,
+            withdrawal_eligibility=None, withdrawal_approval=None,
+            withdrawal_operation=None,
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
         self.bridge_client = PolymarketBridgeClient()
@@ -1919,6 +1928,46 @@ class Polymarket(commands.Cog):
             and not validate_polymarket_production_manifest()
         )
 
+
+    async def _withdrawal_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("withdraw"))
+            and bool(capabilities.get("eligibility"))
+            and bool(capabilities.get("account_data"))
+            and not validate_polymarket_production_manifest()
+        )
+
+    @staticmethod
+    def _withdrawal_amount(value: str) -> tuple[Decimal, int]:
+        try:
+            amount = Decimal(value)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise AccountConnectionError("Withdrawal amount is invalid.") from exc
+        atomic = amount * Decimal(1_000_000)
+        if (
+            not amount.is_finite() or amount <= 0
+            or atomic != atomic.to_integral_value()
+            or atomic >= Decimal(2**256)
+        ):
+            raise AccountConnectionError(
+                "Use a positive pUSD amount with no more than 6 decimals."
+            )
+        return amount, int(atomic)
+
+    async def _pusd_balance(
+        self, user, binding: BotFirstAccountBinding,
+    ) -> int:
+        transport, lifecycle = await self._active_account_transport(user, binding)
+        payload = await transport.balance_allowance(
+            timestamp=int(time.time()),
+            session_signer_address=lifecycle.session_address,
+        )
+        return CollateralBalance.from_response(payload).atomic
+
+
     async def _execute_trade_approval(
         self, interaction: discord.Interaction,
         request: TradeApprovalRequest,
@@ -2646,6 +2695,275 @@ class Polymarket(commands.Cog):
         except TradeConfirmationError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
 
+
+    async def _withdrawal_request_for_view(
+        self, user, view: WithdrawalApprovalView,
+    ) -> WithdrawalApprovalRequest:
+        record = await self.config.user(user).withdrawal_approval()
+        if not record:
+            raise TradeConfirmationError("This withdrawal card is no longer active.")
+        request = WithdrawalApprovalRequest.from_record(record)
+        if (
+            request.request_id != view.request_id
+            or request.plan.fingerprint != view.fingerprint
+            or request.plan.discord_user_id != user.id
+        ):
+            raise TradeConfirmationError("This withdrawal card binding changed.")
+        return request
+
+    def _withdrawal_embed(self, request: WithdrawalApprovalRequest) -> discord.Embed:
+        plan = request.plan
+        state = request.confirmation.state
+        title = {
+            TradeConfirmationState.AWAITING_APPROVAL: "Approve Polymarket withdrawal",
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION: "Confirm Polymarket withdrawal",
+            TradeConfirmationState.APPROVED: "Submitting Polymarket withdrawal",
+            TradeConfirmationState.DECLINED: "Polymarket withdrawal declined",
+        }[state]
+        amount = Decimal(plan.amount_atomic) / Decimal(1_000_000)
+        output = Decimal(plan.quoted_output_atomic) / Decimal(10**plan.destination_decimals)
+        embed = discord.Embed(
+            title=title,
+            description=(
+                "Move pUSD from your Polymarket Deposit Wallet back to your "
+                "existing CryptoWallet address through the official Bridge."
+            ),
+        )
+        embed.add_field(name="Withdraw", value=f"{amount:f} pUSD")
+        embed.add_field(
+            name="Estimated arrival",
+            value=f"{output:f} {plan.destination_symbol}",
+        )
+        embed.add_field(
+            name="Minimum received", value=f"${plan.minimum_received_usd:f}"
+        )
+        embed.add_field(
+            name="CryptoWallet destination",
+            value=(f"Chain `{plan.destination_chain_id}` / {plan.destination_symbol}\n"
+                   f"`{plan.recipient_address}`"), inline=False,
+        )
+        embed.add_field(
+            name="Polymarket account", value=f"`{plan.wallet_address}`", inline=False
+        )
+        embed.add_field(
+            name="Exact route",
+            value=("1. Approve exact pUSD amount\n2. Unwrap to USDC.e\n"
+                   "3. Transfer exact USDC.e amount to the bound Bridge address"),
+            inline=False,
+        )
+        embed.add_field(
+            name="Bridge address", value=f"`{plan.bridge_address}`", inline=False
+        )
+        embed.add_field(
+            name="Final confirmation",
+            value="Required" if request.confirmation.final_confirmation_required else "Disabled by you",
+        )
+        embed.set_footer(
+            text="Bridge estimates may differ from final arrival; submission is irreversible"
+        )
+        return embed
+
+    async def _edit_withdrawal_card(
+        self, interaction: discord.Interaction, request: WithdrawalApprovalRequest,
+        *, content: str | None = None,
+    ) -> None:
+        view = None
+        if request.confirmation.state in {
+            TradeConfirmationState.AWAITING_APPROVAL,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        }:
+            view = WithdrawalApprovalView(self, request)
+            view.message = interaction.message
+        await interaction.message.edit(
+            content=content, embed=self._withdrawal_embed(request), view=view
+        )
+
+    async def _execute_withdrawal_approval(
+        self, interaction: discord.Interaction, request: WithdrawalApprovalRequest,
+    ) -> None:
+        now = int(time.time())
+        request.require_approved(requester_id=interaction.user.id, now=now)
+        if not await self._withdrawal_allowed():
+            raise AccountConnectionError(
+                "Polymarket withdrawal is disabled or emergency-paused."
+            )
+        user_config = self.config.user(interaction.user)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), interaction.user.id
+        ):
+            raise AccountConnectionError("Current Polymarket terms are required.")
+        binding = await self._bot_first_account(interaction.user)
+        plan = request.plan
+        if (
+            plan.discord_user_id != interaction.user.id
+            or plan.profile_id != binding.profile_id
+            or plan.owner_address != binding.signer_address
+            or plan.wallet_address != binding.account_wallet_address
+        ):
+            raise AccountConnectionError("Withdrawal account identity changed.")
+        stored = await user_config.withdrawal_approval()
+        if not stored or WithdrawalApprovalRequest.from_record(stored) != request:
+            raise AccountConnectionError("The exact withdrawal approval is not persisted.")
+        operation_record = await user_config.withdrawal_operation()
+        if operation_record:
+            previous = WithdrawalOperation.from_record(operation_record).recover_after_restart()
+            if (
+                previous.state not in {SettlementState.CONFIRMED, SettlementState.FAILED}
+                or previous.state is SettlementState.CONFIRMED
+                and previous.bridge_status not in {"COMPLETED", "FAILED"}
+            ):
+                await user_config.withdrawal_operation.set(previous.to_record())
+                raise AccountConnectionError(
+                    "A withdrawal outcome is pending; reconcile it before another submission."
+                )
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        destination_reader = getattr(cryptowallet, "polymarket_withdrawal_destination", None)
+        if not callable(destination_reader):
+            raise AccountConnectionError("CryptoWallet withdrawal destination is unavailable.")
+        destination = await destination_reader(
+            interaction.user, plan.destination_chain_id
+        )
+        if (
+            not isinstance(destination, dict)
+            or destination.get("profile_id") != plan.profile_id
+            or destination.get("chain_id") != plan.destination_chain_id
+            or destination.get("address") != plan.recipient_address
+        ):
+            raise AccountConnectionError("CryptoWallet withdrawal destination changed.")
+        assets = await self.bridge_client.supported_assets()
+        matches = tuple(asset for asset in assets if (
+            asset.chain_id == plan.destination_chain_id
+            and asset.token_address == plan.destination_token_address
+            and asset.symbol == plan.destination_symbol
+            and asset.decimals == plan.destination_decimals
+        ))
+        if len(matches) != 1:
+            raise AccountConnectionError("Bridge withdrawal asset changed.")
+        if await self._pusd_balance(interaction.user, binding) < plan.amount_atomic:
+            raise AccountConnectionError("Available pUSD is below the approved withdrawal amount.")
+        nonce = await self.session_transport.get_wallet_nonce(plan.owner_address)
+        if nonce != plan.nonce:
+            raise AccountConnectionError(
+                "Deposit Wallet nonce changed; request a fresh withdrawal."
+            )
+        tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            credentials = BuilderCredentials(
+                tokens["api_key"], tokens["secret"], tokens["passphrase"]
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        signer = getattr(cryptowallet, "polymarket_sign_withdrawal_batch", None)
+        if not callable(signer):
+            raise AccountConnectionError("CryptoWallet withdrawal signing is unavailable.")
+        try:
+            result = await signer(
+                interaction.user, owner_address=plan.owner_address,
+                wallet_address=plan.wallet_address,
+                bridge_address=plan.bridge_address,
+                amount_atomic=plan.amount_atomic, typed_data=plan.typed_data(),
+                approval_fingerprint=plan.fingerprint,
+            )
+        except RuntimeError as exc:
+            raise AccountConnectionError("CryptoWallet withdrawal signing is unavailable.") from exc
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"signature", "signer_address"}
+            or result["signer_address"] != plan.owner_address
+        ):
+            raise AccountConnectionError("CryptoWallet returned an invalid withdrawal signer.")
+        signature = str(result["signature"])
+        verify_withdrawal_batch_signature(plan, signature)
+        operation = WithdrawalOperation(plan).begin_submission(signature, now=now)
+        await user_config.withdrawal_operation.set(operation.to_record())
+        try:
+            response = await self.deposit_wallet_relayer.submit_withdrawal(
+                plan, signature, credentials, timestamp=int(time.time())
+            )
+        except (aiohttp.ClientError, AccountConnectionError, TimeoutError):
+            unknown = operation.recover_after_restart()
+            await user_config.withdrawal_operation.set(unknown.to_record())
+            await user_config.withdrawal_approval.set(None)
+            raise AccountConnectionError(
+                "Withdrawal outcome is unknown; reconcile before retry."
+            ) from None
+        submitted = operation.record_submission(response)
+        await user_config.withdrawal_operation.set(submitted.to_record())
+        await user_config.withdrawal_approval.set(None)
+        await self._edit_withdrawal_card(
+            interaction, request,
+            content=("Withdrawal submitted. Use `poly withdrawstatus` to reconcile "
+                     "the Polygon transfer and Bridge arrival."),
+        )
+
+    async def approve_withdrawal_interaction(
+        self, interaction: discord.Interaction, view: WithdrawalApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._withdrawal_request_for_view(interaction.user, view)
+            request = request.approve_primary(
+                requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).withdrawal_approval.set(request.to_record())
+            if request.confirmation.state is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION:
+                await self._edit_withdrawal_card(
+                    interaction, request,
+                    content=("Please confirm once more. The amount, destination, quote, "
+                             "Bridge address, nonce, and calls are unchanged."),
+                )
+                return
+            await self._execute_withdrawal_approval(interaction, request)
+        except (
+            AccountConnectionError, AccountDataError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await self.config.user(interaction.user).withdrawal_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The withdrawal was not submitted: {exc}", ephemeral=True
+            )
+
+    async def confirm_withdrawal_interaction(
+        self, interaction: discord.Interaction, view: WithdrawalApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._withdrawal_request_for_view(interaction.user, view)
+            request = request.decide_final(
+                True, requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).withdrawal_approval.set(request.to_record())
+            await self._execute_withdrawal_approval(interaction, request)
+        except (
+            AccountConnectionError, AccountDataError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await self.config.user(interaction.user).withdrawal_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The withdrawal was not submitted: {exc}", ephemeral=True
+            )
+
+    async def decline_withdrawal_interaction(
+        self, interaction: discord.Interaction, view: WithdrawalApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            request = await self._withdrawal_request_for_view(interaction.user, view)
+            if request.confirmation.state is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION:
+                request = request.decide_final(
+                    False, requester_id=interaction.user.id, now=int(time.time())
+                )
+            await self.config.user(interaction.user).withdrawal_approval.set(None)
+            await interaction.message.edit(embed=self._withdrawal_embed(request), view=None)
+        except TradeConfirmationError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+
     async def _get_json(self, path: str, params: dict | None = None):
         async with aiohttp.ClientSession(timeout=REQUEST_TIMEOUT) as session:
             async with session.get(GAMMA_API + path, params=params, headers={"Accept": "application/json"}) as response:
@@ -3255,6 +3573,134 @@ class Polymarket(commands.Cog):
         )
         return None
 
+
+    async def _protected_withdrawal_eligibility(
+        self, ctx: commands.Context, *, binding: BotFirstAccountBinding,
+        amount_pusd: Decimal, destination: BridgeAsset, recipient: str,
+    ) -> EligibilityAttestation | None:
+        user_config = self.config.user(ctx.author)
+        amount_text = format(amount_pusd, "f")
+        identity = {
+            "destination_chain_id": destination.chain_id,
+            "destination_token_address": destination.token_address,
+            "recipient_address": recipient, "amount_pusd": amount_text,
+        }
+        now = int(time.time())
+        challenge = await user_config.withdrawal_eligibility()
+        if challenge:
+            expected = {
+                "request_id", "result_handle", "discord_user_id", "profile_id",
+                "signer_address", "account_wallet_address", "action",
+                *identity.keys(), "created_at", "expires_at",
+            }
+            if not isinstance(challenge, dict) or set(challenge) != expected:
+                raise AccountConnectionError(
+                    "The pending withdrawal eligibility record is invalid."
+                )
+            if (
+                challenge["discord_user_id"] != ctx.author.id
+                or challenge["profile_id"] != binding.profile_id
+                or challenge["signer_address"] != binding.signer_address
+                or challenge["account_wallet_address"] != binding.account_wallet_address
+                or challenge["action"] != "withdraw"
+                or any(challenge[key] != value for key, value in identity.items())
+            ):
+                raise AccountConnectionError(
+                    "Withdrawal details changed after eligibility started."
+                )
+            if now >= int(challenge["expires_at"]):
+                await user_config.withdrawal_eligibility.set(None)
+                raise AccountConnectionError(
+                    "The pending withdrawal eligibility request expired."
+                )
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            poll = getattr(cryptowallet, "poll_polymarket_eligibility_result", None)
+            if not callable(poll):
+                raise AccountConnectionError("Protected eligibility is unavailable.")
+            result = await poll(challenge["result_handle"])
+            if result is None:
+                await ctx.send(
+                    "Complete the protected eligibility page first, then run "
+                    f"{ctx.clean_prefix}poly withdraw with the same amount and asset again."
+                )
+                return None
+            checked_at = int(result["checked_at"])
+            if not int(challenge["created_at"]) <= checked_at < int(challenge["expires_at"]):
+                raise AccountConnectionError(
+                    "Eligibility result does not match this withdrawal request."
+                )
+            eligibility = EligibilityAttestation(
+                discord_user_id=ctx.author.id, blocked=result["blocked"],
+                country=result["country"], region=result["region"],
+                checked_at=checked_at,
+                expires_at=checked_at + ELIGIBILITY_LIFETIME_SECONDS,
+            )
+            await user_config.withdrawal_eligibility.set(None)
+            if eligibility.blocked:
+                await ctx.send(
+                    "Polymarket reports this location as unavailable. "
+                    "No withdrawal was signed or submitted."
+                )
+                return None
+            eligibility.require_current(discord_user_id=ctx.author.id, now=now)
+            return eligibility
+
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        required = (
+            "recovery_relay_status", "create_external_companion_handoff",
+            "register_recovery_handoff", "poll_polymarket_eligibility_result",
+        )
+        if cryptowallet is None or not all(
+            callable(getattr(cryptowallet, name, None)) for name in required
+        ):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        status = await cryptowallet.recovery_relay_status()
+        if not status.get("configured") or not status.get("approval_base_url"):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        request_id = secrets.token_urlsafe(32)
+        result_handle = secrets.token_urlsafe(32)
+        payload = {
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "action": "withdraw",
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            **identity, "created_at": now, "expires_at": now + 300,
+            "chain_id": 137, "purpose": "polymarket_eligibility",
+        }
+        token, expires_at = await cryptowallet.create_external_companion_handoff(
+            ctx.author.id, "polymarket_eligibility", payload
+        )
+        if expires_at != payload["expires_at"]:
+            raise AccountConnectionError(
+                "Protected eligibility expiry changed unexpectedly."
+            )
+        handoff = await cryptowallet.register_recovery_handoff(
+            token, expires_at, purpose="polymarket_eligibility"
+        )
+        await user_config.withdrawal_eligibility.set({
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "profile_id": binding.profile_id,
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "action": "withdraw", **identity,
+            "created_at": now, "expires_at": expires_at,
+        })
+        eligibility_url = (
+            f"{status['approval_base_url']}/polymarket-eligibility.html"
+            f"#handoff={quote(handoff, safe='')}"
+        )
+        await ctx.send(
+            "Check current Polymarket eligibility for this exact withdrawal: "
+            f"{eligibility_url}\nThen run {ctx.clean_prefix}poly withdraw "
+            f"{amount_text} {destination.symbol} again before <t:{expires_at}:R>. "
+            "No withdrawal has been signed or submitted."
+        )
+        return None
+
     @polymarket.command(name="quote")
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_quote(self, ctx: commands.Context, reference: str, outcome: str,
@@ -3544,6 +3990,246 @@ class Polymarket(commands.Cog):
             await ctx.send(
                 f"The protected sell preview could not be prepared: {exc} "
                 "No order was signed or submitted."
+            )
+
+
+    @polymarket.command(name="withdraw")
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_withdraw(
+        self, ctx: commands.Context, amount_pusd: str, asset: str = "USDC",
+    ):
+        """Prepare a protected pUSD withdrawal to the existing CryptoWallet address."""
+        if not await self._withdrawal_allowed():
+            await ctx.send(
+                "Polymarket withdrawal is disabled or emergency-paused. "
+                "No Bridge address, signature, or transaction was created."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"{ctx.clean_prefix}poly terms."
+            )
+            return
+        try:
+            amount, amount_atomic = self._withdrawal_amount(amount_pusd)
+            now = int(time.time())
+            existing_record = await user_config.withdrawal_approval()
+            if existing_record:
+                existing = WithdrawalApprovalRequest.from_record(existing_record)
+                if now < existing.confirmation.expires_at:
+                    view = WithdrawalApprovalView(self, existing)
+                    view.message = await ctx.send(
+                        embed=self._withdrawal_embed(existing), view=view
+                    )
+                    return
+                await user_config.withdrawal_approval.set(None)
+            operation_record = await user_config.withdrawal_operation()
+            if operation_record:
+                operation = WithdrawalOperation.from_record(
+                    operation_record
+                ).recover_after_restart()
+                await user_config.withdrawal_operation.set(operation.to_record())
+                if operation.state not in {SettlementState.CONFIRMED, SettlementState.FAILED}:
+                    raise AccountConnectionError(
+                        "A withdrawal outcome is pending; use poly withdrawstatus before retry."
+                    )
+                if operation.state is SettlementState.CONFIRMED and (
+                    operation.bridge_status not in {"COMPLETED", "FAILED"}
+                ):
+                    raise AccountConnectionError(
+                        "A Bridge transfer is pending; use poly withdrawstatus before retry."
+                    )
+            binding = await self._bot_first_account(ctx.author)
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            destination_reader = getattr(
+                cryptowallet, "polymarket_withdrawal_destination", None
+            )
+            if not callable(destination_reader):
+                raise AccountConnectionError(
+                    "CryptoWallet withdrawal destination is unavailable."
+                )
+            destination_record = await destination_reader(ctx.author, 8453)
+            if (
+                not isinstance(destination_record, dict)
+                or destination_record.get("profile_id") != binding.profile_id
+                or destination_record.get("chain_id") != 8453
+                or not isinstance(destination_record.get("address"), str)
+            ):
+                raise AccountConnectionError(
+                    "CryptoWallet withdrawal destination is invalid."
+                )
+            recipient = destination_record["address"]
+            assets = await self.bridge_client.supported_assets()
+            selector = asset.strip().casefold()
+            matches = tuple(item for item in assets if (
+                item.chain_id == 8453 and (
+                    item.symbol.casefold() == selector
+                    or item.token_address.casefold() == selector
+                )
+            ))
+            if len(matches) != 1:
+                raise AccountConnectionError(
+                    "Choose one uniquely supported Base asset symbol or token address."
+                )
+            destination = matches[0]
+            eligibility = await self._protected_withdrawal_eligibility(
+                ctx, binding=binding, amount_pusd=amount,
+                destination=destination, recipient=recipient,
+            )
+            if eligibility is None:
+                return
+            balance = await self._pusd_balance(ctx.author, binding)
+            if balance < amount_atomic:
+                raise AccountConnectionError(
+                    "Available pUSD is below the requested withdrawal amount."
+                )
+            quote_result = await self.bridge_client.withdrawal_quote(
+                amount_atomic=amount_atomic, destination=destination,
+                recipient=recipient,
+            )
+            if quote_result.input_usd < destination.minimum_usd:
+                raise AccountConnectionError(
+                    f"This Bridge route currently requires at least "
+                    f"${destination.minimum_usd:f}."
+                )
+            addresses = await self.bridge_client.withdrawal_addresses(
+                binding.account_wallet_address, destination=destination,
+                recipient=recipient,
+            )
+            nonce = await self.session_transport.get_wallet_nonce(
+                binding.signer_address
+            )
+            created_at = int(time.time())
+            calls = (
+                SettlementCall(
+                    POLYMARKET_PRODUCTION_MANIFEST.collateral_token,
+                    withdrawal_approve_calldata(amount_atomic),
+                ),
+                SettlementCall(
+                    POLYMARKET_PRODUCTION_MANIFEST.collateral_offramp,
+                    withdrawal_unwrap_calldata(
+                        binding.account_wallet_address, amount_atomic
+                    ),
+                ),
+                SettlementCall(
+                    POLYMARKET_PRODUCTION_MANIFEST.usdce_token,
+                    withdrawal_transfer_calldata(addresses.evm, amount_atomic),
+                ),
+            )
+            plan = BridgeWithdrawalPlan(
+                withdrawal_id=secrets.token_urlsafe(24),
+                discord_user_id=ctx.author.id,
+                profile_id=binding.profile_id,
+                owner_address=binding.signer_address,
+                wallet_address=binding.account_wallet_address,
+                recipient_address=recipient, bridge_address=addresses.evm,
+                destination_chain_id=destination.chain_id,
+                destination_token_address=destination.token_address,
+                destination_symbol=destination.symbol,
+                destination_decimals=destination.decimals,
+                amount_atomic=amount_atomic, quote_id=quote_result.quote_id,
+                quoted_output_atomic=quote_result.output_atomic,
+                minimum_received_usd=quote_result.minimum_received_usd,
+                nonce=nonce, created_at=created_at, deadline=created_at + 600,
+                idempotency_key=secrets.token_urlsafe(24), calls=calls,
+            )
+            request = WithdrawalApprovalRequest.create(
+                request_id=secrets.token_urlsafe(24), plan=plan,
+                eligibility=eligibility,
+                final_confirmation_required=bool(
+                    await user_config.final_confirmation_required()
+                ),
+            )
+            await user_config.withdrawal_approval.set(request.to_record())
+            view = WithdrawalApprovalView(self, request)
+            view.message = await ctx.send(
+                embed=self._withdrawal_embed(request), view=view
+            )
+        except (
+            AccountConnectionError, AccountDataError, OrderTransportError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The protected withdrawal preview could not be prepared: {exc} "
+                "No withdrawal was signed or submitted."
+            )
+
+    @polymarket.command(name="withdrawstatus")
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_withdrawstatus(self, ctx: commands.Context):
+        """Reconcile the Polygon withdrawal and Bridge arrival without retrying."""
+        user_config = self.config.user(ctx.author)
+        try:
+            record = await user_config.withdrawal_operation()
+            if not record:
+                raise AccountConnectionError("No Polymarket withdrawal is stored.")
+            operation = WithdrawalOperation.from_record(record).recover_after_restart()
+            if operation.plan.discord_user_id != ctx.author.id:
+                raise AccountConnectionError("Stored withdrawal belongs to another user.")
+            await user_config.withdrawal_operation.set(operation.to_record())
+            if operation.state in {SettlementState.SUBMITTED, SettlementState.UNKNOWN}:
+                if not operation.transaction_id:
+                    await ctx.send(
+                        "The withdrawal submission returned no transaction ID. It was "
+                        "not retried; manual review is required."
+                    )
+                    return
+                evidence = await self.deposit_wallet_relayer.get_withdrawal(
+                    operation.plan, operation.transaction_id
+                )
+                operation = operation.reconcile(evidence)
+            if operation.state is SettlementState.CONFIRMED and (
+                operation.bridge_status not in {"COMPLETED", "FAILED"}
+            ):
+                transactions = await self.bridge_client.status(
+                    operation.plan.bridge_address
+                )
+                operation = operation.reconcile_bridge(transactions)
+            await user_config.withdrawal_operation.set(operation.to_record())
+            if operation.state in {SettlementState.CONFIRMED, SettlementState.FAILED}:
+                await user_config.withdrawal_approval.set(None)
+            description = f"Polygon state: **{operation.state.value}**"
+            if operation.bridge_status:
+                description += f"\nBridge state: **{operation.bridge_status.lower()}**"
+            embed = discord.Embed(
+                title="Polymarket withdrawal status", description=description
+            )
+            embed.add_field(
+                name="Destination",
+                value=(f"Chain `{operation.plan.destination_chain_id}` / "
+                       f"{operation.plan.destination_symbol}\n"
+                       f"`{operation.plan.recipient_address}`"), inline=False,
+            )
+            embed.add_field(
+                name="Transaction ID",
+                value=f"`{operation.transaction_id or unavailable}`", inline=False,
+            )
+            if operation.transaction_hash:
+                embed.add_field(
+                    name="Polygon transaction",
+                    value=f"`{operation.transaction_hash}`", inline=False,
+                )
+            if operation.bridge_transaction_hash:
+                embed.add_field(
+                    name="Bridge transaction",
+                    value=f"`{operation.bridge_transaction_hash}`", inline=False,
+                )
+            embed.set_footer(text="Status reconciliation never resubmits the withdrawal")
+            await ctx.send(embed=embed)
+        except (
+            AccountConnectionError, AccountDataError, TradeConfirmationError,
+            RuntimeError, TypeError, ValueError, aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The withdrawal could not be reconciled: {exc} "
+                "No withdrawal was retried or submitted."
             )
 
     @polymarket.command(name="claim", aliases=["redeem"])

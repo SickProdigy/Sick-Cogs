@@ -8,7 +8,7 @@ import re
 from typing import Any, Mapping
 
 from .account_connection import AccountConnectionError
-from .bridge import BridgeWithdrawalPlan
+from .bridge import BridgeTransaction, BridgeWithdrawalPlan
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 from .security_policy import EligibilityAttestation
 from .settlement import SettlementState
@@ -110,6 +110,8 @@ class WithdrawalOperation:
     transaction_id: str | None = None
     transaction_hash: str | None = None
     failure_digest: str | None = None
+    bridge_status: str | None = None
+    bridge_transaction_hash: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.plan, BridgeWithdrawalPlan) or not isinstance(self.state, SettlementState):
@@ -141,6 +143,20 @@ class WithdrawalOperation:
             raise AccountConnectionError("Confirmed withdrawal lacks a transaction hash.")
         if self.state is SettlementState.FAILED and not self.failure_digest:
             raise AccountConnectionError("Failed withdrawal lacks a digest.")
+        if self.bridge_status is not None and (
+            self.state is not SettlementState.CONFIRMED
+            or self.bridge_status not in {
+                "DEPOSIT_DETECTED", "PROCESSING", "ORIGIN_TX_CONFIRMED",
+                "SUBMITTED", "COMPLETED", "FAILED",
+            }
+        ):
+            raise AccountConnectionError("Withdrawal Bridge status is invalid.")
+        if self.bridge_transaction_hash is not None and re.fullmatch(
+            r"0x[0-9a-f]{64}", self.bridge_transaction_hash
+        ) is None:
+            raise AccountConnectionError("Withdrawal Bridge hash is invalid.")
+        if self.bridge_transaction_hash is not None and self.bridge_status is None:
+            raise AccountConnectionError("Withdrawal Bridge hash lacks status.")
 
     def begin_submission(self, signature: str, *, now: int) -> "WithdrawalOperation":
         if self.state is not SettlementState.APPROVED:
@@ -209,6 +225,33 @@ class WithdrawalOperation:
             raise AccountConnectionError("Withdrawal relayer state is invalid.")
         return replace(self, state=SettlementState.SUBMITTED, transaction_id=transaction_id)
 
+    def reconcile_bridge(
+        self, transactions: tuple[BridgeTransaction, ...],
+    ) -> "WithdrawalOperation":
+        if self.state is not SettlementState.CONFIRMED:
+            raise AccountConnectionError("Withdrawal transfer is not confirmed.")
+        if not isinstance(transactions, tuple) or not all(
+            isinstance(item, BridgeTransaction) for item in transactions
+        ):
+            raise AccountConnectionError("Withdrawal Bridge evidence is invalid.")
+        manifest = POLYMARKET_PRODUCTION_MANIFEST
+        matches = tuple(item for item in transactions if (
+            item.source_chain_id == manifest.chain_id
+            and item.source_token_address == manifest.usdce_token.lower()
+            and item.source_amount_atomic == self.plan.amount_atomic
+            and item.destination_chain_id == self.plan.destination_chain_id
+            and item.destination_token_address == self.plan.destination_token_address
+        ))
+        if len(matches) > 1:
+            raise AccountConnectionError("Withdrawal Bridge evidence is ambiguous.")
+        if not matches:
+            return self
+        evidence = matches[0]
+        return replace(
+            self, bridge_status=evidence.status,
+            bridge_transaction_hash=evidence.transaction_hash,
+        )
+
     def to_record(self) -> dict[str, Any]:
         return {
             "plan": self.plan.to_record(), "state": self.state.value,
@@ -216,6 +259,8 @@ class WithdrawalOperation:
             "transaction_id": self.transaction_id,
             "transaction_hash": self.transaction_hash,
             "failure_digest": self.failure_digest,
+            "bridge_status": self.bridge_status,
+            "bridge_transaction_hash": self.bridge_transaction_hash,
         }
 
     @classmethod
