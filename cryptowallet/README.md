@@ -537,13 +537,11 @@ Frontend build requirements: Node.js 20.18+ and npm. Run `npm ci` in
 for `src/security.js`. Deploy the corresponding generated root-level browser bundle with
 the other public assets. Never deploy `node_modules/` or the development-only `src/` directory.
 
-1. Complete the combined Discord acceptance pass for Base Sepolia and Solana devnet.
-2. Verify the deployed dual-account recovery page with both Coinbase isolated export controls.
-3. Live-check non-owner cooldown wording with a second Discord account; automated enforcement and
-   owner/administrator exemption coverage passes in the representative Red environment.
-4. Deploy the versioned relay migrations, then live-verify TOTP enrollment, invalid and replayed-code
-   rejection, protected sends, disable, replacement, and locked lost-factor recovery.
-5. Complete independent technical review before release to `main`; obtain jurisdiction-specific legal review before monetization or expanded financial services.
+1. With explicit maintainer authorization, exercise the ordinary-user Base mainnet flow on SGBTestAgent using controlled real-value limits.
+2. While the develop implementation is enabled for that acceptance, verify pause, restart, provider failure, reconciliation, and duplicate prevention end to end.
+3. Back up the companion database and private server configuration before any further deployment or migration work.
+4. Freeze the accepted release-candidate revision and complete independent technical review before a PR to `main`; obtain jurisdiction-specific legal review before monetization or expanded financial services.
+5. Continue Ethereum mainnet, Solana mainnet, and additional fixed-network work independently under issue #206; no network inherits Base or Polymarket approval.
 
 ## Security boundary
 
