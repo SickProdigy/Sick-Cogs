@@ -95,6 +95,7 @@ from polymarket.settlement import (
     decode_v3_position_id, read_v3_position_balance, router_redeem_calldata,
     settlement_batch_digest, verify_settlement_batch_signature,
 )
+from polymarket.settlement_views import SettlementApprovalView
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
     POLYMARKET_SESSION_KEY_POLICY, EligibilityAttestation,
@@ -5708,3 +5709,64 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
         )
         cog.deposit_wallet_relayer.submit_withdrawal.assert_awaited_once()
         cog.bridge_client.status.assert_awaited_once_with(plan.bridge_address)
+
+
+    async def test_claim_builds_exact_protected_two_step_card(self):
+        author = SimpleNamespace(id=7)
+        ctx = SimpleNamespace(
+            author=author, clean_prefix="!",
+            send=AsyncMock(return_value=SimpleNamespace()),
+        )
+        binding = BotFirstAccountBinding(
+            discord_user_id=7, profile_id="profile-7",
+            signer_address="0x" + "1" * 40,
+            account_wallet_address="0x" + "2" * 40, created_at=80,
+        )
+        eligibility = EligibilityAttestation(
+            discord_user_id=7, blocked=False, country="IE", region="",
+            checked_at=100, expires_at=400,
+        )
+        condition = "0x" + "ab" * 32
+        token_id = str(1 << 80)
+        cog = Polymarket(SimpleNamespace())
+        user_config = cog.config.user(author)
+        cog.config.user = lambda _user: user_config
+        await cog.config.production_enabled.set(True)
+        await cog.config.production_paused.set(False)
+        await cog.config.production_capabilities.set({
+            "redeem": True, "eligibility": True,
+        })
+        await user_config.terms_acceptance.set(
+            create_polymarket_terms_acceptance(7, now=100, acceptance_id="terms-7")
+        )
+        cog._protected_claim_eligibility = AsyncMock(
+            return_value=(binding, eligibility)
+        )
+        cog._get_json = AsyncMock(return_value={
+            "id": "42", "conditionId": condition, "question": "Did it happen?",
+            "outcomes": '["Yes", "No"]',
+            "clobTokenIds": json.dumps([token_id, str((1 << 80) + 1)]),
+            "negRisk": False, "closed": True,
+        })
+        cog._settlement_balance = AsyncMock(return_value=(
+            4_000_000, "data_api", None, condition,
+        ))
+        cog.session_transport = SimpleNamespace(
+            get_wallet_nonce=AsyncMock(return_value=9)
+        )
+        with (
+            patch("polymarket.polymarket.time.time", return_value=100),
+            patch("polymarket.polymarket.secrets.token_urlsafe",
+                  side_effect=("settlement-" + "a" * 32,
+                               "idempotency-" + "b" * 32,
+                               "request-" + "c" * 32)),
+        ):
+            await Polymarket.polymarket_claim.callback(cog, ctx, "42", "Yes")
+        request = SettlementApprovalRequest.from_record(
+            await user_config.settlement_approval()
+        )
+        self.assertEqual(request.plan.amount_atomic, 4_000_000)
+        self.assertEqual(request.plan.market_id, "42")
+        self.assertEqual(request.confirmation.state, TradeConfirmationState.AWAITING_APPROVAL)
+        self.assertIsInstance(ctx.send.await_args.kwargs["view"], SettlementApprovalView)
+        self.assertIn("Approve Polymarket claim", ctx.send.await_args.kwargs["embed"].title)
