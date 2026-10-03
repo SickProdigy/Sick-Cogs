@@ -1,110 +1,117 @@
 # Polymarket
 
-A develop-only Sick-Cogs connector between CryptoWallet and Polymarket. CryptoWallet remains the user's wallet and funding home; Polymarket is the prediction-market trading destination.
+Polymarket is a develop-only connector that lets users browse and trade Polymarket prediction markets through Discord. CryptoWallet remains the user's wallet and funding home; this cog manages the separate Polymarket Deposit Wallet, market positions, and protected trade workflows.
 
-## Current boundary
+Current version: `0.2.50`
 
-Version `0.2.28` provides category browsing, active-market search, trending markets, and individual market cards with market-implied probabilities, rules, resolution sources, and canonical Polymarket links. It also pins the current official Polygon chain, pUSD, Deposit Wallet, API endpoint, and contract-address model in a validated non-executable manifest. Production actions remain default-off and emergency-paused. Bot-first Deposit Wallet provisioning, session authorization, deposits, orders, positions, sales, settlement, and withdrawals are not live yet.
+## Status
 
-Version `0.2.31` pins the official Bridge endpoint and adds strict supported-asset, minimum, direct-pUSD quote, deposit-address, status, and restart-safe CryptoWallet-intent reconciliation contracts. Quoted pUSD remains an estimate until exact Bridge completion evidence is observed; duplicate or changed evidence fails closed. No command invokes this foundation yet, and no deposit address, signature, or transaction was created during validation.
+The complete intended flow is implemented and tested with simulated signatures and provider responses. Public market discovery is usable, but every production capability is disabled by default, the emergency pause starts active, and monetary limits start at zero. This release cannot enable general production execution.
 
-Version `0.2.32` adds the default-off DM-only `poly deposit` preview and status path. It refreshes Base ETH support and the live minimum, quotes directly to Polygon pUSD, verifies the deployed Deposit Wallet, binds a CryptoWallet transfer intent to the exact Bridge request, uses CryptoWallet's normal approval card, persists restart-safe status, and refuses replacement while submission evidence is uncertain. Version `0.2.33` completes that boundary with a fresh, five-minute, protected-user-IP eligibility handoff bound to the exact stored amount and immutable account identity before any Bridge address or wallet approval is created. A restart restores the unchanged pending CryptoWallet card; changed amounts, expired/blocked eligibility, ambiguous wallet submissions, and duplicate Bridge evidence fail closed.
+No live wallet signature, Deposit Wallet deployment, deposit, order, claim, withdrawal, or other mainnet transaction was performed during validation.
 
-Version `0.2.34` pins the official Data API and adds default-off, DM-only `poly balance`, `poly positions`, and `poly orders` views. Public portfolio and position responses must match the CryptoWallet-derived Deposit Wallet; collateral balance and open orders additionally require an active identity-matched encrypted session credential. Responses are not persisted, and these reads cannot approve, sign, cancel, or submit an order.
+## How it works
 
-Version `0.2.35` replaces the superseded order model with the current official Deposit Wallet contract: signature type 3, protocol v2/v3 binding, the timestamp/metadata/builder payload, an ERC-7739 `TypedDataSign` envelope, and the authorized session-signer ABI wrapper. Golden digest and tamper tests independently verify the local signing path; the transport rejects old payloads, wrong wallets, stale timestamps, changed amounts, and invalid wrappers. No command submits an order.
+1. `poly account` reads the user's existing CryptoWallet profile and verifies its CDP-managed EOA owner. Users do not enter a seed phrase, private key, or separate wallet credential.
+2. The cog derives that owner's official Polygon Deposit Wallet. If it has not been deployed, the protected session flow can prepare its owner-approved deployment when the relevant gates are deliberately enabled.
+3. `poly session` creates a Polymarket-only session signer for routine CLOB orders. The signer and its CLOB credentials are encrypted at rest and bound to the Discord user, CryptoWallet profile, owner, Deposit Wallet, and installation.
+4. `poly deposit` uses CryptoWallet's normal protected approval flow to send a supported Base asset through Polymarket's Bridge and receive Polygon pUSD in the Deposit Wallet.
+5. Buy, sell, cancel, and claim commands use immutable Discord approval cards. The first approval is always required; users may keep or disable the default-on second Yes/No confirmation.
+6. `poly withdraw` obtains one narrowly constrained CryptoWallet owner signature, unwraps pUSD to USDC.e, and transfers it to a Bridge address bound to the user's existing CryptoWallet destination.
 
-Version `0.2.36` updates the public bounded-buy preview to the current CLOB market metadata contract. It reads fee rate and exponent from `/clob-markets/{condition_id}`, applies the SDK's price-dependent fee formula inside the all-in pUSD cap, and binds the exact fee, tick, risk route, minimum size, and outcome token into refresh and reapproval checks. Missing fee metadata is treated as an explicit zero fee; malformed or changed metadata fails closed. No command submits an order.
+The session signer is CLOB-scoped, expires after 180 days, supports protected rotation and revocation, and cannot authorize withdrawals. Claims and withdrawals require an exact-purpose signature from the CryptoWallet owner because they move assets through the Deposit Wallet outside routine order signing.
 
-Version `0.2.37` adds current SDK-equivalent protected-buy rounding for every supported tick, immutable `FAK` order-type binding through the authenticated POST body, strict restart serialization for quotes and fee metadata, and a persisted user/account/session/eligibility-bound two-step trade request. The interaction model stores no session private key or CLOB credential and is not yet connected to a buy command or provider submission.
+## Funds and identities
 
-Version `0.2.38` pins the current SDK's protocol-v3 exchange, protocol-v2 router, and position manager. Order protocol selection now reproduces the SDK's uint256 asset-namespace rule: v3 position IDs use the v3 exchange and EIP-712 domain version `3`; legacy CTF assets use the standard or negative-risk exchange and version `2`. The manifest remains non-executable and default-off.
+The integration keeps these identities separate:
 
-Version `0.2.39` adds the default-off DM-only `poly buy`/`poly bet` flow. It binds protected browser-IP eligibility, current terms, CryptoWallet owner and Deposit Wallet identity, active encrypted session signer, live book and fee metadata, all-in pUSD and rolling-day limits, SDK-equivalent `FAK` amounts, and the optional default-on second Yes/No click into one immutable request. Final approval re-fetches every market constraint, persists `SUBMITTING` before authenticated I/O, locally signs with the scoped session key, stores ambiguity without retry, and never persists a raw private key, CLOB credential, or order signature. All gates and limits remain default-off.
+- **CryptoWallet account:** the user's funding and withdrawal destination.
+- **Owner signer:** the CDP-managed EOA verified from the CryptoWallet profile.
+- **Deposit Wallet:** the official Polymarket wallet derived from that owner on Polygon chain `137`.
+- **Session signer:** an encrypted, revocable signer authorized only for routine Polymarket CLOB activity.
 
-Version `0.2.40` adds DM-only `poly orderstatus` and protected `poly cancel [order ID]`. Status uses the active identity-matched encrypted session to reconcile the exact stored order and remains available while paused; a missing provider order ID is reported for manual review without retry. Cancellation has its own default-off capability, binds the order ID, lifecycle idempotency key, and revision into a two-minute card, honors the same default-on second Yes/No preference, persists `CANCEL_PENDING` before authenticated I/O, and leaves timeouts ambiguous until status reconciliation.
+The cog stores public wallet identifiers, lifecycle records, immutable approval details, transaction evidence, and encrypted session material. It never asks users to paste wallet secrets into Discord. Public balance, position, and market responses are read live and are not persisted.
 
-Version `0.2.41` adds the default-off DM-only `poly sell` flow. It binds protected eligibility, the exact position balance, shares, minimum price, live bid book, market metadata, user/account/session identity, and the existing optional second confirmation into one immutable request. Final approval re-fetches both the position and market constraints, rejects balance or price-floor drift, persists `SUBMITTING` before authenticated I/O, and signs an SDK-equivalent `FAK` SELL with the scoped session key.
+## Approval and recovery rules
 
-Version `0.2.42` pins the current SDK collateral adapters needed for settlement and adds a non-executable exact redemption foundation. Legacy CTF markets target the standard or negative-risk collateral adapter with `redeemPositions(pUSD, zero parent, condition, [1, 2])`; protocol-v3 positions target the v2 router with the decoded bytes31 condition, outcome index, and exact Position Manager balance. Both routes bind an immutable Deposit Wallet `Batch`, ten-minute deadline, nonce, owner/account identity, calldata, relayer envelope, and tamper-evident fingerprint. No command, signer, or submission path invokes it yet.
+- Transaction commands are DM-only and require current protected eligibility.
+- Every action is bound to the requesting user, wallet identities, exact amount or order, expiry, and current provider data.
+- The optional second confirmation defaults on. Turning it off never removes the first approval card.
+- Final approval refreshes material market, balance, nonce, and identity constraints. Drift fails closed or requires a new approval where appropriate.
+- Submission state is persisted before authenticated network I/O.
+- An interrupted or ambiguous submission is never blindly retried. Status commands reconcile the exact stored identity and transaction evidence.
+- Session private keys and CLOB credentials use identity-bound AES-256-GCM encryption with a server-side wrapping key.
+- Terms, connection, and audit records retain bounded metadata and SHA-256 digests rather than signatures or secrets.
 
-Version `0.2.43` adds the persistent settlement operation and exact Builder/Relayer transport. The operation stores only an owner-signature digest and public transaction evidence, persists `SUBMITTING` before network I/O, converts an interrupted submission to `UNKNOWN` without retry, and accepts confirmation only when the transaction ID, owner, factory, Deposit Wallet, request type, and hash remain exact. The protected claim card and command are still not wired, so this does not expose or enable settlement.
+## User commands
 
-Version `0.2.44` adds the protected claim input and approval model: an exact closed binary-market parser, outcome/token selection, a chain-137 Position Manager `balanceOf` read pinned to one recorded block for protocol-v3 positions, and an immutable eligibility-bound request using the existing default-on optional second confirmation. The command and signer invocation remain unwired and default-off.
+The root commands are `polymarket` and `poly`.
 
-Version `0.2.45` wires the default-off DM-only `poly claim`/`poly redeem` flow and `poly claimstatus` reconciliation. Claim preparation binds protected browser-IP eligibility, the resolved market and outcome, exact Deposit Wallet position balance, protocol route, owner nonce, calldata, and the existing optional default-on second confirmation. Final approval rechecks every binding, obtains one exact owner Batch signature through CryptoWallet, independently recovers the signer, persists `SUBMITTING` before Builder/Relayer I/O, and fences ambiguous results from retry. Confirmation requires exact public transaction identity plus a cleared position balance; no live signature or transaction was produced during validation.
+### Discover markets
 
-Version `0.2.46` adds deterministic recovery when an order POST becomes ambiguous before returning an ID. Before authenticated I/O, the cog derives and persists the official standard EIP-712 exchange-order hash separately from the ERC-7739 session-signing digest; any returned provider ID must match it. After timeout or restart, `poly orderstatus` queries only that exact hash and reconciles strict order and trade evidence without resubmitting, while legacy ambiguous records without a hash remain fenced for manual review.
+- `poly markets` or `poly categories` - open the category browser.
+- `poly markets <politics|crypto|sports>` - open a category directly.
+- `poly category <politics|crypto|sports>` - list active markets ranked by 24-hour volume.
+- `poly trending` - list active markets across all categories by 24-hour volume.
+- `poly search <words>` - search active market questions.
+- `poly market <ID, slug, or Polymarket link>` - show probabilities, rules, resolution source, and the canonical link.
+- `poly compatible [words]` - list markets that are technically compatible with the supported CLOB path.
+- `poly readiness <market>` - show technical readiness for one market.
+- `poly quote <market> <outcome> <max pUSD> [max price]` - show a live, two-minute bounded buy preview without signing or submitting.
 
-Version `0.2.47` begins the outbound withdrawal foundation with strict current Bridge contracts for an EVM CryptoWallet destination. It consumes the live supported-assets identity, quotes exact Polygon USDC.e input to the selected destination chain/token/recipient, and creates the official withdrawal address bound to the Deposit Wallet and that same recipient. No command, pUSD unwrap, owner signature, transfer, or submission invokes this foundation yet.
+### Account and safety
 
-Version `0.2.48` adds the immutable owner-authorized Deposit Wallet withdrawal batch: exact pUSD approval, pUSD-to-USDC.e unwrap back to the wallet, and exact USDC.e transfer to the bound Bridge address. The quote, destination, recipient, nonce, deadline, call order, digest, relayer envelope, and stored record fail closed on drift. This remains a non-executable model; no command requests a signature or submits the batch yet.
+- `poly status` - show the current safety boundary.
+- `poly account` - derive and display the CryptoWallet-owned signer and Deposit Wallet.
+- `poly terms` and `poly termsconfirm` - review and accept the current product terms through the protected companion flow.
+- `poly session` - create, resume, rotate, or reconcile the protected session authorization.
+- `poly confirmations [on|off]` - show or change the optional second confirmation.
+- `poly audit` - show the caller's latest ten digest-only safety events.
+- `poly disconnect` - clear pending connection data and the public account binding, including while paused.
 
-Version `0.2.49` adds a withdrawal-specific immutable approval record, the shared optional two-step confirmation binding, a restart-safe digest-only submission lifecycle, and exact Builder-authenticated submit/status transport. Ambiguous submission remains unknown and is never retried; reconciliation requires the bound owner, Deposit Wallet, factory, WALLET type, and transaction identity. No user command invokes this foundation yet.
+`poly connect` and `poly confirm` provide compatibility for an existing Polymarket account. They are not part of the normal bot-first CryptoWallet flow, and users must never send wallet secrets in Discord.
 
-Version `0.2.50` connects the DM-only `poly withdraw <pUSD amount> [Base asset]` approval card and `poly withdrawstatus` reconciliation. It live-selects one supported Base Bridge asset, reuses the existing CryptoWallet address without provisioning, checks protected eligibility and pUSD balance before creating the Bridge address, shows the exact quote and three-call route, applies the optional default-on second confirmation, revalidates identity/asset/balance/nonce before signing, persists before relayer I/O, and separately tracks Polygon confirmation and exact Bridge arrival. Every production gate remains default-off.
+### Funds and portfolio
 
-Production controls are owner-only. Monetary caps default to all-zero and must satisfy per-order <= per-user-day <= installation-day before storage; changing them never enables a capability.  `polyset productionstatus` shows the manifest and default-off state, while `polyset productioncontrol pause` force-closes the boundary. General production enablement deliberately refuses. The separate `polyset onboardingcontrol` can open only protected account connection and eligibility after its exact acknowledgment; every transaction capability remains disabled.
-
-`poly account` now obtains the caller's existing CryptoWallet profile, independently verifies through CDP that its stored smart account has exactly one registered EOA owner, derives the current official Deposit Wallet from that owner, and stores only the public immutable binding. It does not request a wallet connection, deploy the Deposit Wallet, or enable trading. The exact CDP delegated EIP-712 route for Polymarket ClobAuth is now implemented behind a separate permanent default-off CryptoWallet switch; Polymarket independently recovers every returned signature to the bound EOA before use. The develop-only account model keeps the immutable Discord user, signer address, account-wallet address, wallet type, and pending/verified/disconnected lifecycle separate. When the installation, emergency-pause, account-connect, and eligibility gates are deliberately opened for develop testing, the DM-only `poly connect` and `poly confirm` flow can connect an existing account without accepting secrets in Discord. The protected-onboarding contract requires exact signed-companion challenge binding, reviewed signer proof and account-relationship evidence, and a current browser-IP eligibility attestation before producing a verified public connection record. Its signed companion, browser proof, encrypted one-time result relay, independent Polygon derivation/deployment verification, and final public-record storage are connected; all defaults remain off and no transaction capability is enabled. Account relationship verification independently reproduces the official SDK's EOA, Proxy, Safe, legacy UUPS Deposit Wallet, and current beacon Deposit Wallet derivations, pins the SDK production RPC and factories, and requires deployed Polygon bytecode for smart wallets. Transient official ClobAuth EIP-712 signatures are independently recovered with challenge-derived nonces, strict expiry, and canonical low-S checks; only their digest is retained, and verified signer, account relationship, and eligibility evidence must agree before connection completion.
-
-The reviewed session-key policy is Deposit-Wallet-only, beta, CLOB-scoped, fixed at 180 days, non-withdrawing, owner-approved, confirmation-checked, revocable, and still non-executable. Version `0.2.23` adds local secp256k1 session EOA generation plus the exact Deposit Wallet Batch EIP-712, ABI calldata, five-minute deadline, WALLET nonce, Builder endpoint, request-body, and idempotency contracts for both authorization and revocation. Version `0.2.24` adds the exact Builder-authenticated authorization and revocation transport, fenced revocation checks, relayer transaction reconciliation, owner-authenticated active-key registry verification, locally recovered session ClobAuth credential creation/derivation, and identity-bound AES-256-GCM L2 credential storage. Version `0.2.25` adds restart-safe digest-only operation state, registry-gated activation and revocation, expiry maintenance decisions, and overlap-safe seven-day rotation that preserves the old key until its replacement is active. Version `0.2.26` adds an automatically initialized server-side wrapping key, exact Viem-cross-checked Batch recovery, persist-before-sign provisioning, restart-resumable approval, transaction reconciliation, owner-authenticated registry confirmation, create-or-derive recovery, and encrypted session-owned L2 credential finalization. Version `0.2.27` adds persisted owner-approved revocation, mandatory fenced submission, transaction and registry-absence confirmation, restart-safe terminal reconciliation, and post-confirmation deletion of encrypted key and credential material. Version `0.2.28` adds the restart-aware seven-day maintenance dispatcher, separately persisted replacement authorization, complete encrypted-record binding, failure rollback that preserves the old key, and atomic promotion only after the replacement is active and the old key is registry-confirmed revoked. The complete lifecycle remains default-off and no user command invokes it. Version `0.2.19` added the authenticated encryption record for future session private keys. AES-256-GCM ciphertext is bound to the deployment, Discord user, CryptoWallet profile, owner signer, Deposit Wallet, and session address; the wrapping key remains server-side and the session key cannot authorize withdrawals. Eligibility attestations must come from the protected user's request IP, expire after five minutes, and retain country/region and blocked status without retaining the IP address.
-
-New Deposit Wallet creation now has an exact default-off Builder/Relayer adapter. It pins the current beacon-derived empty target, Polygon chain `137`, Deposit Wallet factory, official three-field `WALLET-CREATE` request, server-only HMAC authentication, five-minute owner approval and eligibility evidence, local idempotency, public transaction identifiers, restart recovery, and `STATE_CONFIRMED`/`STATE_FAILED`/`STATE_INVALID` reconciliation. Confirmed results must match the owner, factory, type, and derived wallet and then pass an independent Polygon bytecode/derivation check. No command can enable or invoke deployment yet.
-
-Terms start and acceptance plus connection start, verification, and disconnect events retain only an event name, UTC timestamp, and SHA-256 digest in a 50-entry per-user audit trail. `poly audit` shows the caller the latest ten digest-only events. `poly disconnect` remains available during emergency pause, and Red user-data deletion clears the connection, pending challenges, terms acceptance, and audit records.
-
-The root command aliases are `polymarket` and `poly`.
-
-## Commands
-
-- `poly` - the complete short command guide.
-- `poly markets` or `poly categories` - show the category chooser.
-- `poly markets <politics|crypto|sports>` - shortcut directly to a category.
-- `poly category <politics|crypto|sports>` - active markets in that category, ranked by 24-hour volume.
-- `poly trending` - active markets across every category, ranked by 24-hour volume.
-- `poly search <words>` - public keyword search, excluding closed results. Useful examples: `bitcoin`, `ethereum`, `fed rates`, and `trump`.
-- `poly market <ID, slug, or Polymarket link>` - probabilities, rules, resolution source, and canonical link.
-- `poly market` is intentionally singular: it only opens one exact ID, slug, or copied Polymarket link. Category words receive a category hint; failed exact references suggest `poly search`.
-- `poly compatible [words]` - technically CLOB V2-ready markets for the staged future Polygon handoff; this does not check personal eligibility or enable trading.
-- `poly readiness <market>` - public technical readiness details for one market.
-- `poly quote <market> <outcome> <max pUSD> [max price]` - fetch the live public CLOB book and current market fee parameters and display a two-minute, all-in bounded approval preview. It never connects an account, signs, or submits.
-- `poly buy <market> <outcome> <max pUSD> [max price]` (alias `poly bet`) - start protected eligibility and then show the immutable DM buy card. The first Approve click is always required; the optional second Yes/No click defaults on.
-- `poly sell <market> <outcome> <shares> <min price>` - start exact protected eligibility, verify the bound position, and show an immutable DM FAK sell card with a price floor. Final approval refreshes both position balance and bid liquidity.
-- `poly orderstatus` (alias `poly order`) - reconcile the exact stored order with authenticated provider evidence; this read remains available during emergency pause and never retries a submission.
-- `poly cancel [order ID]` - show an immutable cancellation card for the exact live or partially filled order. Its separate capability defaults off, and an optional supplied ID must match.
-- `poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>` - inspect exact six-decimal asset, token, spender, amount, action contract, and revocation values without approving or transacting.
-- `poly terms` and `poly termsconfirm` - review and record the current product-specific terms through a protected, one-time companion flow. Current acceptance is required before connection.
-- `poly audit` - show the caller their latest ten digest-only safety events.
-- `poly deposit <ETH amount>` - prepare a default-off CryptoWallet approval card or resume the current Bridge deposit status.
-- `poly withdraw <pUSD amount> [Base asset]` - prepare a protected default-off withdrawal card to the existing CryptoWallet address.
-- `poly withdrawstatus` - reconcile the Polygon transfer and Bridge arrival without resubmitting.
-- `poly balance` - show authenticated available pUSD and public open-position value for the bound Deposit Wallet.
-- `poly positions` - show up to ten current identity-bound positions from the official Data API.
+- `poly deposit <ETH amount>` - prepare a CryptoWallet Bridge deposit card or resume its current status.
+- `poly withdraw <pUSD amount> [Base asset]` - prepare a protected withdrawal to the existing CryptoWallet address.
+- `poly withdrawstatus` - reconcile the Polygon withdrawal and exact Bridge arrival without resubmitting.
+- `poly balance` - show available pUSD and open-position value for the bound Deposit Wallet.
+- `poly positions` - show up to ten current identity-bound positions.
 - `poly orders` - show up to ten authenticated open orders for the active session.
-- `poly account` - automatically prepare and show the caller's CryptoWallet-owned signer and derived Deposit Wallet without a separate setup step.
-- `poly confirmations [on|off]` - show or change the optional second yes/no trade confirmation; it defaults on and never removes the first approval.
-- `poly connect <signer> <account wallet> <EOA|POLY_PROXY|GNOSIS_SAFE|DEPOSIT_WALLET>` - start optional default-off existing-account compatibility verification in DM.
-- `poly confirm` - consume and independently verify the protected result in DM.
-- `poly disconnect` - clear any pending challenge and disconnect the public account binding even while production is paused.
-- `poly status` - the current safety boundary.
-- `polyset limits <per order> <per user/day> <installation/day>` - store ordered six-decimal pUSD caps without enabling execution. All defaults are zero.
+- `poly collateral <wrap|unwrap|standard|negative-risk> <amount> <account wallet>` - inspect an exact collateral route without approving or transacting.
 
-The category browser uses Polymarket's public Gamma API tags for Politics, Crypto, and Sports. General discovery remains available through explicit search and `trending`, so `markets` no longer starts with an unrelated mixed list.
+### Trade and settle
 
-## Future handoff foundation
+- `poly buy <market> <outcome> <max pUSD> [max price]` (alias `poly bet`) - prepare an immutable fill-and-kill buy with an all-in spending cap.
+- `poly sell <market> <outcome> <shares> <min price>` - prepare an immutable fill-and-kill sell with a price floor.
+- `poly orderstatus` (alias `poly order`) - reconcile the exact stored order without retrying submission.
+- `poly cancel [order ID]` - prepare cancellation of the exact live or partially filled order.
+- `poly claim <market> <outcome>` (alias `poly redeem`) - prepare redemption of a resolved winning position.
+- `poly claimstatus` (alias `poly redeemstatus`) - reconcile the exact claim transaction and cleared position.
 
-The develop-only package includes an immutable `MarketSnapshot` parser for technically ready public CLOB markets. It records only public market identity, outcome token IDs, displayed prices, and public fee/minimum-size metadata. It is not a wallet, order, approval, quote, or transaction object.
+## Owner controls
 
-It also includes a non-executable live order-book snapshot and market-buy approval model. The approval binds the user, market, outcome token, book hash, best ask, tick size, minimum size, negative-risk route, current fee rate and exponent, price ceiling, all-in pUSD cap, and expiry into one fingerprint. A final refresh requires reapproval when market constraints or fee parameters change, the price ceiling is exceeded, or the approval expires.
+- `polyset productionstatus` - show the pinned manifest, emergency pause, capabilities, session policy, and limits.
+- `polyset productioncontrol pause|disable` - close the production boundary. `enable` deliberately refuses in this release.
+- `polyset onboardingcontrol enable|pause|disable` - control only the protected, non-transactional compatibility onboarding path; enabling requires the exact acknowledgment shown by the command.
+- `polyset limits <per order> <per user/day> <installation/day>` - store ordered six-decimal pUSD caps without enabling any capability.
 
-A restart-safe order lifecycle model binds one approval to its Discord user, account wallet, session signer, market, token, maximum price, and maximum size. It records submission uncertainty, live and partial-fill states, cancel outcomes, provider trade evidence, and authenticated reconciliation behind an injected server-only authenticated transport. The transport pins the official L2 HMAC request contract for `POST /order`, `DELETE /order`, `GET /data/order/{id}`, and `GET /data/trades`; validates the signed maker, session signer, token, side, public taker, raw amounts, price, size, expiration, signature shape, and signature type against the approval; and independently reconciles exact order and trade identities. Credentials are ephemeral and excluded from representations. Unknown submission and cancellation results cannot be blindly retried. The authenticated adapter is reachable only through separately default-off production capabilities, zero-default limits, current identity-bound encrypted session material, and protected user approval.
+Capabilities are separately gated for account connection, eligibility, Deposit Wallet creation, sessions, deposits, account reads, orders, cancellations, claims, and withdrawals. Changing limits does not enable any of them.
 
-## Planned direction
+## Pinned production model
 
-1. Bind the existing CryptoWallet CDP EOA owner as the verified Polygon signer and lazily provision its Deposit Wallet without ordinary-user setup.
-2. Authorize encrypted, CLOB-only 180-day session keys for routine order signing while keeping withdrawal authority with the CDP owner.
-3. Add CryptoWallet-style deposit, balance, buy/bet, sell, orders, positions, settlement, and withdrawal cards. Every trade has one immutable approval card plus the default-on optional final yes/no check; the order is not repriced between those clicks.
-4. Complete provider, security, eligibility, reconciliation, and ordinary-member testing while every production capability remains default-off.
+The validated manifest pins Polygon chain `137`, six-decimal pUSD collateral, the current Exchange, negative-risk Exchange, Conditional Tokens, collateral adapters, Deposit Wallet factory and implementation model, Gamma API, Data API, CLOB API, Builder/Relayer API, and Bridge API.
 
-Perpetuals, spot trading, and other market types remain separate future scopes.
+The order path supports the current protocol-v2 and protocol-v3 asset namespaces, signature type `3`, SDK-equivalent tick rounding and fee calculation, authenticated CLOB transport, and deterministic order-hash recovery after ambiguous submission. Settlement supports the reviewed legacy CTF and protocol-v3 redemption routes. Withdrawal binds the exact pUSD approval, pUSD-to-USDC.e unwrap, and USDC.e Bridge transfer call order.
+
+## Validation
+
+The current implementation passed:
+
+- Polymarket tests: `168/168`
+- CryptoWallet tests: `263/263`
+- Companion browser security tests: `11/11`
+- Ordinary-member integration matrix: `20/20`
+
+The remaining release gates are independent verification of live CDP Polygon EIP-712 behavior, a separately authorized minimal-value mainnet exercise, security review, and any required policy or legal review. Perpetuals, spot trading, and other market types remain outside this cog's scope.
