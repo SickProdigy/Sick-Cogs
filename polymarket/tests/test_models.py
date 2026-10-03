@@ -90,6 +90,7 @@ from polymarket.settlement import (
     SettlementCall, SettlementOperation, SettlementPlan, SettlementState,
     ctf_redeem_calldata,
     decode_v3_position_id, read_v3_position_balance, router_redeem_calldata,
+    settlement_batch_digest, verify_settlement_batch_signature,
 )
 from polymarket.security_policy import (
     ELIGIBILITY_LIFETIME_SECONDS, SESSION_KEY_LIFETIME_SECONDS,
@@ -697,6 +698,46 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
                 "calls": [{**call.to_record(), "target": "0x" + "9" * 40}],
             })
 
+    def test_settlement_batch_signature_recovers_exact_owner_and_call_order(self):
+        owner = session_address_from_private_key((1).to_bytes(32, "big"))
+        condition = "0x" + "ab" * 32
+        plan = SettlementPlan(
+            settlement_id="s" * 32, discord_user_id=7,
+            profile_id="profile-7", owner_address=owner,
+            wallet_address="0x" + "2" * 40, market_id="42",
+            condition_id=condition, token_id=str(1 << 80), outcome="Yes",
+            amount_atomic=4_000_000, protocol="2", negative_risk=False,
+            nonce=9, created_at=100, deadline=700,
+            idempotency_key="i" * 32,
+            calls=(SettlementCall(
+                POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter,
+                ctf_redeem_calldata(condition),
+            ),),
+        )
+        digest = settlement_batch_digest(plan)
+        der = ec.derive_private_key(1, ec.SECP256K1()).sign(
+            digest, ec.ECDSA(utils.Prehashed(hashes.SHA256()))
+        )
+        r, signature_s = utils.decode_dss_signature(der)
+        if signature_s > HALF_CURVE_N:
+            signature_s = CURVE_N - signature_s
+        signature = None
+        for recovery_id in (0, 1):
+            candidate = "0x" + (
+                r.to_bytes(32, "big") + signature_s.to_bytes(32, "big")
+                + bytes([27 + recovery_id])
+            ).hex()
+            try:
+                if verify_settlement_batch_signature(plan, candidate) == owner:
+                    signature = candidate
+                    break
+            except AccountConnectionError:
+                pass
+        self.assertIsNotNone(signature)
+        changed = SettlementPlan.from_record({**plan.to_record(), "nonce": 10})
+        with self.assertRaises(AccountConnectionError):
+            verify_settlement_batch_signature(changed, signature)
+
     def test_settlement_request_reuses_exact_optional_two_step_confirmation(self):
         condition = "0x" + "ab" * 32
         plan = SettlementPlan(
@@ -715,10 +756,12 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         eligibility = EligibilityAttestation(7, False, "US", "CA", 90, 390)
         request = SettlementApprovalRequest.create(
             request_id="r" * 32, plan=plan, question="Did it happen?",
-            eligibility=eligibility, final_confirmation_required=True,
+            market_path="/markets/42", eligibility=eligibility, final_confirmation_required=True,
             balance_source="data_api",
         )
         self.assertEqual(request.confirmation.expires_at, 220)
+        embed = Polymarket(object())._settlement_embed(request)
+        self.assertEqual(embed.fields[2].value, "CTF standard adapter")
         awaiting_final = request.approve_primary(requester_id=7, now=101)
         self.assertEqual(
             awaiting_final.confirmation.state,
@@ -736,7 +779,7 @@ class PolymarketModelTests(_ConfiguredTest, unittest.TestCase):
         with self.assertRaises(TradeConfirmationError):
             SettlementApprovalRequest.create(
                 request_id="x" * 32, plan=plan, question="Did it happen?",
-                eligibility=eligibility, final_confirmation_required=False,
+                market_path="/markets/42", eligibility=eligibility, final_confirmation_required=False,
                 balance_source="polygon_position_manager", balance_block_number=9,
             )
 
@@ -3451,6 +3494,14 @@ class PolymarketCommandTests(_ConfiguredTest, unittest.IsolatedAsyncioTestCase):
             "success": True, "orderID": "order-one", "status": "live",
         })
         return binding, session, active
+
+    async def test_claim_is_default_closed_before_eligibility_or_wallet_access(self):
+        ctx = Context()
+        cog = Polymarket(object())
+        cog._protected_claim_eligibility = AsyncMock()
+        await Polymarket.polymarket_claim.callback(cog, ctx, "42", "Yes")
+        self.assertIn("disabled or emergency-paused", ctx.send.await_args.args[0])
+        cog._protected_claim_eligibility.assert_not_awaited()
 
     async def test_cancel_is_default_closed_before_identity_or_network_access(self):
         ctx = Context()

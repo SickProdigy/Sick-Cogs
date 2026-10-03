@@ -75,6 +75,13 @@ from .session_lifecycle import (
 from .session_approval import SessionApprovalRequest, SessionApprovalState
 from .session_views import SessionApprovalView
 from .session_transport import SessionKeyTransport
+from .settlement import (
+    ResolvedMarket, SettlementApprovalRequest, SettlementCall,
+    SettlementOperation, SettlementPlan, SettlementState,
+    ctf_redeem_calldata, decode_v3_position_id, read_v3_position_balance,
+    router_redeem_calldata, verify_settlement_batch_signature,
+)
+from .settlement_views import SettlementApprovalView
 from cryptowallet.core.polymarket import polymarket_clob_auth_typed_data
 from .safety import ProductionLimits, SafetyLimitError
 from .terms import (
@@ -211,7 +218,8 @@ class Polymarket(commands.Cog):
             bridge_deposit_history=[], deposit_eligibility=None,
             trade_eligibility=None, trade_approval=None,
             active_order=None, order_history=[], trade_spend_history=[],
-            cancel_approval=None,
+            cancel_approval=None, settlement_eligibility=None,
+            settlement_approval=None, settlement_operation=None,
         )
         self.deposit_wallet_relayer = DepositWalletRelayerClient()
         self.bridge_client = PolymarketBridgeClient()
@@ -1834,6 +1842,80 @@ class Polymarket(commands.Cog):
             )
         return matches[0]
 
+    async def _settlement_balance(
+        self, binding: BotFirstAccountBinding, market: ResolvedMarket, *,
+        token_id: str, outcome: str, require_positive: bool = True,
+    ) -> tuple[int, str, int | None, str]:
+        protocol = resolve_order_protocol(
+            token_id, negative_risk=market.negative_risk
+        )
+        if protocol.version == "3":
+            evidence = await read_v3_position_balance(
+                self._polygon_rpc,
+                wallet_address=binding.account_wallet_address,
+                token_id=token_id,
+            )
+            if require_positive and evidence.amount_atomic <= 0:
+                raise AccountDataError(
+                    "This protocol-v3 position has no balance to claim."
+                )
+            condition_id, _outcome_index = decode_v3_position_id(token_id)
+            return (
+                evidence.amount_atomic, evidence.source,
+                evidence.block_number, condition_id,
+            )
+
+        payload = await self._get_data_json(
+            "/v2/positions", {
+                "user": binding.account_wallet_address,
+                "condition_id": market.condition_id,
+                "status": "REDEEMABLE", "limit": 100,
+            },
+        )
+        positions, cursor = parse_positions_page(
+            payload, expected_wallet=binding.account_wallet_address
+        )
+        if cursor:
+            raise AccountDataError(
+                "Redeemable position evidence is incomplete."
+            )
+        matches = [
+            position for position in positions
+            if (
+                position.condition_id.lower() == market.condition_id
+                and position.token_id == token_id
+                and position.outcome.casefold() == outcome.casefold()
+                and position.redeemable
+            )
+        ]
+        if len(matches) > 1:
+            raise AccountDataError("Redeemable position evidence is ambiguous.")
+        if not matches:
+            if require_positive:
+                raise AccountDataError(
+                    "One exact redeemable position was not found."
+                )
+            return 0, "data_api", None, market.condition_id
+        atomic_decimal = matches[0].size * Decimal(10**6)
+        if atomic_decimal != atomic_decimal.to_integral_value():
+            raise AccountDataError(
+                "Redeemable position balance exceeds pUSD precision."
+            )
+        amount_atomic = int(atomic_decimal)
+        if require_positive and amount_atomic <= 0:
+            raise AccountDataError("This position has no balance to claim.")
+        return amount_atomic, "data_api", None, market.condition_id
+
+    async def _settlement_allowed(self) -> bool:
+        capabilities = await self.config.production_capabilities()
+        return (
+            bool(await self.config.production_enabled())
+            and not bool(await self.config.production_paused())
+            and bool(capabilities.get("redeem"))
+            and bool(capabilities.get("eligibility"))
+            and not validate_polymarket_production_manifest()
+        )
+
     async def _execute_trade_approval(
         self, interaction: discord.Interaction,
         request: TradeApprovalRequest,
@@ -2258,6 +2340,304 @@ class Polymarket(commands.Cog):
             await self.config.user(interaction.user).trade_approval.set(None)
             await interaction.message.edit(
                 embed=self._trade_approval_embed(request), view=None
+            )
+        except TradeConfirmationError as exc:
+            await interaction.followup.send(str(exc), ephemeral=True)
+
+    async def _settlement_request_for_view(
+        self, user, view: SettlementApprovalView,
+    ) -> SettlementApprovalRequest:
+        record = await self.config.user(user).settlement_approval()
+        if not record:
+            raise TradeConfirmationError("This claim card is no longer active.")
+        request = SettlementApprovalRequest.from_record(record)
+        if (
+            request.plan.discord_user_id != user.id
+            or request.request_id != view.request_id
+            or request.plan.fingerprint != view.fingerprint
+        ):
+            raise TradeConfirmationError("This claim card binding changed.")
+        return request
+
+    def _settlement_embed(
+        self, request: SettlementApprovalRequest,
+    ) -> discord.Embed:
+        state = request.confirmation.state
+        title = {
+            TradeConfirmationState.AWAITING_APPROVAL: "Approve Polymarket claim",
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION: "Are you sure?",
+            TradeConfirmationState.APPROVED: "Submitting Polymarket claim",
+            TradeConfirmationState.DECLINED: "Polymarket claim declined",
+        }[state]
+        plan = request.plan
+        embed = discord.Embed(title=title, description=request.question)
+        embed.add_field(name="Outcome", value=plan.outcome, inline=True)
+        embed.add_field(
+            name="Position balance",
+            value=f"{Decimal(plan.amount_atomic) / Decimal(10**6):f} shares",
+            inline=True,
+        )
+        embed.add_field(
+            name="Route",
+            value=(
+                "Protocol v3 Position Manager -> v2 router"
+                if plan.protocol == "3" else
+                f"CTF {'negative-risk' if plan.negative_risk else 'standard'} adapter"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Account wallet", value=f"`{plan.wallet_address}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Approval fingerprint", value=f"`{plan.fingerprint}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Expires", value=f"<t:{request.confirmation.expires_at}:R>",
+            inline=True,
+        )
+        embed.add_field(
+            name="Effect",
+            value=(
+                "Claims the selected protocol-v3 outcome balance."
+                if plan.protocol == "3" else
+                "Redeems all claimable outcome tokens for this CTF condition."
+            ),
+            inline=False,
+        )
+        embed.set_footer(
+            text=(
+                "No signature or transaction has been submitted"
+                if state is not TradeConfirmationState.APPROVED else
+                "Submission is idempotent and ambiguous results require reconciliation"
+            )
+        )
+        return embed
+
+    async def _edit_settlement_card(
+        self, interaction: discord.Interaction,
+        request: SettlementApprovalRequest, *, content: str | None = None,
+    ) -> None:
+        view = None
+        if request.confirmation.state in {
+            TradeConfirmationState.AWAITING_APPROVAL,
+            TradeConfirmationState.AWAITING_FINAL_CONFIRMATION,
+        }:
+            view = SettlementApprovalView(self, request)
+            view.message = interaction.message
+        await interaction.message.edit(
+            embed=self._settlement_embed(request), view=view
+        )
+        if content:
+            await interaction.followup.send(content, ephemeral=True)
+
+    async def _execute_settlement_approval(
+        self, interaction: discord.Interaction,
+        request: SettlementApprovalRequest,
+    ) -> None:
+        now = int(time.time())
+        request.require_approved(requester_id=interaction.user.id, now=now)
+        if not await self._settlement_allowed():
+            raise AccountConnectionError(
+                "Polymarket claiming is disabled or emergency-paused."
+            )
+        user_config = self.config.user(interaction.user)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), interaction.user.id
+        ):
+            raise AccountConnectionError("Current Polymarket terms are required.")
+        binding = await self._bot_first_account(interaction.user)
+        plan = request.plan
+        if (
+            plan.discord_user_id != interaction.user.id
+            or plan.profile_id != binding.profile_id
+            or plan.owner_address != binding.signer_address
+            or plan.wallet_address != binding.account_wallet_address
+        ):
+            raise AccountConnectionError("Settlement account identity changed.")
+        stored_request = await user_config.settlement_approval()
+        if not stored_request or SettlementApprovalRequest.from_record(
+            stored_request
+        ) != request:
+            raise AccountConnectionError("The exact claim approval is not persisted.")
+        stored_operation = await user_config.settlement_operation()
+        if stored_operation:
+            previous = SettlementOperation.from_record(
+                stored_operation
+            ).recover_after_restart()
+            if previous.state not in {
+                SettlementState.CONFIRMED, SettlementState.FAILED,
+            }:
+                await user_config.settlement_operation.set(previous.to_record())
+                raise AccountConnectionError(
+                    "A claim outcome is pending; reconcile it before another submission."
+                )
+
+        market = ResolvedMarket.from_market(
+            await self._get_json(request.market_path)
+        )
+        outcome, token_id = market.select(plan.outcome)
+        if (
+            market.market_id != plan.market_id or outcome != plan.outcome
+            or token_id != plan.token_id
+            or market.negative_risk != plan.negative_risk
+        ):
+            raise AccountConnectionError(
+                "Settlement market identity changed; request a fresh claim."
+            )
+        amount, source, _block, condition_id = await self._settlement_balance(
+            binding, market, token_id=token_id, outcome=outcome
+        )
+        if (
+            amount != plan.amount_atomic or source != request.balance_source
+            or condition_id != plan.condition_id
+        ):
+            raise AccountConnectionError(
+                "Settlement balance changed; request a fresh claim."
+            )
+        nonce = await self.session_transport.get_wallet_nonce(plan.owner_address)
+        if nonce != plan.nonce:
+            raise AccountConnectionError(
+                "Deposit Wallet nonce changed; request a fresh claim."
+            )
+        tokens = await self.bot.get_shared_api_tokens("polymarket_builder")
+        try:
+            credentials = BuilderCredentials(
+                tokens["api_key"], tokens["secret"], tokens["passphrase"]
+            )
+        except (KeyError, TypeError):
+            raise AccountConnectionError(
+                "Polymarket Builder credentials are incomplete."
+            ) from None
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        signer = getattr(
+            cryptowallet, "polymarket_sign_settlement_batch", None
+        )
+        if not callable(signer):
+            raise AccountConnectionError(
+                "CryptoWallet settlement signing is unavailable."
+            )
+        try:
+            result = await signer(
+                interaction.user, owner_address=plan.owner_address,
+                wallet_address=plan.wallet_address,
+                typed_data=plan.typed_data(),
+                approval_fingerprint=plan.fingerprint,
+            )
+        except RuntimeError as exc:
+            raise AccountConnectionError(
+                "CryptoWallet settlement signing is unavailable."
+            ) from exc
+        if (
+            not isinstance(result, dict)
+            or set(result) != {"signature", "signer_address"}
+            or result["signer_address"] != plan.owner_address
+        ):
+            raise AccountConnectionError(
+                "CryptoWallet returned an invalid settlement signer."
+            )
+        signature = str(result["signature"])
+        verify_settlement_batch_signature(plan, signature)
+        operation = SettlementOperation(plan).begin_submission(signature, now=now)
+        await user_config.settlement_operation.set(operation.to_record())
+        try:
+            response = await self.deposit_wallet_relayer.submit_settlement(
+                plan, signature, credentials, timestamp=int(time.time())
+            )
+        except (aiohttp.ClientError, AccountConnectionError, TimeoutError):
+            unknown = operation.recover_after_restart()
+            await user_config.settlement_operation.set(unknown.to_record())
+            await user_config.settlement_approval.set(None)
+            raise AccountConnectionError(
+                "Claim outcome is unknown; reconcile before retry."
+            ) from None
+        submitted = operation.record_submission(response)
+        await user_config.settlement_operation.set(submitted.to_record())
+        await user_config.settlement_approval.set(None)
+        await self._edit_settlement_card(
+            interaction, request,
+            content=(
+                "Claim submitted. Use `poly claimstatus` to reconcile the "
+                "public transaction and final position balance."
+            ),
+        )
+
+    async def approve_settlement_interaction(
+        self, interaction: discord.Interaction, view: SettlementApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._settlement_request_for_view(
+                interaction.user, view
+            )
+            request = request.approve_primary(
+                requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).settlement_approval.set(
+                request.to_record()
+            )
+            if request.confirmation.state is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION:
+                await self._edit_settlement_card(
+                    interaction, request,
+                    content=(
+                        "Please confirm once more. The market, outcome, wallet, "
+                        "balance, route, nonce, and calls are unchanged."
+                    ),
+                )
+                return
+            await self._execute_settlement_approval(interaction, request)
+        except (
+            AccountConnectionError, AccountDataError, OrderProtocolError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).settlement_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The claim was not submitted: {exc}", ephemeral=True
+            )
+
+    async def confirm_settlement_interaction(
+        self, interaction: discord.Interaction, view: SettlementApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            request = await self._settlement_request_for_view(
+                interaction.user, view
+            )
+            request = request.decide_final(
+                True, requester_id=interaction.user.id, now=int(time.time())
+            )
+            await self.config.user(interaction.user).settlement_approval.set(
+                request.to_record()
+            )
+            await self._execute_settlement_approval(interaction, request)
+        except (
+            AccountConnectionError, AccountDataError, OrderProtocolError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+        ) as exc:
+            await self.config.user(interaction.user).settlement_approval.set(None)
+            await interaction.message.edit(view=None)
+            await interaction.followup.send(
+                f"The claim was not submitted: {exc}", ephemeral=True
+            )
+
+    async def decline_settlement_interaction(
+        self, interaction: discord.Interaction, view: SettlementApprovalView,
+    ) -> None:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            request = await self._settlement_request_for_view(
+                interaction.user, view
+            )
+            if request.confirmation.state is TradeConfirmationState.AWAITING_FINAL_CONFIRMATION:
+                request = request.decide_final(
+                    False, requester_id=interaction.user.id, now=int(time.time())
+                )
+            await self.config.user(interaction.user).settlement_approval.set(None)
+            await interaction.message.edit(
+                embed=self._settlement_embed(request), view=None
             )
         except TradeConfirmationError as exc:
             await interaction.followup.send(str(exc), ephemeral=True)
@@ -2741,6 +3121,136 @@ class Polymarket(commands.Cog):
         )
         return None
 
+    async def _protected_claim_eligibility(
+        self, ctx: commands.Context, *, market_path_value: str, outcome: str,
+    ) -> tuple[BotFirstAccountBinding, EligibilityAttestation] | None:
+        user_config = self.config.user(ctx.author)
+        binding = await self._bot_first_account(ctx.author)
+        normalized_outcome = outcome.casefold()
+        now = int(time.time())
+        challenge = await user_config.settlement_eligibility()
+        if challenge:
+            expected = {
+                "request_id", "result_handle", "discord_user_id", "profile_id",
+                "signer_address", "account_wallet_address", "action",
+                "market_path", "outcome", "created_at", "expires_at",
+            }
+            if not isinstance(challenge, dict) or set(challenge) != expected:
+                raise AccountConnectionError(
+                    "The pending claim eligibility record is invalid."
+                )
+            if (
+                challenge["discord_user_id"] != ctx.author.id
+                or challenge["profile_id"] != binding.profile_id
+                or challenge["signer_address"] != binding.signer_address
+                or challenge["account_wallet_address"] != binding.account_wallet_address
+                or challenge["action"] != "claim"
+                or challenge["market_path"] != market_path_value
+                or challenge["outcome"] != normalized_outcome
+            ):
+                raise AccountConnectionError(
+                    "Claim details changed after eligibility started."
+                )
+            if now >= int(challenge["expires_at"]):
+                await user_config.settlement_eligibility.set(None)
+                raise AccountConnectionError(
+                    "The pending claim eligibility request expired."
+                )
+            cryptowallet = self.bot.get_cog("CryptoWallet")
+            poll = getattr(
+                cryptowallet, "poll_polymarket_eligibility_result", None
+            )
+            if not callable(poll):
+                raise AccountConnectionError("Protected eligibility is unavailable.")
+            result = await poll(challenge["result_handle"])
+            if result is None:
+                await ctx.send(
+                    "Complete the protected eligibility page first, then run "
+                    f"{ctx.clean_prefix}poly claim with the same market and outcome again."
+                )
+                return None
+            checked_at = int(result["checked_at"])
+            if not (
+                int(challenge["created_at"])
+                <= checked_at < int(challenge["expires_at"])
+            ):
+                raise AccountConnectionError(
+                    "Eligibility result does not match this claim request."
+                )
+            eligibility = EligibilityAttestation(
+                discord_user_id=ctx.author.id, blocked=result["blocked"],
+                country=result["country"], region=result["region"],
+                checked_at=checked_at,
+                expires_at=checked_at + ELIGIBILITY_LIFETIME_SECONDS,
+            )
+            await user_config.settlement_eligibility.set(None)
+            if eligibility.blocked:
+                await ctx.send(
+                    "Polymarket reports this location as unavailable. "
+                    "No claim was signed or submitted."
+                )
+                return None
+            eligibility.require_current(discord_user_id=ctx.author.id, now=now)
+            return binding, eligibility
+
+        cryptowallet = self.bot.get_cog("CryptoWallet")
+        required = (
+            "recovery_relay_status", "create_external_companion_handoff",
+            "register_recovery_handoff", "poll_polymarket_eligibility_result",
+        )
+        if cryptowallet is None or not all(
+            callable(getattr(cryptowallet, name, None)) for name in required
+        ):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        status = await cryptowallet.recovery_relay_status()
+        if not status.get("configured") or not status.get("approval_base_url"):
+            raise AccountConnectionError(
+                "The protected CryptoWallet companion is unavailable."
+            )
+        request_id = secrets.token_urlsafe(32)
+        result_handle = secrets.token_urlsafe(32)
+        payload = {
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "action": "claim",
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "market_path": market_path_value, "outcome": normalized_outcome,
+            "created_at": now, "expires_at": now + 300,
+            "chain_id": 137, "purpose": "polymarket_eligibility",
+        }
+        token, expires_at = await cryptowallet.create_external_companion_handoff(
+            ctx.author.id, "polymarket_eligibility", payload
+        )
+        if expires_at != payload["expires_at"]:
+            raise AccountConnectionError(
+                "Protected eligibility expiry changed unexpectedly."
+            )
+        handoff = await cryptowallet.register_recovery_handoff(
+            token, expires_at, purpose="polymarket_eligibility"
+        )
+        await user_config.settlement_eligibility.set({
+            "request_id": request_id, "result_handle": result_handle,
+            "discord_user_id": ctx.author.id, "profile_id": binding.profile_id,
+            "signer_address": binding.signer_address,
+            "account_wallet_address": binding.account_wallet_address,
+            "action": "claim", "market_path": market_path_value,
+            "outcome": normalized_outcome, "created_at": now,
+            "expires_at": expires_at,
+        })
+        eligibility_url = (
+            f"{status['approval_base_url']}/polymarket-eligibility.html"
+            f"#handoff={quote(handoff, safe='')}"
+        )
+        await ctx.send(
+            "Check current Polymarket eligibility for this exact claim: "
+            f"{eligibility_url}\nThen run {ctx.clean_prefix}poly claim with the "
+            f"same market and outcome again before <t:{expires_at}:R>. "
+            "No claim has been signed or submitted."
+        )
+        return None
+
     @polymarket.command(name="quote")
     @commands.bot_has_permissions(embed_links=True)
     async def polymarket_quote(self, ctx: commands.Context, reference: str, outcome: str,
@@ -3030,6 +3540,212 @@ class Polymarket(commands.Cog):
             await ctx.send(
                 f"The protected sell preview could not be prepared: {exc} "
                 "No order was signed or submitted."
+            )
+
+    @polymarket.command(name="claim", aliases=["redeem"])
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_claim(
+        self, ctx: commands.Context, reference: str, outcome: str,
+    ):
+        """Prepare an exact protected claim for one resolved outcome."""
+        if not await self._settlement_allowed():
+            await ctx.send(
+                "Polymarket claiming is disabled or emergency-paused. "
+                "No claim was signed or submitted."
+            )
+            return
+        user_config = self.config.user(ctx.author)
+        if not is_current_polymarket_terms_acceptance(
+            await user_config.terms_acceptance(), ctx.author.id
+        ):
+            await ctx.send(
+                f"Accept the current Polymarket terms first with "
+                f"{ctx.clean_prefix}poly terms."
+            )
+            return
+        path = market_path(reference)
+        if not path:
+            await ctx.send("Use a Polymarket market ID, slug, or link.")
+            return
+        try:
+            now = int(time.time())
+            existing_record = await user_config.settlement_approval()
+            if existing_record:
+                existing = SettlementApprovalRequest.from_record(existing_record)
+                if now < existing.confirmation.expires_at:
+                    view = SettlementApprovalView(self, existing)
+                    view.message = await ctx.send(
+                        embed=self._settlement_embed(existing), view=view
+                    )
+                    return
+                await user_config.settlement_approval.set(None)
+            operation_record = await user_config.settlement_operation()
+            if operation_record:
+                operation = SettlementOperation.from_record(
+                    operation_record
+                ).recover_after_restart()
+                await user_config.settlement_operation.set(operation.to_record())
+                if operation.state not in {
+                    SettlementState.CONFIRMED, SettlementState.FAILED,
+                }:
+                    raise AccountConnectionError(
+                        "A claim outcome is pending; use poly claimstatus before retry."
+                    )
+            protected = await self._protected_claim_eligibility(
+                ctx, market_path_value=path, outcome=outcome
+            )
+            if protected is None:
+                return
+            binding, eligibility = protected
+            market = ResolvedMarket.from_market(await self._get_json(path))
+            selected_outcome, token_id = market.select(outcome)
+            amount, source, block_number, condition_id = (
+                await self._settlement_balance(
+                    binding, market, token_id=token_id,
+                    outcome=selected_outcome,
+                )
+            )
+            nonce = await self.session_transport.get_wallet_nonce(
+                binding.signer_address
+            )
+            protocol = resolve_order_protocol(
+                token_id, negative_risk=market.negative_risk
+            )
+            if protocol.version == "3":
+                calls = (SettlementCall(
+                    POLYMARKET_PRODUCTION_MANIFEST.protocol_v2_router,
+                    router_redeem_calldata(token_id, amount),
+                ),)
+            else:
+                target = (
+                    POLYMARKET_PRODUCTION_MANIFEST.neg_risk_collateral_adapter
+                    if market.negative_risk else
+                    POLYMARKET_PRODUCTION_MANIFEST.collateral_adapter
+                )
+                calls = (SettlementCall(
+                    target, ctf_redeem_calldata(condition_id)
+                ),)
+            plan = SettlementPlan(
+                settlement_id=secrets.token_urlsafe(24),
+                discord_user_id=ctx.author.id,
+                profile_id=binding.profile_id,
+                owner_address=binding.signer_address,
+                wallet_address=binding.account_wallet_address,
+                market_id=market.market_id, condition_id=condition_id,
+                token_id=token_id, outcome=selected_outcome,
+                amount_atomic=amount, protocol=protocol.version,
+                negative_risk=market.negative_risk, nonce=nonce,
+                created_at=now, deadline=now + 600,
+                idempotency_key=secrets.token_urlsafe(24), calls=calls,
+            )
+            request = SettlementApprovalRequest.create(
+                request_id=secrets.token_urlsafe(24), plan=plan,
+                question=market.question, market_path=path,
+                eligibility=eligibility,
+                final_confirmation_required=bool(
+                    await user_config.final_confirmation_required()
+                ),
+                balance_source=source,
+                balance_block_number=block_number,
+            )
+            await user_config.settlement_approval.set(request.to_record())
+            view = SettlementApprovalView(self, request)
+            view.message = await ctx.send(
+                embed=self._settlement_embed(request), view=view
+            )
+        except (
+            AccountConnectionError, AccountDataError, OrderProtocolError,
+            TradeConfirmationError, RuntimeError, TypeError, ValueError,
+            aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The protected claim preview could not be prepared: {exc} "
+                "No claim was signed or submitted."
+            )
+
+    @polymarket.command(name="claimstatus", aliases=["redeemstatus"])
+    @commands.dm_only()
+    @commands.bot_has_permissions(embed_links=True)
+    async def polymarket_claimstatus(self, ctx: commands.Context):
+        """Reconcile one exact submitted claim without retrying it."""
+        user_config = self.config.user(ctx.author)
+        try:
+            record = await user_config.settlement_operation()
+            if not record:
+                raise AccountConnectionError("No Polymarket claim is stored.")
+            operation = SettlementOperation.from_record(
+                record
+            ).recover_after_restart()
+            if operation.plan.discord_user_id != ctx.author.id:
+                raise AccountConnectionError("Stored claim belongs to another user.")
+            await user_config.settlement_operation.set(operation.to_record())
+            if operation.state in {SettlementState.SUBMITTED, SettlementState.UNKNOWN}:
+                if not operation.transaction_id:
+                    await ctx.send(
+                        "The claim submission returned no transaction ID. It was "
+                        "not retried; manual review is required."
+                    )
+                    return
+                evidence = await self.deposit_wallet_relayer.get_settlement(
+                    operation.plan, operation.transaction_id
+                )
+                operation = operation.reconcile(evidence)
+                if operation.state is SettlementState.CONFIRMED:
+                    binding = await self._bot_first_account(ctx.author)
+                    market = ResolvedMarket.from_market(
+                        await self._get_json(
+                            f"/markets/{operation.plan.market_id}"
+                        )
+                    )
+                    outcome, token_id = market.select(operation.plan.outcome)
+                    remaining, _source, _block, condition_id = (
+                        await self._settlement_balance(
+                            binding, market, token_id=token_id,
+                            outcome=outcome, require_positive=False,
+                        )
+                    )
+                    if (
+                        token_id != operation.plan.token_id
+                        or condition_id != operation.plan.condition_id
+                        or remaining != 0
+                    ):
+                        raise AccountConnectionError(
+                            "The confirmed transaction has not cleared the exact position."
+                        )
+                await user_config.settlement_operation.set(operation.to_record())
+                if operation.state in {
+                    SettlementState.CONFIRMED, SettlementState.FAILED,
+                }:
+                    await user_config.settlement_approval.set(None)
+            embed = discord.Embed(
+                title="Polymarket claim status",
+                description=f"State: **{operation.state.value}**",
+            )
+            embed.add_field(
+                name="Market / outcome",
+                value=f"{operation.plan.market_id} / {operation.plan.outcome}",
+                inline=False,
+            )
+            embed.add_field(
+                name="Transaction ID",
+                value=f"`{operation.transaction_id or unavailable}`",
+                inline=False,
+            )
+            if operation.transaction_hash:
+                embed.add_field(
+                    name="Polygon transaction",
+                    value=f"`{operation.transaction_hash}`", inline=False,
+                )
+            embed.set_footer(text="Status reconciliation never resubmits the claim")
+            await ctx.send(embed=embed)
+        except (
+            AccountConnectionError, AccountDataError, TradeConfirmationError,
+            RuntimeError, TypeError, ValueError, aiohttp.ClientError, TimeoutError,
+        ) as exc:
+            await ctx.send(
+                f"The claim could not be reconciled: {exc} "
+                "No claim was retried or submitted."
             )
 
     @polymarket.command(name="orderstatus", aliases=["order"])

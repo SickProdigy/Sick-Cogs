@@ -15,6 +15,7 @@ from .account_connection import AccountConnectionError, normalize_evm_address
 from .order_protocol import is_protocol_v3_position_id
 from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 from .security_policy import EligibilityAttestation
+from .signer_proof import recover_signer_address
 from .trade_confirmation import TradeConfirmation, TradeConfirmationError
 
 _UINT256_MAX = (1 << 256) - 1
@@ -147,7 +148,7 @@ class PositionBalanceEvidence:
         )
         if (
             not is_protocol_v3_position_id(self.token_id)
-            or not 0 < self.amount_atomic <= _UINT256_MAX
+            or not 0 <= self.amount_atomic <= _UINT256_MAX
             or self.block_number < 0 or self.chain_id != 137
             or self.source != "polygon_position_manager"
         ):
@@ -364,11 +365,60 @@ class SettlementPlan:
             raise AccountConnectionError("Stored settlement is invalid.") from exc
 
 
+def _address_word(address: str) -> bytes:
+    return bytes(12) + bytes.fromhex(
+        normalize_evm_address(address, "EIP-712 address")[2:]
+    )
+
+
+def settlement_batch_digest(plan: SettlementPlan) -> bytes:
+    if not isinstance(plan, SettlementPlan):
+        raise AccountConnectionError("Settlement plan is invalid.")
+    domain_type = keccak(
+        b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    )
+    domain_separator = keccak(
+        domain_type + keccak(b"DepositWallet") + keccak(b"1")
+        + _uint(plan.chain_id, "Settlement chain")
+        + _address_word(plan.wallet_address)
+    )
+    call_type = keccak(b"Call(address target,uint256 value,bytes data)")
+    call_hashes = b"".join(
+        keccak(
+            call_type + _address_word(call.target)
+            + _uint(call.value, "Settlement call value")
+            + keccak(bytes.fromhex(call.data[2:]))
+        )
+        for call in plan.calls
+    )
+    batch_type = keccak(
+        b"Batch(address wallet,uint256 nonce,uint256 deadline,Call[] calls)"
+        b"Call(address target,uint256 value,bytes data)"
+    )
+    batch_hash = keccak(
+        batch_type + _address_word(plan.wallet_address)
+        + _uint(plan.nonce, "Settlement nonce")
+        + _uint(plan.deadline, "Settlement deadline")
+        + keccak(call_hashes)
+    )
+    return keccak(b"\x19\x01" + domain_separator + batch_hash)
+
+
+def verify_settlement_batch_signature(plan: SettlementPlan, signature: str) -> str:
+    recovered = recover_signer_address(settlement_batch_digest(plan), signature)
+    if recovered != plan.owner_address:
+        raise AccountConnectionError(
+            "Settlement owner signature does not match CryptoWallet."
+        )
+    return recovered
+
+
 @dataclass(frozen=True, slots=True)
 class SettlementApprovalRequest:
     request_id: str
     plan: SettlementPlan
     question: str
+    market_path: str
     eligibility: EligibilityAttestation
     confirmation: TradeConfirmation
     balance_source: str
@@ -380,6 +430,10 @@ class SettlementApprovalRequest:
             or not isinstance(self.plan, SettlementPlan)
             or not isinstance(self.question, str) or not self.question
             or len(self.question) > 512
+            or not isinstance(self.market_path, str)
+            or re.fullmatch(
+                r"/markets/(?:[0-9]+|slug/[A-Za-z0-9_-]+)", self.market_path
+            ) is None
             or not isinstance(self.eligibility, EligibilityAttestation)
             or not isinstance(self.confirmation, TradeConfirmation)
             or self.balance_source not in {"data_api", "polygon_position_manager"}
@@ -407,7 +461,8 @@ class SettlementApprovalRequest:
     @classmethod
     def create(
         cls, *, request_id: str, plan: SettlementPlan, question: str,
-        eligibility: EligibilityAttestation, final_confirmation_required: bool,
+        market_path: str, eligibility: EligibilityAttestation,
+        final_confirmation_required: bool,
         balance_source: str, balance_block_number: int | None = None,
     ) -> "SettlementApprovalRequest":
         expires_at = min(
@@ -420,7 +475,7 @@ class SettlementApprovalRequest:
             created_at=plan.created_at, expires_at=expires_at,
         )
         return cls(
-            request_id, plan, question, eligibility, confirmation,
+            request_id, plan, question, market_path, eligibility, confirmation,
             balance_source, balance_block_number,
         )
 
@@ -451,7 +506,7 @@ class SettlementApprovalRequest:
     def to_record(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id, "plan": self.plan.to_record(),
-            "question": self.question,
+            "question": self.question, "market_path": self.market_path,
             "eligibility": asdict(self.eligibility),
             "confirmation": self.confirmation.to_record(),
             "balance_source": self.balance_source,
@@ -461,7 +516,7 @@ class SettlementApprovalRequest:
     @classmethod
     def from_record(cls, record: Mapping[str, Any]) -> "SettlementApprovalRequest":
         expected = {
-            "request_id", "plan", "question", "eligibility",
+            "request_id", "plan", "question", "market_path", "eligibility",
             "confirmation", "balance_source", "balance_block_number",
         }
         if not isinstance(record, Mapping) or set(record) != expected:
@@ -471,6 +526,7 @@ class SettlementApprovalRequest:
                 request_id=str(record["request_id"]),
                 plan=SettlementPlan.from_record(record["plan"]),
                 question=str(record["question"]),
+                market_path=str(record["market_path"]),
                 eligibility=EligibilityAttestation(**dict(record["eligibility"])),
                 confirmation=TradeConfirmation.from_record(record["confirmation"]),
                 balance_source=str(record["balance_source"]),
