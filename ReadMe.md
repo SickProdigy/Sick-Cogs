@@ -45,10 +45,16 @@ Use `[p]cog update` to install future updates. Replace `[p]` with your bot's con
 
 Develop-only cogs and experiments are not part of the stable Index release.
 
-Current develop experiments include `gameroom`, a unified free-play launcher with bounded dice, coin flips, blackjack, higher-or-lower, and discovery of Red native games; `gitforge`, a multi-provider Gitea, GitHub, and GitLab issue and repository monitoring bridge; `ark`, an official ARK: Survival Ascended Steam announcement
-publisher, `imagine`, a private, provider-neutral AI image generator that is disabled until the bot
-owner explicitly allowlists a server and its administrators grant access, `mybb`, a per-server bridge
-for browsing and publishing through the SickProdigy MyBB API, `tickets`, a private text-channel support workflow with persistent staff controls, and `twitter`, a native X API post announcement cog.
+Current develop experiments include:
+
+- `gameroom` — unified free-play games and Red native-game discovery.
+- `gitforge` — Gitea, GitHub, and GitLab issue and repository monitoring.
+- `ark` — official ARK: Survival Ascended Steam announcements.
+- `imagine` — private provider-neutral AI image generation with explicit allowlisting.
+- `mybb` — per-server SickProdigy MyBB browsing and publishing.
+- `tickets` — private text-channel support with persistent staff controls.
+- `advancedhelp` — audience-first, permission-filtered interactive Red help.
+- `twitter` — native X API post announcements.
 
 ## External Cog Sync Helper
 
