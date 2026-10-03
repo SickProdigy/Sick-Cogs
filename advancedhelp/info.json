@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Audience-first interactive help that preserves Red command visibility and permission checks.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores server-level help presentation settings and Discord role IDs for optional presentation groups. It does not store member activity or message content.",
+  "hidden": false,
+  "install_msg": "AdvancedHelp replaces bare [p]help while delegating direct command and cog help to Red. Only one custom help formatter can be loaded. Configure delivery with [p]advancedhelpset.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "AdvancedHelp",
+  "permissions": ["embed_links"],
+  "requirements": [],
+  "short": "Permission-aware interactive help organized by audience.",
+  "tags": ["help", "permissions", "navigation", "utility"],
+  "type": "COG",
+  "version": "0.1.0"
+}
