@@ -1779,6 +1779,44 @@ class PolymarketBridgeTests(unittest.IsolatedAsyncioTestCase):
             "/status/" + "0x" + "3" * 40
         ))
 
+    async def test_withdrawal_quote_and_address_bind_exact_crypto_destination(self):
+        destination = BridgeAsset(
+            8453, "Base", "USD Coin", "USDC",
+            "0x" + "4" * 40, 6, Decimal("2"),
+        )
+        transport = AsyncMock(side_effect=[
+            self._quote(),
+            {"address": {
+                "evm": "0x" + "3" * 40, "svm": "solana-address",
+                "btc": "bc1address", "tvm": "tron-address",
+            }},
+        ])
+        client = PolymarketBridgeClient(transport)
+        recipient = "0x" + "2" * 40
+        quote = await client.withdrawal_quote(
+            amount_atomic=25_000_000, destination=destination,
+            recipient=recipient,
+        )
+        addresses = await client.withdrawal_addresses(
+            "0x" + "1" * 40, destination=destination, recipient=recipient,
+        )
+        self.assertEqual(quote.quote_id, "0x" + "a" * 64)
+        self.assertEqual(addresses.evm, "0x" + "3" * 40)
+        quote_call, address_call = transport.await_args_list
+        self.assertTrue(quote_call.args[1].endswith("/quote"))
+        self.assertEqual(json.loads(quote_call.kwargs["body"]), {
+            "fromAmountBaseUnit": "25000000", "fromChainId": "137",
+            "fromTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.usdce_token,
+            "recipientAddress": recipient, "toChainId": "8453",
+            "toTokenAddress": destination.token_address,
+        })
+        self.assertTrue(address_call.args[1].endswith("/withdraw"))
+        self.assertEqual(json.loads(address_call.kwargs["body"]), {
+            "address": "0x" + "1" * 40, "toChainId": "8453",
+            "toTokenAddress": destination.token_address,
+            "recipientAddr": recipient,
+        })
+
     async def test_status_accepts_detection_without_optional_hash_or_time(self):
         transaction = {
             "fromChainId": "8453", "fromTokenAddress": NATIVE_EVM_TOKEN,

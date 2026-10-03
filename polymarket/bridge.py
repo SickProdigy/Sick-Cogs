@@ -15,6 +15,7 @@ from .production_manifest import POLYMARKET_PRODUCTION_MANIFEST
 
 SUPPORTED_ASSETS_PATH = "/supported-assets"
 DEPOSIT_PATH = "/deposit"
+WITHDRAW_PATH = "/withdraw"
 QUOTE_PATH = "/quote"
 STATUS_PREFIX = "/status/"
 NATIVE_EVM_TOKEN = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
@@ -265,6 +266,54 @@ class PolymarketBridgeClient:
             body=body, params=None,
         )
         return BridgeQuote.from_payload(payload)
+
+    async def withdrawal_quote(
+        self, *, amount_atomic: int, destination: BridgeAsset, recipient: str,
+    ) -> BridgeQuote:
+        if amount_atomic <= 0 or not isinstance(destination, BridgeAsset):
+            raise AccountConnectionError("Bridge withdrawal quote is invalid.")
+        destination_address = normalize_evm_address(
+            recipient, "CryptoWallet withdrawal recipient"
+        )
+        body = json.dumps({
+            "fromAmountBaseUnit": str(amount_atomic),
+            "fromChainId": str(POLYMARKET_PRODUCTION_MANIFEST.chain_id),
+            "fromTokenAddress": POLYMARKET_PRODUCTION_MANIFEST.usdce_token,
+            "recipientAddress": destination_address,
+            "toChainId": str(destination.chain_id),
+            "toTokenAddress": destination.token_address,
+        }, separators=(",", ":"))
+        payload = await self._transport(
+            "POST", POLYMARKET_PRODUCTION_MANIFEST.bridge_api + QUOTE_PATH,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            body=body, params=None,
+        )
+        return BridgeQuote.from_payload(payload)
+
+    async def withdrawal_addresses(
+        self, account_wallet: str, *, destination: BridgeAsset, recipient: str,
+    ) -> BridgeDepositAddresses:
+        wallet = normalize_evm_address(account_wallet, "Polymarket account wallet")
+        destination_address = normalize_evm_address(
+            recipient, "CryptoWallet withdrawal recipient"
+        )
+        if not isinstance(destination, BridgeAsset):
+            raise AccountConnectionError("Bridge withdrawal destination is invalid.")
+        body = json.dumps({
+            "address": wallet, "toChainId": str(destination.chain_id),
+            "toTokenAddress": destination.token_address,
+            "recipientAddr": destination_address,
+        }, separators=(",", ":"))
+        payload = await self._transport(
+            "POST", POLYMARKET_PRODUCTION_MANIFEST.bridge_api + WITHDRAW_PATH,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            body=body, params=None,
+        )
+        if not isinstance(payload, dict) or set(payload) not in (
+            {"address"}, {"address", "note"},
+        ):
+            raise AccountConnectionError("Bridge withdrawal response is invalid.")
+        return BridgeDepositAddresses.from_payload(payload["address"])
 
     async def deposit_addresses(self, account_wallet: str) -> BridgeDepositAddresses:
         wallet = normalize_evm_address(account_wallet, "Polymarket account wallet")
