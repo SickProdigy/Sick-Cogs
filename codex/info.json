@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "Private manual Codex usage-cycle estimates and reset reminders with a provider boundary for future official usage data.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores each participating Discord user's private reminder schedule, manually entered remaining-percentage estimate, thresholds, and delivery state. It stores no OpenAI credentials, OAuth tokens, account identifiers, prompts, or conversations. Disconnect and Red user-data deletion clear all stored user data.",
+  "hidden": false,
+  "install_msg": "Use [p]codex setup to privately track a reset cycle. OpenAI does not currently expose remaining allowance or reset timestamps to this cog, so it never claims that manual estimates are live account data.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 8, 0],
+  "name": "Codex",
+  "permissions": [],
+  "requirements": [],
+  "short": "Private Codex usage-cycle and reset reminders.",
+  "tags": ["codex", "openai", "reminders", "usage", "privacy"],
+  "type": "COG",
+  "version": "0.1.0"
+}

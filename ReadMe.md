@@ -54,6 +54,7 @@ Current develop experiments include:
 - `mybb` — per-server SickProdigy MyBB browsing and publishing.
 - `tickets` — private text-channel support with persistent staff controls.
 - `advancedhelp` — audience-first, permission-filtered interactive Red help.
+- `codex` — private manual Codex allowance-cycle reminders.
 - `twitter` — native X API post announcements.
 
 ## External Cog Sync Helper
