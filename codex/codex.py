@@ -1,51 +1,72 @@
 import asyncio
 import logging
 import time
+
+import aiohttp
 import discord
 from discord.ext import tasks
-from redbot.core import Config, commands
+from redbot.core import Config, checks, commands
+from redbot.core.data_manager import cog_data_path
 
-from .models import due_notifications, normalize_offsets, roll_cycle, validate_percent
-from .provider import ManualUsageProvider
+from .manager import CodexManager, CodexManagerError
+from .models import alert_key, due_low_alerts, iter_limit_windows, validate_percent
 
 log = logging.getLogger("red.sickcogs.codex")
-
 CONFIG_IDENTIFIER = 620351947235
+DEFAULT_GLOBAL = {"schema_version": 2}
 DEFAULT_USER = {
-    "enabled": False,
-    "reset_at": 0,
-    "cycle_seconds": 7 * 86400,
-    "reminder_offsets": [48 * 3600, 24 * 3600],
-    "sent_keys": [],
-    "remaining_percent": None,
-    "updated_at": 0,
-    "low_threshold": 10,
-    "low_notified_reset": 0,
+    "connected": False,
+    "enabled": True,
+    "low_threshold": 20,
+    "sent_alerts": [],
+    "last_checked_at": 0,
 }
-USAGE_URL = "https://chatgpt.com/#settings/Usage"
+
+
+class CodexLinkView(discord.ui.View):
+    def __init__(self, url):
+        super().__init__(timeout=600)
+        self.add_item(discord.ui.Button(
+            label="Open ChatGPT authorization",
+            style=discord.ButtonStyle.link,
+            url=url,
+        ))
 
 
 class Codex(commands.Cog):
-    """Private Codex allowance-cycle reminders without account scraping."""
+    """Private live Codex allowance status and notifications."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
 
     def __init__(self, bot):
         self.bot = bot
         self.config = Config.get_conf(
             self, identifier=CONFIG_IDENTIFIER, force_registration=True
         )
+        self.config.register_global(**DEFAULT_GLOBAL)
         self.config.register_user(**DEFAULT_USER)
-        self.provider = ManualUsageProvider(self.config)
+        self.session = None
+        self.manager = CodexManager(cog_data_path(self), lambda: self.session)
+        self._linking = set()
 
     async def cog_load(self):
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        )
         self.notification_loop.start()
 
     def cog_unload(self):
         self.notification_loop.cancel()
+        if self.session and not self.session.closed:
+            asyncio.create_task(self.session.close())
 
     async def red_delete_data_for_user(self, *, requester, user_id: int):
+        try:
+            await self.manager.logout(user_id)
+        except CodexManagerError:
+            pass
+        self.manager.remove_account(user_id)
         await self.config.user_from_id(user_id).clear()
 
     async def _user(self, user_id):
@@ -57,255 +78,264 @@ class Codex(commands.Cog):
                 return None
         return user
 
-    async def _send_user(self, user_id, message):
+    async def _send_user(self, user_id, content=None, embed=None, view=None):
         user = await self._user(user_id)
         if user is None:
-            return False
+            return None
         try:
-            await user.send(message)
+            return await user.send(content=content, embed=embed, view=view)
         except (discord.Forbidden, discord.HTTPException):
-            return False
-        return True
+            return None
 
-    async def process_user(self, user_id, data, now=None):
-        now = int(time.time() if now is None else now)
-        if not data.get("enabled") or not data.get("reset_at"):
+    async def _private(self, ctx, content=None, embed=None, view=None):
+        try:
+            message = await ctx.author.send(
+                content=content, embed=embed, view=view
+            )
+        except (discord.Forbidden, discord.HTTPException):
+            await ctx.send(
+                "I could not DM you. Enable direct messages and try again."
+            )
+            return None
+        if ctx.guild:
+            await ctx.tick()
+        return message
+
+    @staticmethod
+    def _window_label(window):
+        if window.duration_minutes:
+            hours = window.duration_minutes / 60
+            if hours >= 24 and hours % 24 == 0:
+                return f"{hours / 24:g}-day {window.window_name}"
+            return f"{hours:g}-hour {window.window_name}"
+        return window.window_name.title()
+
+    async def usage_embed(self, user_id, payload=None):
+        if payload is None:
+            payload = await self.manager.rate_limits(user_id)
+        windows = list(iter_limit_windows(payload))
+        if not windows:
+            raise CodexManagerError(
+                "The linked account did not return Codex rate-limit windows."
+            )
+        embed = discord.Embed(
+            title="Codex account usage",
+            description="Live allowance reported by Codex app-server.",
+            color=discord.Color.blurple(),
+        )
+        for window in windows[:10]:
+            reset = (
+                f"<t:{window.resets_at}:F> (<t:{window.resets_at}:R>)"
+                if window.resets_at
+                else "Not reported"
+            )
+            embed.add_field(
+                name=f"{window.limit_name} - {self._window_label(window)}",
+                value=(
+                    f"**{window.remaining_percent}% remaining** "
+                    f"({window.used_percent}% used)\nReset: {reset}"
+                ),
+                inline=False,
+            )
+        data = await self.config.user_from_id(user_id).all()
+        state = "on" if data["enabled"] else "paused"
+        embed.set_footer(
+            text=(
+                f"Low-allowance DMs: {state} at "
+                f"{data['low_threshold']}% remaining"
+            )
+        )
+        return embed
+
+    async def process_user(self, user_id, data):
+        if not data.get("connected") or not data.get("enabled"):
             return 0
-        group = self.config.user_from_id(user_id)
-        reset_at = int(data["reset_at"])
-        cycle_seconds = int(data.get("cycle_seconds", 7 * 86400))
-        sent = list(data.get("sent_keys", []))
+        payload = await self.manager.rate_limits(user_id)
+        threshold = int(data.get("low_threshold", 20))
+        sent = list(data.get("sent_alerts", []))
         delivered = 0
-
-        if reset_at <= now:
-            next_reset, _ = roll_cycle(now, reset_at, cycle_seconds)
-            remaining = data.get("remaining_percent")
-            summary = (
-                f" Your last manual estimate was {remaining}% remaining."
-                if remaining is not None
+        for window in due_low_alerts(payload, threshold, sent):
+            reset = (
+                f" It resets <t:{window.resets_at}:R>."
+                if window.resets_at
                 else ""
             )
-            if await self._send_user(
-                user_id,
-                f"Your tracked Codex usage cycle reset.{summary} "
-                f"The next reset is <t:{next_reset}:F>.",
-            ):
-                delivered += 1
-            await group.reset_at.set(next_reset)
-            await group.remaining_percent.set(None)
-            await group.updated_at.set(0)
-            await group.sent_keys.set([])
-            await group.low_notified_reset.set(0)
-            reset_at, sent = next_reset, []
-
-        for key, offset in due_notifications(
-            now, reset_at,
-            (
-                offset
-                for offset in data.get("reminder_offsets", [])
-                if 0 < int(offset) < cycle_seconds
-            ),
-            sent
-        ):
-            hours = offset // 3600
-            remaining = data.get("remaining_percent")
-            estimate = (
-                f" Your manual estimate is {remaining}% remaining."
-                if remaining is not None
-                else ""
+            message = (
+                f"Your **{window.limit_name}** "
+                f"{self._window_label(window)} allowance has "
+                f"**{window.remaining_percent}% remaining**.{reset}"
             )
-            if await self._send_user(
-                user_id,
-                f"Your tracked Codex cycle resets <t:{reset_at}:R> "
-                f"({hours}h reminder).{estimate} Review official usage: {USAGE_URL}",
-            ):
-                sent.append(key)
+            if await self._send_user(user_id, message):
+                sent.append(alert_key(window, threshold))
                 delivered += 1
-        if sent != data.get("sent_keys", []):
-            await group.sent_keys.set(sent[-20:])
+        group = self.config.user_from_id(user_id)
+        await group.sent_alerts.set(sent[-30:])
+        await group.last_checked_at.set(int(time.time()))
         return delivered
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=15)
     async def notification_loop(self):
-        now = int(time.time())
         for user_id, data in (await self.config.all_users()).items():
             try:
-                await self.process_user(user_id, data, now)
+                await self.process_user(user_id, data)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Codex reminder processing failed for user %s", user_id)
+                log.exception("Codex usage polling failed for user %s", user_id)
 
     @notification_loop.before_loop
     async def before_notification_loop(self):
         await self.bot.wait_until_red_ready()
 
-    async def _private(self, ctx, content=None, embed=None):
-        try:
-            await ctx.author.send(content=content, embed=embed)
-        except (discord.Forbidden, discord.HTTPException):
-            await ctx.send(
-                "I could not DM you. Enable direct messages and try again."
-            )
-            return False
-        if ctx.guild:
-            await ctx.tick()
-        return True
-
-    async def status_embed(self, user):
-        data = await self.config.user(user).all()
-        embed = discord.Embed(
-            title="Codex usage reminders",
-            description=(
-                "Manual private tracking. OpenAI does not expose remaining allowance "
-                "or reset timestamps to this cog."
-            ),
-            color=discord.Color.blurple(),
-        )
-        embed.add_field(
-            name="Notifications",
-            value="Enabled" if data["enabled"] else "Paused",
-        )
-        reset_at = int(data.get("reset_at", 0) or 0)
-        embed.add_field(
-            name="Tracked reset",
-            value=f"<t:{reset_at}:F> (<t:{reset_at}:R>)" if reset_at else "Not configured",
-            inline=False,
-        )
-        remaining = data.get("remaining_percent")
-        embed.add_field(
-            name="Manual remaining estimate",
-            value=f"{remaining}%" if remaining is not None else "Not recorded",
-        )
-        embed.add_field(
-            name="Reminder offsets",
-            value=", ".join(
-                f"{int(value) // 3600}h" for value in data["reminder_offsets"]
-            ),
-        )
-        embed.add_field(
-            name="Official usage",
-            value=f"[Open ChatGPT Settings → Usage]({USAGE_URL})",
-            inline=False,
-        )
-        embed.set_footer(
-            text="Estimates are entered by you and are never visible to other members."
-        )
-        return embed
-
     @commands.group(name="codex", invoke_without_command=True)
     async def codex(self, ctx):
-        """Manage your private Codex usage-cycle reminders."""
-        await self._private(ctx, embed=await self.status_embed(ctx.author))
-
-    @codex.command(name="setup")
-    async def setup_cycle(
-        self, ctx, hours_until_reset: float, cycle_hours: int = 168
-    ):
-        """Track a reset relative to now and its recurring cycle length."""
-        if not 0 < hours_until_reset <= 720:
-            await ctx.send("Hours until reset must be above 0 and at most 720.")
+        """Show your private live Codex allowance."""
+        if not await self.config.user(ctx.author).connected():
+            await self._private(
+                ctx,
+                "Your Codex account is not connected. "
+                f"Use {ctx.clean_prefix}codex connect.",
+            )
             return
-        if not 1 <= cycle_hours <= 720:
-            await ctx.send("Cycle hours must be from 1 through 720.")
-            return
-        now = int(time.time())
-        group = self.config.user(ctx.author)
-        await group.reset_at.set(now + int(hours_until_reset * 3600))
-        await group.cycle_seconds.set(cycle_hours * 3600)
-        await group.sent_keys.set([])
-        await group.low_notified_reset.set(0)
-        await group.enabled.set(True)
-        await self._private(
-            ctx,
-            "Codex usage-cycle reminders are enabled. "
-            "Use the status command to review the private schedule.",
-        )
-
-    @codex.command(name="remaining")
-    async def remaining(self, ctx, percent: int):
-        """Record your own estimate of remaining allowance."""
         try:
-            percent = validate_percent(percent)
-        except ValueError as error:
-            await ctx.send(str(error))
+            embed = await self.usage_embed(ctx.author.id)
+        except CodexManagerError as exc:
+            await self._private(ctx, f"Codex usage is unavailable: {exc}")
             return
-        group = self.config.user(ctx.author)
-        data = await group.all()
-        await group.remaining_percent.set(percent)
-        await group.updated_at.set(int(time.time()))
-        reset_at = int(data.get("reset_at", 0) or 0)
-        threshold = int(data.get("low_threshold", 10))
-        note = ""
-        if percent <= threshold and reset_at:
-            note = f" This is at or below your {threshold}% low-allowance threshold."
-            await group.low_notified_reset.set(reset_at)
-        await self._private(
-            ctx,
-            f"Your manual remaining estimate is now {percent}%.{note} "
-            f"Official usage remains available at {USAGE_URL}",
-        )
+        await self._private(ctx, embed=embed)
 
-    @codex.command(name="reminders")
-    async def reminders(self, ctx, *hours: int):
-        """Set one or more reminder offsets, such as 48 24 1."""
-        try:
-            offsets = normalize_offsets(hours)
-        except ValueError as error:
-            await ctx.send(str(error))
+    @codex.command(name="connect")
+    async def connect(self, ctx):
+        """Privately link your ChatGPT account with a device code."""
+        user_id = ctx.author.id
+        if user_id in self._linking:
+            await ctx.send("A Codex connection is already waiting for you.")
             return
-        await self.config.user(ctx.author).reminder_offsets.set(offsets)
-        await self.config.user(ctx.author).sent_keys.set([])
-        await self._private(
-            ctx,
-            "Reminder offsets saved: "
-            + ", ".join(f"{value // 3600}h" for value in offsets),
-        )
+        self._linking.add(user_id)
+        server = None
+        message = None
+        try:
+            server, request = await self.manager.begin_device_login(user_id)
+            message = await self._private(
+                ctx,
+                content=(
+                    "**Connect your Codex account**\n"
+                    "1. Open the authorization page.\n"
+                    f"2. Enter this one-time code: {request['userCode']}\n"
+                    "3. Approve access.\n\nWaiting for ChatGPT..."
+                ),
+                view=CodexLinkView(request["verificationUrl"]),
+            )
+            if message is None:
+                return
+            result = await server.wait_for_login(request["loginId"])
+            if not result.get("success"):
+                raise CodexManagerError(
+                    result.get("error") or "ChatGPT did not approve the link."
+                )
+            await self.config.user(ctx.author).connected.set(True)
+            await self.config.user(ctx.author).sent_alerts.set([])
+            await message.edit(
+                content=(
+                    "**Codex connected**\n"
+                    "Run codex here or in a shared server to see live usage."
+                ),
+                view=None,
+            )
+        except CodexManagerError as exc:
+            target = message.edit if message else None
+            if target:
+                await target(content=f"Codex linking failed: {exc}", view=None)
+            else:
+                await self._private(ctx, f"Codex linking failed: {exc}")
+        finally:
+            self._linking.discard(user_id)
+            if server:
+                await server.close()
 
     @codex.command(name="threshold")
     async def threshold(self, ctx, percent: int):
-        """Set the low-allowance threshold for your manual estimate."""
+        """Set the remaining-percentage warning threshold."""
         try:
             percent = validate_percent(percent)
-        except ValueError as error:
-            await ctx.send(str(error))
+        except ValueError as exc:
+            await ctx.send(str(exc))
             return
-        await self.config.user(ctx.author).low_threshold.set(percent)
-        await self._private(ctx, f"Low-allowance threshold set to {percent}%.")
+        group = self.config.user(ctx.author)
+        await group.low_threshold.set(percent)
+        await group.sent_alerts.set([])
+        await self._private(
+            ctx,
+            f"Low-allowance warnings will be sent at {percent}% remaining.",
+        )
 
     @codex.command(name="pause")
     async def pause(self, ctx):
-        """Pause notifications without deleting your schedule."""
+        """Pause automatic allowance notifications."""
         await self.config.user(ctx.author).enabled.set(False)
-        await self._private(ctx, "Codex usage reminders are paused.")
+        await self._private(ctx, "Codex allowance notifications are paused.")
 
     @codex.command(name="resume")
     async def resume(self, ctx):
-        """Resume a configured notification schedule."""
-        reset_at = await self.config.user(ctx.author).reset_at()
-        if not reset_at:
-            await ctx.send("Configure a cycle with the setup command first.")
+        """Resume automatic allowance notifications."""
+        if not await self.config.user(ctx.author).connected():
+            await ctx.send("Connect your Codex account first.")
             return
         await self.config.user(ctx.author).enabled.set(True)
-        await self._private(ctx, "Codex usage reminders are enabled.")
+        await self._private(ctx, "Codex allowance notifications are enabled.")
 
     @codex.command(name="disconnect")
     async def disconnect(self, ctx, confirm: bool = False):
-        """Delete all of your Codex reminder data."""
+        """Revoke and delete your Codex connection."""
         if not confirm:
             await ctx.send(
-                "Run this command again with true to delete your private Codex data."
+                "Run this command again with true to disconnect Codex "
+                "and delete its local credentials."
             )
             return
+        warning = ""
+        try:
+            await self.manager.logout(ctx.author.id)
+        except CodexManagerError:
+            warning = (
+                " Remote revocation could not be confirmed; disconnect the "
+                "app in ChatGPT Settings if needed."
+            )
+        self.manager.remove_account(ctx.author.id)
         await self.config.user(ctx.author).clear()
-        await self._private(ctx, "Your Codex reminder data was deleted.")
+        await self._private(
+            ctx,
+            "Your Codex connection and local data were deleted." + warning,
+        )
 
     @codex.command(name="about")
     async def about(self, ctx):
-        """Explain live usage limitations and the manual fallback."""
+        """Explain the live Codex usage connection."""
         await self._private(
             ctx,
-            "OpenAI currently directs third-party apps to ChatGPT Settings → Usage. "
-            "It does not provide this cog a supported remaining-balance or reset-time "
-            f"feed, so reminders use only dates and estimates you enter. {USAGE_URL}",
+            "This cog uses the official Codex device-code login and "
+            "account/rateLimits/read to show live allowance windows. "
+            "It does not read conversations, prompts, or API keys.",
         )
+
+    @commands.group(name="codexset", invoke_without_command=True)
+    @checks.is_owner()
+    async def codexset(self, ctx):
+        """Manage the bot's private Codex CLI installation."""
+        version = await self.manager.version()
+        await ctx.send(
+            f"Managed Codex CLI: {version}"
+            if version
+            else "Managed Codex CLI is not installed."
+        )
+
+    @codexset.command(name="install")
+    async def codexset_install(self, ctx):
+        """Install or update the official Codex CLI."""
+        message = await ctx.send("Installing the official Codex CLI...")
+        try:
+            version = await self.manager.install()
+        except CodexManagerError as exc:
+            await message.edit(content=f"Codex installation failed: {exc}")
+            return
+        await message.edit(content=f"Codex is installed: {version}")

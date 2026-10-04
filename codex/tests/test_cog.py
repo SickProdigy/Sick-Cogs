@@ -1,4 +1,5 @@
 import unittest
+
 from codex.codex import Codex, DEFAULT_USER
 
 
@@ -48,8 +49,9 @@ class User:
         self.id = user_id
         self.messages = []
 
-    async def send(self, message):
-        self.messages.append(message)
+    async def send(self, content=None, embed=None, view=None):
+        self.messages.append(content)
+        return object()
 
 
 class Bot:
@@ -63,67 +65,77 @@ class Bot:
         return self.users.get(user_id)
 
 
+class Manager:
+    def __init__(self, payload):
+        self.payload = payload
+        self.removed = []
+
+    async def rate_limits(self, user_id):
+        return self.payload
+
+    async def logout(self, user_id):
+        return None
+
+    def remove_account(self, user_id):
+        self.removed.append(user_id)
+
+
 class CogTests(unittest.IsolatedAsyncioTestCase):
-    def cog(self, records):
+    def cog(self, records, payload):
         users = [User(user_id) for user_id in records]
         cog = Codex.__new__(Codex)
         cog.config = Config(records)
         cog.bot = Bot(users)
+        cog.manager = Manager(payload)
         return cog
 
-    async def test_due_reminder_is_private_and_idempotent(self):
-        cog = self.cog({
-            1: {
-                "enabled": True,
-                "reset_at": 100,
-                "reminder_offsets": [20],
-                "remaining_percent": 40,
+    async def test_low_warning_is_private_and_idempotent(self):
+        payload = {
+            "rateLimits": {
+                "limitId": "codex",
+                "limitName": "Codex",
+                "secondary": {
+                    "usedPercent": 90,
+                    "resetsAt": 500,
+                    "windowDurationMins": 10080,
+                },
+            }
+        }
+        cog = self.cog(
+            {
+                1: {
+                    "connected": True,
+                    "enabled": True,
+                    "low_threshold": 20,
+                },
+                2: {
+                    "connected": True,
+                    "enabled": True,
+                    "low_threshold": 5,
+                },
             },
-            2: {
-                "enabled": True,
-                "reset_at": 200,
-                "reminder_offsets": [20],
-                "remaining_percent": 90,
-            },
-        })
-        data = await cog.config.user_from_id(1).all()
-        self.assertEqual(await cog.process_user(1, data, now=90), 1)
+            payload,
+        )
+        first = await cog.config.user_from_id(1).all()
+        self.assertEqual(await cog.process_user(1, first), 1)
         self.assertEqual(len(cog.bot.users[1].messages), 1)
         self.assertEqual(cog.bot.users[2].messages, [])
-        data = await cog.config.user_from_id(1).all()
-        self.assertEqual(await cog.process_user(1, data, now=90), 0)
-        self.assertEqual(len(cog.bot.users[1].messages), 1)
+        first = await cog.config.user_from_id(1).all()
+        self.assertEqual(await cog.process_user(1, first), 0)
 
-    async def test_cycle_reset_clears_estimate_and_advances(self):
-        cog = self.cog({
-            1: {
-                "enabled": True,
-                "reset_at": 100,
-                "cycle_seconds": 50,
-                "remaining_percent": 30,
-                "updated_at": 80,
-                "sent_keys": ["100:20"],
-            }
-        })
-        data = await cog.config.user_from_id(1).all()
-        await cog.process_user(1, data, now=125)
-        updated = await cog.config.user_from_id(1).all()
-        self.assertEqual(updated["reset_at"], 150)
-        self.assertIsNone(updated["remaining_percent"])
-        self.assertEqual(updated["sent_keys"], [])
-        self.assertIn("30%", cog.bot.users[1].messages[0])
-
-    async def test_user_deletion_clears_only_target_user(self):
-        cog = self.cog({
-            1: {"enabled": True, "remaining_percent": 20},
-            2: {"enabled": True, "remaining_percent": 80},
-        })
+    async def test_user_deletion_removes_only_target_credentials(self):
+        cog = self.cog(
+            {1: {"connected": True}, 2: {"connected": True}}, {}
+        )
         await cog.red_delete_data_for_user(
             requester="discord_deleted_user", user_id=1
         )
-        self.assertFalse((await cog.config.user_from_id(1).all())["enabled"])
-        self.assertEqual(
-            (await cog.config.user_from_id(2).all())["remaining_percent"], 80
+        self.assertEqual(cog.manager.removed, [1])
+        self.assertFalse(
+            (await cog.config.user_from_id(1).all())["connected"]
+        )
+        self.assertTrue(
+            (await cog.config.user_from_id(2).all())["connected"]
         )
 
 

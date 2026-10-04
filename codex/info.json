@@ -1,17 +1,17 @@
 {
   "author": ["SickProdigy"],
-  "description": "Private manual Codex usage-cycle estimates and reset reminders with a provider boundary for future official usage data.",
+  "description": "Private live Codex allowance status and low-usage notifications through per-user ChatGPT device-code connections.",
   "disabled": false,
-  "end_user_data_statement": "This cog stores each participating Discord user's private reminder schedule, manually entered remaining-percentage estimate, thresholds, and delivery state. It stores no OpenAI credentials, OAuth tokens, account identifiers, prompts, or conversations. Disconnect and Red user-data deletion clear all stored user data.",
+  "end_user_data_statement": "This cog stores each participating Discord user's notification preferences and a private Codex authentication home containing renewable ChatGPT authorization. Credentials are isolated per user and are never shown in Discord or stored in Red Config. Disconnect and Red user-data deletion remove the user's local credentials and configuration after attempting remote logout.",
   "hidden": false,
-  "install_msg": "Use [p]codex setup to privately track a reset cycle. OpenAI does not currently expose remaining allowance or reset timestamps to this cog, so it never claims that manual estimates are live account data.",
+  "install_msg": "The bot owner first runs [p]codexset install. Members then use [p]codex connect to privately link ChatGPT with an official device code and [p]codex to view live allowance.",
   "min_bot_version": "3.5.0",
-  "min_python_version": [3, 8, 0],
+  "min_python_version": [3, 10, 0],
   "name": "Codex",
   "permissions": [],
   "requirements": [],
-  "short": "Private Codex usage-cycle and reset reminders.",
+  "short": "Live private Codex allowance and reset notifications.",
   "tags": ["codex", "openai", "reminders", "usage", "privacy"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
