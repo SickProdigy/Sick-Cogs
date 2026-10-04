@@ -106,19 +106,19 @@ class CogTests(unittest.IsolatedAsyncioTestCase):
                 1: {
                     "connected": True,
                     "enabled": True,
-                    "low_threshold": 20,
+                    "alert_levels": [50, 75, 95],
                 },
                 2: {
                     "connected": True,
                     "enabled": True,
-                    "low_threshold": 5,
+                    "alert_levels": [95],
                 },
             },
             payload,
         )
         first = await cog.config.user_from_id(1).all()
-        self.assertEqual(await cog.process_user(1, first), 1)
-        self.assertEqual(len(cog.bot.users[1].messages), 1)
+        self.assertEqual(await cog.process_user(1, first), 2)
+        self.assertEqual(len(cog.bot.users[1].messages), 2)
         self.assertEqual(cog.bot.users[2].messages, [])
         first = await cog.config.user_from_id(1).all()
         self.assertEqual(await cog.process_user(1, first), 0)

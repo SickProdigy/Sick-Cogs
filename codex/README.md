@@ -22,13 +22,13 @@ allow outbound HTTPS and execution from Red's data directory.
 
 - [p]codex connect - receive an OpenAI authorization link and one-time device code by DM.
 - [p]codex - privately show live used/remaining percentages and reset times.
-- [p]codex threshold PERCENT - set the remaining allowance warning threshold.
+- [p]codex alerts PERCENT... - set used-percentage milestones, such as 50 75 95.
 - [p]codex pause or resume - control automatic DMs.
 - [p]codex disconnect true - revoke and delete the local account connection.
 - [p]codex about - explain the connection and data boundary.
 
-The default threshold is 20 percent remaining. The cog polls connected accounts every
-15 minutes and sends each window warning once per reset period and threshold.
+The default milestones are 50, 75, and 95 percent used. The cog polls connected accounts every
+15 minutes and sends each milestone once per allowance window.
 
 ## Privacy and storage
 
@@ -38,7 +38,7 @@ member is offline. Account credentials are never placed in Red Config, Discord m
 URLs, logs, source control, or another member's process environment.
 
 Red Config stores only the Discord user ID, connection state, notification preference,
-threshold, sent-alert keys, and last-check time. The cog does not read or store prompts,
+alert milestones, sent-alert keys, and last-check time. The cog does not read or store prompts,
 conversations, source code, or OpenAI API keys. Disconnect and Red user-data deletion
 attempt remote logout, remove the user's private Codex home, and clear their configuration.
 

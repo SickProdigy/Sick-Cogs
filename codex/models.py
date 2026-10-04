@@ -71,24 +71,32 @@ def iter_limit_windows(payload: Dict) -> Iterator[LimitWindow]:
             )
 
 
-def due_low_alerts(
-    payload: Dict, threshold: int, sent_keys: Iterable[str]
-) -> Tuple[LimitWindow, ...]:
+def validate_alert_levels(values: Iterable[int]) -> Tuple[int, ...]:
+    levels = tuple(sorted({validate_percent(value) for value in values}))
+    if not levels:
+        raise ValueError("Provide at least one alert percentage.")
+    if len(levels) > 10:
+        raise ValueError("Configure no more than 10 alert percentages.")
+    if levels[0] == 0:
+        raise ValueError("Alert percentages must be from 1 through 100.")
+    return levels
+
+
+def due_alerts(
+    payload: Dict, levels: Iterable[int], sent_keys: Iterable[str]
+) -> Tuple[Tuple[LimitWindow, int], ...]:
     sent = set(sent_keys)
     return tuple(
-        window
+        (window, level)
         for window in iter_limit_windows(payload)
-        if window.remaining_percent <= threshold
-        and (
-            f"{window.limit_id}:{window.window_name}:"
-            f"{window.resets_at or 0}:{threshold}"
-        )
-        not in sent
+        for level in validate_alert_levels(levels)
+        if window.used_percent >= level
+        and alert_key(window, level) not in sent
     )
 
 
-def alert_key(window: LimitWindow, threshold: int) -> str:
+def alert_key(window: LimitWindow, level: int) -> str:
     return (
         f"{window.limit_id}:{window.window_name}:"
-        f"{window.resets_at or 0}:{threshold}"
+        f"{window.resets_at or 0}:{level}"
     )

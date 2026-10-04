@@ -2,9 +2,9 @@ import unittest
 
 from codex.models import (
     alert_key,
-    due_low_alerts,
+    due_alerts,
     iter_limit_windows,
-    validate_percent,
+    validate_alert_levels,
 )
 
 
@@ -30,10 +30,10 @@ PAYLOAD = {
 
 class ModelTests(unittest.TestCase):
     def test_percent_validation(self):
-        self.assertEqual(validate_percent(20), 20)
+        self.assertEqual(validate_alert_levels([95, 50, 75, 50]), (50, 75, 95))
         for value in (-1, 101):
             with self.assertRaises(ValueError):
-                validate_percent(value)
+                validate_alert_levels([value])
 
     def test_live_windows_report_remaining_and_reset(self):
         windows = list(iter_limit_windows(PAYLOAD))
@@ -43,10 +43,18 @@ class ModelTests(unittest.TestCase):
         )
 
     def test_low_alerts_are_idempotent_per_window_and_threshold(self):
-        windows = due_low_alerts(PAYLOAD, 20, [])
-        self.assertEqual(len(windows), 1)
-        key = alert_key(windows[0], 20)
-        self.assertEqual(due_low_alerts(PAYLOAD, 20, [key]), ())
+        alerts = due_alerts(PAYLOAD, [50, 75, 95], [])
+        self.assertEqual(
+            [(window.window_name, level) for window, level in alerts],
+            [("primary", 50), ("secondary", 50), ("secondary", 75)],
+        )
+        window, level = alerts[0]
+        key = alert_key(window, level)
+        remaining = due_alerts(PAYLOAD, [50], [key])
+        self.assertEqual(
+            [(item.window_name, item_level) for item, item_level in remaining],
+            [("secondary", 50)],
+        )
 
     def test_legacy_single_bucket_is_supported(self):
         payload = {"rateLimits": PAYLOAD["rateLimitsByLimitId"]["codex"]}

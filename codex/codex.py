@@ -9,15 +9,20 @@ from redbot.core import Config, checks, commands
 from redbot.core.data_manager import cog_data_path
 
 from .manager import CodexManager, CodexManagerError
-from .models import alert_key, due_low_alerts, iter_limit_windows, validate_percent
+from .models import (
+    alert_key,
+    due_alerts,
+    iter_limit_windows,
+    validate_alert_levels,
+)
 
 log = logging.getLogger("red.sickcogs.codex")
 CONFIG_IDENTIFIER = 620351947235
-DEFAULT_GLOBAL = {"schema_version": 2}
+DEFAULT_GLOBAL = {"schema_version": 3}
 DEFAULT_USER = {
     "connected": False,
     "enabled": True,
-    "low_threshold": 20,
+    "alert_levels": [50, 75, 95],
     "sent_alerts": [],
     "last_checked_at": 0,
 }
@@ -37,7 +42,7 @@ class Codex(commands.Cog):
     """Private live Codex allowance status and notifications."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
 
     def __init__(self, bot):
         self.bot = bot
@@ -139,22 +144,28 @@ class Codex(commands.Cog):
             )
         data = await self.config.user_from_id(user_id).all()
         state = "on" if data["enabled"] else "paused"
+        levels = ", ".join(f"{level}%" for level in data["alert_levels"])
         embed.set_footer(
-            text=(
-                f"Low-allowance DMs: {state} at "
-                f"{data['low_threshold']}% remaining"
-            )
+            text=f"Usage alerts: {state} at {levels} used"
         )
         return embed
+
+    @staticmethod
+    def _alert_advice(level):
+        if level >= 95:
+            return " Critical: consider pausing new work until the allowance resets."
+        if level >= 75:
+            return " Heads up: consider wrapping up long-running work."
+        return ""
 
     async def process_user(self, user_id, data):
         if not data.get("connected") or not data.get("enabled"):
             return 0
         payload = await self.manager.rate_limits(user_id)
-        threshold = int(data.get("low_threshold", 20))
+        levels = data.get("alert_levels", [50, 75, 95])
         sent = list(data.get("sent_alerts", []))
         delivered = 0
-        for window in due_low_alerts(payload, threshold, sent):
+        for window, level in due_alerts(payload, levels, sent):
             reset = (
                 f" It resets <t:{window.resets_at}:R>."
                 if window.resets_at
@@ -163,10 +174,13 @@ class Codex(commands.Cog):
             message = (
                 f"Your **{window.limit_name}** "
                 f"{self._window_label(window)} allowance has "
-                f"**{window.remaining_percent}% remaining**.{reset}"
+                f"crossed your **{level}% used** alert "
+                f"({window.used_percent}% used, "
+                f"{window.remaining_percent}% remaining).{reset}"
+                f"{self._alert_advice(level)}"
             )
             if await self._send_user(user_id, message):
-                sent.append(alert_key(window, threshold))
+                sent.append(alert_key(window, level))
                 delivered += 1
         group = self.config.user_from_id(user_id)
         await group.sent_alerts.set(sent[-30:])
@@ -253,20 +267,48 @@ class Codex(commands.Cog):
             if server:
                 await server.close()
 
-    @codex.command(name="threshold")
-    async def threshold(self, ctx, percent: int):
-        """Set the remaining-percentage warning threshold."""
+    @codex.command(name="alerts")
+    async def alerts(self, ctx, *percentages: int):
+        """Set used-percentage alerts, such as 50 75 95."""
+        if not percentages:
+            levels = await self.config.user(ctx.author).alert_levels()
+            await self._private(
+                ctx,
+                "Current Codex usage alerts: "
+                + ", ".join(f"{level}% used" for level in levels),
+            )
+            return
         try:
-            percent = validate_percent(percent)
+            levels = validate_alert_levels(percentages)
         except ValueError as exc:
             await ctx.send(str(exc))
             return
         group = self.config.user(ctx.author)
-        await group.low_threshold.set(percent)
+        await group.alert_levels.set(list(levels))
         await group.sent_alerts.set([])
         await self._private(
             ctx,
-            f"Low-allowance warnings will be sent at {percent}% remaining.",
+            "Codex usage alerts set for "
+            + ", ".join(f"{level}% used" for level in levels)
+            + ".",
+        )
+
+    @codex.command(name="threshold")
+    async def threshold(self, ctx, percent_remaining: int):
+        """Set one legacy remaining-percentage warning threshold."""
+        try:
+            remaining = validate_alert_levels([percent_remaining])[0]
+        except ValueError as exc:
+            await ctx.send(str(exc))
+            return
+        used = max(1, 100 - remaining)
+        group = self.config.user(ctx.author)
+        await group.alert_levels.set([used])
+        await group.sent_alerts.set([])
+        await self._private(
+            ctx,
+            f"Alert set for {used}% used ({remaining}% remaining). "
+            f"Use {ctx.clean_prefix}codex alerts 50 75 95 for milestones.",
         )
 
     @codex.command(name="pause")
