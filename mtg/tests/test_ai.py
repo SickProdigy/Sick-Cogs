@@ -391,6 +391,19 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertEqual(game.stack[-1].uid,aura); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
+    def test_ai_values_and_casts_gauntlet_and_lifetap(self):
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        gauntlet=solo(order=(AI,HUMAN)); gauntlet.player(AI).hand=[]; own=self.add(gauntlet,AI,"goblin"); self.add(gauntlet,AI,"mountain"); self.add(gauntlet,HUMAN,"forest")
+        self.assertGreater(_global_enchantment_score(gauntlet,AI,cards["lea:244"]),5)
+        spell=self.add(gauntlet,AI,"lea:244","hand"); [self.add(gauntlet,AI,"forest") for _ in range(4)]
+        gauntlet.player(HUMAN).kept=True; gauntlet.player(AI).kept=True; gauntlet.active_index=0; gauntlet.phase="precombat_main"; gauntlet.priority_user=AI; gauntlet.player(AI).land_played=True
+        advance_solo(gauntlet); self.assertEqual(gauntlet.stack[-1].uid,spell)
+
+        lifetap=solo(order=(AI,HUMAN)); lifetap.player(HUMAN).kept=True; lifetap.player(AI).kept=True; lifetap.player(AI).hand=[]; self.add(lifetap,HUMAN,"forest")
+        spell=self.add(lifetap,AI,"lea:61","hand"); self.add(lifetap,AI,"island"); self.add(lifetap,AI,"island")
+        lifetap.active_index=0; lifetap.phase="precombat_main"; lifetap.priority_user=AI; lifetap.player(AI).land_played=True
+        advance_solo(lifetap); self.assertEqual(lifetap.stack[-1].uid,spell)
+
     def test_ai_casts_land_mana_and_hostile_tap_auras_on_correct_sides(self):
         growth=solo(order=(AI,HUMAN)); growth.player(HUMAN).kept=True; growth.player(AI).kept=True; growth.player(AI).hand=[]
         forest=self.add(growth,AI,"forest"); spell=self.add(growth,AI,"lea:229","hand")

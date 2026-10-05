@@ -80,6 +80,8 @@ class Card:
     land_tap_damage: int = 0
     aura_extra_mana: str = ""
     aura_tap_damage: int = 0
+    mountain_extra_red: bool = False
+    opponent_forest_tap_life: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -137,6 +139,8 @@ class Card:
         if self.land_tap_damage: abilities.append(f"Whenever a player taps a land for mana, deals {self.land_tap_damage} damage to that player")
         if self.aura_extra_mana: abilities.append(f"Enchanted land produces an additional {self.aura_extra_mana}")
         if self.aura_tap_damage: abilities.append(f"Whenever enchanted land becomes tapped, deals {self.aura_tap_damage} damage to its controller")
+        if self.mountain_extra_red: abilities.append("Mountains tapped for mana add an additional R")
+        if self.opponent_forest_tap_life: abilities.append(f"Whenever an opponent taps a Forest, you gain {self.opponent_forest_tap_life} life")
         if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
@@ -181,6 +185,7 @@ ALPHA_TAP_ENCHANTMENTS = {
     "lea:162": {"mana_flare":True},
     "lea:163": {"land_tap_damage":1},
     "lea:229": {"aura_target_types":("Land",), "aura_extra_mana":"G"},
+    "lea:61": {"opponent_forest_tap_life":1},
 }
 
 ALPHA_ENCHANTMENTS = {
@@ -211,6 +216,7 @@ ALPHA_ENCHANTMENTS = {
 ALPHA_ARTIFACTS = {
     "lea:231": {"produces":("C",), "mana_amount":3, "skip_untap":True, "activation_cost":"{3}", "activation_effect":"untap_self", "activation_text":"Untap this artifact"},
     "lea:234": {"produces":("W","U","B","R","G"), "mana_activation_cost":"{2}"},
+    "lea:244": {"global_buff_color":"R", "global_power":1, "global_toughness":1, "mountain_extra_red":True},
     "lea:248": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"tap_permanent", "activation_text":"Tap target artifact, creature, or land"},
     "lea:254": {"activation_cost":"{4}", "activation_tap":True, "activation_effect":"draw_self", "activation_text":"Draw a card"},
     "lea:268": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
@@ -409,9 +415,9 @@ for reference in PLAYABLE_ALPHA:
         lord_toughness=ALPHA_LORDS.get(reference.key,{}).get("lord_toughness",0),
         lord_keyword=ALPHA_LORDS.get(reference.key,{}).get("lord_keyword",""),
         lord_regeneration_cost=ALPHA_LORDS.get(reference.key,{}).get("lord_regeneration_cost",""),
-        global_buff_color=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_buff_color",""),
-        global_power=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_power",0),
-        global_toughness=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_toughness",0),
+        global_buff_color=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_buff_color",ALPHA_ARTIFACTS.get(reference.key,{}).get("global_buff_color","")),
+        global_power=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_power",ALPHA_ARTIFACTS.get(reference.key,{}).get("global_power",0)),
+        global_toughness=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_toughness",ALPHA_ARTIFACTS.get(reference.key,{}).get("global_toughness",0)),
         global_controller_only=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_controller_only",False),
         global_requires_untapped=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_untapped",False),
         global_requires_attacking=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_attacking",False),
@@ -419,6 +425,8 @@ for reference in PLAYABLE_ALPHA:
         land_tap_damage=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("land_tap_damage",0),
         aura_extra_mana=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("aura_extra_mana",""),
         aura_tap_damage=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("aura_tap_damage",0),
+        mountain_extra_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("mountain_extra_red",False),
+        opponent_forest_tap_life=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("opponent_forest_tap_life",0),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

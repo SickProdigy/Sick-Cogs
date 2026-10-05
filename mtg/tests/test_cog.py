@@ -253,6 +253,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"S:1"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Counter target green spell",rendered); self.assertIn("Deathgrip ability",rendered)
 
+    async def test_public_embed_shows_gauntlet_and_lifetap_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        lifetap=game.next_uid; game.next_uid+=1; game.cards[lifetap]="lea:61"; gauntlet=game.next_uid; game.next_uid+=1; game.cards[gauntlet]="lea:244"
+        forest=game.next_uid; game.next_uid+=1; game.cards[forest]="forest"
+        game.player(10).battlefield=[permanent_type(lifetap,"lea:61",sick=False),permanent_type(gauntlet,"lea:244",sick=False)]
+        game.player(20).battlefield=[permanent_type(forest,"forest",sick=False)]; game.phase="precombat_main"; game.priority_user=20; game.activate_mana(20,1)
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Mountains tapped for mana",rendered); self.assertIn("Whenever an opponent taps a Forest",rendered); self.assertIn("Lifetap ability",rendered)
+
     async def test_public_embed_shows_paid_mana_and_skip_untap_artifacts(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

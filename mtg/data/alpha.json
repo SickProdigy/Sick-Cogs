@@ -1412,7 +1412,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:62",
@@ -5564,7 +5564,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:245",

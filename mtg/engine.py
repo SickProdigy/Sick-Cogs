@@ -243,27 +243,33 @@ class Game:
         if card.land:
             flares=sum(self.card(source.uid).mana_flare for player in self.players.values() for source in player.battlefield)
             output[symbol]+=flares
+            if card.has_land_type("mountain"):
+                gauntlets=sum(self.card(source.uid).mountain_extra_red for player in self.players.values() for source in player.battlefield)
+                if gauntlets: output["R"]=output.get("R",0)+gauntlets
             for aura in self.attached_auras(permanent):
                 extra=self.card(aura.uid).aura_extra_mana
                 if extra: output[extra]=output.get(extra,0)+1
         return output
 
-    def _tap_damage_triggers(self,user,permanent,mana_symbol):
-        if not self.card(permanent.uid).land: return []
+    def _tap_triggers(self,user,permanent,mana_symbol):
+        tapped_card=self.card(permanent.uid)
+        if not tapped_card.land: return []
         sources=[]
         if mana_symbol:
-            sources.extend((controller.user_id,source) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
-        sources.extend((controller.user_id,aura) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
+            sources.extend((controller.user_id,source,"tap_damage",str(user)) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
+        sources.extend((controller.user_id,aura,"tap_damage",str(user)) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
+        if tapped_card.has_land_type("forest"):
+            sources.extend((controller.user_id,source,"tap_life",str(controller.user_id)) for controller in self.players.values() if controller.user_id!=user for source in controller.battlefield if self.card(source.uid).opponent_forest_tap_life)
         triggers=[]
-        for owner,source in sources:
+        for owner,source,effect,target in sources:
             uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
-            triggers.append(Spell(owner,uid,card.key,str(user),ability_effect="tap_damage",source_uid=source.uid,color_override=source.color_override))
+            triggers.append(Spell(owner,uid,card.key,target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
         return triggers
 
     def _tap_permanent(self,user,permanent,mana_symbol=None,add_mana=False,pending_triggers=None):
         if permanent.tapped: return {}
         permanent.tapped=True; player=self.player(user)
-        triggers=self._tap_damage_triggers(user,permanent,mana_symbol)
+        triggers=self._tap_triggers(user,permanent,mana_symbol)
         if pending_triggers is None: self.stack.extend(triggers)
         else: pending_triggers.extend(triggers)
         output=self._mana_output(permanent,mana_symbol) if mana_symbol else {}
@@ -792,6 +798,8 @@ class Game:
             self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
             self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
+        elif effect=="tap_life":
+            self.player(int(s.target)).life+=card.opponent_forest_tap_life
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":

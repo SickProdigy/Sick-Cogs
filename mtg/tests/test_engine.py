@@ -1330,6 +1330,26 @@ class AlphaLandTapEnchantmentTests(unittest.TestCase):
     def resolve_top(self,game):
         game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
 
+    def test_gauntlet_of_might_stacks_live_red_buffs_and_mountain_mana(self):
+        game=ready(); self.add(game,10,"lea:244"); self.add(game,20,"lea:244"); own=self.add(game,10,"goblin"); enemy=self.add(game,20,"goblin")
+        self.assertEqual(game.current_stats(own),(3,3)); self.assertEqual(game.current_stats(enemy),(3,3))
+        own.color_override="G"; self.assertEqual(game.current_stats(own),(1,1))
+        mountain=self.add(game,10,"lea:277"); game.activate_mana(10,3,"B")
+        self.assertEqual(game.player(10).mana_pool,{"B":1,"R":2})
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(20).battlefield[1]; self.assertEqual(restored.current_stats(saved),(3,3))
+        restored.player(10).battlefield.remove(restored.find_permanent(game.player(10).battlefield[0].uid)[1]); self.assertEqual(restored.current_stats(saved),(2,2))
+
+    def test_lifetap_creates_persisted_triggers_for_opponent_forest_taps(self):
+        game=ready(); lifetap=self.add(game,10,"lea:61"); forest=self.add(game,20,"forest")
+        game.priority_user=20; game.activate_mana(20,1); self.assertEqual(game.player(10).life,20); self.assertEqual(game.stack[-1].ability_effect,"tap_life"); self.assertEqual(game.stack[-1].target,"10")
+        restored=Game.from_raw(game.to_raw()); controller,source=restored.find_permanent(lifetap.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        self.resolve_top(restored); self.assertEqual(restored.player(10).life,21)
+        own=self.add(restored,10,"forest"); restored.priority_user=10; restored.activate_mana(10,len(restored.player(10).battlefield)); self.assertFalse(restored.stack)
+
+        twiddle=ready(); target=self.add(twiddle,20,"forest"); self.add(twiddle,10,"lea:61"); self.add(twiddle,10,"lea:85","hand"); self.add(twiddle,10,"island")
+        twiddle.play(10,1,"tap:20:1"); self.resolve_top(twiddle); self.assertEqual(twiddle.stack[-1].ability_effect,"tap_life")
+        self.resolve_top(twiddle); self.assertEqual(twiddle.player(10).life,21); self.assertTrue(target.tapped)
+
     def test_wild_growth_pays_mixed_cost_and_preserves_extra_mana(self):
         game=ready(); mountain=self.add(game,10,"mountain"); self.add(game,10,"lea:229",attached_to=mountain.uid)
         test_card=Card(key="test_rg",name="Test RG",kind="Instant",scryfall_id="test",oracle_id="test",mana_cost="{R}{G}",effect="life")

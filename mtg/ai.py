@@ -130,7 +130,10 @@ def _global_enchantment_score(game,user,card):
         return True
     own=sum(eligible(user,permanent) for permanent in game.player(user).battlefield)
     enemy=0 if card.global_controller_only else sum(eligible(game.opponent(user),permanent) for permanent in game.player(game.opponent(user)).battlefield)
-    return 5+value*(own-enemy)
+    mountain_value=0
+    if card.mountain_extra_red:
+        mountain_value=sum(game.card(x.uid).has_land_type("mountain") and not x.tapped for x in game.player(user).battlefield)-sum(game.card(x.uid).has_land_type("mountain") and not x.tapped for x in game.player(game.opponent(user)).battlefield)
+    return 5+value*(own-enemy)+mountain_value
 
 
 def _play_one(game, user, difficulty):
@@ -166,6 +169,8 @@ def _play_one(game, user, difficulty):
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
             score=5+own-enemy
+        elif card.opponent_forest_tap_life:
+            score=5+sum(game.card(permanent.uid).has_land_type("forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
         elif card.land_tap_damage:
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
