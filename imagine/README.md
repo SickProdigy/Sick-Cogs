@@ -22,8 +22,9 @@ one at a time per server.
 ## Codex setup from Discord
 
 Codex does not need to be installed globally and the bot owner does not need SSH or root access.
-Imagine installs the official standalone CLI inside its private Red data directory and keeps the
-Codex authentication cache there.
+Sick-Cogs installs the official standalone CLI in a shared Red data directory so Codex, Imagine,
+and future integrations reuse one executable. Imagine keeps its authentication cache in its own
+private data directory.
 
 First reload Imagine after installing or updating the cog:
 
