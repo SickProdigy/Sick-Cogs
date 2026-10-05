@@ -4,7 +4,7 @@
   "disabled": false,
   "end_user_data_statement": "This cog stores each participating Discord user's notification preferences and a private Codex authentication home containing renewable ChatGPT authorization. Credentials are isolated per user and are never shown in Discord or stored in Red Config. Disconnect and Red user-data deletion remove the user's local credentials and configuration after attempting remote logout.",
   "hidden": false,
-  "install_msg": "The bot owner first runs [p]codexset install. Members then use [p]codex connect to privately link ChatGPT with an official device code and [p]codex to view live allowance.",
+  "install_msg": "The cog automatically installs a shared Codex CLI on first load. The bot owner can run [p]codexset install to update or repair it. Members use [p]codex connect to privately link ChatGPT with an official device code and [p]codex to view live allowance.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 10, 0],
   "name": "Codex",
@@ -13,5 +13,5 @@
   "short": "Live Codex usage milestones and reset notifications.",
   "tags": ["codex", "openai", "reminders", "usage", "privacy"],
   "type": "COG",
-  "version": "0.3.0"
+  "version": "0.3.1"
 }

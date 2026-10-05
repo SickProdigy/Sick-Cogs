@@ -42,7 +42,7 @@ class Codex(commands.Cog):
     """Private live Codex allowance status and notifications."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -52,17 +52,36 @@ class Codex(commands.Cog):
         self.config.register_global(**DEFAULT_GLOBAL)
         self.config.register_user(**DEFAULT_USER)
         self.session = None
-        self.manager = CodexManager(cog_data_path(self), lambda: self.session)
+        self.manager = CodexManager(
+            cog_data_path(self),
+            lambda: self.session,
+            install_path=cog_data_path(raw_name="SickCogsShared") / "codex",
+        )
         self._linking = set()
+        self._install_task = None
 
     async def cog_load(self):
         self.session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
         )
+        if not self.manager.executable():
+            self._install_task = asyncio.create_task(self._install_shared_cli())
         self.notification_loop.start()
+
+    async def _install_shared_cli(self):
+        try:
+            version = await self.manager.install()
+        except asyncio.CancelledError:
+            raise
+        except CodexManagerError as exc:
+            log.warning("Automatic Codex CLI installation failed: %s", exc)
+        else:
+            log.info("Shared Codex CLI installed: %s", version or "version unavailable")
 
     def cog_unload(self):
         self.notification_loop.cancel()
+        if self._install_task and not self._install_task.done():
+            self._install_task.cancel()
         if self.session and not self.session.closed:
             asyncio.create_task(self.session.close())
 
@@ -229,6 +248,11 @@ class Codex(commands.Cog):
         server = None
         message = None
         try:
+            if self._install_task and not self._install_task.done():
+                await self._private(
+                    ctx, "Codex is finishing its automatic setup. Try again shortly."
+                )
+                return
             server, request = await self.manager.begin_device_login(user_id)
             message = await self._private(
                 ctx,

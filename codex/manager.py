@@ -51,7 +51,7 @@ class CodexAppServer:
                 "clientInfo": {
                     "name": "sick-cogs-codex",
                     "title": "Sick-Cogs Codex",
-                    "version": "0.3.0",
+                    "version": "0.3.1",
                 }
             },
         )
@@ -141,9 +141,10 @@ class CodexAppServer:
 
 
 class CodexManager:
-    def __init__(self, data_path: Path, session_getter):
+    def __init__(self, data_path: Path, session_getter, install_path: Path = None):
         self.data_path = Path(data_path)
-        self.bin_path = self.data_path / "bin" / "codex"
+        self.install_path = Path(install_path) if install_path else self.data_path
+        self.bin_path = self.install_path / "bin" / "codex"
         self.accounts_path = self.data_path / "accounts"
         self._session_getter = session_getter
         self._install_lock = asyncio.Lock()
@@ -237,7 +238,7 @@ class CodexManager:
                 for key, value in os.environ.items()
                 if key in {"PATH", "HOME", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR"}
             }
-            installer_home = self.data_path / "installer"
+            installer_home = self.install_path / "installer"
             installer_home.mkdir(parents=True, exist_ok=True, mode=0o700)
             installer_home.chmod(0o700)
             environment.update(
@@ -266,6 +267,10 @@ class CodexManager:
                 process.kill()
                 await process.wait()
                 raise CodexManagerError("Codex installation timed out.") from exc
+            except asyncio.CancelledError:
+                process.kill()
+                await process.wait()
+                raise
             if process.returncode or not (
                 self.bin_path.is_file() and os.access(self.bin_path, os.X_OK)
             ):

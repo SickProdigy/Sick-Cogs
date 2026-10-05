@@ -20,6 +20,17 @@ class FakeServer:
 
 
 class ManagerTests(unittest.IsolatedAsyncioTestCase):
+    def test_shared_binary_is_separate_from_user_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manager = CodexManager(
+                root / "Codex", lambda: None, root / "SickCogsShared" / "codex"
+            )
+            self.assertEqual(
+                manager.bin_path, root / "SickCogsShared" / "codex" / "bin" / "codex"
+            )
+            self.assertEqual(manager.accounts_path, root / "Codex" / "accounts")
+
     def test_users_receive_isolated_private_codex_homes(self):
         with tempfile.TemporaryDirectory() as directory:
             manager = CodexManager(Path(directory), lambda: None)

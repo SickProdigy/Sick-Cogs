@@ -51,7 +51,7 @@ class Imagine(commands.Cog):
     """Private, provider-neutral image generation."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.0"
+    __version__ = "0.2.1"
 
     def __init__(self, bot):
         self.bot = bot
@@ -62,7 +62,11 @@ class Imagine(commands.Cog):
         self.session = None
         self._locks = {}
         self._cooldowns = {}
-        self.codex_manager = CodexManager(cog_data_path(self) / "codex", lambda: self.session)
+        self.codex_manager = CodexManager(
+            cog_data_path(self) / "codex",
+            lambda: self.session,
+            install_path=cog_data_path(raw_name="SickCogsShared") / "codex",
+        )
 
     async def cog_load(self):
         schema_version = await self.config.schema_version()
