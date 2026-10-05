@@ -38,10 +38,16 @@ class Spell:
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
-    def __init__(self, game_id, users, seed=None):
+    def __init__(self, game_id, users, seed=None, decks=None, ai_user=None, ai_difficulty=None):
         if len(users) != 2 or users[0] == users[1]: raise GameError("Two different players are required.")
         self.game_id, self.order = int(game_id), [int(x) for x in users]
-        self.players = {self.order[0]: Player(self.order[0],"red"), self.order[1]: Player(self.order[1],"green")}
+        decks = {int(user): color for user, color in (decks or {}).items()}
+        self.players = {
+            user: Player(user, decks.get(user, color))
+            for user, color in zip(self.order, ("red", "green"))
+        }
+        self.ai_user = int(ai_user) if ai_user is not None else None
+        self.ai_difficulty = ai_difficulty
         self.cards, self.next_uid = {}, 1
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
@@ -50,9 +56,9 @@ class Game:
         self.log, self.history = [], []
         self.created_at = self.updated_at = int(time.time())
         rng = random.Random(seed)
-        for user, color in zip(self.order, ("red","green")):
+        for user in self.order:
             p=self.players[user]
-            for key in starter(color):
+            for key in starter(p.deck):
                 self.cards[self.next_uid]=key; p.library.append(self.next_uid); self.next_uid+=1
             rng.shuffle(p.library); self._draw(p,7)
         self.log.append("Both players drew seven cards.")
@@ -249,12 +255,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

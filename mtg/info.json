@@ -1,17 +1,17 @@
 {
   "author": ["SickProdigy"],
-  "description": "An experimental persistent two-player Magic: The Gathering rules prototype with private hands and curated starter decks.",
+  "description": "An experimental persistent solo and two-player Magic: The Gathering rules prototype with private hands and curated starter decks.",
   "disabled": false,
   "end_user_data_statement": "This cog stores Discord user IDs, active match state, private hands, decks, public game actions, and channel/message identifiers until the match record is deleted. User deletion removes matches involving that user.",
   "hidden": false,
-  "install_msg": "Start with `[p]mtg challenge @member`. This experimental version supports only its bundled starter decks and curated rules subset.",
+  "install_msg": "Start with `[p]mtg solo red easy` or `[p]mtg challenge @member`. This experimental version supports only its bundled starter decks and curated rules subset.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "MTG",
   "permissions": ["embed_links", "attach_files", "add_reactions"],
   "requirements": ["Pillow>=12.3.0,<13"],
-  "short": "Persistent two-player MTG rules prototype",
-  "tags": ["games", "cards", "mtg", "multiplayer"],
+  "short": "Persistent solo and two-player MTG prototype",
+  "tags": ["games", "cards", "mtg", "solo", "multiplayer"],
   "type": "COG",
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

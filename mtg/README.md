@@ -1,8 +1,8 @@
 # MTG
 
-MTG is an experimental two-player Magic: The Gathering rules prototype for Red.
+MTG is an experimental solo and two-player Magic: The Gathering rules prototype for Red.
 
-Version 0.4.0 supports a curated catalog of 60 unique Scryfall-backed cards and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, paginated private hand images with a text fallback, and a public rendered playmat layered over the accessible match embed. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
+Version 0.5.0 supports a curated catalog of 60 unique Scryfall-backed cards and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, paginated private hand images with a text fallback, and a public rendered playmat layered over the accessible match embed. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
 
 ## Play
 
@@ -16,6 +16,10 @@ Version 0.4.0 supports a curated catalog of 60 unique Scryfall-backed cards and 
 
 Player targets use a Discord user ID. Permanent targets use `USER_ID:FIELD_POSITION`.
 Pass no positions to attack or block to decline combat. Hands are returned as private ephemeral, numbered image pages and are never included in the public table. If artwork or rendering is unavailable, the same interaction falls back to private text.
+
+## Solo play
+
+Run `[p]mtg solo [red|green] [easy|normal]` to play against the bot with the selected starter deck. `[p]mtg solo normal` is shorthand for a normal game using the red deck. Easy makes deterministic but intentionally incomplete attacks and blocks; normal evaluates its affordable plays and uses all legal attackers. The bot uses the same engine actions, mana, timing, targeting, priority, and combat rules as a human, and its decisions never inspect the human hand. Solo state and bot decisions recover after reloads. Solo games grant no cards, packs, currency, or other rewards.
 
 ## Supported rules
 

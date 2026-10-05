@@ -7,6 +7,7 @@ from typing import Dict
 import discord
 from redbot.core import Config, commands
 from redbot.core.data_manager import cog_data_path
+from .ai import DIFFICULTIES, advance_solo
 from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield, render_hand
 from .cards import CARDS
 from .engine import Game, GameError
@@ -18,9 +19,9 @@ DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
 MATCH_TIMEOUT_SECONDS=7*24*60*60
 
 class MTG(commands.Cog):
-    """Play a deliberately bounded two-player Magic rules prototype."""
+    """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.4.0"
+    __version__="0.5.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -35,20 +36,38 @@ class MTG(commands.Cog):
                 self.games[game.game_id]=game; self.channels[game.game_id]=int(value.get("channel_id",0))
             except Exception: log.exception("Could not restore MTG game %s",key)
         await self.cleanup_expired()
+        resumed=await self.resume_solo_games()
         for game in self.games.values():
             if not game.finished: self.bot.add_view(GameView(self,game.game_id),message_id=game.message_id or None)
+        for game in resumed: asyncio.create_task(self.refresh_message(game))
         self.cleanup_task=asyncio.create_task(self._cleanup_loop())
     def cog_unload(self):
         if self.cleanup_task: self.cleanup_task.cancel()
         if self.session and not self.session.closed: asyncio.create_task(self.session.close())
     def lock(self,gid): return self.locks.setdefault(gid,asyncio.Lock())
+    def human_players(self,game):
+        return [user for user in game.order if user != getattr(game,"ai_user",None)]
+    def ensure_players_available(self,*users):
+        for game in self.games.values():
+            if not game.finished and any(user in self.human_players(game) for user in users):
+                raise GameError("One player already has an active game.")
     async def create_game(self,a,b,channel):
         async with self.storage_lock:
-            for game in self.games.values():
-                if not game.finished and (a in game.order or b in game.order): raise GameError("One player already has an active game.")
+            self.ensure_players_available(a,b)
             gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
             users=[a,b]; secrets.SystemRandom().shuffle(users)
             game=Game(gid,users); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
+            await self._save_unlocked(game)
+        return game
+    async def create_solo_game(self,human,ai,channel,deck,difficulty):
+        async with self.storage_lock:
+            self.ensure_players_available(human)
+            gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
+            users=[human,ai]; secrets.SystemRandom().shuffle(users)
+            other="green" if deck=="red" else "red"
+            game=Game(gid,users,decks={human:deck,ai:other},ai_user=ai,ai_difficulty=difficulty)
+            game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
+            advance_solo(game)
             await self._save_unlocked(game)
         return game
     async def _save_unlocked(self,game):
@@ -56,6 +75,13 @@ class MTG(commands.Cog):
         games=await self.config.games(); games[str(game.game_id)]=raw; await self.config.games.set(games)
     async def save(self,game):
         async with self.storage_lock: await self._save_unlocked(game)
+    async def resume_solo_games(self):
+        resumed=[]
+        for game in list(self.games.values()):
+            async with self.lock(game.game_id):
+                if advance_solo(game):
+                    await self.save(game); resumed.append(game)
+        return resumed
     async def cleanup_expired(self):
         expired=[]; now=int(__import__("time").time())
         for game in list(self.games.values()):
@@ -75,6 +101,8 @@ class MTG(commands.Cog):
         return found[0]
     def game_embed(self,g):
         names={u:(self.bot.get_user(u).display_name if self.bot.get_user(u) else str(u)) for u in g.order}
+        if g.ai_user is not None:
+            names[g.ai_user]=f"{names[g.ai_user]} ({(g.ai_difficulty or 'easy').title()} AI)"
         e=discord.Embed(title=f"MTG prototype · Game {g.game_id}",color=discord.Color.dark_green())
         if g.phase=="opening":
             e.description=f"Opening hands - **{names[g.active_user]}** will play first."
@@ -149,7 +177,8 @@ class MTG(commands.Cog):
         if not game:
             await i.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
-            try: action(game); game.record(i.user.id,label); await self.save(game)
+            try:
+                action(game); game.record(i.user.id,label); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as e: await i.response.send_message(str(e),ephemeral=True); return
             await i.response.defer()
             embed,file=await self.game_message(game)
@@ -157,7 +186,8 @@ class MTG(commands.Cog):
     async def mutate_ctx(self,ctx,action,label):
         game=self.find(ctx.author.id)
         async with self.lock(game.game_id):
-            try: action(game); game.record(ctx.author.id,label); await self.save(game)
+            try:
+                action(game); game.record(ctx.author.id,label); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as e: await ctx.send(str(e)); return
         await self.refresh_message(game)
         await ctx.message.add_reaction("✅")
@@ -171,10 +201,27 @@ class MTG(commands.Cog):
         """Challenge another member."""
         if member.bot or member.id==ctx.author.id: await ctx.send("Challenge another human member."); return
         await ctx.send(f"{member.mention}, {ctx.author.mention} challenged you to a two-player MTG prototype game.",view=ChallengeView(self,ctx.author.id,member.id),allowed_mentions=discord.AllowedMentions(users=True))
+    @mtg.command(name="solo")
+    @commands.guild_only()
+    async def solo(self,ctx,deck:str="red",difficulty:str="easy"):
+        """Start a reward-free solo match. Deck: red/green; difficulty: easy/normal."""
+        deck=deck.casefold(); difficulty=difficulty.casefold()
+        if deck in DIFFICULTIES and difficulty=="easy": difficulty,deck=deck,"red"
+        if deck not in ("red","green") or difficulty not in DIFFICULTIES:
+            await ctx.send(f"Use `{ctx.clean_prefix}mtg solo [red|green] [easy|normal]`."); return
+        if not self.bot.user:
+            await ctx.send("The solo opponent is not ready yet."); return
+        try: game=await self.create_solo_game(ctx.author.id,self.bot.user.id,ctx.channel.id,deck,difficulty)
+        except GameError as e: await ctx.send(str(e)); return
+        embed,file=await self.game_message(game)
+        message=await ctx.send(embed=embed,file=file,view=GameView(self,game.game_id)) if file else await ctx.send(embed=embed,view=GameView(self,game.game_id))
+        game.message_id=message.id; await self.save(game)
     @mtg.command(name="status")
     async def status(self,ctx):
         try: game=self.find(ctx.author.id)
         except GameError as e: await ctx.send(str(e)); return
+        async with self.lock(game.game_id):
+            if advance_solo(game): await self.save(game)
         embed,file=await self.game_message(game)
         if file: await ctx.send(embed=embed,file=file)
         else: await ctx.send(embed=embed)

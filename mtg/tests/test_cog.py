@@ -48,6 +48,18 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(cog.games), 1)
         self.assertEqual(len(cog.config.games.value), 1)
 
+    async def test_multiple_people_can_play_solo_against_the_same_bot(self):
+        cog = cog_fixture()
+        first, second = await asyncio.gather(
+            cog.create_solo_game(10, 999, 100, "red", "easy"),
+            cog.create_solo_game(20, 999, 200, "green", "normal"),
+        )
+        self.assertEqual({first.ai_user, second.ai_user}, {999})
+        self.assertEqual(cog.human_players(first), [10])
+        self.assertEqual(cog.human_players(second), [20])
+        with self.assertRaises(GameError):
+            await cog.create_solo_game(10, 999, 100, "red", "easy")
+
     async def test_concurrent_cross_game_saves_preserve_both_games(self):
         cog = cog_fixture()
         first, second = Game(1, [10, 20], 1), Game(2, [30, 40], 2)
@@ -63,6 +75,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
             game = await cog.create_game(10, 20, 100)
         self.assertEqual(game.order, [20, 10])
         self.assertEqual(game.players[20].deck, "red")
+
+    async def test_resume_advances_and_persists_pending_solo_turn(self):
+        cog = cog_fixture()
+        game = Game(1, [999, 10], 4, decks={999: "green", 10: "red"}, ai_user=999, ai_difficulty="normal")
+        game.mulligan(999, True); game.mulligan(10, True)
+        cog.games = {1: game}; cog.channels = {1: 100}
+        resumed = await cog.resume_solo_games()
+        self.assertEqual(resumed, [game])
+        self.assertEqual(game.priority_user, 10)
+        self.assertIn("1", cog.config.games.value)
 
     async def test_finished_view_rejects_stale_player_interaction(self):
         cog = cog_fixture()

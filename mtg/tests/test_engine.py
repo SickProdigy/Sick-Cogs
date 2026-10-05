@@ -46,6 +46,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
+        raw.pop("ai_user"); raw.pop("ai_difficulty")
         restored=Game.from_raw(raw)
         self.assertEqual(restored.history,[])
         self.assertGreater(restored.updated_at,0)
