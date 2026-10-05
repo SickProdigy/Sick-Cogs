@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock
 
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
-from pokemon.pokemon import Pokemon, activity_weight, available_species, encounter_is_expired
+from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_is_expired, pace_for_settings, scaled_wild_level
 from pokemon.tests.test_models import battle
-from pokemon.views import BattleView
+from pokemon.views import BagView, BattleView, FightView, PartyView
 
 
 class StoredEncounters:
@@ -28,8 +28,20 @@ class StoredEncounters:
 
 
 class CogPolicyTests(unittest.TestCase):
+    def test_pacing_presets_are_ordered(self):
+        self.assertLess(PACE["active"][0],PACE["normal"][0])
+        self.assertLess(PACE["normal"][0],PACE["relaxed"][0])
+        self.assertLess(PACE["active"][2],PACE["relaxed"][2])
+        self.assertEqual(pace_for_settings(*PACE["normal"]),"normal")
+        self.assertEqual(pace_for_settings(7,13,90),"custom")
+
     def test_activity_weight_is_bounded(self):
         self.assertEqual([activity_weight(n) for n in (0, 1, 2, 8)], [1, 1, 2, 3])
+
+    def test_wild_level_scales_near_player(self):
+        self.assertEqual(scaled_wild_level(1,-2),2)
+        self.assertEqual(scaled_wild_level(50,2),52)
+        self.assertEqual(scaled_wild_level(100,2),100)
 
     def test_spawn_pool_excludes_starters_and_filters_generation(self):
         pool = available_species([1])
@@ -48,6 +60,16 @@ class CogPolicyTests(unittest.TestCase):
         path = Path(__file__).parents[1] / "gen1.json"
         self.assertEqual(PokemonCatalog(path).load(), 151)
         self.assertEqual(set(range(1, 152)), {key for key in SPECIES if key <= 151})
+
+    def test_old_runtime_cache_keeps_bundled_learnsets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            bundled=Path(__file__).parents[1] / "gen1.json"
+            runtime=Path(folder) / "catalog.json"
+            item=PokemonCatalog.to_cached(SPECIES[19]);item.pop("learnset",None)
+            runtime.write_text(json.dumps({"schema":1,"species":[item]}),encoding="utf-8")
+            PokemonCatalog(runtime,bundled).load()
+            self.assertTrue(SPECIES[19].learnset)
+            self.assertEqual(SPECIES[19].moves,("tackle",))
 
     def test_catalog_cache_round_trip(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -84,6 +106,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ids = {item.custom_id for item in view.children}
         self.assertEqual(len(ids), len(view.children))
         self.assertTrue(all(item.custom_id.startswith("pokemon:1:") for item in view.children))
+        self.assertEqual([item.label for item in view.children],["Fight","Pokémon","Bag","Run"])
+        fight=FightView(cog,1);party=PartyView(cog,1);bag=BagView(cog,1)
+        self.assertTrue(any("PP" in item.label for item in fight.children))
+        self.assertTrue(any(item.label=="Back" for item in fight.children))
+        self.assertTrue(any(item.label=="Back" for item in party.children))
+        self.assertEqual([item.label for item in bag.children],["Poké Ball","Back"])
         allowed = SimpleNamespace(
             user=SimpleNamespace(id=current.user_id),
             response=SimpleNamespace(send_message=AsyncMock()),

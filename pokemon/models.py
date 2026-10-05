@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Optional
 
-from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, effectiveness
+from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, effectiveness, moves_for_level
 
 
 class BattleError(ValueError):
@@ -29,7 +29,7 @@ class OwnedPokemon:
 
     def __post_init__(self):
         if not self.moves:
-            self.moves = tuple(SPECIES[self.species_id].moves[:4])
+            self.moves = moves_for_level(self.species_id, self.level)
         if not self.move_pp:
             self.move_pp = {key: MOVES[key].pp for key in self.moves}
 
@@ -55,8 +55,8 @@ class OwnedPokemon:
             guild_id,
             rng.choice(NATURES),
             "",
-            tuple(SPECIES[species_id].moves[:4]),
-            {key: MOVES[key].pp for key in SPECIES[species_id].moves[:4]},
+            moves_for_level(species_id, level),
+            {key: MOVES[key].pp for key in moves_for_level(species_id, level)},
             {
                 key: rng.randrange(32)
                 for key in ("hp", "attack", "defense", "speed")
@@ -73,7 +73,7 @@ class OwnedPokemon:
     def from_raw(cls, raw):
         allowed = {item.name for item in fields(cls)}
         data = {key: value for key, value in dict(raw).items() if key in allowed}
-        data["moves"] = tuple(data.get("moves") or SPECIES[int(data["species_id"])].moves[:4])
+        data["moves"] = tuple(data.get("moves") or moves_for_level(int(data["species_id"]), int(data.get("level",5))))
         data.setdefault("move_pp", {key: MOVES[key].pp for key in data["moves"]})
         data.setdefault("ivs", {})
         return cls(**data)
@@ -82,6 +82,7 @@ class OwnedPokemon:
         self.experience += max(0, int(amount))
         levels = 0
         evolved_from = None
+        learned = []
         while self.level < 100 and self.experience >= self.level * self.level * 10:
             self.experience -= self.level * self.level * 10
             self.level += 1
@@ -90,13 +91,14 @@ class OwnedPokemon:
             if evolution and self.level >= evolution[1] and evolution[0] in SPECIES:
                 evolved_from = self.species_id
                 self.species_id = evolution[0]
-                known = list(self.moves)
-                for move in SPECIES[self.species_id].moves:
-                    if move not in known and len(known) < 4:
-                        known.append(move)
-                self.moves = tuple(known)
-                for move in known:self.move_pp.setdefault(move,MOVES[move].pp)
-        return levels, evolved_from
+            for move in moves_for_level(self.species_id, self.level):
+                if move in self.moves:
+                    continue
+                known=list(self.moves)+[move]
+                if len(known)>4:
+                    forgotten=known.pop(0);self.move_pp.pop(forgotten,None)
+                self.moves=tuple(known);self.move_pp[move]=MOVES[move].pp;learned.append(move)
+        return levels, evolved_from, learned
 
 
 @dataclass
@@ -148,6 +150,24 @@ class Battle:
             if pokemon.instance_id != self.player.instance_id
         )
 
+    def switch_to(self, index):
+        if self.state != "active":
+            raise BattleError("This encounter is over.")
+        if not 0 <= index < len(self.party):
+            raise BattleError("That party slot is unavailable.")
+        candidate=self.party[index]
+        if candidate.instance_id==self.player.instance_id:
+            raise BattleError("That Pokémon is already active.")
+        if self.party_hp.get(candidate.instance_id,0)<=0:
+            raise BattleError("That Pokémon has fainted.")
+        self.party_hp[self.player.instance_id]=self.player_hp
+        self.party_status[self.player.instance_id]=self.player_status
+        self.player=candidate
+        self.player_hp=self.party_hp[candidate.instance_id]
+        self.player_status=self.party_status.get(candidate.instance_id,"")
+        self.last_action=f"Go, {SPECIES[candidate.species_id].name}!"
+        self.result=None
+
     def switch_next(self):
         if self.state != "active":
             raise BattleError("This encounter is over.")
@@ -162,11 +182,7 @@ class Battle:
         for offset in range(1, len(self.party) + 1):
             candidate = self.party[(start + offset) % len(self.party)]
             if self.party_hp.get(candidate.instance_id, 0) > 0:
-                self.player = candidate
-                self.player_hp = self.party_hp[candidate.instance_id]
-                self.player_status = self.party_status.get(candidate.instance_id, "")
-                self.last_action = f"Go, {SPECIES[candidate.species_id].name}!"
-                self.result = None
+                self.switch_to((start + offset) % len(self.party))
                 return
         raise BattleError("No conscious party Pokémon remain.")
 
@@ -205,10 +221,11 @@ class Battle:
             player_key, MOVES[player_key].pp
         ) - 1
         wild = SPECIES[self.wild_species_id]
+        wild_moves = moves_for_level(self.wild_species_id, self.wild_level)
         if not self.wild_pp:
-            self.wild_pp = {key: MOVES[key].pp for key in wild.moves}
-        available = [key for key in wild.moves if self.wild_pp.get(key, 0) > 0]
-        wild_key = available[self.rng().randrange(len(available))] if available else wild.moves[0]
+            self.wild_pp = {key: MOVES[key].pp for key in wild_moves}
+        available = [key for key in wild_moves if self.wild_pp.get(key, 0) > 0]
+        wild_key = available[self.rng().randrange(len(available))] if available else wild_moves[0]
         if available:
             self.wild_pp[wild_key] -= 1
         player_move = MOVES[player_key]
@@ -219,10 +236,9 @@ class Battle:
         wild_speed = wild.speed
         if self.wild_status == "paralysis":
             wild_speed //= 2
-        player_first = (player_move.priority, player_speed) >= (
-            wild_move.priority,
-            wild_speed,
-        )
+        player_order=(player_move.priority,player_speed)
+        wild_order=(wild_move.priority,wild_speed)
+        player_first=(self.rng().randrange(2)==0) if player_order==wild_order else player_order>wild_order
         actions = (
             (self._player_attack, player_move),
             (self._wild_attack, wild_move),
@@ -290,12 +306,14 @@ class Battle:
         if self.wild_hp == 0:
             self.state = "won"
             self.experience_award = self.wild_level * 20
-            levels, evolved = self.player.gain_experience(self.experience_award)
+            levels, evolved, learned = self.player.gain_experience(self.experience_award)
             detail = f" Gained {self.experience_award} XP."
             if levels:
                 detail += f" Reached level {self.player.level}."
             if evolved:
                 detail += f" Evolved into {SPECIES[self.player.species_id].name}."
+            if learned:
+                detail += " Learned " + ", ".join(MOVES[key].name for key in learned) + "."
             self.result = "The wild Pokémon fainted." + detail
             for index,item in enumerate(self.party):
                 if item.instance_id==self.player.instance_id:self.party[index]=self.player
@@ -321,10 +339,11 @@ class Battle:
 
     def _wild_response(self):
         wild = SPECIES[self.wild_species_id]
+        wild_moves = moves_for_level(self.wild_species_id, self.wild_level)
         if not self.wild_pp:
-            self.wild_pp = {key: MOVES[key].pp for key in wild.moves}
-        available = [key for key in wild.moves if self.wild_pp.get(key, 0) > 0]
-        key = available[self.rng().randrange(len(available))] if available else wild.moves[0]
+            self.wild_pp = {key: MOVES[key].pp for key in wild_moves}
+        available = [key for key in wild_moves if self.wild_pp.get(key, 0) > 0]
+        key = available[self.rng().randrange(len(available))] if available else wild_moves[0]
         if available:
             self.wild_pp[key] -= 1
         self.last_action = self._wild_attack(MOVES[key])
@@ -351,7 +370,7 @@ class Battle:
         )
         if self.rng().randrange(100) < chance:
             self.state = "caught"
-            self.result = "Caught!"
+            self.result = f"Caught {SPECIES[self.wild_species_id].name}! Catching does not award battle XP."
             return True
         self._wild_response()
         return False
@@ -391,6 +410,10 @@ class Battle:
         data.setdefault("wild_status", "")
         data.setdefault("last_action", "")
         data["party"]=[OwnedPokemon.from_raw(item) for item in data.get("party",[])]
+        for index,item in enumerate(data["party"]):
+            if item.instance_id==data["player"].instance_id:
+                data["party"][index]=data["player"]
+                break
         data.setdefault("party_hp", {})
         data.setdefault("party_status", {})
         battle=cls(**data)

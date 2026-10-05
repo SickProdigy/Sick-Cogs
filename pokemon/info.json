@@ -1,6 +1,6 @@
 {
   "author": ["SickProdigy"],
-  "description": "A global Pokémon collection with activity encounters, persistent wild battles, progression, catching, and generated retro scenes.",
+  "description": "A nostalgic Generation 1 catching RPG with activity encounters, level-scaled battles, progression, and generated retro scenes.",
   "disabled": false,
   "end_user_data_statement": "This cog stores Discord user IDs, globally owned Pokémon, party selections, inventory counts, catch provenance, active battles, and guild/channel spawn configuration. User deletion removes the requesting user's collection and active encounters.",
   "hidden": false,
@@ -13,5 +13,5 @@
   "short": "Global Pokémon catching and wild battles",
   "tags": ["pokemon", "games", "collecting", "battles"],
   "type": "COG",
-  "version": "0.3.0"
+  "version": "0.4.0"
 }
