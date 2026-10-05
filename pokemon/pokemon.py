@@ -11,14 +11,15 @@ from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .data import MOVES,SPECIES,generation_for,sprite
 from .models import Battle,BattleError,OwnedPokemon
+from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,RenderError
 from .views import BagView,BattleView,EncounterView,FightView,PartyView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal"}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[]}
-GLOBAL={"schema":4,"next_encounter":1,"encounters":{}}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default"}
+GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro"}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -49,7 +50,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.5.0";__author__="SickProdigy"
+    __version__="0.6.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -352,19 +353,50 @@ class Pokemon(commands.Cog):
             await self.config.user(ctx.author).set(conf)
         await ctx.send(f"Restored your party’s HP, status, and PP ({healed} Pokémon).")
 
+    async def selected_pokedex_style(self,user):
+        preference=await self.config.user(user).pokedex_style()
+        if preference=="default":
+            preference=await self.config.pokedex_default_style()
+        return resolve_style(preference).key
+
+    async def set_pokedex_style(self,user,style):
+        if style not in POKEDEX_STYLES:
+            raise ValueError("Unknown Pokédex style")
+        await self.config.user(user).pokedex_style.set(style)
+
     @pokemon.command(name="pokedex",aliases=["dex"])
     async def pokedex(self,ctx,page:int=1):
         conf=await self.config.user(ctx.author).all()
-        seen={int(value) for value in conf.get("pokedex_seen",[])}
-        caught={int(value) for value in conf.get("pokedex_caught",[])}
-        entries=sorted(item for item in SPECIES.values() if generation_for(item.id)==1)
-        page_size=25;pages=max(1,(len(entries)+page_size-1)//page_size);page=max(1,min(page,pages))
-        lines=[]
-        for item in entries[(page-1)*page_size:page*page_size]:
-            marker="●" if item.id in caught else "○" if item.id in seen else "—"
-            name=item.name if item.id in seen else "???"
-            lines.append(f"{marker} #{item.id:03d} {name}")
-        await ctx.send(f"**Generation I Pokédex · {len(seen & {item.id for item in entries})} seen · {len(caught & {item.id for item in entries})} caught · {page}/{pages}**\n"+"\n".join(lines))
+        session=PokedexSession(
+            user_id=ctx.author.id,
+            seen={int(value) for value in conf.get("pokedex_seen",[])},
+            caught={int(value) for value in conf.get("pokedex_caught",[])},
+            style=await self.selected_pokedex_style(ctx.author),
+            page=max(0,page-1),
+        )
+        view=PokedexView(self,session)
+        view.message=await ctx.send(embed=render_pokedex(session),view=view)
+
+    @pokemon.command(name="pokedexstyle",aliases=["dexstyle"])
+    async def pokedex_style(self,ctx,style:str=None):
+        """Choose your Pokédex display style, or follow the bot default."""
+        preference=await self.config.user(ctx.author).pokedex_style()
+        active=await self.selected_pokedex_style(ctx.author)
+        if style is None:
+            choices=", ".join(["default",*POKEDEX_STYLES])
+            await ctx.send(f"Pokédex style: **{preference}** (currently **{active}**). Choices: {choices}.")
+            return
+        style=style.casefold()
+        if style=="default":
+            await self.config.user(ctx.author).pokedex_style.set("default")
+            active=await self.selected_pokedex_style(ctx.author)
+            await ctx.send(f"Pokédex style now follows the bot default (**{active}**).")
+            return
+        if style not in POKEDEX_STYLES:
+            await ctx.send("Unknown style. Choose: "+", ".join(POKEDEX_STYLES)+".")
+            return
+        await self.set_pokedex_style(ctx.author,style)
+        await ctx.send(f"Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
 
     @pokemon.command(name="profile")
     async def profile(self,ctx):
@@ -443,6 +475,21 @@ class Pokemon(commands.Cog):
         channel=channel or ctx.channel
         if await self.config.guild(ctx.guild).active_encounter():await ctx.send("This server already has an encounter.");return
         await self.spawn(channel)
+    @pokemon_set.command(name="pokedexstyle")
+    @commands.is_owner()
+    async def default_pokedex_style(self,ctx,style:str=None):
+        """Choose the default Pokédex style for users following the default."""
+        current=resolve_style(await self.config.pokedex_default_style()).key
+        if style is None:
+            await ctx.send(f"Default Pokédex style: **{current}**. Choices: "+", ".join(POKEDEX_STYLES)+".")
+            return
+        style=style.casefold()
+        if style not in POKEDEX_STYLES:
+            await ctx.send("Unknown style. Choose: "+", ".join(POKEDEX_STYLES)+".")
+            return
+        await self.config.pokedex_default_style.set(style)
+        await ctx.send(f"Default Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
+
     @pokemon_set.command(name="catalogsync")
     @commands.is_owner()
     async def catalog_sync(self,ctx,generation:int):
