@@ -1,6 +1,6 @@
 import unittest
 
-from mtg.ai import _global_enchantment_score, _target, advance_solo
+from mtg.ai import _activation_target, _global_enchantment_score, _target, advance_solo
 from mtg.engine import Game, Permanent
 
 
@@ -445,6 +445,18 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
+
+    def test_ai_targets_reusable_artifacts_and_resolves_card_draw(self):
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        icy=solo(); self.add(icy,HUMAN,"forest"); self.add(icy,HUMAN,"giant")
+        self.assertEqual(_activation_target(icy,AI,cards["lea:248"]),f"{HUMAN}:2")
+        rod=solo(); self.assertEqual(_activation_target(rod,AI,cards["lea:268"]),str(HUMAN))
+
+        tome=solo(order=(AI,HUMAN)); tome.player(HUMAN).kept=True; tome.player(AI).kept=True; tome.player(AI).hand=[]
+        source=self.add(tome,AI,"lea:254"); [self.add(tome,AI,"forest") for _ in range(4)]
+        before=len(tome.player(AI).hand); tome.active_index=0; tome.phase="precombat_main"; tome.priority_user=AI; tome.player(AI).land_played=True
+        advance_solo(tome); self.assertTrue(source.tapped); self.assertEqual(tome.stack[-1].ability_effect,"draw_self")
+        tome.pass_priority(HUMAN); advance_solo(tome); self.assertEqual(len(tome.player(AI).hand),before+1)
 
 
 if __name__ == "__main__":

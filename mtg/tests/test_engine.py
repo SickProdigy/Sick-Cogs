@@ -1711,6 +1711,42 @@ class SpellTests(unittest.TestCase):
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
 
+class AlphaReusableArtifactTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_icy_manipulator_pays_taps_and_uses_a_stable_target(self):
+        game=ready(); icy=self.add(game,10,"lea:248"); land=self.add(game,10,"island"); target=self.add(game,20,"bear")
+        game.activate_ability(10,1,"20:1")
+        self.assertTrue(icy.tapped); self.assertTrue(land.tapped); self.assertFalse(target.tapped); self.assertEqual(game.stack[-1].target,f"20:{target.uid}")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertTrue(restored.player(20).battlefield[0].tapped)
+
+    def test_icy_manipulator_rejects_illegal_target_before_payment_and_fizzles_if_target_leaves(self):
+        game=ready(); icy=self.add(game,10,"lea:248"); land=self.add(game,10,"island"); self.add(game,10,"lea:100")
+        with self.assertRaisesRegex(GameError,"artifact, creature, or land"): game.activate_ability(10,1,"10:3")
+        self.assertFalse(icy.tapped); self.assertFalse(land.tapped)
+        target=self.add(game,20,"bear"); game.activate_ability(10,1,"20:1"); game.player(20).battlefield.remove(target); game.player(20).graveyard.append(target.uid)
+        self.resolve_top(game); self.assertIn("fizzled",game.log[-1])
+
+    def test_rod_of_ruin_deals_respondable_damage_without_summoning_sickness(self):
+        game=ready(); rod=self.add(game,10,"lea:268"); lands=[self.add(game,10,"mountain") for _ in range(3)]; victim=self.add(game,20,"bear")
+        game.activate_ability(10,1,"20:1"); self.assertTrue(rod.tapped); self.assertTrue(all(x.tapped for x in lands)); self.assertEqual(victim.damage,0)
+        controller,_=game.find_permanent(rod.uid); controller.battlefield.remove(rod); controller.graveyard.append(rod.uid)
+        self.resolve_top(game); self.assertEqual(victim.damage,1)
+
+    def test_jayemdae_tome_draws_after_source_removal_and_empty_library_loses(self):
+        game=ready(); tome=self.add(game,10,"lea:254"); lands=[self.add(game,10,"forest") for _ in range(4)]; before=len(game.player(10).hand)
+        game.activate_ability(10,1); game.player(10).battlefield.remove(tome); game.player(10).graveyard.append(tome.uid); self.resolve_top(game)
+        self.assertEqual(len(game.player(10).hand),before+1); self.assertTrue(all(x.tapped for x in lands))
+        empty=ready(); self.add(empty,10,"lea:254"); [self.add(empty,10,"plains") for _ in range(4)]; empty.player(10).library=[]
+        empty.activate_ability(10,1); self.resolve_top(empty); self.assertTrue(empty.finished); self.assertEqual(empty.winner,20)
+
+
 class CombatTests(unittest.TestCase):
     def test_unblocked_damage_and_lethal_creatures(self):
         g=ready(); a=g.players[10]; d=g.players[20]

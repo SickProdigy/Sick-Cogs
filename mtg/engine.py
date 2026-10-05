@@ -331,6 +331,7 @@ class Game:
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
+        if card.activation_effect=="draw_self": return str(user)
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
             if attached is None or not self._aura_can_attach(card,attached,source): raise GameError(f"{card.name} is not attached to a legal permanent.")
@@ -352,6 +353,7 @@ class Game:
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
         if card.activation_effect=="unblockable" and (not target_card.creature or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="untap_land" and not target_card.land: raise GameError("Target must be a land.")
+        if card.activation_effect=="tap_permanent" and not any(target_card.has_type(kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
     def can_activate(self,user,position,target=None):
@@ -778,6 +780,8 @@ class Game:
             self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
             self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
+        elif effect=="draw_self":
+            self._draw(self.player(s.owner),1)
         elif effect=="damage_any":
             if ":" in (s.target or ""):
                 if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
@@ -797,6 +801,9 @@ class Game:
         elif effect=="untap_land":
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             target.tapped=False
+        elif effect=="tap_permanent":
+            if target_card is None or not any(target_card.has_type(kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
+            target.tapped=True
         else:
             fizzle("the effect is unsupported"); return
         self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability resolved.")

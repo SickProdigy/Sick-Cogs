@@ -278,6 +278,7 @@ def _activation_target(game,user,card,source_uid=None):
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
+    if card.activation_effect=="draw_self": return str(user)
     if card.activation_effect=="damage_any":
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)
@@ -298,6 +299,14 @@ def _activation_target(game,user,card,source_uid=None):
             if permanent.uid!=source_uid and target.creature and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
                 choices.append((game.current_stats(permanent)[0],position))
         if choices: return f"{user}:{max(choices)[1]}"
+    if card.activation_effect=="tap_permanent":
+        choices=[]
+        for position,permanent in enumerate(game.player(opponent).battlefield,1):
+            target=game.card(permanent.uid)
+            if not permanent.tapped and any(target.has_type(kind) for kind in ("Artifact","Creature","Land")) and _can_target(game,card,permanent):
+                score=(10+sum(game.current_stats(permanent))) if target.creature else target.cost
+                choices.append((score,position))
+        if choices: return f"{opponent}:{max(choices)[1]}"
     if card.activation_effect=="untap_land":
         for position,permanent in enumerate(game.player(user).battlefield,1):
             if game.card(permanent.uid).land and permanent.tapped and _can_target(game,card,permanent): return f"{user}:{position}"

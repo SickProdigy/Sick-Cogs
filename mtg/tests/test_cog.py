@@ -253,6 +253,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"S:1"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Counter target green spell",rendered); self.assertIn("Deathgrip ability",rendered)
 
+    async def test_public_embed_shows_reusable_artifact_and_pending_ability(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        rod=game.next_uid; game.next_uid+=1; game.cards[rod]="lea:268"; source=permanent_type(rod,"lea:268",sick=False)
+        lands=[]
+        for _ in range(3):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]="mountain"; lands.append(permanent_type(uid,"mountain",sick=False))
+        game.player(10).battlefield=[source,*lands]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1,"20"); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Deals 1 damage to any target",rendered); self.assertIn("Rod of Ruin ability",rendered)
+
     async def test_public_embed_labels_activated_abilities_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
