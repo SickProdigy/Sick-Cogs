@@ -10,9 +10,11 @@ class ChallengeView(discord.ui.View):
         await i.response.send_message("Only the challenged player can answer.",ephemeral=True); return False
     @discord.ui.button(label="Accept MTG game",style=discord.ButtonStyle.success)
     async def accept(self,i,b):
+        await i.response.defer()
         try: game=await self.cog.create_game(self.challenger,self.opponent,i.channel_id)
-        except GameError as e: await i.response.send_message(str(e),ephemeral=True); return
-        self.stop(); await i.response.edit_message(content=None,embed=self.cog.game_embed(game),view=GameView(self.cog,game.game_id))
+        except GameError as e: await i.followup.send(str(e),ephemeral=True); return
+        self.stop(); embed,file=await self.cog.game_message(game)
+        await i.edit_original_response(content=None,embed=embed,attachments=[file] if file else [],view=GameView(self.cog,game.game_id))
         game.message_id=i.message.id; await self.cog.save(game)
     @discord.ui.button(label="Decline",style=discord.ButtonStyle.secondary)
     async def decline(self,i,b): self.stop(); await i.response.edit_message(content="Challenge declined.",view=None)

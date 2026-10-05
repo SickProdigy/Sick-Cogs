@@ -5,7 +5,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, render_hand
+from mtg.art import MAX_CACHE_FILES, ScryfallArtCache, render_battlefield, render_hand
+from mtg.engine import Game, Permanent
 from mtg.cards import CARDS
 
 
@@ -19,6 +20,18 @@ class ArtTests(unittest.TestCase):
             self.assertEqual(image.format,"PNG")
             self.assertLessEqual(image.width,964)
             self.assertLessEqual(image.height,708)
+
+    def test_public_battlefield_render_is_bounded_png(self):
+        game=Game(1,[10,20],1)
+        creature=next(uid for uid,key in game.cards.items() if key=="goblin")
+        game.players[10].battlefield=[Permanent(creature,"goblin",sick=False)]
+        background=Path(__file__).parents[1]/"assets"/"default_playmat.png"
+        output=render_battlefield(game,{10:"First player",20:"Second player"},{},background)
+        payload=output.getvalue()
+        self.assertLess(len(payload),8*1024*1024)
+        with Image.open(io.BytesIO(payload)) as image:
+            self.assertEqual(image.format,"PNG")
+            self.assertEqual(image.size,(1280,853))
 
     def test_valid_card_image_is_cached_without_reencoding(self):
         with tempfile.TemporaryDirectory() as directory:

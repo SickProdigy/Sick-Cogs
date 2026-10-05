@@ -2,7 +2,7 @@
 
 MTG is an experimental two-player Magic: The Gathering rules prototype for Red.
 
-Version 0.2.0 supports a small curated card pool and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, and paginated private hand images with a text fallback. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
+Version 0.3.0 supports a small curated card pool and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, paginated private hand images with a text fallback, and a public rendered playmat layered over the accessible match embed. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
 
 ## Play
 

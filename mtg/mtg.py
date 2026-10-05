@@ -7,7 +7,7 @@ from typing import Dict
 import discord
 from redbot.core import Config, commands
 from redbot.core.data_manager import cog_data_path
-from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_hand
+from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield, render_hand
 from .cards import CARDS
 from .engine import Game, GameError
 from .views import ChallengeView, GameView, HandPaginationView
@@ -20,7 +20,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.2.0"
+    __version__="0.3.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -94,10 +94,29 @@ class MTG(commands.Cog):
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e
+    async def game_message(self,game):
+        embed=self.game_embed(game); paths={}
+        public_cards=[game.card(permanent.uid) for player in game.players.values() for permanent in player.battlefield]
+        public_cards.extend(game.card(spell.uid) for spell in game.stack)
+        for card in {card.key:card for card in public_cards}.values():
+            try: paths[card.key]=await self.art_cache.get(card)
+            except (ArtError,aiohttp.ClientError,asyncio.TimeoutError,OSError):
+                log.warning("Could not cache public art for %s",card.key,exc_info=True)
+        names={user:str(self.bot.get_user(user).display_name if self.bot.get_user(user) else user).replace("\n"," ")[:32] for user in game.order}
+        try:
+            background=__import__("pathlib").Path(__file__).with_name("assets")/"default_playmat.png"
+            image=await asyncio.to_thread(render_battlefield,game,names,paths,background)
+            file=discord.File(image,filename=f"mtg-table-{game.game_id}.png")
+            embed.set_image(url=f"attachment://mtg-table-{game.game_id}.png")
+            return embed,file
+        except (ArtError,OSError):
+            log.warning("Could not render public battlefield",exc_info=True)
+            return embed,None
     async def refresh_message(self,game):
         try:
             channel=self.bot.get_channel(self.channels.get(game.game_id)); message=await channel.fetch_message(game.message_id)
-            await message.edit(embed=self.game_embed(game),view=None if game.finished else GameView(self,game.game_id))
+            embed,file=await self.game_message(game)
+            await message.edit(embed=embed,attachments=[file] if file else [],view=None if game.finished else GameView(self,game.game_id))
         except (discord.HTTPException,AttributeError): pass
     async def send_hand(self,interaction,game_id,page,editing=False):
         game=self.games.get(game_id)
@@ -132,7 +151,9 @@ class MTG(commands.Cog):
         async with self.lock(game.game_id):
             try: action(game); game.record(i.user.id,label); await self.save(game)
             except (GameError,IndexError,ValueError) as e: await i.response.send_message(str(e),ephemeral=True); return
-            await i.response.edit_message(embed=self.game_embed(game),view=None if game.finished else GameView(self,game.game_id))
+            await i.response.defer()
+            embed,file=await self.game_message(game)
+            await i.edit_original_response(embed=embed,attachments=[file] if file else [],view=None if game.finished else GameView(self,game.game_id))
     async def mutate_ctx(self,ctx,action,label):
         game=self.find(ctx.author.id)
         async with self.lock(game.game_id):
@@ -154,7 +175,9 @@ class MTG(commands.Cog):
     async def status(self,ctx):
         try: game=self.find(ctx.author.id)
         except GameError as e: await ctx.send(str(e)); return
-        await ctx.send(embed=self.game_embed(game))
+        embed,file=await self.game_message(game)
+        if file: await ctx.send(embed=embed,file=file)
+        else: await ctx.send(embed=embed)
     @mtg.command(name="card")
     async def card_detail(self,ctx,*,query:str):
         """Show one supported card by stable catalog key or name."""
