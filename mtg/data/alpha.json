@@ -6204,7 +6204,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:278",
@@ -6226,7 +6226,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:279",
@@ -6248,7 +6248,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:280",
@@ -6270,7 +6270,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:281",
@@ -6292,7 +6292,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:282",
@@ -6314,7 +6314,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:283",
@@ -6336,7 +6336,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:284",
@@ -6358,7 +6358,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:285",
@@ -6380,7 +6380,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:286",
@@ -6401,7 +6401,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:287",
@@ -6422,7 +6422,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:288",
@@ -6443,7 +6443,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:289",
@@ -6464,7 +6464,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:290",
@@ -6485,7 +6485,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:291",
@@ -6506,7 +6506,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:292",
@@ -6527,7 +6527,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:293",
@@ -6548,7 +6548,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:294",
@@ -6569,7 +6569,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:295",
@@ -6590,7 +6590,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "land",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     }
   ]
 }

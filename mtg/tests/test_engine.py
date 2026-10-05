@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from mtg.cards import CARDS, starter
 from mtg.engine import Game, GameError, Permanent
 
@@ -108,6 +109,30 @@ class ManaTests(unittest.TestCase):
         game.play(10,1)
         self.assertTrue(all(land.tapped for land in player.battlefield))
 
+    def test_alpha_dual_land_can_be_played_and_produce_either_color(self):
+        game=ready(); player=game.players[10]
+        dual=self.alpha_in_hand(game,10,"lea:277")
+        game.play(10,1)
+        self.assertEqual(player.battlefield[-1].uid,dual)
+        self.assertEqual(set(game.card(dual).produces),{"B","R"})
+        self.assertTrue(game.card(dual).has_land_type("swamp"))
+        self.assertTrue(game.card(dual).has_land_type("mountain"))
+
+    def test_colored_payment_backtracks_across_dual_lands(self):
+        game=ready(); player=game.players[10]
+        tundra=self.land(game,"lea:284"); scrubland=self.land(game,"lea:281")
+        player.battlefield=[tundra,scrubland]
+        cost=SimpleNamespace(name="Azorius test",mana_cost="{W}{U}")
+        payment=game._mana_payment(player,cost)
+        self.assertEqual({permanent.uid for permanent in payment},{tundra.uid,scrubland.uid})
+
+    def test_alpha_basic_land_printing_pays_colored_cost(self):
+        game=ready(); player=game.players[10]
+        self.alpha_in_hand(game,10,"lea:38")
+        alpha_plains=self.land(game,"lea:286"); player.battlefield=[alpha_plains]
+        game.play(10,1)
+        self.assertTrue(alpha_plains.tapped)
+
 
 
 class StaticKeywordCombatTests(unittest.TestCase):
@@ -165,7 +190,7 @@ class StaticKeywordCombatTests(unittest.TestCase):
         self.assertEqual(restored.blocks,{angel.uid:spider.uid})
 
     def test_landwalk_depends_on_defender_land_type(self):
-        for attacker_key,land_key in (("lea:95","swamp"),("lea:216","forest")):
+        for attacker_key,land_key in (("lea:95","swamp"),("lea:216","forest"),("lea:95","lea:277")):
             with self.subTest(attacker=attacker_key):
                 game,attacker=self.attacking_game(attacker_key)
                 blocker=self.permanent(game,20,"bear")

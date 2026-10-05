@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import ALPHA_KEYWORDS, BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.cards import ALPHA_KEYWORDS, ALPHA_LAND_KEYS, BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),91)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),91)
+        self.assertEqual(len(CARDS),110)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),110)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),31)
-        self.assertEqual(len(REFERENCE_ALPHA),264)
+        self.assertEqual(len(PLAYABLE_ALPHA),50)
+        self.assertEqual(len(REFERENCE_ALPHA),245)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -51,7 +51,10 @@ class CatalogTests(unittest.TestCase):
         })
         promoted_abilities={card.key for card in PLAYABLE_ALPHA if card.support_family=="creature_ability"}
         self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|{"lea:159"})
-        self.assertTrue(all("Creature" in card.type_line for card in PLAYABLE_ALPHA))
+        promoted_lands={card.key for card in PLAYABLE_ALPHA if card.support_family=="land"}
+        self.assertEqual(promoted_lands,ALPHA_LAND_KEYS)
+        self.assertTrue(all("Creature" in card.type_line or "Land" in card.type_line for card in PLAYABLE_ALPHA))
+        self.assertTrue(all(CARDS[key].land and CARDS[key].produces for key in ALPHA_LAND_KEYS))
 
     def test_alpha_search_handles_names_printing_keys_and_basic_art(self):
         lotus=search_alpha("Black Lotus")
@@ -79,7 +82,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         await MTG.catalog.callback(cog,ctx,query=None)
         sent=ctx.send.await_args.kwargs; embed=sent["embed"]; view=sent["view"]
         self.assertEqual(len(embed.description.splitlines()),15)
-        self.assertIn("91 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("110 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

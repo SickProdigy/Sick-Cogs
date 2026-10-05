@@ -11,7 +11,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Instants and sorceries | 70 | Targets, zones, countering, prevention, X costs, and special resolutions |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Artifact permanents, mana abilities, activation costs, and continuous effects |
-| Lands | 19 | Basic and nonbasic mana production, land types, and continuous effects |
+| Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
 
@@ -21,9 +21,11 @@ The 0.8.0 static-keyword promotion adds Air Elemental, Mahamoti Djinn, Phantom M
 
 The 0.9.0 combat-timing promotion adds Elvish Archers, Bog Wraith, Shanodin Dryads, and Ironclaw Orcs. First strike uses a persisted first-strike damage step followed by a priority window before normal damage. Forestwalk and swampwalk inspect the defending battlefield’s land types, and Ironclaw Orcs checks the prospective attacker’s current power before blocking.
 
+The 0.10.0 land promotion adds all 19 Alpha land printings: the nine basic-land artworks present in Alpha and all ten original dual lands except Volcanic Island, which was not printed in Limited Edition Alpha. Dual lands expose both basic land types and both mana choices. Automatic payment now searches possible colored assignments, so overlapping dual-land choices cannot falsely reject a payable cost.
+
 ## Delivery stages
 
-1. **Mana and vanilla creatures:** colored and generic costs, automatic legal land selection, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
+1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, and Ironclaw Orcs’ block restriction are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
 3. **Spell and zone actions:** damage variants, destroy/sacrifice, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, and target legality.
 4. **Artifacts and activated abilities:** artifact permanents, mana pools, chosen colors, tap/sacrifice costs, reusable activations, and activation controls.

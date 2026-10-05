@@ -126,15 +126,25 @@ class Game:
     def _mana_payment(self,player,card):
         generic,colored=self._mana_requirements(card)
         available=[permanent for permanent in player.battlefield if self.card(permanent.uid).land and not permanent.tapped]
-        selected=[]
-        for symbol in colored:
-            choices=[permanent for permanent in available if symbol in self.card(permanent.uid).colors]
-            if not choices: return None
-            permanent=min(choices,key=lambda item:len(self.card(item.uid).colors))
-            selected.append(permanent); available.remove(permanent)
-        if len(available)<generic: return None
-        selected.extend(available[:generic])
-        return selected
+
+        def assign(index,remaining,selected):
+            if index==len(colored): return selected,remaining
+            symbol=colored[index]
+            choices=sorted(
+                (permanent for permanent in remaining if symbol in self.card(permanent.uid).produces),
+                key=lambda item:len(self.card(item.uid).produces),
+            )
+            for permanent in choices:
+                rest=[item for item in remaining if item.uid!=permanent.uid]
+                result=assign(index+1,rest,selected+[permanent])
+                if result is not None: return result
+            return None
+
+        result=assign(0,available,[])
+        if result is None: return None
+        selected,remaining=result
+        if len(remaining)<generic: return None
+        return selected+remaining[:generic]
 
     def can_pay(self,user,card):
         return self._mana_payment(self.player(user),card) is not None

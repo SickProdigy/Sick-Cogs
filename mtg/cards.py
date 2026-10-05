@@ -15,6 +15,7 @@ class Card:
     oracle_id: str
     mana_cost: str = ""
     colors: Tuple[str, ...] = ()
+    produces: Tuple[str, ...] = ()
     rarity: str = "common"
     pack_slot: str = "common"
     cost: int = 0
@@ -45,6 +46,7 @@ class Card:
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
+        if self.land and self.produces: abilities.append("Produces "+"/".join(self.produces))
         return ", ".join(abilities)
 
     def has_land_type(self,land_type):
@@ -61,10 +63,13 @@ BASE_CARDS = {
         **{
             **raw,
             "colors": tuple(raw.get("colors", ())),
+            "produces": tuple(raw.get("produces", raw.get("colors", ()))) if raw.get("kind") == "Land" else tuple(raw.get("produces", ())),
         }
     )
     for raw in _CATALOG["cards"]
 }
+
+ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
 
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
@@ -89,18 +94,19 @@ for reference in PLAYABLE_ALPHA:
     CARDS[reference.key] = Card(
         key=reference.key,
         name=reference.name,
-        kind="Creature",
+        kind="Land" if reference.support_family == "land" else "Creature",
         type_line=reference.type_line,
         set_code="lea",
         scryfall_id=reference.scryfall_id,
         oracle_id=reference.oracle_id,
         mana_cost=reference.mana_cost,
         colors=reference.colors,
+        produces=reference.color_identity if reference.support_family == "land" else (),
         rarity=reference.rarity,
         pack_slot="alpha",
         cost=int(reference.mana_value),
-        power=int(reference.power),
-        toughness=int(reference.toughness),
+        power=int(reference.power) if reference.power is not None else 0,
+        toughness=int(reference.toughness) if reference.toughness is not None else 0,
         text=reference.oracle_text,
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
@@ -121,3 +127,6 @@ def starter(color):
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
+
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:
+    raise RuntimeError("Playable Alpha lands do not match the validated land map.")

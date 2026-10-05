@@ -31,6 +31,16 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(restored.ai_difficulty, "easy")
         self.assertEqual(restored.to_raw(), game.to_raw())
 
+    def test_ai_can_play_alpha_dual_land(self):
+        game=solo(order=(AI,HUMAN)); advance_solo(game)
+        player=game.player(AI)
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:282"
+        player.hand.insert(0,uid); game.player(HUMAN).kept=True; player.kept=True
+        game.phase="precombat_main"; game.priority_user=AI; game.active_index=0
+        advance_solo(game)
+        self.assertIn(uid,[permanent.uid for permanent in player.battlefield])
+        self.assertTrue(any(event["action"]=="ai_play_land" for event in game.history))
+
     def test_ai_uses_normal_game_actions_until_human_priority(self):
         game = solo(order=(AI, HUMAN))
         advance_solo(game)
