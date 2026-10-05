@@ -78,7 +78,8 @@ class CatalogSelect(discord.ui.Select):
                 description=f"{card.type_line} · {status}"
             else:
                 description=f"{card.kind} · Playable"
-            options.append(discord.SelectOption(label=(f"{card.name} · #{card.collector_number}" if source=="alpha" else card.name)[:100],description=description[:100],value=str(index)))
+            name=f"{card.name} · #{card.collector_number}" if source=="alpha" else card.name
+            options.append(discord.SelectOption(label=f"{index+1}. {name}"[:100],description=description[:100],value=str(index)))
         super().__init__(placeholder="Select a card for details",min_values=1,max_values=1,options=options,row=0)
 
     async def callback(self,interaction):

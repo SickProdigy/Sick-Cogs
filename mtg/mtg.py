@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.17.0"
+    __version__="0.17.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -246,16 +246,20 @@ class MTG(commands.Cog):
 
     def catalog_embed(self,browser):
         start=browser.page*browser.page_size; visible=browser.records[start:start+browser.page_size]
-        lines=[]
+        def cell(value,width):
+            value=str(value).replace("\n"," ").replace("\r"," ").replace("`","'")
+            return (value if len(value)<=width else value[:width-1]+"…").ljust(width)
+        lines=[f"{'#':>3}  {'Card':<25} {'Mana':<9} {'Type':<12} Status",f"{'—'*3}  {'—'*25} {'—'*9} {'—'*12} {'—'*9}"]
         for number,(source,card) in enumerate(visible,start+1):
             if source=="alpha":
-                status="playable" if card.engine_status=="playable" else "reference only"
-                detail=f"{card.type_line}; {card.rarity}; {status}"
-            else: detail=f"{card.kind}; playable"
-            label=f"{card.name} · #{card.collector_number}" if source=="alpha" else card.name
-            lines.append(f"**{number}. {label}** — {detail}")
+                status="Ready" if card.engine_status=="playable" else "Reference"
+                card_type=card.type_line.split(" — ",1)[0]
+            else:
+                status="Ready"; card_type=card.kind.title()
+            lines.append(f"{number:>3}  {cell(card.name,25)} {cell(card.mana_cost or '—',9)} {cell(card_type,12)} {status}")
         title={"all":"MTG card catalog","playable":"Supported playable catalog","alpha":"Limited Edition Alpha catalog"}[browser.scope]
-        embed=discord.Embed(title=title,description="\n".join(lines),color=discord.Color.dark_green())
+        description="Choose a numbered row from the menu below to open its card.\n\n```text\n"+"\n".join(lines)+"\n```"
+        embed=discord.Embed(title=title,description=description,color=discord.Color.dark_green())
         summary=f"Page {browser.page+1}/{browser.pages} · {len(browser.records)} matching records"
         if not browser.search and browser.scope=="all": summary+=f" · {len(CARDS)} playable definitions · {len(BASE_CARDS)} core + {ALPHA_SET['printing_count']} Alpha printings"
         embed.set_footer(text=summary+" · Select a row for card details")
@@ -311,6 +315,8 @@ class MTG(commands.Cog):
     async def show_catalog_detail(self,interaction,browser,index):
         source,card=browser.records[index]
         embed,file=await self.card_presentation(source,card)
+        attribution=embed.footer.text
+        embed.set_footer(text=f"Card {index+1}/{len(browser.records)} · Up returns to page {browser.page+1}/{browser.pages} · {attribution}")
         await interaction.edit_original_response(embed=embed,attachments=[file] if file else [],view=CatalogDetailView(browser,index))
 
     @mtg.command(name="card")

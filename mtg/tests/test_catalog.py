@@ -92,19 +92,25 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         cog=MTG.__new__(MTG); ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await MTG.catalog.callback(cog,ctx,query=None)
         sent=ctx.send.await_args.kwargs; embed=sent["embed"]; view=sent["view"]
-        self.assertEqual(len(embed.description.splitlines()),15)
+        self.assertIn("#  Card",embed.description)
+        self.assertIn("Mana",embed.description)
+        self.assertIn("Type",embed.description)
+        self.assertIn("Status",embed.description)
         self.assertIn("139 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
         self.assertEqual(len(select.options),15)
+        self.assertTrue(select.options[0].label.startswith("1. "))
 
     async def test_catalog_supports_alpha_pages_and_search(self):
         cog=MTG.__new__(MTG); ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await MTG.catalog.callback(cog,ctx,query="alpha 20")
         embed=ctx.send.await_args.kwargs["embed"]
-        self.assertEqual(len(embed.description.splitlines()),10)
         self.assertIn("Page 20/20",embed.footer.text)
+        page_view=ctx.send.await_args.kwargs["view"]
+        page_select=next(child for child in page_view.children if hasattr(child,"options"))
+        self.assertEqual(len(page_select.options),10)
         ctx.send.reset_mock()
         await MTG.catalog.callback(cog,ctx,query="alpha Black Lotus")
         self.assertIn("Black Lotus",ctx.send.await_args.kwargs["embed"].description)
@@ -127,6 +133,13 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["view"].page,7)
         self.assertEqual(kwargs["view"].scope,"alpha")
         self.assertEqual(kwargs["attachments"],[])
+
+        cog.art_cache=SimpleNamespace(get=AsyncMock(side_effect=ArtError("offline")))
+        detail_interaction=SimpleNamespace(edit_original_response=AsyncMock())
+        await cog.show_catalog_detail(detail_interaction,view,110)
+        detail_embed=detail_interaction.edit_original_response.await_args.kwargs["embed"]
+        self.assertIn("Card 111/295",detail_embed.footer.text)
+        self.assertIn("Up returns to page 8/20",detail_embed.footer.text)
 
     async def test_catalog_is_alphabetical_and_requester_bound(self):
         cog=MTG.__new__(MTG)
