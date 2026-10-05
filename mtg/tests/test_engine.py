@@ -48,7 +48,9 @@ class TurnTests(unittest.TestCase):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty")
+        for player in raw["players"].values(): player.pop("mana_pool")
         restored=Game.from_raw(raw)
+        self.assertTrue(all(player.mana_pool=={} for player in restored.players.values()))
         self.assertEqual(restored.history,[])
         self.assertGreater(restored.updated_at,0)
 
@@ -124,7 +126,8 @@ class ManaTests(unittest.TestCase):
         player.battlefield=[tundra,scrubland]
         cost=SimpleNamespace(name="Azorius test",mana_cost="{W}{U}")
         payment=game._mana_payment(player,cost)
-        self.assertEqual({permanent.uid for permanent in payment},{tundra.uid,scrubland.uid})
+        self.assertEqual({permanent.uid for permanent in payment[0]},{tundra.uid,scrubland.uid})
+        self.assertEqual(payment[1],{})
 
     def test_alpha_basic_land_printing_pays_colored_cost(self):
         game=ready(); player=game.players[10]
@@ -132,6 +135,32 @@ class ManaTests(unittest.TestCase):
         alpha_plains=self.land(game,"lea:286"); player.battlefield=[alpha_plains]
         game.play(10,1)
         self.assertTrue(alpha_plains.tapped)
+
+
+    def test_manual_mana_activation_requires_dual_color_choice(self):
+        game=ready(); player=game.players[10]; dual=self.land(game,"lea:277"); player.battlefield=[dual]
+        with self.assertRaisesRegex(GameError,"Choose one of"):
+            game.activate_mana(10,1)
+        game.activate_mana(10,1,"r")
+        self.assertTrue(dual.tapped); self.assertEqual(player.mana_pool,{"R":1})
+
+    def test_floating_mana_persists_round_trip_and_pays_before_lands(self):
+        game=ready(); player=game.players[10]
+        mountain=self.land(game,"mountain"); forest=self.land(game,"forest"); player.battlefield=[mountain,forest]
+        game.activate_mana(10,1)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.players[10].mana_pool,{"R":1})
+        self.alpha_in_hand(restored,10,"lea:161")
+        restored.play(10,1,"20")
+        self.assertEqual(restored.players[10].mana_pool,{})
+        self.assertFalse(restored.players[10].battlefield[1].tapped)
+
+    def test_mana_pool_empties_only_when_step_advances(self):
+        game=ready(); player=game.players[10]; player.battlefield=[self.land(game,"mountain")]
+        game.activate_mana(10,1); game.pass_priority(10)
+        self.assertEqual(player.mana_pool,{"R":1})
+        game.pass_priority(20)
+        self.assertEqual(player.mana_pool,{})
+        self.assertEqual(game.phase,"attackers")
 
 
 
@@ -320,6 +349,68 @@ class AlphaTargetedSpellTests(unittest.TestCase):
         game.players[20].battlefield.remove(target); game.players[20].graveyard.append(target.uid)
         self.resolve(game)
         self.assertEqual(game.players[10].life,20)
+
+
+class AlphaLandDestructionTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.players[user].hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.players[user].battlefield.append(permanent); return permanent
+
+    def cast(self,game,key,target=None,lands=("swamp","swamp","swamp","swamp")):
+        spell=self.add(game,10,key,"hand")
+        for land in lands: self.add(game,10,land)
+        game.play(10,1,target); game.pass_priority(20); game.pass_priority(10)
+        return spell
+
+    def test_targeted_land_destruction_and_fizzle(self):
+        for key,lands in (("lea:129",("swamp","swamp")),("lea:177",("mountain","mountain","mountain")),("lea:201",("forest","forest","forest"))):
+            with self.subTest(key=key):
+                game=ready(); target=self.add(game,20,"island")
+                spell=self.cast(game,key,"20:1",lands)
+                self.assertNotIn(target,game.players[20].battlefield)
+                self.assertIn(target.uid,game.players[20].graveyard); self.assertIn(spell,game.players[10].graveyard)
+
+        game=ready(); target=self.add(game,20,"island"); self.add(game,10,"lea:177","hand")
+        for _ in range(3): self.add(game,10,"mountain")
+        game.play(10,1,"20:1"); game.players[20].battlefield.remove(target); game.players[20].graveyard.append(target.uid)
+        game.pass_priority(20); game.pass_priority(10)
+        self.assertIn("fizzled",game.log[-1])
+
+    def test_land_target_validation_preserves_card_and_mana(self):
+        game=ready(); spell=self.add(game,10,"lea:129","hand"); lands=[self.add(game,10,"swamp") for _ in range(2)]
+        self.add(game,20,"bear")
+        with self.assertRaisesRegex(GameError,"not a land"):
+            game.play(10,1,"20:1")
+        self.assertEqual(game.players[10].hand[0],spell); self.assertTrue(all(not land.tapped for land in lands))
+
+    def test_armageddon_destroys_all_lands(self):
+        game=ready(); self.add(game,20,"lea:277"); self.add(game,20,"forest")
+        self.cast(game,"lea:2",lands=("plains","plains","plains","plains"))
+        self.assertFalse(any(game.card(x.uid).land for player in game.players.values() for x in player.battlefield))
+        self.assertEqual(sum(1 for player in game.players.values() for uid in player.graveyard if game.card(uid).land),6)
+
+    def test_flashfires_and_tsunami_use_basic_land_types(self):
+        for spell_key,land_type,destroyed_key,safe_key,casting_lands in (
+            ("lea:151","plains","lea:284","forest",("mountain",)*4),
+            ("lea:221","island","lea:285","mountain",("forest",)*4),
+        ):
+            with self.subTest(spell=spell_key):
+                game=ready(); doomed=self.add(game,20,destroyed_key); safe=self.add(game,20,safe_key)
+                self.cast(game,spell_key,lands=casting_lands)
+                self.assertTrue(game.card(doomed.uid).has_land_type(land_type))
+                self.assertNotIn(doomed,game.players[20].battlefield); self.assertIn(safe,game.players[20].battlefield)
+
+    def test_float_mana_in_response_to_land_destruction_then_spend_it(self):
+        game=ready(); target=self.add(game,20,"forest"); bear=self.add(game,20,"bear")
+        growth=self.add(game,20,"lea:197","hand"); self.add(game,10,"lea:177","hand")
+        for _ in range(3): self.add(game,10,"mountain")
+        game.play(10,1,"20:1")
+        game.activate_mana(20,1,"G"); game.pass_priority(20); game.pass_priority(10)
+        self.assertNotIn(target,game.players[20].battlefield); self.assertEqual(game.players[20].mana_pool,{"G":1})
+        game.pass_priority(10); game.play(20,1,"20:1")
+        self.assertEqual(game.players[20].mana_pool,{})
+        self.assertIn(growth,[spell.uid for spell in game.stack]); self.assertEqual(bear.bonus,0)
 
 
 class SpellTests(unittest.TestCase):

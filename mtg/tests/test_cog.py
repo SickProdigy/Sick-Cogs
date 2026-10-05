@@ -119,6 +119,9 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         uid3=game.next_uid; game.next_uid+=1; game.cards[uid3]="lea:277"
         game.players[10].battlefield.append(__import__("mtg.engine",fromlist=["Permanent"]).Permanent(uid3,"lea:277",sick=False))
         self.assertIn("Produces B/R",str(cog.game_embed(game).to_dict()))
+        game.players[10].mana_pool={"B":1,"R":2}
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Mana pool",rendered); self.assertIn("{R}×2",rendered)
 
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()

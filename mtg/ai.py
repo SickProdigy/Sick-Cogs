@@ -9,6 +9,11 @@ def _target(game, user, card):
         return str(game.opponent(user))
     if card.effect == "draw_target":
         return str(user)
+    if card.effect == "destroy_land":
+        lands=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).land]
+        if not lands: return None
+        position,_=max(lands,key=lambda item:len(game.card(item[1].uid).produces))
+        return f"{game.opponent(user)}:{position}"
     if card.effect in ("pump","pump_blocking"):
         creatures = [
             (position, permanent)
@@ -39,7 +44,7 @@ def _play_one(game, user, difficulty):
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
         target = _target(game, user, card)
-        if card.effect in ("pump","pump_blocking") and target is None:
+        if card.effect in ("pump","pump_blocking","destroy_land") and target is None:
             continue
         score = 0
         if card.creature:
@@ -52,6 +57,12 @@ def _play_one(game, user, difficulty):
             score = 7 + card.amount
         elif card.effect == "life":
             score = 4 + card.amount
+        elif card.effect == "destroy_land":
+            score = 11
+        elif card.effect in ("destroy_all_lands","destroy_land_type"):
+            enemy=sum(1 for permanent in game.player(game.opponent(user)).battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
+            own=sum(1 for permanent in player.battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
+            score=6+2*enemy-2*own
         candidates.append((score, -position, position, target))
     if not candidates:
         return None

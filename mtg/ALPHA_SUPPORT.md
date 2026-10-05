@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 16 combat-ability creatures playable through 0.9.0; 61 remain |
-| Instants and sorceries | 70 | 5 targeted instants playable in 0.11.0; 65 remain |
+| Instants and sorceries | 70 | 11 spells playable through 0.12.0; 59 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Artifact permanents, mana abilities, activation costs, and continuous effects |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -25,11 +25,13 @@ The 0.10.0 land promotion adds all 19 Alpha land printings: the nine basic-land 
 
 The 0.11.0 targeted-spell promotion adds Lightning Bolt, Psionic Blast, Giant Growth, Righteousness, and Ancestral Recall. Targets are stored by stable player/permanent identity on the stack, checked before costs are paid, and rechecked for existence on resolution. Creature damage runs state-based death, temporary bonuses expire during cleanup, illegal vanished targets fizzle, Psionic Blast applies self-damage only when it resolves, and simultaneous zero-life loss is a draw.
 
+The 0.12.0 mana-pool and land-destruction promotion adds Armageddon, Sinkhole, Flashfires, Stone Rain, Ice Storm, and Tsunami. Players may manually tap a land for a chosen color while they have priority; the public, persisted pool can pay later spells in that step and empties at the next step or phase boundary. Targeted destruction uses stable permanent identity and can fizzle, while mass effects inspect basic land types so Alpha duals interact correctly.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, and Ironclaw Orcs’ block restriction are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
-3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, and simultaneous zero-life draws are complete. Destroy/sacrifice, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, modes, and X costs remain.
+3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, and floating-mana responses are complete. Destroy/sacrifice, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, modes, and X costs remain.
 4. **Artifacts and activated abilities:** artifact permanents, mana pools, chosen colors, tap/sacrifice costs, reusable activations, and activation controls.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.
 6. **Complex Alpha behavior:** X costs, copying, control changes, extra turns, delayed effects, face-down state, card-specific choices, and remaining manual exceptions.

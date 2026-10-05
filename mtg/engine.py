@@ -24,6 +24,7 @@ class Player:
     library: List[int] = field(default_factory=list)
     hand: List[int] = field(default_factory=list)
     graveyard: List[int] = field(default_factory=list)
+    mana_pool: Dict[str, int] = field(default_factory=dict)
     battlefield: List[Permanent] = field(default_factory=list)
     land_played: bool = False
     kept: bool = False
@@ -125,29 +126,55 @@ class Game:
 
     def _mana_payment(self,player,card):
         generic,colored=self._mana_requirements(card)
-        available=[permanent for permanent in player.battlefield if self.card(permanent.uid).land and not permanent.tapped]
+        sources=[]
+        for symbol,count in player.mana_pool.items():
+            sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
+        for permanent in player.battlefield:
+            land=self.card(permanent.uid)
+            if land.land and not permanent.tapped:
+                sources.append(("land",str(permanent.uid),land.produces,permanent))
 
-        def assign(index,remaining,selected):
-            if index==len(colored): return selected,remaining
-            symbol=colored[index]
-            choices=sorted(
-                (permanent for permanent in remaining if symbol in self.card(permanent.uid).produces),
-                key=lambda item:len(self.card(item.uid).produces),
-            )
-            for permanent in choices:
-                rest=[item for item in remaining if item.uid!=permanent.uid]
-                result=assign(index+1,rest,selected+[permanent])
+        def assign(symbols,remaining,selected):
+            if not symbols: return selected,remaining
+            symbol=min(symbols,key=lambda item:sum(item in source[2] for source in remaining))
+            rest_symbols=list(symbols); rest_symbols.remove(symbol)
+            choices=sorted((source for source in remaining if symbol in source[2]),key=lambda source:(len(source[2]),source[0]!="pool"))
+            for source in choices:
+                rest=[item for item in remaining if item[0:2]!=source[0:2]]
+                result=assign(rest_symbols,rest,selected+[source])
                 if result is not None: return result
             return None
 
-        result=assign(0,available,[])
+        result=assign(colored,sources,[])
         if result is None: return None
         selected,remaining=result
         if len(remaining)<generic: return None
-        return selected+remaining[:generic]
+        selected+=sorted(remaining,key=lambda source:source[0]!="pool")[:generic]
+        lands=[]; pool={}
+        for kind,identifier,options,permanent in selected:
+            if kind=="land": lands.append(permanent)
+            else:
+                symbol=options[0]; pool[symbol]=pool.get(symbol,0)+1
+        return lands,pool
 
     def can_pay(self,user,card):
         return self._mana_payment(self.player(user),card) is not None
+
+    def activate_mana(self,user,position,color=None):
+        self._priority(user); player=self.player(user)
+        if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
+        if not card.land or not card.produces: raise GameError("That permanent has no supported mana ability.")
+        if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
+        symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
+        if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
+        permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+1
+        self.phase_passes=0
+        for spell in self.stack: spell.passes=0
+        self.log.append(f"{user} added {{{symbol}}}.")
+
+    def _empty_mana(self):
+        for player in self.players.values(): player.mana_pool.clear()
 
     def play(self,user,index,target=None):
         self._priority(user); p=self.player(user)
@@ -162,8 +189,12 @@ class Game:
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
         payment=self._mana_payment(p,c)
-        if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your untapped lands.")
-        for permanent in payment: permanent.tapped=True
+        if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your available mana.")
+        lands,pool=payment
+        for permanent in lands: permanent.tapped=True
+        for symbol,count in pool.items():
+            p.mana_pool[symbol]-=count
+            if not p.mana_pool[symbol]: p.mana_pool.pop(symbol)
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
         self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
@@ -200,6 +231,15 @@ class Game:
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
+        if c.effect=="destroy_land":
+            if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]
+            if not self.card(permanent.uid).land: raise GameError("Target is not a land.")
+            return f"{target_user}:{permanent.uid}"
         if target is not None: raise GameError(f"{c.name} does not use a target.")
         return None
 
@@ -216,7 +256,7 @@ class Game:
             if self.phase in ("attackers","blockers"): raise GameError("Complete the required combat declaration.")
             self.phase_passes+=1
             if self.phase_passes<2: self.priority_user=self.opponent(user)
-            else: self.phase_passes=0; self._advance()
+            else: self.phase_passes=0; self._empty_mana(); self._advance()
 
     def _advance(self):
         if self.phase=="precombat_main": self.phase="attackers"; self.priority_user=None; return
@@ -328,6 +368,18 @@ class Game:
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             target.bonus+=c.amount; p.graveyard.append(s.uid)
+        elif c.effect=="destroy_land":
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            target=next((x for x in controller.battlefield if x.uid==uid),None)
+            if target is None or not self.card(target.uid).land:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            controller.battlefield.remove(target); controller.graveyard.append(target.uid); p.graveyard.append(s.uid)
+        elif c.effect in ("destroy_all_lands","destroy_land_type"):
+            for controller in self.players.values():
+                destroyed=[x for x in controller.battlefield if self.card(x.uid).land and (c.effect=="destroy_all_lands" or self.card(x.uid).has_land_type(c.land_type))]
+                controller.battlefield=[x for x in controller.battlefield if x not in destroyed]
+                controller.graveyard.extend(x.uid for x in destroyed)
+            p.graveyard.append(s.uid)
         self.log.append(f"{c.name} resolved."); self._sba(); self._life()
 
     def _perm(self,p,uid):
@@ -366,6 +418,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

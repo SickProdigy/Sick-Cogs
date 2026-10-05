@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.11.0"
+    __version__="0.12.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -119,7 +119,10 @@ class MTG(commands.Cog):
                 stats=f" {c.power+x.bonus}/{c.toughness+x.bonus}" if c.creature else ""
                 abilities=f" [{c.ability_text}]" if c.ability_text else ""
                 field.append(f"{n}. {c.name}{stats}{abilities}{state}")
-            e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value="\n".join(field) or "No permanents",inline=False)
+            pool=" ".join(f"{{{symbol}}}×{count}" for symbol,count in sorted(p.mana_pool.items()))
+            value="\n".join(field) or "No permanents"
+            if pool: value+=f"\nMana pool: {pool}"
+            e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.stack: e.add_field(name="Stack",value=" → ".join(g.card(x.uid).name for x in reversed(g.stack)),inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
@@ -331,6 +334,10 @@ class MTG(commands.Cog):
         if page<1 or page>pages: await ctx.send(f"Choose a page from 1 to {pages}."); return
         view=CatalogView(self,ctx.author.id,records,scope,search,page-1)
         await ctx.send(embed=self.catalog_embed(view),view=view,allowed_mentions=discord.AllowedMentions.none())
+    @mtg.command(name="mana")
+    async def mana(self,ctx,position:int,color:str=None):
+        """Tap a land for floating mana. Dual lands require W/U/B/R/G."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None):
         """Play/cast a hand position. Target: USER_ID or USER_ID:FIELD_POSITION."""

@@ -25,6 +25,7 @@ class Card:
     effect: Optional[str] = None
     amount: int = 0
     self_damage: int = 0
+    land_type: str = ""
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -78,6 +79,12 @@ ALPHA_SPELLS = {
     "lea:74": {"effect":"damage_any", "amount":4, "self_damage":2},
     "lea:161": {"effect":"damage_any", "amount":3},
     "lea:197": {"effect":"pump", "amount":3},
+    "lea:2": {"effect":"destroy_all_lands"},
+    "lea:129": {"effect":"destroy_land"},
+    "lea:151": {"effect":"destroy_land_type", "land_type":"plains"},
+    "lea:177": {"effect":"destroy_land"},
+    "lea:201": {"effect":"destroy_land"},
+    "lea:221": {"effect":"destroy_land_type", "land_type":"island"},
 }
 
 ALPHA_KEYWORDS = {
@@ -120,6 +127,7 @@ for reference in PLAYABLE_ALPHA:
         effect=ALPHA_SPELLS.get(reference.key, {}).get("effect"),
         amount=ALPHA_SPELLS.get(reference.key, {}).get("amount",0),
         self_damage=ALPHA_SPELLS.get(reference.key, {}).get("self_damage",0),
+        land_type=ALPHA_SPELLS.get(reference.key, {}).get("land_type",""),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
     )

@@ -173,9 +173,10 @@ def render_battlefield(game, names, paths, background_path):
         y0 = 34 if top else 626
         y_cards = 92 if top else 666
         draw.rounded_rectangle((194, y0, 1086, y0 + 190), 16, fill=(7, 10, 9, 150), outline=(200, 174, 112, 180), width=2)
+        pool=" ".join(f"{symbol}{count}" for symbol,count in sorted(player.mana_pool.items())) or "-"
         summary = (
             f"{names[user]}  |  Life {player.life}  |  Hand {len(player.hand)}  |  "
-            f"Library {len(player.library)}  |  Graveyard {len(player.graveyard)}  |  Exile 0"
+            f"Library {len(player.library)}  |  Graveyard {len(player.graveyard)}  |  Mana {pool}  |  Exile 0"
         )
         draw.text((214, y0 + 12), summary, fill=(249, 241, 220), font=label_font)
         permanents = player.battlefield[:8]

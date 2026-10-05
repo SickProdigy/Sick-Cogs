@@ -145,6 +145,13 @@ class SoloAITests(unittest.TestCase):
         game.blocks={123:creature_uid}
         self.assertEqual(_target(game,AI,__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:36"]),f"{AI}:1")
 
+    def test_ai_targets_opponent_land_for_destruction(self):
+        game=solo(); advance_solo(game)
+        land_uid=game.next_uid; game.next_uid+=1; game.cards[land_uid]="lea:284"
+        game.player(HUMAN).battlefield=[Permanent(land_uid,"lea:284",sick=False)]
+        card=__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:177"]
+        self.assertEqual(_target(game,AI,card),f"{HUMAN}:1")
+
 
 if __name__ == "__main__":
     unittest.main()
