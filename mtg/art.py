@@ -201,9 +201,9 @@ def render_battlefield(game, names, paths, background_path):
             canvas.paste(panel, (x, y_cards))
             draw.ellipse((x + 4, y_cards + 4, x + 32, y_cards + 32), fill=(10, 13, 12, 235), outline=(222, 185, 82, 255), width=2)
             draw.text((x + 18, y_cards + 18), str(index), fill=(255, 244, 207), font=small_font, anchor="mm")
-            if card.keyword_text:
-                short={"Flying":"Fly","Vigilance":"Vig","Defender":"Def","Reach":"Reach"}
-                abilities="/".join(short.get(word,word[:3]) for word in card.keyword_text.split(", "))
+            if card.ability_text:
+                short={"Flying":"Fly","Vigilance":"Vig","Defender":"Def","Reach":"Reach","First Strike":"FS","Swampwalk":"Swamp","Forestwalk":"Forest","Blocks Power ≤1":"P≤1"}
+                abilities="/".join(short.get(word,word[:3]) for word in card.ability_text.split(", "))
                 draw.rounded_rectangle((x+34,y_cards+4,x+92,y_cards+23),5,fill=(8,12,11,220))
                 draw.text((x+63,y_cards+13),abilities,fill=(255,244,207),font=_font(10),anchor="mm")
             if permanent.tapped:

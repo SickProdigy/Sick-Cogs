@@ -84,11 +84,7 @@ def _blocks(game, user, difficulty):
         if not blockers:
             break
         attacker = game.card(attacker_uid)
-        legal = [
-            item for item in blockers
-            if "flying" not in attacker.keywords
-            or {"flying", "reach"} & set(game.card(item[1].uid).keywords)
-        ]
+        legal = [item for item in blockers if game.can_block(attacker_uid,item[1].uid)[0]]
         if not legal:
             continue
         attacker_power = attacker.power

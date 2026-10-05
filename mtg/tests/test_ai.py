@@ -111,6 +111,21 @@ class SoloAITests(unittest.TestCase):
                 advance_solo(game)
                 self.assertEqual(bool(game.blocks),expected)
 
+    def test_ai_obeys_landwalk_and_block_power_restrictions(self):
+        for attacker_key,blocker_key,land_key in (("lea:95","bear","swamp"),("bear","lea:159",None)):
+            with self.subTest(attacker=attacker_key,blocker=blocker_key):
+                game=solo(); advance_solo(game)
+                attacker=game.next_uid; game.next_uid+=1; game.cards[attacker]=attacker_key
+                blocker=game.next_uid; game.next_uid+=1; game.cards[blocker]=blocker_key
+                game.player(HUMAN).battlefield=[Permanent(attacker,attacker_key,sick=False)]
+                game.player(AI).battlefield=[Permanent(blocker,blocker_key,sick=False)]
+                if land_key:
+                    land=game.next_uid; game.next_uid+=1; game.cards[land]=land_key
+                    game.player(AI).battlefield.append(Permanent(land,land_key,sick=False))
+                game.attackers=[attacker]; game.phase="blockers"; game.priority_user=None
+                advance_solo(game)
+                self.assertEqual(game.blocks,{})
+
 
 if __name__ == "__main__":
     unittest.main()

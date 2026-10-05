@@ -2194,7 +2194,7 @@
       "toughness": "3",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:96",
@@ -3666,7 +3666,7 @@
       "toughness": "2",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:160",
@@ -4403,7 +4403,7 @@
       "toughness": "1",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:192",
@@ -4978,7 +4978,7 @@
       "toughness": "1",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:217",

@@ -164,6 +164,57 @@ class StaticKeywordCombatTests(unittest.TestCase):
         restored.declare_blockers(20,{1:1})
         self.assertEqual(restored.blocks,{angel.uid:spider.uid})
 
+    def test_landwalk_depends_on_defender_land_type(self):
+        for attacker_key,land_key in (("lea:95","swamp"),("lea:216","forest")):
+            with self.subTest(attacker=attacker_key):
+                game,attacker=self.attacking_game(attacker_key)
+                blocker=self.permanent(game,20,"bear")
+                land=self.permanent(game,20,land_key)
+                game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+                with self.assertRaisesRegex(GameError,"can't be blocked"):
+                    game.declare_blockers(20,{1:1})
+                game.players[20].battlefield.remove(land)
+                game.declare_blockers(20,{1:1})
+                self.assertEqual(game.blocks,{attacker.uid:blocker.uid})
+
+    def test_ironclaw_orcs_block_only_power_below_two(self):
+        for attacker_key,legal in (("goblin",True),("bear",False)):
+            with self.subTest(attacker=attacker_key):
+                game,attacker=self.attacking_game(attacker_key)
+                orcs=self.permanent(game,20,"lea:159")
+                game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+                if legal:
+                    game.declare_blockers(20,{1:1}); self.assertEqual(game.blocks,{attacker.uid:orcs.uid})
+                else:
+                    with self.assertRaisesRegex(GameError,"can't block a creature with power 2"):
+                        game.declare_blockers(20,{1:1})
+
+    def test_first_strike_kills_blocker_before_normal_damage(self):
+        game,archer=self.attacking_game("lea:191")
+        bear=self.permanent(game,20,"bear")
+        game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+        game.declare_blockers(20,{1:1}); game.pass_priority(10); game.pass_priority(20)
+        self.assertEqual(game.phase,"after_first_strike")
+        self.assertEqual(game.priority_user,10)
+        self.assertNotIn(bear,game.players[20].battlefield)
+        self.assertIn(archer,game.players[10].battlefield)
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.phase,"after_first_strike")
+        restored.pass_priority(10); restored.pass_priority(20)
+        self.assertEqual(restored.phase,"postcombat_main")
+        self.assertIn(archer.uid,[x.uid for x in restored.players[10].battlefield])
+
+    def test_first_strike_blocker_deals_damage_before_normal_attacker(self):
+        game,giant=self.attacking_game("giant")
+        archer=self.permanent(game,20,"lea:191")
+        game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+        game.declare_blockers(20,{1:1}); game.pass_priority(10); game.pass_priority(20)
+        self.assertEqual(giant.damage,2)
+        self.assertEqual(archer.damage,0)
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertNotIn(archer,game.players[20].battlefield)
+        self.assertIn(giant,game.players[10].battlefield)
+
 
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):

@@ -112,6 +112,10 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Flying, Vigilance",rendered)
 
+        uid2=game.next_uid; game.next_uid+=1; game.cards[uid2]="lea:159"
+        game.players[10].battlefield.append(__import__("mtg.engine",fromlist=["Permanent"]).Permanent(uid2,"lea:159",sick=False))
+        self.assertIn("Blocks power ≤1",str(cog.game_embed(game).to_dict()))
+
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
         expired, active = Game(1, [10, 20], 1), Game(2, [30, 40], 2)

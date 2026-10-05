@@ -25,6 +25,7 @@ class Card:
     amount: int = 0
     haste: bool = False
     keywords: Tuple[str, ...] = ()
+    max_block_power: Optional[int] = None
     type_line: str = ""
     set_code: str = ""
 
@@ -38,7 +39,16 @@ class Card:
 
     @property
     def keyword_text(self):
-        return ", ".join(keyword.title() for keyword in self.keywords)
+        return ", ".join(keyword.replace("_", " ").title() for keyword in self.keywords)
+
+    @property
+    def ability_text(self):
+        abilities=[self.keyword_text] if self.keyword_text else []
+        if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
+        return ", ".join(abilities)
+
+    def has_land_type(self,land_type):
+        return self.land and (self.key == land_type.casefold() or land_type.casefold() in self.type_line.casefold().split())
 
 
 _CATALOG_PATH = Path(__file__).with_name("data") / "cards.json"
@@ -63,10 +73,13 @@ ALPHA_KEYWORDS = {
     "lea:64": ("flying",),
     "lea:69": ("flying",),
     "lea:89": ("defender", "flying"),
+    "lea:95": ("swampwalk",),
     "lea:170": ("flying",),
     "lea:182": ("defender",),
+    "lea:191": ("first_strike",),
     "lea:198": ("reach",),
     "lea:215": ("flying",),
+    "lea:216": ("forestwalk",),
     "lea:224": ("defender",),
     "lea:225": ("defender",),
 }
@@ -90,6 +103,7 @@ for reference in PLAYABLE_ALPHA:
         toughness=int(reference.toughness),
         text=reference.oracle_text,
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
+        max_block_power=1 if reference.key == "lea:159" else None,
     )
 
 PACK_POOLS = {
@@ -105,5 +119,5 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS):
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")

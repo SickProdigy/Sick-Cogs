@@ -195,7 +195,16 @@ class Game:
         if self.phase=="precombat_main": self.phase="attackers"; self.priority_user=None; return
         elif self.phase=="after_attackers": self.phase="blockers"; self.priority_user=None; return
         elif self.phase=="after_blockers":
-            self._combat()
+            if self._combat_has_first_strike():
+                self._combat_damage(first_strike=True)
+                if self.finished: return
+                self.phase="after_first_strike"
+            else:
+                self._combat_damage(first_strike=False); self._end_combat()
+                if self.finished: return
+                self.phase="postcombat_main"
+        elif self.phase=="after_first_strike":
+            self._combat_damage(first_strike=False); self._end_combat()
             if self.finished: return
             self.phase="postcombat_main"
         elif self.phase=="postcombat_main": self.phase="ending"
@@ -225,21 +234,53 @@ class Game:
         p=self.player(user); used=set(); self.blocks={}
         for a,b in assignments.items():
             if not 1<=a<=len(self.attackers) or not 1<=b<=len(p.battlefield): raise GameError("Bad combat position.")
-            x=p.battlefield[b-1]; attacker=self.card(self.attackers[a-1]); blocker=self.card(x.uid)
-            if not blocker.creature or x.tapped or x.uid in used: raise GameError("Invalid blocker.")
-            if "flying" in attacker.keywords and not ({"flying","reach"} & set(blocker.keywords)):
-                raise GameError(f"{blocker.name} cannot block a creature with flying.")
-            used.add(x.uid); self.blocks[self.attackers[a-1]]=x.uid
+            x=p.battlefield[b-1]; attacker_uid=self.attackers[a-1]
+            if x.uid in used: raise GameError("Invalid blocker.")
+            legal,reason=self.can_block(attacker_uid,x.uid)
+            if not legal: raise GameError(reason)
+            used.add(x.uid); self.blocks[attacker_uid]=x.uid
         self.phase="after_blockers"; self.phase_passes=0; self.priority_user=self.active_user
 
-    def _combat(self):
+    def can_block(self,attacker_uid,blocker_uid):
+        defender=self.players[self.opponent(self.active_user)]
+        attacker=self.card(attacker_uid)
+        blocker_perm=next((x for x in defender.battlefield if x.uid==blocker_uid),None)
+        if blocker_perm is None: return False,"That blocker is no longer on the battlefield."
+        blocker=self.card(blocker_uid)
+        if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
+        if "flying" in attacker.keywords and not ({"flying","reach"} & set(blocker.keywords)):
+            return False,f"{blocker.name} cannot block a creature with flying."
+        for land_type in ("plains","island","swamp","mountain","forest"):
+            if f"{land_type}walk" in attacker.keywords and any(self.card(x.uid).has_land_type(land_type) for x in defender.battlefield):
+                return False,f"{attacker.name} can't be blocked while the defender controls a {land_type.title()}."
+        power=attacker.power+next((x.bonus for x in self.players[self.active_user].battlefield if x.uid==attacker_uid),0)
+        if blocker.max_block_power is not None and power>blocker.max_block_power:
+            return False,f"{blocker.name} can't block a creature with power {power}."
+        return True,""
+
+    def _combat_has_first_strike(self):
+        combatants=set(self.attackers)|set(self.blocks.values())
+        return any(
+            "first_strike" in self.card(x.uid).keywords
+            for player in self.players.values() for x in player.battlefield if x.uid in combatants
+        )
+
+    def _combat_damage(self,first_strike):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
         for uid in self.attackers:
-            a=self._perm(atk,uid); block=self.blocks.get(uid)
-            if block is None: dfn.life-=self.card(a.uid).power+a.bonus
-            else:
-                b=self._perm(dfn,block); a.damage+=self.card(b.uid).power+b.bonus; b.damage+=self.card(a.uid).power+a.bonus
-        self.attackers=[]; self.blocks={}; self._sba(); self._life()
+            a=next((x for x in atk.battlefield if x.uid==uid),None)
+            if a is None: continue
+            block_uid=self.blocks.get(uid); b=next((x for x in dfn.battlefield if x.uid==block_uid),None)
+            attacker_strikes=("first_strike" in self.card(a.uid).keywords)==first_strike
+            blocker_strikes=b is not None and (("first_strike" in self.card(b.uid).keywords)==first_strike)
+            if attacker_strikes:
+                if block_uid is None: dfn.life-=self.card(a.uid).power+a.bonus
+                elif b is not None: b.damage+=self.card(a.uid).power+a.bonus
+            if blocker_strikes: a.damage+=self.card(b.uid).power+b.bonus
+        self._sba(); self._life()
+
+    def _end_combat(self):
+        self.attackers=[]; self.blocks={}
 
     def _resolve(self,s):
         p=self.players[s.owner]; c=CARDS[s.key]
