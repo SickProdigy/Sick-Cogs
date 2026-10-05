@@ -273,6 +273,28 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertTrue(warriors.tapped); self.assertFalse(bear.tapped); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
+    def test_ai_recognizes_activated_and_mass_damage_regeneration_threats(self):
+        from mtg.engine import Spell
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        game=solo(); target=self.add(game,AI,"bear"); source=self.add(game,HUMAN,"lea:165")
+        ability_uid=game.next_uid; game.next_uid+=1; game.cards[ability_uid]="lea:165"
+        game.stack=[Spell(HUMAN,ability_uid,"lea:165",f"{AI}:{target.uid}",ability_effect="damage_any",source_uid=source.uid)]
+        self.assertEqual(_target(game,AI,cards["lea:17"]),f"{AI}:1")
+        quake_uid=game.next_uid; game.next_uid+=1; game.cards[quake_uid]="lea:146"
+        game.stack=[Spell(HUMAN,quake_uid,"lea:146",x_value=2)]
+        self.assertEqual(_target(game,AI,cards["lea:17"]),f"{AI}:1")
+        flying=self.add(game,AI,"lea:46"); game.player(AI).battlefield.remove(target)
+        self.assertIsNone(_target(game,AI,cards["lea:17"]))
+        hurricane_uid=game.next_uid; game.next_uid+=1; game.cards[hurricane_uid]="lea:200"
+        game.stack=[Spell(HUMAN,hurricane_uid,"lea:200",x_value=5)]
+        self.assertEqual(_target(game,AI,cards["lea:17"]),f"{AI}:1")
+
+    def test_ai_twiddle_untaps_a_defender_before_blocks(self):
+        game=solo(); defender=self.add(game,AI,"bear"); defender.tapped=True; attacker=self.add(game,HUMAN,"bear")
+        game.active_index=0; game.attackers=[attacker.uid]; game.phase="after_attackers"
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(_target(game,AI,cards["lea:85"]),f"untap:{AI}:1")
+
     def test_ai_regenerates_a_lethally_blocking_creature(self):
         game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         attacker=self.add(game,HUMAN,"bear"); skeleton=self.add(game,AI,"lea:106"); self.add(game,AI,"swamp")
@@ -281,6 +303,17 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"regenerate"); self.assertEqual(game.priority_user,HUMAN)
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertEqual(skeleton.regeneration_shields,1); self.assertEqual(game.priority_user,HUMAN)
+
+    def test_ai_targets_utility_spells_without_illegal_choices(self):
+        game=solo(); advance_solo(game); cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        attacker=self.add(game,AI,"bear"); wall=self.add(game,HUMAN,"lea:132"); self.add(game,HUMAN,"forest")
+        game.active_index=1; game.attackers=[attacker.uid]; game.phase="after_attackers"
+        self.assertEqual(_target(game,AI,cards["lea:60"]),f"{AI}:1")
+        self.assertEqual(_target(game,AI,cards["lea:85"]),f"tap:{HUMAN}:1")
+        self.assertEqual(_target(game,AI,cards["lea:178"]),f"{HUMAN}:1")
+        self.assertIsNone(_target(game,AI,cards["lea:17"]))
+        attacker.damage=1; game.active_index=0; game.attackers=[wall.uid]; game.blocks={wall.uid:attacker.uid}; game.blocked_attackers=[wall.uid]; game.phase="after_blockers"
+        self.assertEqual(_target(game,AI,cards["lea:17"]),f"{AI}:1")
 
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)

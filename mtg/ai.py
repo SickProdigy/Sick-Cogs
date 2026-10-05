@@ -2,7 +2,7 @@ from .engine import Game, GameError
 
 
 DIFFICULTIES = ("easy", "normal")
-TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x"}
+TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -30,6 +30,23 @@ def _target(game, user, card):
         if not choices: return None
         position,_=max(choices,key=lambda item:(sum(game.projected_stats(user,game.card(item[1]))),game.card(item[1]).cost))
         return f"G:{position}"
+    if card.effect=="regenerate_target":
+        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.card(permanent.uid).creature and not permanent.regeneration_shields and _regeneration_threatened(game,user,permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
+    if card.effect=="grant_keyword":
+        if game.active_user!=user or game.phase!="after_attackers": return None
+        choices=[(game.current_stats(permanent)[0],position) for position,permanent in enumerate(game.player(user).battlefield,1) if permanent.uid in game.attackers and card.temporary_keyword not in game.current_keywords(permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
+    if card.effect=="tap_or_untap":
+        if game.phase=="after_attackers" and game.active_user!=user:
+            choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.card(permanent.uid).creature and permanent.tapped]
+            return f"untap:{user}:{max(choices)[1]}" if choices else None
+        if game.active_user!=user or game.phase not in ("precombat_main","after_attackers"): return None
+        choices=[(sum(game.current_stats(permanent)) if game.card(permanent.uid).creature else game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if not permanent.tapped and any(game.card(permanent.uid).has_type(kind) for kind in card.target_types)]
+        return f"tap:{game.opponent(user)}:{max(choices)[1]}" if choices else None
+    if card.effect=="destroy_wall":
+        choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if "Wall" in game.card(permanent.uid).type_line.split(" — ",1)[-1].split()]
+        return f"{game.opponent(user)}:{max(choices)[1]}" if choices else None
     if card.effect in ("destroy_creature","exile_creature_life"):
         creatures=[]
         for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1):
@@ -146,6 +163,16 @@ def _play_one(game, user, difficulty):
             score=13
         elif card.effect in ("counter_spell","elemental_blast"):
             score=15 if target and target.startswith("S:") else 11
+        elif card.effect in ("regenerate_target","grant_keyword","tap_or_untap"):
+            score=10
+        elif card.effect=="destroy_wall":
+            score=11
+        elif card.effect=="add_mana":
+            score=6
+        elif card.effect=="destroy_all_enchantments":
+            enemy=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in game.player(game.opponent(user)).battlefield)
+            own=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in player.battlefield)
+            score=5+3*enemy-2*own
         elif card.effect == "destroy_all_creatures":
             enemy=sum(game.card(permanent.uid).creature for permanent in game.player(game.opponent(user)).battlefield)
             own=sum(game.card(permanent.uid).creature for permanent in player.battlefield)
@@ -234,8 +261,14 @@ def _regeneration_threatened(game,user,permanent):
         card=game.card(item.uid)
         if item.target!=stable: continue
         if item.ability_effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"): return True
+        if item.ability_effect=="damage_any" and card.activation_amount>=toughness: return True
         if not item.ability_effect and card.effect in ("destroy_permanent","elemental_blast"): return True
         if not item.ability_effect and card.effect in ("damage","damage_any") and card.amount>=toughness: return True
+    for item in game.stack:
+        card=game.card(item.uid)
+        if item.ability_effect or card.effect not in ("earthquake_x","hurricane_x") or item.x_value<toughness: continue
+        flying="flying" in game.current_keywords(permanent)
+        if (card.effect=="earthquake_x" and not flying) or (card.effect=="hurricane_x" and flying): return True
     if game.phase not in ("after_blockers","after_first_strike"): return False
     if permanent.uid in game.attackers:
         blocker_uid=game.blocks.get(permanent.uid); opponent=game.player(game.opponent(user))

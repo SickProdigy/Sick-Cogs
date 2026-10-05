@@ -1037,6 +1037,78 @@ class AlphaZoneMovementTests(unittest.TestCase):
         self.assertEqual(game.players[20].life,before)
 
 
+class AlphaUtilitySpellTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve(self,game,opponent=20,owner=10):
+        game.pass_priority(opponent); game.pass_priority(owner)
+
+    def lands(self,game,key,count):
+        return [self.add(game,10,key) for _ in range(count)]
+
+    def test_death_ward_uses_stable_target_and_creates_regeneration_shield(self):
+        game=ready(); target=self.add(game,10,"bear"); spell=self.add(game,10,"lea:17","hand"); self.add(game,10,"plains")
+        game.play(10,1,"10:1")
+        self.assertEqual(game.stack[-1].target,f"10:{target.uid}")
+        game=Game.from_raw(game.to_raw()); target=game.player(10).battlefield[0]
+        self.resolve(game)
+        self.assertEqual(target.regeneration_shields,1); self.assertIn(spell,game.player(10).graveyard)
+        game._destroy(game.player(10),target)
+        self.assertIn(target,game.player(10).battlefield); self.assertTrue(target.tapped); self.assertEqual(target.regeneration_shields,0)
+
+    def test_jump_grants_temporary_flying_and_cleans_up(self):
+        game=ready(); target=self.add(game,10,"bear"); spell=self.add(game,10,"lea:60","hand"); self.add(game,10,"island")
+        game.play(10,1,"10:1"); self.resolve(game)
+        self.assertIn("flying",game.current_keywords(target)); self.assertIn(spell,game.player(10).graveyard)
+        blocker=self.add(game,20,"bear"); game.active_index=0
+        self.assertFalse(game.can_block(target.uid,blocker.uid)[0])
+        game._cleanup(); self.assertNotIn("flying",game.current_keywords(target))
+
+    def test_twiddle_persists_mode_and_can_tap_or_untap(self):
+        game=ready(); target=self.add(game,20,"forest"); spell=self.add(game,10,"lea:85","hand"); self.add(game,10,"island")
+        with self.assertRaisesRegex(GameError,"Twiddle mode"): game.play(10,1,"toggle:20:1")
+        self.assertFalse(target.tapped); self.assertIn(spell,game.player(10).hand)
+        game.play(10,1,"tap:20:1"); self.assertEqual(game.stack[-1].target,f"tap:20:{target.uid}")
+        game=Game.from_raw(game.to_raw()); self.resolve(game); target=game.player(20).battlefield[0]
+        self.assertTrue(target.tapped)
+        game.priority_user=10; self.add(game,10,"lea:85","hand"); self.add(game,10,"island")
+        game.play(10,1,"untap:20:1"); self.resolve(game); self.assertFalse(target.tapped)
+
+    def test_twiddle_fizzles_when_stable_target_leaves(self):
+        game=ready(); target=self.add(game,20,"forest"); self.add(game,10,"lea:85","hand"); self.add(game,10,"island")
+        game.play(10,1,"tap:20:1"); game.player(20).battlefield.remove(target); game.player(20).graveyard.append(target.uid)
+        self.resolve(game); self.assertIn("fizzled",game.log[-1])
+
+    def test_dark_ritual_adds_persisted_black_mana(self):
+        game=ready(); spell=self.add(game,10,"lea:98","hand"); self.add(game,10,"swamp")
+        game.play(10,1); self.resolve(game)
+        self.assertEqual(game.player(10).mana_pool,{"B":3}); self.assertIn(spell,game.player(10).graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.player(10).mana_pool,{"B":3})
+
+    def test_tunnel_destroys_wall_without_regeneration(self):
+        game=ready(); wall=self.add(game,20,"lea:132"); wall.regeneration_shields=1
+        spell=self.add(game,10,"lea:178","hand"); self.add(game,10,"mountain")
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertNotIn(wall,game.player(20).battlefield); self.assertIn(wall.uid,game.player(20).graveyard); self.assertIn(spell,game.player(10).graveyard)
+        invalid=ready(); held=self.add(invalid,10,"lea:178","hand"); self.add(invalid,10,"mountain"); self.add(invalid,20,"bear")
+        with self.assertRaisesRegex(GameError,"Wall"): invalid.play(10,1,"20:1")
+        self.assertIn(held,invalid.player(10).hand)
+
+    def test_tranquility_destroys_all_enchantments_and_allows_regeneration(self):
+        aura=Card("test_aura","Test Aura","Enchantment","s1","o1",type_line="Enchantment")
+        creature=Card("test_enchantment_creature","Test Enchantment Creature","Creature","s2","o2",power=1,toughness=1,type_line="Enchantment Creature")
+        with patch.dict(CARDS,{"test_aura":aura,"test_enchantment_creature":creature}):
+            game=ready(); own=self.add(game,10,"test_aura"); enemy=self.add(game,20,"test_aura"); saved=self.add(game,20,"test_enchantment_creature"); saved.regeneration_shields=1
+            land=self.add(game,20,"forest"); spell=self.add(game,10,"lea:220","hand"); self.lands(game,"forest",4)
+            game.play(10,1); self.resolve(game)
+            self.assertIn(own.uid,game.player(10).graveyard); self.assertIn(enemy.uid,game.player(20).graveyard)
+            self.assertIn(saved,game.player(20).battlefield); self.assertTrue(saved.tapped); self.assertEqual(saved.regeneration_shields,0)
+            self.assertIn(land,game.player(20).battlefield); self.assertIn(spell,game.player(10).graveyard)
+
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

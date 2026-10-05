@@ -32,6 +32,8 @@ class Card:
     target_nonartifact: bool = False
     target_nonblack: bool = False
     target_color: str = ""
+    temporary_keyword: str = ""
+    mana_color: str = ""
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -154,6 +156,12 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 }
 
 ALPHA_SPELLS = {
+    "lea:17": {"effect":"regenerate_target"},
+    "lea:60": {"effect":"grant_keyword", "temporary_keyword":"flying"},
+    "lea:85": {"effect":"tap_or_untap", "target_types":("Artifact","Creature","Land")},
+    "lea:98": {"effect":"add_mana", "mana_color":"B", "mana_amount":3},
+    "lea:178": {"effect":"destroy_wall"},
+    "lea:220": {"effect":"destroy_all_enchantments"},
     "lea:50": {"effect":"draw_target_x"},
     "lea:111": {"effect":"pump_power_x"},
     "lea:140": {"effect":"damage_x_exile"},
@@ -238,11 +246,13 @@ for reference in PLAYABLE_ALPHA:
         self_damage=ALPHA_SPELLS.get(reference.key, {}).get("self_damage",0),
         land_type=ALPHA_SPELLS.get(reference.key, {}).get("land_type",""),
         target_types=ALPHA_SPELLS.get(reference.key, {}).get("target_types",()),
-        mana_amount=ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1),
+        mana_amount=ALPHA_SPELLS.get(reference.key, {}).get("mana_amount",ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1)),
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
         target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
         target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",""),
+        temporary_keyword=ALPHA_SPELLS.get(reference.key, {}).get("temporary_keyword",""),
+        mana_color=ALPHA_SPELLS.get(reference.key, {}).get("mana_color",""),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),

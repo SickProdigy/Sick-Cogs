@@ -376,6 +376,21 @@ class Game:
             return self._target_graveyard(user,target,True)
         if c.effect=="return_grave_card_hand":
             return self._target_graveyard(user,target,False)
+        if c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
+            target_user,permanent=self._target_creature(target)
+            if c.effect=="destroy_wall" and "Wall" not in self.card(permanent.uid).type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
+            return f"{target_user}:{permanent.uid}"
+        if c.effect=="tap_or_untap":
+            if not target or target.count(":")!=2: raise GameError("Twiddle target must be tap:USER_ID:POSITION or untap:USER_ID:POSITION.")
+            mode,user_text,pos_text=target.casefold().split(":")
+            if mode not in ("tap","untap"): raise GameError("Twiddle mode must be tap or untap.")
+            try: target_user,pos=int(user_text),int(pos_text)
+            except ValueError as error: raise GameError("Twiddle target must be tap:USER_ID:POSITION or untap:USER_ID:POSITION.") from error
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
+            if not any(target_card.has_type(kind) for kind in c.target_types): raise GameError("Twiddle must target an artifact, creature, or land.")
+            return f"{mode}:{target_user}:{permanent.uid}"
         if c.effect in ("destroy_creature","exile_creature_life"):
             target_user,permanent=self._target_creature(target)
             target_card=self.card(permanent.uid)
@@ -622,6 +637,30 @@ class Game:
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
             else: self.player(int(s.target or self.opponent(s.owner))).life-=amount
             p.life-=c.self_damage; p.graveyard.append(s.uid)
+        elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
+            legal=target_card is not None and target_card.creature and (c.effect!="destroy_wall" or "Wall" in target_card.type_line.split(" — ",1)[-1].split())
+            if not legal:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            if c.effect=="regenerate_target": target.regeneration_shields+=1
+            elif c.effect=="grant_keyword":
+                if c.temporary_keyword not in target.temporary_keywords: target.temporary_keywords.append(c.temporary_keyword)
+            else: self._destroy(controller,target,allow_regeneration=False)
+            p.graveyard.append(s.uid)
+        elif c.effect=="tap_or_untap":
+            mode,user_text,uid_text=s.target.split(":"); controller=self.player(int(user_text))
+            target=next((x for x in controller.battlefield if x.uid==int(uid_text)),None); target_card=self.card(target.uid) if target is not None else None
+            if target_card is None or not any(target_card.has_type(kind) for kind in c.target_types):
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            target.tapped=mode=="tap"; p.graveyard.append(s.uid)
+        elif c.effect=="add_mana":
+            p.mana_pool[c.mana_color]=p.mana_pool.get(c.mana_color,0)+c.mana_amount; p.graveyard.append(s.uid)
+        elif c.effect=="destroy_all_enchantments":
+            for controller in self.players.values():
+                for permanent in list(controller.battlefield):
+                    if self.card(permanent.uid).has_type("Enchantment"): self._destroy(controller,permanent)
+            p.graveyard.append(s.uid)
         elif c.effect in ("pump","pump_blocking","pump_power_x"):
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None:

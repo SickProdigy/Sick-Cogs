@@ -14,12 +14,12 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),172)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),172)
+        self.assertEqual(len(CARDS),178)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),178)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
-        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","earthquake_x","hurricane_x","life_target_x"})
+        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","earthquake_x","hurricane_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","add_mana","destroy_wall","destroy_all_enchantments"})
         self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact"} for card in CARDS.values()))
         self.assertTrue(all(card.power>=0 and card.toughness>=0 for card in CARDS.values()))
 
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),112)
-        self.assertEqual(len(REFERENCE_ALPHA),183)
+        self.assertEqual(len(PLAYABLE_ALPHA),118)
+        self.assertEqual(len(REFERENCE_ALPHA),177)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -90,6 +90,9 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:49"].target_color,"R")
         self.assertEqual(CARDS["lea:169"].target_color,"U")
         self.assertEqual(CARDS["lea:54"].effect,"counter_spell")
+        self.assertEqual(CARDS["lea:60"].temporary_keyword,"flying")
+        self.assertEqual(CARDS["lea:85"].target_types,("Artifact","Creature","Land"))
+        self.assertEqual((CARDS["lea:98"].mana_color,CARDS["lea:98"].mana_amount),("B",3))
         self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery","Artifact")) for card in PLAYABLE_ALPHA))
         self.assertTrue(all(CARDS[key].land and CARDS[key].produces for key in ALPHA_LAND_KEYS))
 
@@ -122,7 +125,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("172 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("178 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
