@@ -441,6 +441,32 @@ class AlphaArtifactTests(unittest.TestCase):
         game.play(10,1,"20")
         self.assertTrue(mox.tapped); self.assertFalse(mountain.tapped)
 
+    def test_sol_ring_adds_two_colorless_and_preserves_surplus(self):
+        game=ready(); ring=self.add(game,10,"lea:269")
+        game.activate_mana(10,1)
+        self.assertTrue(ring.tapped); self.assertEqual(game.players[10].mana_pool,{"C":2})
+        self.add(game,10,"lea:269","hand")
+        game.play(10,1)
+        self.assertEqual(game.players[10].mana_pool,{"C":1})
+
+    def test_black_lotus_requires_color_and_is_sacrificed_for_three(self):
+        game=ready(); lotus=self.add(game,10,"lea:232")
+        with self.assertRaisesRegex(GameError,"Choose one of"):
+            game.activate_mana(10,1)
+        game.activate_mana(10,1,"g")
+        self.assertNotIn(lotus,game.players[10].battlefield)
+        self.assertIn(lotus.uid,game.players[10].graveyard)
+        self.assertEqual(game.players[10].mana_pool,{"G":3})
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.players[10].mana_pool,{"G":3})
+        self.assertIn(lotus.uid,restored.players[10].graveyard)
+
+    def test_multi_mana_sources_require_explicit_activation(self):
+        game=ready(); ring=self.add(game,10,"lea:269")
+        self.add(game,10,"giant","hand")
+        self.assertFalse(game.can_pay(10,game.card(game.players[10].hand[0])))
+        self.assertFalse(ring.tapped)
+
     def test_shatter_destroys_artifact_and_illegal_target_preserves_costs(self):
         game=ready(); target=self.add(game,20,"lea:261"); spell=self.add(game,10,"lea:173","hand")
         lands=[self.add(game,10,key) for key in ("mountain","mountain")]

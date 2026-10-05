@@ -27,6 +27,8 @@ class Card:
     self_damage: int = 0
     land_type: str = ""
     target_types: Tuple[str, ...] = ()
+    mana_amount: int = 1
+    sacrifice_for_mana: bool = False
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -49,7 +51,9 @@ class Card:
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
-        if self.produces: abilities.append("Produces "+"/".join(self.produces))
+        if self.produces:
+            produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
+            abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
         return ", ".join(abilities)
 
     def has_land_type(self,land_type):
@@ -75,11 +79,13 @@ BASE_CARDS = {
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
 
 ALPHA_ARTIFACTS = {
-    "lea:261": ("G",),
-    "lea:262": ("B",),
-    "lea:263": ("W",),
-    "lea:264": ("R",),
-    "lea:265": ("U",),
+    "lea:232": {"produces":("W","U","B","R","G"), "mana_amount":3, "sacrifice_for_mana":True},
+    "lea:261": {"produces":("G",)},
+    "lea:262": {"produces":("B",)},
+    "lea:263": {"produces":("W",)},
+    "lea:264": {"produces":("R",)},
+    "lea:265": {"produces":("U",)},
+    "lea:269": {"produces":("C",), "mana_amount":2},
 }
 
 ALPHA_SPELLS = {
@@ -128,7 +134,7 @@ for reference in PLAYABLE_ALPHA:
         oracle_id=reference.oracle_id,
         mana_cost=reference.mana_cost,
         colors=reference.colors,
-        produces=ALPHA_ARTIFACTS.get(reference.key, reference.color_identity if reference.support_family == "land" else ()),
+        produces=ALPHA_ARTIFACTS.get(reference.key, {}).get("produces", reference.color_identity if reference.support_family == "land" else ()),
         rarity=reference.rarity,
         pack_slot="alpha",
         cost=int(reference.mana_value),
@@ -140,6 +146,8 @@ for reference in PLAYABLE_ALPHA:
         self_damage=ALPHA_SPELLS.get(reference.key, {}).get("self_damage",0),
         land_type=ALPHA_SPELLS.get(reference.key, {}).get("land_type",""),
         target_types=ALPHA_SPELLS.get(reference.key, {}).get("target_types",()),
+        mana_amount=ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1),
+        sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
     )

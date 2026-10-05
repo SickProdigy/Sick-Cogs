@@ -131,7 +131,7 @@ class Game:
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
-            if source.produces and not permanent.tapped:
+            if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped:
                 sources.append(("permanent",str(permanent.uid),source.produces,permanent))
 
         def assign(symbols,remaining,selected):
@@ -168,10 +168,13 @@ class Game:
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
-        permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+1
+        permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+card.mana_amount
+        if card.sacrifice_for_mana:
+            player.battlefield.remove(permanent); player.graveyard.append(permanent.uid)
         self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        self.log.append(f"{user} added {{{symbol}}}.")
+        amount=f" ×{card.mana_amount}" if card.mana_amount>1 else ""
+        self.log.append(f"{user} added {{{symbol}}}{amount}.")
 
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()

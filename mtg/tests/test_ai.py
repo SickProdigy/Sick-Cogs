@@ -161,5 +161,33 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(_target(game,AI,card),f"{HUMAN}:1")
 
 
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_ai_activates_sol_ring_only_to_enable_a_spell(self):
+        game=solo(order=(AI,HUMAN)); advance_solo(game)
+        game.player(HUMAN).kept=True; game.player(AI).kept=True
+        ring=self.add(game,AI,"lea:269"); forest=self.add(game,AI,"forest")
+        centaur=self.add(game,AI,"centaur","hand")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertTrue(ring.tapped); self.assertTrue(forest.tapped)
+        self.assertEqual(game.stack[-1].uid,centaur)
+        self.assertTrue(any(event["action"]=="ai_mana" for event in game.history))
+
+    def test_ai_chooses_lotus_color_and_preserves_surplus(self):
+        game=solo(order=(AI,HUMAN)); advance_solo(game)
+        game.player(HUMAN).kept=True; game.player(AI).kept=True
+        lotus=self.add(game,AI,"lea:232"); bear=self.add(game,AI,"bear")
+        growth=self.add(game,AI,"lea:197","hand")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertNotIn(lotus,game.player(AI).battlefield); self.assertIn(lotus.uid,game.player(AI).graveyard)
+        self.assertEqual(game.player(AI).mana_pool,{"G":2})
+        self.assertEqual(game.stack[-1].uid,growth); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+
+
 if __name__ == "__main__":
     unittest.main()

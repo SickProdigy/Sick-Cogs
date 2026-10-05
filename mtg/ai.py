@@ -33,6 +33,30 @@ def _target(game, user, card):
     return None
 
 
+def _activate_helpful_mana(game, user):
+    player=game.player(user)
+    candidates=[]
+    for uid in player.hand:
+        card=game.card(uid)
+        if card.land or game.can_pay(user,card): continue
+        if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main","postcombat_main") or game.stack): continue
+        target=_target(game,user,card)
+        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent") and target is None: continue
+        candidates.append(card)
+    for position,permanent in enumerate(list(player.battlefield),1):
+        source=game.card(permanent.uid)
+        if permanent.tapped or not source.produces or (source.mana_amount==1 and not source.sacrifice_for_mana): continue
+        for symbol in source.produces:
+            player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+source.mana_amount
+            enabled=any(game.can_pay(user,card) for card in candidates)
+            player.mana_pool[symbol]-=source.mana_amount
+            if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
+            if enabled:
+                game.activate_mana(user,position,symbol)
+                return "mana"
+    return None
+
+
 def _play_one(game, user, difficulty):
     player = game.player(user)
     if game.active_user == user and game.phase in ("precombat_main", "postcombat_main") and not game.stack and not player.land_played:
@@ -40,6 +64,9 @@ def _play_one(game, user, difficulty):
             if game.card(uid).land:
                 game.play(user, position)
                 return "play_land"
+
+    mana_action=_activate_helpful_mana(game,user)
+    if mana_action: return mana_action
 
     candidates = []
     for position, uid in enumerate(player.hand, 1):
