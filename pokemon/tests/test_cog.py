@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
@@ -175,6 +175,19 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         kwargs=ctx.send.await_args.kwargs
         self.assertIsInstance(kwargs["view"],PokedexView)
         self.assertIn("POKEDEX",kwargs["embed"].title)
+
+    async def test_pokedex_render_failure_does_not_mutate_progress(self):
+        conf={"pokedex_seen":[25],"pokedex_caught":[25]}
+        snapshot={key:list(value) for key,value in conf.items()}
+        cog=Pokemon.__new__(Pokemon)
+        cog.config=SimpleNamespace(user=lambda user:SimpleNamespace(all=AsyncMock(return_value=conf)))
+        cog.selected_pokedex_style=AsyncMock(return_value="retro")
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
+        with patch("pokemon.pokemon.render_pokedex",side_effect=RuntimeError("render failed")):
+            with self.assertRaises(RuntimeError):
+                await Pokemon.pokedex.callback(cog,ctx,1)
+        self.assertEqual(conf,snapshot)
+        ctx.send.assert_not_awaited()
 
     async def test_pokedex_view_is_owner_scoped(self):
         cog=SimpleNamespace(set_pokedex_style=AsyncMock())
