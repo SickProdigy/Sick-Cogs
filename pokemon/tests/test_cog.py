@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
-from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_is_expired, pace_for_settings, scaled_wild_level
+from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_is_expired, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, FightView, PartyView
 
@@ -55,11 +55,15 @@ class CogPolicyTests(unittest.TestCase):
         self.assertTrue(encounter_is_expired({"state": "open", "expires_at": expired}, now))
         self.assertFalse(encounter_is_expired({"state": "caught", "expires_at": expired}, now))
         self.assertFalse(encounter_is_expired({"state": "open", "expires_at": "bad"}, now))
+        self.assertTrue(encounter_returns_after_timeout({"state":"battle","battle":{}}))
+        self.assertFalse(encounter_returns_after_timeout({"state":"battle","battle":{"action_count":1}}))
 
     def test_bundled_generation_one_catalog_is_complete(self):
         path = Path(__file__).parents[1] / "gen1.json"
         self.assertEqual(PokemonCatalog(path).load(), 151)
         self.assertEqual(set(range(1, 152)), {key for key in SPECIES if key <= 151})
+        self.assertTrue(all(SPECIES[key].abilities for key in range(1,152)))
+        self.assertEqual(SPECIES[81].gender_rate,-1)
 
     def test_old_runtime_cache_keeps_bundled_learnsets(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -83,6 +87,7 @@ class CogPolicyTests(unittest.TestCase):
     def test_expected_command_surface_registered(self):
         names = {command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertIn("pokemon heal", names)
+        self.assertIn("pokemon pokedex", names)
         self.assertIn("pokemon party add", names)
         self.assertIn("pokemon set catalogsync", names)
 

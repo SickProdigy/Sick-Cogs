@@ -17,8 +17,11 @@ from .views import BagView,BattleView,EncounterView,FightView,PartyView
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal"}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{}}
-GLOBAL={"schema":3,"next_encounter":1,"encounters":{}}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[]}
+GLOBAL={"schema":4,"next_encounter":1,"encounters":{}}
+BOX_SIZE=30
+MAX_BOXES=10
+MAX_COLLECTION=BOX_SIZE*MAX_BOXES
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 
 def pace_for_settings(minimum,maximum,cooldown):
@@ -40,17 +43,21 @@ def encounter_is_expired(raw,now):
     except (TypeError,ValueError):return False
     return raw.get("state") in {"open","battle"} and due<=now
 
+def encounter_returns_after_timeout(raw):
+    battle=raw.get("battle",{})
+    return raw.get("state")=="battle" and int(battle.get("action_count",0))==0
+
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.4.0";__author__="SickProdigy"
+    __version__="0.5.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
         self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
     async def cog_load(self):
-        await self._migrate()
         try:self.catalog.load()
         except CatalogError:log.exception("Pokémon catalog cache could not be loaded")
+        await self._migrate()
         for key,raw in (await self.config.encounters()).items():
             if raw.get("battle"):
                 battle=Battle.from_raw(raw["battle"]);self.battles[battle.encounter_id]=battle
@@ -62,13 +69,25 @@ class Pokemon(commands.Cog):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
     @tasks.loop(seconds=60)
     async def cleanup_loop(self):
-        now=datetime.now(timezone.utc);expired=[]
+        now=datetime.now(timezone.utc);expired=[];returned=[]
         async with self.lock("encounters"):
             encounters=await self.config.encounters()
             for key,raw in encounters.items():
-                if encounter_is_expired(raw,now):
+                if not encounter_is_expired(raw,now):continue
+                if encounter_returns_after_timeout(raw):
+                    raw["state"]="open";raw.pop("battle",None);raw.pop("level_locked",None);raw["level"]=0
+                    raw["expires_at"]=(now+timedelta(seconds=int(raw.get("encounter_timeout",900)))).isoformat()
+                    returned.append((int(key),dict(raw)))
+                else:
                     raw["state"]="expired";expired.append((int(key),dict(raw)))
-            if expired:await self.config.encounters.set(encounters)
+            if expired or returned:await self.config.encounters.set(encounters)
+        for eid,raw in returned:
+            self.battles.pop(eid,None)
+            channel=self.bot.get_channel(int(raw["channel_id"]))
+            if channel:
+                try:
+                    message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="The previous trainer timed out. This encounter is available again.",view=EncounterView(self,eid))
+                except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
         for eid,raw in expired:
             self.battles.pop(eid,None);await self.clear_guild(int(raw["guild_id"]),eid)
             channel=self.bot.get_channel(int(raw["channel_id"]))
@@ -91,7 +110,20 @@ class Pokemon(commands.Cog):
             for guild_id,data in (await self.config.all_guilds()).items():
                 pace=pace_for_settings(data.get("threshold_min",12),data.get("threshold_max",25),data.get("spawn_cooldown",300))
                 await self.config.guild_from_id(int(guild_id)).pace.set(pace)
-        if schema<3:await self.config.schema.set(3)
+        if schema<4:
+            for user_id,data in (await self.config.all_users()).items():
+                collection=[];caught=set()
+                for raw in data.get("collection",[]):
+                    try:pokemon=OwnedPokemon.from_raw(raw)
+                    except (KeyError,TypeError,ValueError):collection.append(raw);continue
+                    collection.append(pokemon.raw());caught.add(pokemon.species_id)
+                data["collection"]=collection
+                previous_caught={int(value) for value in data.get("pokedex_caught",[]) if str(value).isdigit()}
+                previous_seen={int(value) for value in data.get("pokedex_seen",[]) if str(value).isdigit()}
+                data["pokedex_caught"]=sorted(previous_caught|caught)
+                data["pokedex_seen"]=sorted(previous_seen|previous_caught|caught)
+                await self.config.user_from_id(int(user_id)).set(data)
+        if schema<4:await self.config.schema.set(4)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):
@@ -134,7 +166,7 @@ class Pokemon(commands.Cog):
             msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
         except RenderError:
             log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
-        raw={"state":"open","species_id":sid,"level":level,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat()}
+        raw={"state":"open","species_id":sid,"level":level,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
@@ -155,6 +187,9 @@ class Pokemon(commands.Cog):
             if not raw.get("level_locked"):
                 raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
                 raw["level_locked"]=True
+            seen={int(value) for value in user.get("pokedex_seen",[])}
+            seen.add(int(raw["species_id"]));user["pokedex_seen"]=sorted(seen)
+            await self.config.user(i.user).set(user)
             collection={item["instance_id"]:item for item in user["collection"]}
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
@@ -218,14 +253,20 @@ class Pokemon(commands.Cog):
             if battle.state!="active" or battle.needs_switch:
                 await i.response.send_message("Switch Pokémon first." if battle.needs_switch else "This encounter is over.",ephemeral=True);return
             conf=await self.config.user(i.user).all();tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
+            if len(conf["collection"])>=MAX_COLLECTION and not tx.get("settled"):
+                await i.response.send_message(f"Your {MAX_BOXES} boxes are full.",ephemeral=True);return
             if conf["balls"]<1 and not tx.get("ball_charged"):await i.response.send_message("You have no Poké Balls.",ephemeral=True);return
             if not tx.get("ball_charged"):
-                conf["balls"]-=1;tx["ball_charged"]=True;conf["transactions"][tx_key]=tx;await self.config.user(i.user).set(conf)
+                conf["balls"]-=1;tx["ball_charged"]=True;conf["transactions"][tx_key]=tx
             try:caught=battle.throw_ball()
             except BattleError as e:await i.response.send_message(str(e),ephemeral=True);return
             if caught:
                 identity=f"catch-{battle.user_id}-{eid}";pokemon=battle.caught(identity)
                 if not any(p["instance_id"]==identity for p in conf["collection"]):conf["collection"].append(pokemon.raw())
+                seen={int(value) for value in conf.get("pokedex_seen",[])}
+                caught_ids={int(value) for value in conf.get("pokedex_caught",[])}
+                seen.add(pokemon.species_id);caught_ids.add(pokemon.species_id)
+                conf["pokedex_seen"]=sorted(seen);conf["pokedex_caught"]=sorted(caught_ids)
                 if len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
                 tx["settled"]=True;tx["caught_id"]=identity;conf["transactions"][tx_key]=tx
             while len(conf["transactions"])>100:conf["transactions"].pop(next(iter(conf["transactions"])))
@@ -255,19 +296,19 @@ class Pokemon(commands.Cog):
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
             if conf["starter_chosen"]:await ctx.send("You already chose a starter.");return
-            pokemon=OwnedPokemon.create(__import__("uuid").uuid4().hex,sid,seed=random.SystemRandom().randrange(1,2**31));conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True
+            pokemon=OwnedPokemon.create(__import__("uuid").uuid4().hex,sid,seed=random.SystemRandom().randrange(1,2**31));conf["collection"]=[pokemon.raw()];conf["party"]=[pokemon.instance_id];conf["starter_chosen"]=True;conf["pokedex_seen"]=[sid];conf["pokedex_caught"]=[sid]
             await self.config.user(ctx.author).set(conf)
         await ctx.send(f"{SPECIES[sid].name} joined your global party!")
     @pokemon.command(name="collection",aliases=["box"])
     async def collection(self,ctx,page:int=1):
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
-        pages=max(1,(len(conf["collection"])+9)//10);page=max(1,min(page,pages));start=(page-1)*10
+        pages=max(1,(len(conf["collection"])+BOX_SIZE-1)//BOX_SIZE);page=max(1,min(page,pages));start=(page-1)*BOX_SIZE
         lines=[]
-        for n,pokemon in enumerate(conf["collection"][start:start+10],start+1):
+        for n,pokemon in enumerate(conf["collection"][start:start+BOX_SIZE],start+1):
             species=SPECIES[pokemon["species_id"]];marker="⭐ " if pokemon.get("shiny") else ""
             lines.append(f"{n}. {marker}{pokemon.get('nickname') or species.name} · Lv. {pokemon['level']} · {pokemon['instance_id'][:8]}")
-        await ctx.send(f"**Global collection · {page}/{pages}**\n"+"\n".join(lines))
+        await ctx.send(f"**Global boxes · {page}/{pages} · {len(conf['collection'])}/{MAX_COLLECTION}**\n"+"\n".join(lines))
     @pokemon.group(name="party",invoke_without_command=True)
     async def party(self,ctx):
         conf=await self.config.user(ctx.author).all();owned={p["instance_id"]:p for p in conf["collection"]}
@@ -311,6 +352,20 @@ class Pokemon(commands.Cog):
             await self.config.user(ctx.author).set(conf)
         await ctx.send(f"Restored your party’s HP, status, and PP ({healed} Pokémon).")
 
+    @pokemon.command(name="pokedex",aliases=["dex"])
+    async def pokedex(self,ctx,page:int=1):
+        conf=await self.config.user(ctx.author).all()
+        seen={int(value) for value in conf.get("pokedex_seen",[])}
+        caught={int(value) for value in conf.get("pokedex_caught",[])}
+        entries=sorted(item for item in SPECIES.values() if generation_for(item.id)==1)
+        page_size=25;pages=max(1,(len(entries)+page_size-1)//page_size);page=max(1,min(page,pages))
+        lines=[]
+        for item in entries[(page-1)*page_size:page*page_size]:
+            marker="●" if item.id in caught else "○" if item.id in seen else "—"
+            name=item.name if item.id in seen else "???"
+            lines.append(f"{marker} #{item.id:03d} {name}")
+        await ctx.send(f"**Generation I Pokédex · {len(seen & {item.id for item in entries})} seen · {len(caught & {item.id for item in entries})} caught · {page}/{pages}**\n"+"\n".join(lines))
+
     @pokemon.command(name="profile")
     async def profile(self,ctx):
         conf=await self.config.user(ctx.author).all()
@@ -320,7 +375,7 @@ class Pokemon(commands.Cog):
         if lead:
             needed=lead["level"]*lead["level"]*10 if lead["level"]<100 else 0
             progress=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']} · " + ("MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP")
-        await ctx.send(f"Pokémon: **{len(conf['collection'])}** · Party: **{len(conf['party'])}/6** · Poké Balls: **{conf['balls']}**\nLead: {progress}")
+        await ctx.send(f"Pokémon: **{len(conf['collection'])}/{MAX_COLLECTION}** · Party: **{len(conf['party'])}/6** · Poké Balls: **{conf['balls']}** · Pokédex: **{len(conf.get('pokedex_seen',[]))} seen/{len(conf.get('pokedex_caught',[]))} caught**\nLead: {progress}")
     @pokemon.group(name="set",invoke_without_command=True)
     @commands.admin_or_permissions(manage_guild=True)
     async def pokemon_set(self,ctx):await ctx.send_help()

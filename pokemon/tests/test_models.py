@@ -82,12 +82,32 @@ class BattleTests(unittest.TestCase):
     def test_round_trip(self):
         b=battle();b.use_move(0)
         self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
+        self.assertEqual(b.action_history[-1]["action"],"move:scratch")
+        self.assertEqual(b.action_count,1)
+
+    def test_action_history_is_monotonic_and_bounded(self):
+        b=battle()
+        for index in range(125):b._record(f"test:{index}")
+        self.assertEqual(len(b.action_history),100)
+        self.assertEqual(b.action_history[0]["sequence"],26)
+        self.assertEqual(b.action_history[-1]["sequence"],125)
+
+    def test_move_categories_use_special_stats(self):
+        self.assertEqual(__import__("pokemon.data",fromlist=["MOVES"]).MOVES["ember"].category,"special")
+        self.assertGreater(SPECIES[4].special_attack,0)
+        self.assertGreater(SPECIES[4].special_defense,0)
 
     def test_owned_pokemon_has_stable_moves_and_pp(self):
         pokemon=OwnedPokemon("stable",4,5)
         self.assertEqual(pokemon.moves,("scratch",))
         self.assertEqual(pokemon.move_pp["scratch"],35)
         self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).raw(),pokemon.raw())
+        self.assertEqual(set(pokemon.evs),{"hp","attack","defense","special_attack","special_defense","speed"})
+        self.assertEqual(pokemon.gender,"unknown")
+        created=OwnedPokemon.create("created",4,5,seed=8)
+        self.assertIn(created.gender,{"male","female","genderless"})
+        self.assertTrue(created.ability)
+        self.assertEqual(created.origin,"starter")
     def test_experience_levels_up(self):
         pokemon=OwnedPokemon.create("xp",4,5,seed=7)
         pokemon.experience=249
@@ -133,19 +153,28 @@ class CatalogTests(unittest.TestCase):
                 {"stat": {"name": "hp"}, "base_stat": 35},
                 {"stat": {"name": "attack"}, "base_stat": 55},
                 {"stat": {"name": "defense"}, "base_stat": 40},
+                {"stat": {"name": "special-attack"}, "base_stat": 50},
+                {"stat": {"name": "special-defense"}, "base_stat": 50},
                 {"stat": {"name": "speed"}, "base_stat": 90},
             ],
             "types": [{"slot": 1, "type": {"name": "electric"}}],
+            "abilities": [
+                {"slot": 1, "is_hidden": False, "ability": {"name": "static"}},
+                {"slot": 3, "is_hidden": True, "ability": {"name": "lightning-rod"}},
+            ],
             "moves": [
                 {"move": {"name": "quick-attack"}, "version_group_details": [{"level_learned_at": 4, "move_learn_method": {"name": "level-up"}, "version_group": {"name": "red-blue"}}]},
                 {"move": {"name": "thunder-shock"}, "version_group_details": [{"level_learned_at": 1, "move_learn_method": {"name": "level-up"}, "version_group": {"name": "red-blue"}}]},
             ],
         }
         species = PokemonCatalog.parse_api(
-            raw, {"name": "pikachu", "capture_rate": 190}
+            raw, {"name": "pikachu", "capture_rate": 190, "gender_rate": 4}
         )
         self.assertEqual(species.id, 25)
         self.assertEqual(species.moves, ("thunder_shock", "quick_attack"))
+        self.assertEqual(species.abilities,("Static",))
+        self.assertEqual(species.gender_rate,4)
+        self.assertEqual(PokemonCatalog.parse_cached(PokemonCatalog.to_cached(species)),species)
 
     def test_cache_rejects_unknown_move(self):
         from pokemon.catalog import CatalogError, PokemonCatalog

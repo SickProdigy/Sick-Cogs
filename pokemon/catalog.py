@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.4 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.5 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
@@ -37,7 +37,12 @@ class PokemonCatalog:
                 if previous and previous.learnset and not item.learnset:
                     learned=previous.learnset
                     moves=tuple(move for level,move in learned if level<=5)[-4:] or item.moves
-                    item=Species(item.id,item.name,item.types,item.hp,item.attack,item.defense,item.speed,item.catch_rate,moves,learned)
+                    item=Species(
+                        item.id,item.name,item.types,item.hp,item.attack,item.defense,
+                        item.speed,item.catch_rate,moves,learned,previous.abilities,
+                        previous.gender_rate,previous.special_attack,
+                        previous.special_defense,
+                    )
                 SPECIES[item.id] = item
             loaded = max(loaded, len(parsed))
         return loaded
@@ -123,6 +128,11 @@ class PokemonCatalog:
         moves = tuple(key for level, key in learnset if level <= 5)[-4:]
         if not moves:
             moves = ("tackle",)
+        abilities = tuple(
+            str(item["ability"]["name"]).replace("-", " ").title()
+            for item in sorted(pokemon.get("abilities", []), key=lambda value: value["slot"])
+            if not item.get("is_hidden")
+        )
         display = str(species["name"]).replace("-", " ").title()
         return Species(
             species_id,
@@ -135,6 +145,10 @@ class PokemonCatalog:
             int(species["capture_rate"]),
             moves,
             learnset,
+            abilities,
+            int(species.get("gender_rate", -1)),
+            stats["special-attack"],
+            stats["special-defense"],
         )
 
     @staticmethod
@@ -150,6 +164,10 @@ class PokemonCatalog:
             "catch_rate": item.catch_rate,
             "moves": list(item.moves),
             "learnset": [list(value) for value in item.learnset],
+            "abilities": list(item.abilities),
+            "gender_rate": item.gender_rate,
+            "special_attack": item.special_attack,
+            "special_defense": item.special_defense,
         }
 
     @staticmethod
@@ -165,6 +183,10 @@ class PokemonCatalog:
             int(raw["catch_rate"]),
             tuple(str(value) for value in raw["moves"]),
             tuple((int(value[0]),str(value[1])) for value in raw.get("learnset",[])),
+            tuple(str(value)[:80] for value in raw.get("abilities",[])),
+            int(raw.get("gender_rate",-1)),
+            int(raw.get("special_attack",raw["attack"])),
+            int(raw.get("special_defense",raw["defense"])),
         )
         if not 1 <= item.id <= MAX_SPECIES or not item.types or not item.moves:
             raise CatalogError("Cached species data is out of bounds.")

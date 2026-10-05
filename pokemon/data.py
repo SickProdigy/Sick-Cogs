@@ -12,6 +12,10 @@ class Species:
     catch_rate: int
     moves: tuple
     learnset: tuple = ()
+    abilities: tuple = ()
+    gender_rate: int = -1
+    special_attack: int = 0
+    special_defense: int = 0
 
 @dataclass(frozen=True)
 class Move:
@@ -23,18 +27,19 @@ class Move:
     priority: int = 0
     status: str = ""
     status_chance: int = 0
+    category: str = "physical"
 
 MOVES={
 "tackle":Move("Tackle","normal",40),
 "scratch":Move("Scratch","normal",40),
-"vine_whip":Move("Vine Whip","grass",45),
-"ember":Move("Ember","fire",40,status="burn",status_chance=10),
-"water_gun":Move("Water Gun","water",40),
-"thunder_shock":Move("Thunder Shock","electric",40,status="paralysis",status_chance=10),
+"vine_whip":Move("Vine Whip","grass",45,category="special"),
+"ember":Move("Ember","fire",40,status="burn",status_chance=10,category="special"),
+"water_gun":Move("Water Gun","water",40,category="special"),
+"thunder_shock":Move("Thunder Shock","electric",40,status="paralysis",status_chance=10,category="special"),
 "gust":Move("Gust","flying",40),
 "quick_attack":Move("Quick Attack","normal",40,priority=1),
 "poison_sting":Move("Poison Sting","poison",35,status="poison",status_chance=30),
-"bite":Move("Bite","dark",60),
+"bite":Move("Bite","dark",60,category="special"),
 }
 SPECIES={
 1:Species(1,"Bulbasaur",("grass","poison"),45,49,49,45,45,("tackle","vine_whip")),
