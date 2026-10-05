@@ -13,7 +13,7 @@ DEFAULTS={"schema":1,"next_game_id":1,"games":{}}
 class MTG(commands.Cog):
     """Play a deliberately bounded two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.1.0"
+    __version__="0.1.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}

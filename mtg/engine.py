@@ -98,18 +98,41 @@ class Game:
             if p.land_played: raise GameError("You already played a land.")
             p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True
             self.log.append(f"{user} played {c.name}."); return
-        if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main")): raise GameError("Cast that during your main phase.")
+        if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
+        target=self._target_for_cast(c,user,target)
         lands=[x for x in p.battlefield if self.card(x.uid).land and not x.tapped]
         if len(lands)<c.cost: raise GameError(f"You need {c.cost} untapped lands.")
         for x in lands[:c.cost]: x.tapped=True
-        p.hand.pop(index-1); self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
+        p.hand.pop(index-1)
+        for spell in self.stack: spell.passes=0
+        self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
         self.log.append(f"{user} cast {c.name}.")
 
+    def _target_for_cast(self,c,user,target):
+        if c.effect=="damage":
+            try: target_user=int(target) if target is not None else self.opponent(user)
+            except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
+            self.player(target_user); return str(target_user)
+        if c.effect=="pump":
+            if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]
+            if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
+            return f"{target_user}:{permanent.uid}"
+        if target is not None: raise GameError(f"{c.name} does not use a target.")
+        return None
+
     def pass_priority(self,user):
-        if self.priority_user!=user: raise GameError("You do not have priority.")
+        self._priority(user)
         if self.stack:
             s=self.stack[-1]; s.passes+=1
-            if s.passes==2: self.stack.pop(); self._resolve(s); self.priority_user=self.active_user
+            if s.passes==2:
+                self.stack.pop(); self._resolve(s)
+                if self.stack: self.stack[-1].passes=0
+                if not self.winner: self.priority_user=self.active_user
             else: self.priority_user=self.opponent(user)
         elif user==self.active_user: self._advance()
         else: self.priority_user=self.active_user
@@ -165,9 +188,9 @@ class Game:
         elif c.effect=="damage":
             target=self.player(int(s.target or self.opponent(s.owner))); target.life-=c.amount; p.graveyard.append(s.uid)
         elif c.effect=="pump":
-            if not s.target or ":" not in s.target: raise GameError("Target must be USER_ID:POSITION.")
-            user,pos=(int(x) for x in s.target.split(":")); target=self.player(user).battlefield[pos-1]
-            if not self.card(target.uid).creature: raise GameError("Target is not a creature.")
+            user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
+            if target is None:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             target.bonus+=c.amount; p.graveyard.append(s.uid)
         self.log.append(f"{c.name} resolved."); self._sba(); self._life()
 
@@ -187,7 +210,10 @@ class Game:
     def _life(self):
         for p in self.players.values():
             if p.life<=0: self._finish(self.opponent(p.user_id),"zero life"); break
-    def concede(self,user): self._finish(self.opponent(user),"concession")
+    def concede(self,user):
+        self.player(user)
+        if self.winner: raise GameError("Game is over.")
+        self._finish(self.opponent(user),"concession")
     def _finish(self,winner,reason): self.winner=winner; self.finished_reason=reason; self.phase="finished"; self.priority_user=None
     def _priority(self,user):
         if self.winner: raise GameError("Game is over.")

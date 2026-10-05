@@ -54,6 +54,45 @@ class SpellTests(unittest.TestCase):
         g.priority_user=20; g.play(20,1,"20:2")
         self.assertEqual(g.stack[-1].owner,20)
 
+    def test_invalid_target_does_not_consume_card_or_mana(self):
+        g=ready(); p=g.players[20]
+        land=next(uid for uid,key in g.cards.items() if key=="forest")
+        p.battlefield=[Permanent(land,"forest",sick=False)]
+        growth=next(uid for uid,key in g.cards.items() if key=="growth")
+        if growth in p.library: p.library.remove(growth)
+        if growth in p.hand: p.hand.remove(growth)
+        p.hand.insert(0,growth); g.priority_user=20
+        with self.assertRaises(GameError): g.play(20,1,"20:99")
+        self.assertEqual(p.hand[0],growth); self.assertFalse(p.battlefield[0].tapped); self.assertFalse(g.stack)
+
+    def test_sorcery_speed_spell_requires_empty_stack(self):
+        g=ready(); p=g.players[10]
+        lands=[uid for uid,key in g.cards.items() if key=="mountain"][:4]
+        p.battlefield=[Permanent(uid,"mountain",sick=False) for uid in lands]
+        creature=next(uid for uid,key in g.cards.items() if key=="giant")
+        shock=next(uid for uid,key in g.cards.items() if key=="shock")
+        for uid in (creature,shock):
+            if uid in p.library: p.library.remove(uid)
+            if uid in p.hand: p.hand.remove(uid)
+        p.hand[:0]=[shock,creature]; g.play(10,1,"20"); g.priority_user=10
+        with self.assertRaises(GameError): g.play(10,1)
+        self.assertEqual(p.hand[0],creature); self.assertEqual(len(g.stack),1)
+
+    def test_response_resets_passes_on_underlying_spell(self):
+        g=ready(); active=g.players[10]; opponent=g.players[20]
+        mountains=[uid for uid,key in g.cards.items() if key=="mountain"][:2]
+        active.battlefield=[Permanent(uid,"mountain",sick=False) for uid in mountains]
+        shocks=[uid for uid,key in g.cards.items() if key=="shock"][:2]
+        for uid in shocks:
+            if uid in active.library: active.library.remove(uid)
+            if uid in active.hand: active.hand.remove(uid)
+        active.hand[:0]=shocks
+        g.play(10,1,"20"); g.pass_priority(20); g.play(10,1,"20")
+        g.pass_priority(20); g.pass_priority(10)
+        self.assertEqual(len(g.stack),1); self.assertEqual(g.stack[0].passes,0)
+        g.pass_priority(10); self.assertEqual(len(g.stack),1)
+        g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
+
 class CombatTests(unittest.TestCase):
     def test_unblocked_damage_and_lethal_creatures(self):
         g=ready(); a=g.players[10]; d=g.players[20]
@@ -65,5 +104,7 @@ class CombatTests(unittest.TestCase):
         self.assertFalse(d.battlefield); self.assertEqual(len(a.battlefield),1)
     def test_concession(self):
         g=ready(); g.concede(10); self.assertEqual(g.winner,20)
+        with self.assertRaises(GameError): g.concede(20)
+        self.assertEqual(g.winner,20)
 
 if __name__=="__main__": unittest.main()
