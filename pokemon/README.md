@@ -12,6 +12,7 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Modern encounter art plus a generated Game Boy-inspired battle scene with bounded sprite/render caches and accessible embed text.
 - An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
+- Ordered Kanto Gym Leader challenges, persistent badges, and a trainer-profile badge case without introducing a separate trainer XP level.
 - Red user-data deletion releases affected encounters.
 
 Collections are global only within one bot installation. Separate bots do not share data.
@@ -24,8 +25,15 @@ Collections are global only within one bot installation. Separate bots do not sh
 4. Review settings with `[p]pokemon set status`; choose `[p]pokemon set pace active|normal|relaxed`, or configure threshold, cooldown, expiry, and generations individually.
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
+7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
 
-Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+
+## Trainer profile and Kanto Gyms
+
+`[p]pokemon profile` displays the trainer's badge case, Pokédex progress, collection, bag, partner level/XP, and next Gym. Trainers challenge Brock through Giovanni in order. Each first victory awards that leader's badge exactly once; rematches are not required for progression. Gym battles award ordinary Pokémon battle XP, cannot award or consume a caught Gym Pokémon, and occupy the server's encounter slot until victory, defeat, forfeit, or expiry.
+
+The initial Gym milestone uses each leader's signature Pokémon as a restart-safe ace challenge. Full leader teams are deliberately deferred until opponent-party support is added to the battle engine; badge storage and ordering do not need to change for that expansion.
 
 ## Pokédex styles
 

@@ -145,6 +145,8 @@ class Battle:
     party_status: dict = field(default_factory=dict)
     action_history: list = field(default_factory=list)
     action_count: int = 0
+    battle_kind: str = "wild"
+    gym_key: str = ""
 
     def __post_init__(self):
         if not self.party:
@@ -409,7 +411,7 @@ class Battle:
         if self.state != "active":
             raise BattleError("This encounter is over.")
         self.state = "ran"
-        self.result = "You got away safely."
+        self.result = "You forfeited the Gym challenge." if self.battle_kind=="gym" else "You got away safely."
         self._record("run")
 
     def caught(self, instance_id=None):

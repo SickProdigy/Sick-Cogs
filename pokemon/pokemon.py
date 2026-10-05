@@ -11,6 +11,7 @@ from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .data import MOVES,SPECIES,generation_for,sprite
 from .models import Battle,BattleError,OwnedPokemon
+from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,RenderError
 from .views import BagView,BattleView,EncounterView,FightView,PartyView
@@ -18,7 +19,7 @@ from .views import BagView,BattleView,EncounterView,FightView,PartyView
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal"}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default"}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[]}
 GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro"}
 BOX_SIZE=30
 MAX_BOXES=10
@@ -46,11 +47,11 @@ def encounter_is_expired(raw,now):
 
 def encounter_returns_after_timeout(raw):
     battle=raw.get("battle",{})
-    return raw.get("state")=="battle" and int(battle.get("action_count",0))==0
+    return raw.get("kind","wild")=="wild" and raw.get("state")=="battle" and int(battle.get("action_count",0))==0
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.6.0";__author__="SickProdigy"
+    __version__="0.7.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -210,14 +211,16 @@ class Pokemon(commands.Cog):
     def move_label(key):return MOVES[key].name[:80]
     def battle_embed(self,b):
         player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id]
-        e=discord.Embed(title=f"Wild {wild.name} · Lv. {b.wild_level}",description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.blurple())
+        gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
+        title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level}" if gym else f"Wild {wild.name} · Lv. {b.wild_level}"
+        e=discord.Embed(title=title,description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.gold() if gym else discord.Color.blurple())
         e.set_thumbnail(url=sprite(wild.id))
         e.add_field(name=f"{wild.name} HP",value=f"{b.wild_hp}/{b.wild_max_hp}",inline=True)
         e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
         e.add_field(name="Moves",value=" · ".join(f"{n+1}. {MOVES[k].name} ({b.player.move_pp.get(k,MOVES[k].pp)} PP)" for n,k in enumerate(b.player.moves)),inline=False)
         needed=b.player.level*b.player.level*10 if b.player.level<100 else 0
         e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
-        e.set_footer(text="Defeat it for XP, catch it from Bag, switch Pokémon, or run.")
+        e.set_footer(text="Defeat the Gym Leader to earn the badge; switch Pokémon or forfeit." if gym else "Defeat it for XP, catch it from Bag, switch Pokémon, or run.")
         return e
     async def battle_action(self,i,eid,action):
         battle=self.battles.get(eid)
@@ -239,9 +242,16 @@ class Pokemon(commands.Cog):
         conf=await self.config.user_from_id(battle.user_id).all()
         updates={item.instance_id:item.raw() for item in battle.party}
         updates[battle.player.instance_id]=battle.player.raw()
-        conf["collection"]=[
-            updates.get(raw["instance_id"],raw) for raw in conf["collection"]
-        ]
+        conf["collection"]=[updates.get(raw["instance_id"],raw) for raw in conf["collection"]]
+        gym=GYMS.get(battle.gym_key) if battle.battle_kind=="gym" else None
+        if gym:
+            defeated=f"Gym Leader {gym.leader}'s {SPECIES[battle.wild_species_id].name} fainted."
+            battle.result=(battle.result or "Victory!").replace("The wild Pokémon fainted.",defeated,1)
+            badges=earned_badges(conf.get("badges",[]))
+            if gym.key not in badges:
+                badges.append(gym.key)
+                battle.result+=f" Earned the {gym.badge}!"
+            conf["badges"]=badges
         await self.config.user_from_id(battle.user_id).set(conf)
     async def throw_ball(self,i,eid):
         battle=self.battles.get(eid)
@@ -253,6 +263,8 @@ class Pokemon(commands.Cog):
                 await i.response.send_message("This battle is unavailable.",ephemeral=True);return
             if battle.state!="active" or battle.needs_switch:
                 await i.response.send_message("Switch Pokémon first." if battle.needs_switch else "This encounter is over.",ephemeral=True);return
+            if battle.battle_kind=="gym":
+                await i.response.send_message("Poké Balls cannot be used in a Gym battle.",ephemeral=True);return
             conf=await self.config.user(i.user).all();tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
             if len(conf["collection"])>=MAX_COLLECTION and not tx.get("settled"):
                 await i.response.send_message(f"Your {MAX_BOXES} boxes are full.",ephemeral=True);return
@@ -398,16 +410,58 @@ class Pokemon(commands.Cog):
         await self.set_pokedex_style(ctx.author,style)
         await ctx.send(f"Pokédex style set to **{POKEDEX_STYLES[style].label}**.")
 
+    @pokemon.group(name="gym",invoke_without_command=True)
+    async def gym(self,ctx):
+        """View and challenge the ordered Kanto Gyms."""
+        conf=await self.config.user(ctx.author).all()
+        await ctx.send(embed=gym_status_embed(ctx.author,conf))
+
+    @gym.command(name="challenge")
+    @commands.guild_only()
+    async def gym_challenge(self,ctx):
+        """Challenge the next Kanto Gym Leader's signature Pokémon."""
+        async with self.lock(("user",ctx.author.id)),self.lock(("spawn",ctx.guild.id)):
+            if any(b.user_id==ctx.author.id and b.state=="active" for b in self.battles.values()):
+                await ctx.send("Finish your active battle first.");return
+            if await self.config.guild(ctx.guild).active_encounter():
+                await ctx.send("This server already has an active encounter or Gym battle.");return
+            conf=await self.config.user(ctx.author).all();gym=next_gym(conf.get("badges",[]))
+            if not gym:
+                await ctx.send("You already earned all eight Kanto badges.");return
+            if not conf["party"]:
+                await ctx.send("Choose a starter and prepare a party first.");return
+            collection={item["instance_id"]:item for item in conf["collection"]}
+            party=[OwnedPokemon.from_raw(collection[key]) for key in conf["party"] if key in collection]
+            if not party:
+                await ctx.send("Your active party needs repair.");return
+            async with self.lock("encounters"):
+                eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
+            lead=party[0]
+            battle=Battle(eid,ctx.author.id,ctx.guild.id,ctx.channel.id,0,lead,gym.species_id,gym.level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key)
+            battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            self.battles[eid]=battle
+            try:
+                embed,files=await self.rendered_battle(battle)
+                message=await ctx.send(embed=embed,files=files,view=BattleView(self,eid))
+            except Exception:
+                self.battles.pop(eid,None)
+                raise
+            battle.message_id=message.id
+            seconds=await self.config.guild(ctx.guild).battle_timeout()
+            raw={"kind":"gym","gym_key":gym.key,"state":"battle","guild_id":ctx.guild.id,"channel_id":ctx.channel.id,"message_id":message.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat(),"battle":battle.raw()}
+            try:
+                await self.put_encounter(eid,raw)
+                await self.config.guild(ctx.guild).active_encounter.set(eid)
+            except Exception:
+                self.battles.pop(eid,None)
+                try:await message.edit(content="The Gym challenge could not be saved. Please try again.",view=None)
+                except discord.HTTPException:pass
+                raise
+
     @pokemon.command(name="profile")
     async def profile(self,ctx):
         conf=await self.config.user(ctx.author).all()
-        owned={item["instance_id"]:item for item in conf["collection"]}
-        lead=owned.get(conf["party"][0]) if conf["party"] else None
-        progress="No active Pokémon"
-        if lead:
-            needed=lead["level"]*lead["level"]*10 if lead["level"]<100 else 0
-            progress=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']} · " + ("MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP")
-        await ctx.send(f"Pokémon: **{len(conf['collection'])}/{MAX_COLLECTION}** · Party: **{len(conf['party'])}/6** · Poké Balls: **{conf['balls']}** · Pokédex: **{len(conf.get('pokedex_seen',[]))} seen/{len(conf.get('pokedex_caught',[]))} caught**\nLead: {progress}")
+        await ctx.send(embed=trainer_profile_embed(ctx.author,conf,MAX_COLLECTION))
     @pokemon.group(name="set",invoke_without_command=True)
     @commands.admin_or_permissions(manage_guild=True)
     async def pokemon_set(self,ctx):await ctx.send_help()

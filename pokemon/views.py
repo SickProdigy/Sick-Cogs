@@ -32,6 +32,9 @@ class BattleMenu(discord.ui.View):
 class BattleView(BattleMenu):
     def __init__(self, cog, encounter_id):
         super().__init__(cog, encounter_id)
+        battle=self.cog.battles.get(encounter_id)
+        if battle and battle.battle_kind=="gym":
+            self.remove_item(self.bag)
         for item in self.children:
             item.custom_id = f"pokemon:{encounter_id}:root:{item.custom_id}"
 
