@@ -44,6 +44,11 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse(encounter_is_expired({"state": "caught", "expires_at": expired}, now))
         self.assertFalse(encounter_is_expired({"state": "open", "expires_at": "bad"}, now))
 
+    def test_bundled_generation_one_catalog_is_complete(self):
+        path = Path(__file__).parents[1] / "gen1.json"
+        self.assertEqual(PokemonCatalog(path).load(), 151)
+        self.assertEqual(set(range(1, 152)), {key for key in SPECIES if key <= 151})
+
     def test_catalog_cache_round_trip(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "catalog.json"

@@ -3,6 +3,7 @@ import logging
 import random
 import time
 from datetime import datetime,timedelta,timezone
+from pathlib import Path
 import discord
 from discord.ext import tasks
 from redbot.core import Config,commands
@@ -32,11 +33,11 @@ def encounter_is_expired(raw,now):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.2.0";__author__="SickProdigy"
+    __version__="0.3.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
-        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json");self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
+        self.battles={};self.locks={};self.activity={};self.recent_users={};self.recent_content={};self.catalog=PokemonCatalog(cog_data_path(self)/"catalog.json",Path(__file__).with_name("gen1.json"));self.renderer=BattleRenderer(cog_data_path(self)/"sprites");self.cleanup_loop.start()
     async def cog_load(self):
         await self._migrate()
         try:self.catalog.load()

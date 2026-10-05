@@ -13,7 +13,10 @@ def battle(seed=1,wild=10):
 
 class DataTests(unittest.TestCase):
     def test_initial_catalog_and_types(self):
-        self.assertEqual(len(SPECIES),12)
+        from pathlib import Path
+        from pokemon.catalog import PokemonCatalog
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        self.assertEqual(len([key for key in SPECIES if key <= 151]),151)
         self.assertEqual(effectiveness("fire",("grass",)),2)
         self.assertEqual(effectiveness("water",("grass",)),0.5)
 
@@ -40,7 +43,7 @@ class BattleTests(unittest.TestCase):
         self.assertGreater(b.rolls,0)
     def test_quick_attack_beats_higher_speed(self):
         player=OwnedPokemon.create("fast",19,5,seed=3)
-        b=Battle(1,100,1,2,3,player,25,5,30,30,seed=8)
+        b=Battle(1,100,1,2,3,player,52,5,30,30,seed=8)
         b.use_move(1)
         self.assertTrue(b.last_action.startswith("Quick Attack"))
 
