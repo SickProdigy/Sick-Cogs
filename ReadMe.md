@@ -57,6 +57,7 @@ Current develop experiments include:
 - `codex` — private manual Codex allowance-cycle reminders.
 - `twitter` — native X API post announcements.
 - `mtg` — experimental persistent two-player Magic rules prototype.
+- `pokemon` — experimental global catching and wild-battle RPG.
 
 ## External Cog Sync Helper
 
