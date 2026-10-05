@@ -10,7 +10,7 @@ from redbot.core import Config,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .data import MOVES,SPECIES,generation_for,sprite
-from .models import Battle,BattleError,OwnedPokemon
+from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,RenderError
@@ -18,8 +18,8 @@ from .views import BagView,BattleView,EncounterView,FightView,PartyView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal"}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[]}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
 GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro"}
 BOX_SIZE=30
 MAX_BOXES=10
@@ -51,7 +51,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.7.0";__author__="SickProdigy"
+    __version__="0.8.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -194,6 +194,8 @@ class Pokemon(commands.Cog):
             await self.config.user(i.user).set(user)
             collection={item["instance_id"]:item for item in user["collection"]}
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
+            if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
+                await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
             wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
@@ -232,17 +234,27 @@ class Pokemon(commands.Cog):
                 await i.response.send_message("This battle is unavailable.",ephemeral=True);return
             try:action(battle)
             except (BattleError,IndexError,AttributeError) as e:await i.response.send_message(str(e),ephemeral=True);return
-            if battle.state=="won":await self.sync_battle_player(battle)
-            await self.save_battle(battle)
             done=battle.state!="active"
+            if done:await self.sync_battle_player(battle)
+            await self.save_battle(battle)
             if done:await self.clear_guild(battle.guild_id,eid)
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=None if done else BattleView(self,eid))
-    async def sync_battle_player(self,battle):
-        conf=await self.config.user_from_id(battle.user_id).all()
-        updates={item.instance_id:item.raw() for item in battle.party}
+    @staticmethod
+    def apply_battle_party(conf,battle):
+        battle.party_hp[battle.player.instance_id]=battle.player_hp
+        battle.party_status[battle.player.instance_id]=battle.player_status
+        updates={}
+        for item in battle.party:
+            item.current_hp=max(0,min(pokemon_max_hp(item),int(battle.party_hp.get(item.instance_id,pokemon_max_hp(item)))))
+            item.status=battle.party_status.get(item.instance_id,"")
+            updates[item.instance_id]=item.raw()
         updates[battle.player.instance_id]=battle.player.raw()
         conf["collection"]=[updates.get(raw["instance_id"],raw) for raw in conf["collection"]]
+
+    async def sync_battle_player(self,battle):
+        conf=await self.config.user_from_id(battle.user_id).all()
+        self.apply_battle_party(conf,battle)
         gym=GYMS.get(battle.gym_key) if battle.battle_kind=="gym" else None
         if gym:
             defeated=f"Gym Leader {gym.leader}'s {SPECIES[battle.wild_species_id].name} fainted."
@@ -274,6 +286,7 @@ class Pokemon(commands.Cog):
             try:caught=battle.throw_ball()
             except BattleError as e:await i.response.send_message(str(e),ephemeral=True);return
             if caught:
+                self.apply_battle_party(conf,battle)
                 identity=f"catch-{battle.user_id}-{eid}";pokemon=battle.caught(identity)
                 if not any(p["instance_id"]==identity for p in conf["collection"]):conf["collection"].append(pokemon.raw())
                 seen={int(value) for value in conf.get("pokedex_seen",[])}
@@ -328,7 +341,10 @@ class Pokemon(commands.Cog):
         lines=[]
         for slot,identity in enumerate(conf["party"],1):
             pokemon=owned.get(identity)
-            if pokemon:lines.append(f"{slot}. {SPECIES[pokemon['species_id']].name} · Lv. {pokemon['level']} · {identity[:8]}")
+            if pokemon:
+                owned_pokemon=OwnedPokemon.from_raw(pokemon);maximum=pokemon_max_hp(owned_pokemon)
+                current=maximum if owned_pokemon.current_hp is None else owned_pokemon.current_hp
+                lines.append(f"{slot}. {SPECIES[pokemon['species_id']].name} · Lv. {pokemon['level']} · HP {current}/{maximum} · {identity[:8]}")
         await ctx.send("**Party**\n"+("\n".join(lines) or "Empty"))
     @party.command(name="add")
     async def party_add(self,ctx,identifier:str,slot:int=None):
@@ -350,20 +366,75 @@ class Pokemon(commands.Cog):
             if not 1<=slot<=len(conf["party"]):await ctx.send("That party slot is empty.");return
             conf["party"].pop(slot-1);await self.config.user(ctx.author).set(conf)
         await ctx.send("Party updated.")
-    @pokemon.command(name="heal")
-    async def heal(self,ctx):
+    @staticmethod
+    def find_owned(conf,identifier):
+        owned={item["instance_id"]:item for item in conf["collection"]}
+        if str(identifier).isdigit():
+            slot=int(identifier)
+            if 1<=slot<=len(conf["party"]):return owned.get(conf["party"][slot-1])
+        matches=[raw for key,raw in owned.items() if key.startswith(str(identifier))]
+        return matches[0] if len(matches)==1 else None
+
+    @pokemon.command(name="bag")
+    async def pokemon_bag(self,ctx):
+        conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
+        await ctx.send(f"**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
+
+    @pokemon.group(name="use",invoke_without_command=True)
+    async def pokemon_use(self,ctx):
+        await ctx.send_help()
+
+    @pokemon_use.command(name="potion")
+    async def use_potion(self,ctx,identifier:str):
         async with self.lock(("user",ctx.author.id)):
-            conf=await self.config.user(ctx.author).all()
-            party=set(conf["party"])
-            healed=0
-            for raw in conf["collection"]:
-                if raw["instance_id"] not in party:
-                    continue
-                pokemon=OwnedPokemon.from_raw(raw)
-                pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves}
-                raw.update(pokemon.raw());healed+=1
+            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
+            if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
+            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
+            if current<=0:await ctx.send("That Pokémon has fainted. Use a Revive first.");return
+            if current>=maximum:await ctx.send("That Pokémon already has full HP.");return
+            items=conf.get("items",{})
+            if int(items.get("potion",0))<1:await ctx.send("You have no Potions.");return
+            items["potion"]=int(items.get("potion",0))-1;conf["items"]=items
+            pokemon.current_hp=min(maximum,current+20);raw.update(pokemon.raw())
             await self.config.user(ctx.author).set(conf)
-        await ctx.send(f"Restored your party’s HP, status, and PP ({healed} Pokémon).")
+        await ctx.send(f"{SPECIES[pokemon.species_id].name} recovered {pokemon.current_hp-current} HP ({pokemon.current_hp}/{maximum}).")
+
+    @pokemon_use.command(name="revive")
+    async def use_revive(self,ctx,identifier:str):
+        async with self.lock(("user",ctx.author.id)):
+            conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
+            if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
+            pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
+            current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
+            if current>0:await ctx.send("That Pokémon has not fainted.");return
+            items=conf.get("items",{})
+            if int(items.get("revive",0))<1:await ctx.send("You have no Revives.");return
+            items["revive"]=int(items.get("revive",0))-1;conf["items"]=items
+            pokemon.current_hp=max(1,maximum//2);pokemon.status="";raw.update(pokemon.raw())
+            await self.config.user(ctx.author).set(conf)
+        await ctx.send(f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP.")
+
+    @pokemon.command(name="center")
+    @commands.guild_only()
+    async def pokemon_center(self,ctx):
+        center=await self.config.guild(ctx.guild).center_channel()
+        if not center:await ctx.send("This server has not configured a Pokémon Center.");return
+        if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server's Pokémon Center.");return
+        async with self.lock(("user",ctx.author.id)):
+            conf=await self.config.user(ctx.author).all();last=conf.get("center_last_at")
+            now=datetime.now(timezone.utc)
+            if last:
+                try:remaining=300-(now-datetime.fromisoformat(last)).total_seconds()
+                except (TypeError,ValueError):remaining=0
+                if remaining>0:await ctx.send(f"The Pokémon Center will be ready again in {int(remaining)+1}s.");return
+            party=set(conf["party"]);healed=0
+            for raw in conf["collection"]:
+                if raw["instance_id"] not in party:continue
+                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status=""
+                pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());healed+=1
+            conf["center_last_at"]=now.isoformat();await self.config.user(ctx.author).set(conf)
+        await ctx.send(f"Your party is fully restored. ({healed} Pokémon)")
 
     async def selected_pokedex_style(self,user):
         preference=await self.config.user(user).pokedex_style()
@@ -434,6 +505,8 @@ class Pokemon(commands.Cog):
             party=[OwnedPokemon.from_raw(collection[key]) for key in conf["party"] if key in collection]
             if not party:
                 await ctx.send("Your active party needs repair.");return
+            if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
+                await ctx.send("Your party has fainted. Visit a Pokémon Center or use a Revive.");return
             async with self.lock("encounters"):
                 eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
             lead=party[0]
@@ -476,6 +549,16 @@ class Pokemon(commands.Cog):
         channels=await self.config.guild(ctx.guild).channels()
         if channel.id in channels:channels.remove(channel.id)
         await self.config.guild(ctx.guild).channels.set(channels);await ctx.send(f"Removed {channel.mention}.")
+    @pokemon_set.command(name="center")
+    async def set_center(self,ctx,channel:discord.TextChannel):
+        await self.config.guild(ctx.guild).center_channel.set(channel.id)
+        await ctx.send(f"{channel.mention} is now this server's Pokémon Center.")
+
+    @pokemon_set.command(name="removecenter")
+    async def remove_center(self,ctx):
+        await self.config.guild(ctx.guild).center_channel.set(None)
+        await ctx.send("This server's Pokémon Center was removed.")
+
     @pokemon_set.command(name="status")
     async def spawn_status(self,ctx):
         conf=await self.config.guild(ctx.guild).all()

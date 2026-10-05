@@ -29,6 +29,8 @@ class OwnedPokemon:
     gender: str = "unknown"
     origin: str = "wild"
     caught_at: Optional[str] = None
+    current_hp: Optional[int] = None
+    status: str = ""
 
     def __post_init__(self):
         if not self.moves:
@@ -93,6 +95,8 @@ class OwnedPokemon:
         data.setdefault("evs",{})
         data.setdefault("gender","unknown")
         data.setdefault("origin","wild" if data.get("caught_guild_id") is not None else "starter")
+        data.setdefault("current_hp",None)
+        data.setdefault("status","")
         return cls(**data)
 
     def gain_experience(self, amount: int):
@@ -116,6 +120,12 @@ class OwnedPokemon:
                     forgotten=known.pop(0);self.move_pp.pop(forgotten,None)
                 self.moves=tuple(known);self.move_pp[move]=MOVES[move].pp;learned.append(move)
         return levels, evolved_from, learned
+
+
+def pokemon_max_hp(pokemon):
+    species=SPECIES[pokemon.species_id]
+    iv=int(pokemon.ivs.get("hp",0))
+    return ((2*species.hp+iv)*pokemon.level)//100+pokemon.level+10
 
 
 @dataclass
@@ -153,15 +163,21 @@ class Battle:
             self.party = [self.player]
         self.party_hp.setdefault(self.player.instance_id, self.player_hp)
         self.party_status.setdefault(self.player.instance_id, self.player_status)
+        if self.player.current_hp is not None:self.player_hp=max(0,min(self.max_hp(self.player),int(self.player.current_hp)))
+        if self.player.status:self.player_status=self.player.status
 
     def initialize_party(self, party):
         self.party = list(party)
         self.party_hp = {
-            pokemon.instance_id: self.max_hp(pokemon) for pokemon in self.party
+            pokemon.instance_id:max(0,min(self.max_hp(pokemon),int(pokemon.current_hp)))
+            if pokemon.current_hp is not None else self.max_hp(pokemon)
+            for pokemon in self.party
         }
-        self.party_status = {pokemon.instance_id: "" for pokemon in self.party}
-        self.player = self.party[0]
-        self.player_hp = self.party_hp[self.player.instance_id]
+        self.party_status = {pokemon.instance_id:pokemon.status for pokemon in self.party}
+        conscious=next((pokemon for pokemon in self.party if self.party_hp[pokemon.instance_id]>0),self.party[0])
+        self.player = conscious
+        self.player_hp = self.party_hp[conscious.instance_id]
+        self.player_status=self.party_status.get(conscious.instance_id,"")
 
     @property
     def needs_switch(self):
@@ -224,7 +240,7 @@ class Battle:
         return ((2 * base + iv) * pokemon.level) // 100 + 5
 
     def max_hp(self, pokemon):
-        return self.stat(pokemon, "hp")
+        return pokemon_max_hp(pokemon)
 
     @property
     def wild_max_hp(self):
