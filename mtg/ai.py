@@ -4,10 +4,6 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 
 
-def _available_lands(game, user):
-    return sum(1 for permanent in game.player(user).battlefield if game.card(permanent.uid).land and not permanent.tapped)
-
-
 def _target(game, user, card):
     if card.effect == "damage":
         return str(game.opponent(user))
@@ -32,11 +28,10 @@ def _play_one(game, user, difficulty):
                 game.play(user, position)
                 return "play_land"
 
-    mana = _available_lands(game, user)
     candidates = []
     for position, uid in enumerate(player.hand, 1):
         card = game.card(uid)
-        if card.land or card.cost > mana:
+        if card.land or not game.can_pay(user, card):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue

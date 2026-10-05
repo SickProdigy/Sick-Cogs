@@ -21,6 +21,7 @@ class ReferenceCard:
     power: Optional[str]
     toughness: Optional[str]
     layout: str
+    support_family: str
     engine_status: str
 
     @property
@@ -51,8 +52,13 @@ if len({card.scryfall_id for card in ALPHA_CARDS}) != len(ALPHA_CARDS):
     raise RuntimeError("Alpha catalog printing identifiers are not unique.")
 if len({card.oracle_id for card in ALPHA_CARDS}) != ALPHA_SET.get("distinct_card_count"):
     raise RuntimeError("Alpha catalog distinct-card count is invalid.")
-if any(card.engine_status != "reference_only" for card in ALPHA_CARDS):
-    raise RuntimeError("Alpha catalog contains an unreviewed playable card.")
+SUPPORT_FAMILIES = {"vanilla_creature","creature_ability","spell","artifact","enchantment","land","excluded_ante","digital_adaptation_required"}
+if any(card.support_family not in SUPPORT_FAMILIES for card in ALPHA_CARDS):
+    raise RuntimeError("Alpha catalog contains an unknown support family.")
+if any(card.engine_status not in {"playable", "reference_only"} for card in ALPHA_CARDS):
+    raise RuntimeError("Alpha catalog contains an unknown engine status.")
+PLAYABLE_ALPHA = tuple(card for card in ALPHA_CARDS if card.engine_status == "playable")
+REFERENCE_ALPHA = tuple(card for card in ALPHA_CARDS if card.engine_status == "reference_only")
 
 
 def search_alpha(query):

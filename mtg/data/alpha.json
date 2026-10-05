@@ -31,6 +31,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -53,6 +54,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -75,6 +77,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -97,6 +100,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -119,6 +123,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -141,6 +146,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -163,6 +169,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -185,6 +192,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -207,6 +215,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -229,6 +238,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -251,6 +261,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -273,6 +284,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -295,6 +307,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -317,6 +330,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -339,6 +353,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -361,6 +376,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -383,6 +399,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -405,6 +422,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -427,6 +445,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -449,6 +468,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -471,6 +491,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -493,6 +514,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -515,6 +537,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -537,6 +560,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -559,6 +583,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -581,6 +606,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -603,6 +629,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -625,6 +652,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -647,6 +675,7 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -669,7 +698,8 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:31",
@@ -691,6 +721,7 @@
       "power": "6",
       "toughness": "6",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -713,6 +744,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -735,6 +767,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -757,6 +790,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -779,6 +813,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -801,6 +836,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -823,6 +859,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -845,7 +882,8 @@
       "power": "2",
       "toughness": "1",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:39",
@@ -867,6 +905,7 @@
       "power": "4",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -889,6 +928,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -911,6 +951,7 @@
       "power": "2",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -933,6 +974,7 @@
       "power": "3",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -955,6 +997,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -977,6 +1020,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -999,6 +1043,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1021,6 +1066,7 @@
       "power": "4",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1043,6 +1089,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1065,6 +1112,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1087,6 +1135,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1109,6 +1158,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1131,6 +1181,7 @@
       "power": "0",
       "toughness": "0",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1153,6 +1204,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1175,6 +1227,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1197,6 +1250,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1219,6 +1273,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1241,6 +1296,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1263,6 +1319,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1285,6 +1342,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1307,6 +1365,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1329,6 +1388,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1351,6 +1411,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1373,6 +1434,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1395,6 +1457,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1417,6 +1480,7 @@
       "power": "5",
       "toughness": "6",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1439,6 +1503,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1461,7 +1526,8 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:67",
@@ -1483,6 +1549,7 @@
       "power": "4",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1505,6 +1572,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1527,6 +1595,7 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1549,6 +1618,7 @@
       "power": "4",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1571,6 +1641,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1593,6 +1664,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1615,6 +1687,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1637,6 +1710,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1659,6 +1733,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1681,6 +1756,7 @@
       "power": "5",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1703,6 +1779,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1725,6 +1802,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1747,6 +1825,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1769,6 +1848,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1791,6 +1871,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -1813,6 +1894,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1835,6 +1917,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1857,6 +1940,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1879,6 +1963,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1901,6 +1986,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1923,6 +2009,7 @@
       "power": "0",
       "toughness": "0",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1945,6 +2032,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -1967,6 +2055,7 @@
       "power": "1",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -1989,6 +2078,7 @@
       "power": "0",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2011,7 +2101,8 @@
       "power": "5",
       "toughness": "4",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:92",
@@ -2033,6 +2124,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2055,6 +2147,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2077,6 +2170,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2099,6 +2193,7 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2121,6 +2216,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "excluded_ante",
       "engine_status": "reference_only"
     },
     {
@@ -2143,6 +2239,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2165,6 +2262,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2187,6 +2285,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "excluded_ante",
       "engine_status": "reference_only"
     },
     {
@@ -2209,6 +2308,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2231,6 +2331,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2253,6 +2354,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "excluded_ante",
       "engine_status": "reference_only"
     },
     {
@@ -2275,6 +2377,7 @@
       "power": "5",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2297,6 +2400,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2319,6 +2423,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2341,6 +2446,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2363,6 +2469,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2385,6 +2492,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2407,6 +2515,7 @@
       "power": "0",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2429,6 +2538,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2451,6 +2561,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2473,6 +2584,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2495,6 +2607,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2517,6 +2630,7 @@
       "power": "7",
       "toughness": "7",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2539,6 +2653,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2561,6 +2676,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2583,6 +2699,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2605,6 +2722,7 @@
       "power": "*",
       "toughness": "*",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2627,6 +2745,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2649,6 +2768,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2671,6 +2791,7 @@
       "power": "*",
       "toughness": "*",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2693,6 +2814,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2715,6 +2837,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2737,6 +2860,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2759,7 +2883,8 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:126",
@@ -2781,6 +2906,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2803,6 +2929,7 @@
       "power": "4",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2825,6 +2952,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2847,6 +2975,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2869,6 +2998,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -2891,6 +3021,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2913,6 +3044,7 @@
       "power": "1",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -2935,6 +3067,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2957,6 +3090,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -2979,6 +3113,7 @@
       "power": "0",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3001,6 +3136,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3023,6 +3159,7 @@
       "power": "2",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3045,6 +3182,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3067,6 +3205,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3089,6 +3228,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3111,6 +3251,7 @@
       "power": "2",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3133,6 +3274,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3155,6 +3297,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3177,7 +3320,8 @@
       "power": "4",
       "toughness": "5",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:145",
@@ -3199,6 +3343,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3221,6 +3366,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3243,6 +3389,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3265,7 +3412,8 @@
       "power": "5",
       "toughness": "4",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:149",
@@ -3287,6 +3435,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3309,6 +3458,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3331,6 +3481,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3353,6 +3504,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3375,6 +3527,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3397,6 +3550,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3419,6 +3573,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3441,7 +3596,8 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:157",
@@ -3463,7 +3619,8 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:158",
@@ -3485,7 +3642,8 @@
       "power": "2",
       "toughness": "3",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:159",
@@ -3507,6 +3665,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3529,6 +3688,7 @@
       "power": "*",
       "toughness": "*",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3551,6 +3711,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3573,6 +3734,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3595,6 +3757,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3617,7 +3780,8 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:165",
@@ -3639,6 +3803,7 @@
       "power": "1",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3661,6 +3826,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3683,6 +3849,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3705,6 +3872,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3727,6 +3895,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3749,6 +3918,7 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3771,6 +3941,7 @@
       "power": "0",
       "toughness": "0",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3794,6 +3965,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3816,6 +3988,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3838,6 +4011,7 @@
       "power": "5",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3860,6 +4034,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -3882,6 +4057,7 @@
       "power": "3",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3904,6 +4080,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3926,6 +4103,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -3948,6 +4126,7 @@
       "power": "4",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3970,6 +4149,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -3992,6 +4172,7 @@
       "power": "0",
       "toughness": "5",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4014,6 +4195,7 @@
       "power": "0",
       "toughness": "8",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4036,6 +4218,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4058,6 +4241,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4080,6 +4264,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4102,6 +4287,7 @@
       "power": "0",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4124,6 +4310,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4146,6 +4333,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4168,6 +4356,7 @@
       "power": "2",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4190,7 +4379,8 @@
       "power": "6",
       "toughness": "4",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:191",
@@ -4212,6 +4402,7 @@
       "power": "2",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4234,6 +4425,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4256,6 +4448,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4278,6 +4471,7 @@
       "power": "8",
       "toughness": "8",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4300,6 +4494,7 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4322,6 +4517,7 @@
       "power": "*",
       "toughness": "*",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4344,6 +4540,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4366,6 +4563,7 @@
       "power": "2",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4388,7 +4586,8 @@
       "power": "2",
       "toughness": "2",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:200",
@@ -4410,6 +4609,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4432,6 +4632,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4454,6 +4655,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4476,7 +4678,8 @@
       "power": "3",
       "toughness": "5",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:204",
@@ -4498,6 +4701,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4520,6 +4724,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4542,6 +4747,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4564,6 +4770,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4586,6 +4793,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4608,6 +4816,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4630,6 +4839,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4652,6 +4862,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4674,6 +4885,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4696,6 +4908,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -4718,6 +4931,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4740,6 +4954,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4762,6 +4977,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4784,6 +5000,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4806,6 +5023,7 @@
       "power": "2",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4828,6 +5046,7 @@
       "power": "1",
       "toughness": "1",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4850,6 +5069,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4872,6 +5092,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "spell",
       "engine_status": "reference_only"
     },
     {
@@ -4894,6 +5115,7 @@
       "power": "0",
       "toughness": "2",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4916,6 +5138,7 @@
       "power": "2",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4938,6 +5161,7 @@
       "power": "0",
       "toughness": "7",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4960,6 +5184,7 @@
       "power": "0",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -4982,6 +5207,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -5004,6 +5230,7 @@
       "power": "3",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -5026,6 +5253,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -5048,6 +5276,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "enchantment",
       "engine_status": "reference_only"
     },
     {
@@ -5066,6 +5295,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5084,6 +5314,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5102,6 +5333,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5120,6 +5352,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5138,6 +5371,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5156,6 +5390,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "digital_adaptation_required",
       "engine_status": "reference_only"
     },
     {
@@ -5174,6 +5409,7 @@
       "power": "0",
       "toughness": "4",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -5192,6 +5428,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5210,6 +5447,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5228,6 +5466,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5246,6 +5485,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5264,6 +5504,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5282,6 +5523,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5300,6 +5542,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5320,6 +5563,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5338,6 +5582,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5356,6 +5601,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5374,6 +5620,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5392,6 +5639,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5410,6 +5658,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5428,6 +5677,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5446,6 +5696,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5464,6 +5715,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5482,6 +5734,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5500,6 +5753,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5518,6 +5772,7 @@
       "power": "5",
       "toughness": "3",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -5536,6 +5791,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5554,6 +5810,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5572,6 +5829,7 @@
       "power": "0",
       "toughness": "6",
       "layout": "normal",
+      "support_family": "creature_ability",
       "engine_status": "reference_only"
     },
     {
@@ -5590,6 +5848,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5608,6 +5867,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5628,6 +5888,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5648,6 +5909,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5668,6 +5930,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5688,6 +5951,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5708,6 +5972,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5726,6 +5991,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5744,7 +6010,8 @@
       "power": "4",
       "toughness": "6",
       "layout": "normal",
-      "engine_status": "reference_only"
+      "support_family": "vanilla_creature",
+      "engine_status": "playable"
     },
     {
       "key": "lea:268",
@@ -5762,6 +6029,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5780,6 +6048,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5798,6 +6067,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5816,6 +6086,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5834,6 +6105,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5852,6 +6124,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5870,6 +6143,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5888,6 +6162,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5906,6 +6181,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "artifact",
       "engine_status": "reference_only"
     },
     {
@@ -5927,6 +6203,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -5948,6 +6225,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -5969,6 +6247,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -5990,6 +6269,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6011,6 +6291,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6032,6 +6313,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6053,6 +6335,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6074,6 +6357,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6095,6 +6379,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6115,6 +6400,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6135,6 +6421,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6155,6 +6442,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6175,6 +6463,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6195,6 +6484,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6215,6 +6505,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6235,6 +6526,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6255,6 +6547,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6275,6 +6568,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     },
     {
@@ -6295,6 +6589,7 @@
       "power": null,
       "toughness": null,
       "layout": "normal",
+      "support_family": "land",
       "engine_status": "reference_only"
     }
   ]

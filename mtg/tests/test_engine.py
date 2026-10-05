@@ -67,6 +67,48 @@ class TurnTests(unittest.TestCase):
         self.assertEqual(g.finished_reason,"empty library")
         self.assertIsNone(g.priority_user)
 
+class ManaTests(unittest.TestCase):
+    def alpha_in_hand(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        game.players[user].hand.insert(0,uid)
+        return uid
+
+    def land(self,game,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        return Permanent(uid,key,sick=False)
+
+    def test_colored_cost_rejects_wrong_land_and_preserves_state(self):
+        game=ready(); player=game.players[10]
+        card=self.alpha_in_hand(game,10,"lea:38")
+        mountain=self.land(game,"mountain"); player.battlefield=[mountain]
+        with self.assertRaises(GameError): game.play(10,1)
+        self.assertEqual(player.hand[0],card)
+        self.assertFalse(mountain.tapped)
+
+    def test_colored_cost_casts_alpha_vanilla_creature(self):
+        game=ready(); player=game.players[10]
+        card=self.alpha_in_hand(game,10,"lea:38")
+        plains=self.land(game,"plains"); player.battlefield=[plains]
+        game.play(10,1)
+        self.assertTrue(plains.tapped)
+        game.pass_priority(20); game.pass_priority(10)
+        self.assertEqual(game.card(player.battlefield[-1].uid).name,"Savannah Lions")
+
+    def test_colored_symbols_and_generic_cost_use_correct_lands(self):
+        game=ready(); player=game.players[10]
+        self.alpha_in_hand(game,10,"lea:158")
+        player.battlefield=[self.land(game,"forest"),self.land(game,"mountain"),self.land(game,"mountain")]
+        game.play(10,1)
+        self.assertTrue(all(land.tapped for land in player.battlefield))
+
+    def test_generic_artifact_creature_accepts_any_basic_lands(self):
+        game=ready(); player=game.players[10]
+        self.alpha_in_hand(game,10,"lea:267")
+        player.battlefield=[self.land(game,"mountain") for _ in range(6)]
+        game.play(10,1)
+        self.assertTrue(all(land.tapped for land in player.battlefield))
+
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

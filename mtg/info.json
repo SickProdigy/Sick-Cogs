@@ -1,10 +1,10 @@
 {
   "author": ["SickProdigy"],
-  "description": "An experimental persistent solo and two-player Magic: The Gathering rules prototype with private hands, curated starter decks, and the complete Alpha reference catalog.",
+  "description": "An experimental persistent solo and two-player Magic: The Gathering rules prototype with private hands, curated starter decks, and the complete Alpha catalog and progressive rules support.",
   "disabled": false,
   "end_user_data_statement": "This cog stores Discord user IDs, active match state, private hands, decks, public game actions, and channel/message identifiers until the match record is deleted. User deletion removes matches involving that user.",
   "hidden": false,
-  "install_msg": "Start with `[p]mtg solo red easy` or `[p]mtg challenge @member`. Alpha cards are browseable reference records; gameplay remains limited to the bundled starter decks and curated rules subset.",
+  "install_msg": "Start with `[p]mtg solo red easy` or `[p]mtg challenge @member`. Alpha cards are progressively promoted only after their rules pass engine tests; fixed starter decks remain unchanged.",
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "MTG",
@@ -13,5 +13,5 @@
   "short": "Persistent solo and two-player MTG prototype",
   "tags": ["games", "cards", "mtg", "solo", "multiplayer"],
   "type": "COG",
-  "version": "0.6.0"
+  "version": "0.7.0"
 }

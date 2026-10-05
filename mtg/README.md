@@ -2,7 +2,7 @@
 
 MTG is an experimental solo and two-player Magic: The Gathering rules prototype for Red.
 
-Version 0.6.0 supports a curated playable pool of 60 Scryfall-backed cards, the complete original Limited Edition Alpha reference catalog, and two fixed 60-card beginner decks. Alpha contributes 295 printings representing 290 distinct card names; its five basic lands each have two original artworks. Alpha cards are browseable but remain reference-only until their individual mechanics are implemented and tested. The cog is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
+Version 0.7.0 supports the original 60-card gameplay pool plus the first 15 playable Limited Edition Alpha cards: every textless Alpha creature. The full Alpha catalog remains 295 printings representing 290 distinct names. Proper colored and generic mana payment now prevents lands of the wrong color from casting spells. The two fixed 60-card beginner decks remain unchanged while collection and deck-choice design is deferred. The cog is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
 
 ## Play
 
@@ -23,9 +23,9 @@ Run `[p]mtg solo [red|green] [easy|normal]` to play against the bot with the sel
 
 ## Supported rules
 
-Opening hands and London-style mulligans, a randomized starting player, 20 life, five broad turn phases, one land per turn, automatic land tapping, creatures and summoning sickness, haste on Raging Goblin, a response stack with priority passing before phase changes and combat damage, combat, graveyards, empty-library loss, concessions, and persistent recovery.
+Opening hands and London-style mulligans, a randomized starting player, 20 life, five broad turn phases, one land per turn, colored and generic mana costs with automatic legal land tapping, creatures and summoning sickness, haste on Raging Goblin, a response stack with priority passing before phase changes and combat damage, combat, graveyards, empty-library loss, concessions, and persistent recovery.
 
-This is a learning prototype. The versioned playable catalog in `data/cards.json` remains authoritative for matches, starter decks, and future pack pools. It contains five basics, thirty creatures, thirteen instants, and twelve sorceries. Every playable entry is limited to an engine-supported shape. The separate `data/alpha.json` catalog contains all 295 Limited Edition Alpha printings as historical reference records; those records cannot enter decks, matches, or pack pools. Pack generation and ownership remain deliberately unimplemented.
+This is a learning prototype. The versioned playable catalog in `data/cards.json` remains authoritative for matches, starter decks, and future pack pools. It contains five basics, thirty creatures, thirteen instants, and twelve sorceries. Every playable entry is limited to an engine-supported shape. The separate `data/alpha.json` catalog contains all 295 Limited Edition Alpha printings. Fifteen textless creatures are now engine-playable but are not included in the fixed starters or pack pools; the remaining 280 printings stay reference-only. The complete inventory, staged rules plan, promotion gate, and paper-only exceptions are documented in `ALPHA_SUPPORT.md`. Pack generation and ownership remain deliberately unimplemented.
 
 ## Card data and artwork
 

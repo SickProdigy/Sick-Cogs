@@ -1,4 +1,5 @@
 import random
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
@@ -112,6 +113,32 @@ class Game:
         self.phase_passes=0; self.phase="precombat_main"; self.priority_user=self.active_user
         self.log.append(f"Turn {self.turn}: {self.active_user}.")
 
+    @staticmethod
+    def _mana_requirements(card):
+        symbols=re.findall(r"\{([^}]+)\}",card.mana_cost or "")
+        generic=0; colored=[]
+        for symbol in symbols:
+            if symbol.isdigit(): generic+=int(symbol)
+            elif symbol in {"W","U","B","R","G"}: colored.append(symbol)
+            else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
+        return generic,colored
+
+    def _mana_payment(self,player,card):
+        generic,colored=self._mana_requirements(card)
+        available=[permanent for permanent in player.battlefield if self.card(permanent.uid).land and not permanent.tapped]
+        selected=[]
+        for symbol in colored:
+            choices=[permanent for permanent in available if symbol in self.card(permanent.uid).colors]
+            if not choices: return None
+            permanent=min(choices,key=lambda item:len(self.card(item.uid).colors))
+            selected.append(permanent); available.remove(permanent)
+        if len(available)<generic: return None
+        selected.extend(available[:generic])
+        return selected
+
+    def can_pay(self,user,card):
+        return self._mana_payment(self.player(user),card) is not None
+
     def play(self,user,index,target=None):
         self._priority(user); p=self.player(user)
         if not 1<=index<=len(p.hand): raise GameError("No card at that hand position.")
@@ -124,9 +151,9 @@ class Game:
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
-        lands=[x for x in p.battlefield if self.card(x.uid).land and not x.tapped]
-        if len(lands)<c.cost: raise GameError(f"You need {c.cost} untapped lands.")
-        for x in lands[:c.cost]: x.tapped=True
+        payment=self._mana_payment(p,c)
+        if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your untapped lands.")
+        for permanent in payment: permanent.tapped=True
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
         self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)

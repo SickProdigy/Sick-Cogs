@@ -9,7 +9,7 @@ from redbot.core import Config, commands
 from redbot.core.data_manager import cog_data_path
 from .ai import DIFFICULTIES, advance_solo
 from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield, render_hand
-from .cards import CARDS
+from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
 from .views import ChallengeView, GameView, HandPaginationView
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.6.0"
+    __version__="0.7.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -237,17 +237,21 @@ class MTG(commands.Cog):
         matches=[] if alpha_only else [card for card in CARDS.values() if folded==card.key.casefold() or folded==card.name.casefold()]
         if not matches and not alpha_only: matches=[card for card in CARDS.values() if folded in card.name.casefold()]
         alpha_matches=search_alpha(raw) if alpha_only or not matches else []
+        if matches and matches[0].set_code=="lea":
+            alpha_matches=search_alpha(matches[0].key); matches=[]
         if not matches and not alpha_matches:
             await ctx.send("No catalog card matched that search."); return
         alpha=bool(alpha_matches); card=(alpha_matches or matches)[0]
         if alpha:
             description=card.oracle_text or "No current Oracle rules text."
-            embed=discord.Embed(title=card.name,description=description,color=discord.Color.dark_gold())
+            color=discord.Color.dark_green() if card.engine_status=="playable" else discord.Color.dark_gold()
+            embed=discord.Embed(title=card.name,description=description,color=color)
             embed.add_field(name="Type",value=card.type_line,inline=False)
             embed.add_field(name="Mana",value=card.mana_cost or "None")
             if card.power is not None: embed.add_field(name="Power / toughness",value=f"{card.power} / {card.toughness}")
             embed.add_field(name="Alpha printing",value=f"`{card.key}` · #{card.collector_number} · {card.rarity.title()}",inline=False)
-            embed.add_field(name="Engine status",value="Reference only — not available in starter decks or future pack pools yet.",inline=False)
+            status=("Playable in the supported rules subset; not included in the fixed starters or pack pools." if card.engine_status=="playable" else "Reference only — its mechanics are not implemented yet.")
+            embed.add_field(name="Engine status",value=status,inline=False)
             if len(alpha_matches)>1: embed.add_field(name="Alternate Alpha art",value=f"{len(alpha_matches)} printings share this card name; use an exact `lea:NUMBER` key.",inline=False)
             source=f"https://scryfall.com/card/lea/{card.collector_number}"
         else:
@@ -279,8 +283,11 @@ class MTG(commands.Cog):
         if tokens and tokens[0].isdigit(): page=int(tokens.pop(0))
         search=" ".join(tokens).casefold()
         records=[]
-        if scope in ("all","playable"): records.extend(("playable",card) for card in CARDS.values())
-        if scope in ("all","alpha"): records.extend(("alpha",card) for card in ALPHA_CARDS)
+        if scope=="all":
+            records.extend(("playable",card) for card in BASE_CARDS.values())
+            records.extend(("alpha",card) for card in ALPHA_CARDS)
+        elif scope=="playable": records.extend(("playable",card) for card in CARDS.values())
+        else: records.extend(("alpha",card) for card in ALPHA_CARDS)
         if search: records=[item for item in records if search in item[1].name.casefold() or search in item[1].key.casefold()]
         if not records:
             await ctx.send("No catalog cards matched that search."); return
@@ -292,11 +299,12 @@ class MTG(commands.Cog):
             if source=="playable":
                 lines.append(f"`{card.key}` — **{card.name}** ({card.kind}; playable)")
             else:
-                lines.append(f"`{card.key}` — **{card.name}** ({card.type_line}; {card.rarity}; reference only)")
+                status="playable" if card.engine_status=="playable" else "reference only"
+                lines.append(f"`{card.key}` — **{card.name}** ({card.type_line}; {card.rarity}; {status})")
         title={"all":"MTG card catalog","playable":"Supported playable catalog","alpha":"Limited Edition Alpha catalog"}[scope]
         embed=discord.Embed(title=title,description="\n".join(lines),color=discord.Color.dark_green())
         summary=f"Page {page}/{pages} · {len(records)} matching records"
-        if not search and scope=="all": summary+=f" · {len(CARDS)} playable + {ALPHA_SET['printing_count']} Alpha printings ({ALPHA_SET['distinct_card_count']} names)"
+        if not search and scope=="all": summary+=f" · {len(CARDS)} playable definitions · {len(BASE_CARDS)} core + {ALPHA_SET['printing_count']} Alpha printings ({ALPHA_SET['distinct_card_count']} names)"
         embed.set_footer(text=summary+" · Use mtg card <key or name> for details")
         await ctx.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
     @mtg.command(name="play")

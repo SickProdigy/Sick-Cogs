@@ -1,19 +1,20 @@
 import unittest
+from collections import Counter
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import CARDS, PACK_POOLS, starter
-from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, search_alpha
+from mtg.cards import BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
 
 
 class CatalogTests(unittest.TestCase):
-    def test_catalog_has_sixty_unique_stable_records(self):
-        self.assertEqual(len(CARDS),60)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),60)
-        self.assertEqual(len({card.oracle_id for card in CARDS.values()}),60)
+    def test_catalog_has_stable_base_and_promoted_records(self):
+        self.assertEqual(len(BASE_CARDS),60)
+        self.assertEqual(len(CARDS),75)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),75)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -24,7 +25,7 @@ class CatalogTests(unittest.TestCase):
     def test_pack_pools_cover_catalog_without_duplicates(self):
         flattened=[key for pool in PACK_POOLS.values() for key in pool]
         self.assertEqual(len(flattened),60)
-        self.assertEqual(set(flattened),set(CARDS))
+        self.assertEqual(set(flattened),set(BASE_CARDS))
         self.assertEqual(len(PACK_POOLS["basic"]),5)
 
     def test_existing_starter_keys_and_sizes_remain_stable(self):
@@ -40,7 +41,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertTrue(all(card.engine_status == "reference_only" for card in ALPHA_CARDS))
+        self.assertEqual(len(PLAYABLE_ALPHA),15)
+        self.assertEqual(len(REFERENCE_ALPHA),280)
+        self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
+            "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
+            "land":19,"vanilla_creature":15,"excluded_ante":3,
+            "digital_adaptation_required":1,
+        })
+        self.assertTrue(all(not card.oracle_text and "Creature" in card.type_line for card in PLAYABLE_ALPHA))
 
     def test_alpha_search_handles_names_printing_keys_and_basic_art(self):
         lotus=search_alpha("Black Lotus")
@@ -50,7 +58,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_future_pack_pools_remain_supported_only(self):
         flattened={key for pool in PACK_POOLS.values() for key in pool}
-        self.assertEqual(flattened,set(CARDS))
+        self.assertEqual(flattened,set(BASE_CARDS))
         self.assertTrue(flattened.isdisjoint(ALPHA_BY_KEY))
 
     def test_haste_is_data_driven(self):
@@ -68,7 +76,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         await MTG.catalog.callback(cog,ctx,query=None)
         embed=ctx.send.await_args.kwargs["embed"]
         self.assertEqual(len(embed.description.splitlines()),15)
-        self.assertIn("60 playable + 295 Alpha printings (290 names)",embed.footer.text)
+        self.assertIn("75 playable definitions · 60 core + 295 Alpha printings (290 names)",embed.footer.text)
 
     async def test_catalog_supports_alpha_pages_and_search(self):
         cog=MTG.__new__(MTG); ctx=SimpleNamespace(send=AsyncMock())
@@ -79,6 +87,16 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.reset_mock()
         await MTG.catalog.callback(cog,ctx,query="alpha Black Lotus")
         self.assertIn("Black Lotus",ctx.send.await_args.kwargs["embed"].description)
+
+    async def test_promoted_alpha_details_are_explicitly_playable(self):
+        cog=MTG.__new__(MTG)
+        cog.art_cache=SimpleNamespace(get=AsyncMock(side_effect=ArtError("offline")))
+        ctx=SimpleNamespace(send=AsyncMock())
+        await MTG.card_detail.callback(cog,ctx,query="alpha Savannah Lions")
+        embed=ctx.send.await_args.kwargs["embed"]
+        status=next(field.value for field in embed.fields if field.name=="Engine status")
+        self.assertIn("Playable",status)
+        self.assertIn("not included in the fixed starters",status)
 
     async def test_alpha_details_are_explicitly_reference_only(self):
         cog=MTG.__new__(MTG)

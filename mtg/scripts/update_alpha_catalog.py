@@ -13,7 +13,7 @@ API_HOST = "api.scryfall.com"
 QUERY = "https://api.scryfall.com/cards/search?q=set%3Alea&unique=prints&order=set"
 SET_URI = "https://api.scryfall.com/sets/lea"
 HEADERS = {
-    "User-Agent": "Sick-Cogs-MTG/0.6 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)",
+    "User-Agent": "Sick-Cogs-MTG/0.7 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)",
     "Accept": "application/json;q=0.9,*/*;q=0.8",
 }
 
@@ -41,7 +41,19 @@ def build():
     if len({card["id"] for card in cards}) != len(cards):
         raise RuntimeError("Scryfall returned duplicate Alpha printing identifiers.")
     records = []
+    ante_cards={"Contract from Below","Darkpact","Demonic Attorney"}
     for card in cards:
+        text=card.get("oracle_text") or ""
+        type_line=card["type_line"]
+        vanilla=type_line.startswith(("Creature", "Artifact Creature")) and not text
+        if card["name"] in ante_cards: support_family="excluded_ante"
+        elif card["name"]=="Chaos Orb": support_family="digital_adaptation_required"
+        elif vanilla: support_family="vanilla_creature"
+        elif type_line.startswith(("Basic Land","Land")): support_family="land"
+        elif type_line.startswith(("Creature","Artifact Creature")): support_family="creature_ability"
+        elif type_line.startswith("Artifact"): support_family="artifact"
+        elif type_line.startswith("Enchantment"): support_family="enchantment"
+        else: support_family="spell"
         records.append({
             "key": "lea:" + card["collector_number"],
             "name": card["name"],
@@ -58,7 +70,13 @@ def build():
             "power": card.get("power"),
             "toughness": card.get("toughness"),
             "layout": card["layout"],
-            "engine_status": "reference_only",
+            "support_family": support_family,
+            "engine_status": (
+                "playable"
+                if card["type_line"].startswith(("Creature", "Artifact Creature"))
+                and not (card.get("oracle_text") or "")
+                else "reference_only"
+            ),
         })
     return {
         "schema": 1,
