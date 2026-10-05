@@ -1,0 +1,17 @@
+{
+  "author": ["SickProdigy"],
+  "description": "An experimental persistent two-player Yu-Gi-Oh duel prototype with private hands, fixed beginner decks, and a deliberately bounded legacy-style rules subset.",
+  "disabled": false,
+  "end_user_data_statement": "This cog stores Discord user IDs, active duel state, private hands and decks, public actions, and channel/message identifiers. User deletion removes duels involving that user.",
+  "hidden": false,
+  "install_msg": "Start with [p]yugioh challenge @member. This prototype supports only its documented fixed decks and explicit rules subset.",
+  "min_bot_version": "3.5.0",
+  "min_python_version": [3, 9, 0],
+  "name": "YuGiOh",
+  "permissions": ["embed_links", "attach_files", "add_reactions"],
+  "requirements": ["Pillow>=12.3.0,<13"],
+  "short": "Persistent two-player Yu-Gi-Oh prototype",
+  "tags": ["games", "cards", "yugioh", "multiplayer"],
+  "type": "COG",
+  "version": "0.1.0"
+}
