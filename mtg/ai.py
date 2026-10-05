@@ -108,13 +108,12 @@ def _activate_helpful_mana(game, user):
         candidates.append(card)
     for position,permanent in enumerate(list(player.battlefield),1):
         source=game.card(permanent.uid)
-        if permanent.tapped or not source.produces or (source.mana_amount==1 and not source.sacrifice_for_mana): continue
+        if permanent.tapped or not source.produces or (source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana): continue
         for symbol in source.produces:
-            player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+source.mana_amount
-            enabled=any(game.can_pay(user,card) for card in candidates)
-            player.mana_pool[symbol]-=source.mana_amount
-            if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
-            if enabled:
+            simulated=Game.from_raw(game.to_raw())
+            try: simulated.activate_mana(user,position,symbol)
+            except GameError: continue
+            if any(simulated.can_pay(user,card) for card in candidates):
                 game.activate_mana(user,position,symbol)
                 return "mana"
     return None

@@ -217,7 +217,9 @@ class Game:
 
     def _start_turn(self,first=False):
         self.turn+=1; p=self.players[self.active_user]; p.land_played=False
-        for x in p.battlefield: x.tapped=False; x.sick=False
+        for x in p.battlefield:
+            if not self.card(x.uid).skip_untap: x.tapped=False
+            x.sick=False
         self._cleanup()
         if not(first and self.turn==1):
             self._draw(p)
@@ -278,7 +280,7 @@ class Game:
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids: continue
-            if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
+            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
                 options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in source.produces)
                 items.append(("permanent",str(permanent.uid),permanent,options))
 
@@ -332,6 +334,7 @@ class Game:
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
         if card.activation_effect=="draw_self": return str(user)
+        if card.activation_effect=="untap_self": return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
             if attached is None or not self._aura_can_attach(card,attached,source): raise GameError(f"{card.name} is not attached to a legal permanent.")
@@ -410,7 +413,16 @@ class Game:
         if card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
-        output=self._tap_permanent(user,permanent,symbol,add_mana=True)
+        pending_triggers=[]
+        if card.mana_activation_cost:
+            payment=self._mana_payment(player,card,mana_cost=card.mana_activation_cost,excluded_uids=(permanent.uid,))
+            if payment is None: raise GameError(f"You cannot pay {card.mana_activation_cost} for {card.name}.")
+            sources,remaining,choices=payment
+            for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending_triggers)
+            player.mana_pool=remaining
+        output=self._tap_permanent(user,permanent,symbol,pending_triggers=pending_triggers)
+        for produced,count in output.items(): player.mana_pool[produced]=player.mana_pool.get(produced,0)+count
+        self.stack.extend(pending_triggers)
         if card.sacrifice_for_mana:
             player.battlefield.remove(permanent); player.graveyard.append(permanent.uid)
         self._sba(); self._life()
@@ -782,6 +794,9 @@ class Game:
             self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
+        elif effect=="untap_self":
+            if target is None: fizzle("its source was gone"); return
+            target.tapped=False
         elif effect=="damage_any":
             if ":" in (s.target or ""):
                 if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return

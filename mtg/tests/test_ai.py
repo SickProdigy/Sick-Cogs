@@ -446,6 +446,17 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_uses_paid_and_multi_mana_artifacts_to_enable_spells(self):
+        prism=solo(order=(AI,HUMAN)); prism.player(HUMAN).kept=True; prism.player(AI).kept=True; prism.player(AI).hand=[]
+        source=self.add(prism,AI,"lea:234"); self.add(prism,AI,"mountain"); self.add(prism,AI,"mountain"); spell=self.add(prism,AI,"lea:38","hand")
+        prism.active_index=0; prism.phase="precombat_main"; prism.priority_user=AI; prism.player(AI).land_played=True
+        advance_solo(prism); self.assertTrue(source.tapped); self.assertEqual(prism.stack[-1].uid,spell)
+
+        basalt=solo(order=(AI,HUMAN)); basalt.player(HUMAN).kept=True; basalt.player(AI).kept=True; basalt.player(AI).hand=[]
+        source=self.add(basalt,AI,"lea:231"); self.add(basalt,AI,"mountain"); spell=self.add(basalt,AI,"giant","hand")
+        basalt.active_index=0; basalt.phase="precombat_main"; basalt.priority_user=AI; basalt.player(AI).land_played=True
+        advance_solo(basalt); self.assertTrue(source.tapped); self.assertEqual(basalt.stack[-1].uid,spell)
+
     def test_ai_targets_reusable_artifacts_and_resolves_card_draw(self):
         cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
         icy=solo(); self.add(icy,HUMAN,"forest"); self.add(icy,HUMAN,"giant")

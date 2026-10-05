@@ -28,7 +28,9 @@ class Card:
     land_type: str = ""
     target_types: Tuple[str, ...] = ()
     mana_amount: int = 1
+    mana_activation_cost: str = ""
     sacrifice_for_mana: bool = False
+    skip_untap: bool = False
     target_nonartifact: bool = False
     target_nonblack: bool = False
     target_color: str = ""
@@ -135,9 +137,11 @@ class Card:
         if self.land_tap_damage: abilities.append(f"Whenever a player taps a land for mana, deals {self.land_tap_damage} damage to that player")
         if self.aura_extra_mana: abilities.append(f"Enchanted land produces an additional {self.aura_extra_mana}")
         if self.aura_tap_damage: abilities.append(f"Whenever enchanted land becomes tapped, deals {self.aura_tap_damage} damage to its controller")
+        if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
-            abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
+            if self.mana_activation_cost: abilities.append(f"{self.mana_activation_cost}, {{T}}: Add "+produced)
+            else: abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
         return ", ".join(abilities)
 
     def has_type(self,card_type):
@@ -205,6 +209,8 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:231": {"produces":("C",), "mana_amount":3, "skip_untap":True, "activation_cost":"{3}", "activation_effect":"untap_self", "activation_text":"Untap this artifact"},
+    "lea:234": {"produces":("W","U","B","R","G"), "mana_activation_cost":"{2}"},
     "lea:248": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"tap_permanent", "activation_text":"Tap target artifact, creature, or land"},
     "lea:254": {"activation_cost":"{4}", "activation_tap":True, "activation_effect":"draw_self", "activation_text":"Draw a card"},
     "lea:268": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
@@ -363,7 +369,9 @@ for reference in PLAYABLE_ALPHA:
         land_type=ALPHA_SPELLS.get(reference.key, {}).get("land_type",""),
         target_types=ALPHA_SPELLS.get(reference.key, {}).get("target_types",()),
         mana_amount=ALPHA_SPELLS.get(reference.key, {}).get("mana_amount",ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1)),
+        mana_activation_cost=ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_activation_cost",""),
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
+        skip_untap=ALPHA_ARTIFACTS.get(reference.key, {}).get("skip_untap",False),
         target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
         target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("target_color","")),

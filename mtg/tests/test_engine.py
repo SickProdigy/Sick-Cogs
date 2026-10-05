@@ -1719,6 +1719,24 @@ class AlphaReusableArtifactTests(unittest.TestCase):
     def resolve_top(self,game):
         game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
 
+    def test_celestial_prism_pays_atomically_and_is_not_free_automatic_mana(self):
+        game=ready(); prism=self.add(game,10,"lea:234"); first=self.add(game,10,"mountain")
+        with self.assertRaisesRegex(GameError,"cannot pay"): game.activate_mana(10,1,"W")
+        self.assertFalse(prism.tapped); self.assertFalse(first.tapped); self.assertFalse(game.player(10).mana_pool)
+        second=self.add(game,10,"forest"); game.activate_mana(10,1,"U")
+        self.assertTrue(prism.tapped); self.assertTrue(first.tapped); self.assertTrue(second.tapped); self.assertEqual(game.player(10).mana_pool,{"U":1})
+        other=ready(); self.add(other,10,"lea:234"); self.assertFalse(other.can_pay(10,CARDS["lea:38"]))
+
+    def test_basalt_monolith_skips_untap_and_can_pay_to_untap_through_stack(self):
+        game=ready(); basalt=self.add(game,10,"lea:231"); game.activate_mana(10,1)
+        self.assertEqual(game.player(10).mana_pool,{"C":3}); self.assertTrue(basalt.tapped)
+        restored=Game.from_raw(game.to_raw()); restored._start_turn(True); saved=restored.player(10).battlefield[0]
+        self.assertTrue(saved.tapped); restored.activate_ability(10,1); self.assertTrue(saved.tapped); self.assertFalse(restored.player(10).mana_pool)
+        self.resolve_top(restored); self.assertFalse(saved.tapped)
+        removed=ready(); source=self.add(removed,10,"lea:231"); removed.activate_mana(10,1); removed.activate_ability(10,1)
+        removed.player(10).battlefield.remove(source); removed.player(10).graveyard.append(source.uid); self.resolve_top(removed)
+        self.assertIn("fizzled",removed.log[-1])
+
     def test_icy_manipulator_pays_taps_and_uses_a_stable_target(self):
         game=ready(); icy=self.add(game,10,"lea:248"); land=self.add(game,10,"island"); target=self.add(game,20,"bear")
         game.activate_ability(10,1,"20:1")

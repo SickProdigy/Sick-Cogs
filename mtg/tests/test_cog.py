@@ -253,6 +253,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.activate_ability(10,1,"S:1"); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Counter target green spell",rendered); self.assertIn("Deathgrip ability",rendered)
 
+    async def test_public_embed_shows_paid_mana_and_skip_untap_artifacts(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        for key in ("lea:231","lea:234"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(10).battlefield.append(permanent_type(uid,key,sick=False))
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Doesn't untap during your untap step",rendered); self.assertIn("{2}, {T}: Add W/U/B/R/G",rendered)
+
     async def test_public_embed_shows_reusable_artifact_and_pending_ability(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
