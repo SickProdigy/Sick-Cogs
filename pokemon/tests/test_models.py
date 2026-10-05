@@ -106,6 +106,7 @@ class BattleTests(unittest.TestCase):
         pokemon=OwnedPokemon("stable",4,5)
         self.assertEqual(pokemon.moves,("scratch",))
         self.assertEqual(pokemon.move_pp["scratch"],35)
+        pokemon.current_hp=3;pokemon.status="burn"
         self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).raw(),pokemon.raw())
         self.assertEqual(set(pokemon.evs),{"hp","attack","defense","special_attack","special_defense","speed"})
         self.assertEqual(pokemon.gender,"unknown")

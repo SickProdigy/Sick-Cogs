@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import discord
 
 from .data import SPECIES
+from .models import OwnedPokemon,pokemon_max_hp
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,9 @@ def trainer_profile_embed(user,conf,max_collection):
     if lead:
         needed=lead["level"]*lead["level"]*10 if lead["level"]<100 else 0
         progress="MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP"
-        embed.add_field(name="Partner",value=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']}\n{progress}",inline=False)
+        partner=OwnedPokemon.from_raw(lead);maximum=pokemon_max_hp(partner)
+        current=maximum if partner.current_hp is None else partner.current_hp
+        embed.add_field(name="Partner",value=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']}\nHP {current}/{maximum} · {progress}",inline=False)
     else:
         embed.add_field(name="Partner",value="Choose a starter to begin your journey.",inline=False)
     upcoming=next_gym(badges)

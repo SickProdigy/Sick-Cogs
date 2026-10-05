@@ -29,6 +29,17 @@ class StoredValue:
         self.value=value
 
 
+class StoredSection:
+    def __init__(self,value):
+        self.value=value
+
+    async def all(self):
+        return self.value
+
+    async def set(self,value):
+        self.value=value
+
+
 class StoredEncounters:
     def __init__(self):
         self.value = {}
@@ -102,7 +113,10 @@ class CogPolicyTests(unittest.TestCase):
 
     def test_expected_command_surface_registered(self):
         names = {command.qualified_name for command in Pokemon.pokemon.walk_commands()}
-        self.assertIn("pokemon heal", names)
+        self.assertNotIn("pokemon heal", names)
+        self.assertIn("pokemon center", names)
+        self.assertIn("pokemon use potion", names)
+        self.assertIn("pokemon use revive", names)
         self.assertIn("pokemon pokedex", names)
         self.assertIn("pokemon gym challenge", names)
         self.assertIn("pokemon party add", names)
@@ -174,6 +188,52 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_potion_and_revive_consume_inventory_atomically(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        pokemon=OwnedPokemon.create("medicine",7,10,seed=4)
+        maximum=Battle.stat(pokemon,"hp");pokemon.current_hp=1
+        section=StoredSection({"collection":[pokemon.raw()],"party":["medicine"],"items":{"potion":1,"revive":1}})
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
+        await Pokemon.use_potion.callback(cog,ctx,"1")
+        restored=OwnedPokemon.from_raw(section.value["collection"][0])
+        self.assertEqual(restored.current_hp,min(maximum,21))
+        self.assertEqual(section.value["items"]["potion"],0)
+        restored.current_hp=0;section.value["collection"][0]=restored.raw()
+        await Pokemon.use_revive.callback(cog,ctx,"medicine")
+        revived=OwnedPokemon.from_raw(section.value["collection"][0])
+        self.assertEqual(revived.current_hp,max(1,maximum//2))
+        self.assertEqual(section.value["items"]["revive"],0)
+
+    async def test_configured_center_restores_party_only(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        party=OwnedPokemon.create("party",4,10,seed=3);party.current_hp=0;party.status="burn";party.move_pp={key:0 for key in party.moves}
+        boxed=OwnedPokemon.create("boxed",7,10,seed=4);boxed.current_hp=1
+        section=StoredSection({"collection":[party.raw(),boxed.raw()],"party":["party"],"items":{},"center_last_at":None})
+        center=StoredValue(55)
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.config=SimpleNamespace(
+            user=lambda user:section,
+            guild=lambda guild:SimpleNamespace(center_channel=center),
+        )
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42),guild=SimpleNamespace(id=1),channel=SimpleNamespace(id=55),send=AsyncMock())
+        await Pokemon.pokemon_center.callback(cog,ctx)
+        healed=OwnedPokemon.from_raw(section.value["collection"][0]);still_boxed=OwnedPokemon.from_raw(section.value["collection"][1])
+        self.assertEqual(healed.current_hp,Battle.stat(healed,"hp"))
+        self.assertEqual(healed.status,"")
+        self.assertTrue(all(value>0 for value in healed.move_pp.values()))
+        self.assertEqual(still_boxed.current_hp,1)
+
+    async def test_finished_battle_persists_hp_and_status(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        player=OwnedPokemon.create("persistent",4,10,seed=4)
+        current=Battle(9,42,1,2,3,player,10,5,20,0)
+        current.initialize_party([player]);current.player_hp=3;current.player_status="poison";current.state="won"
+        section=StoredSection({"collection":[player.raw()],"badges":[]})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user_from_id=lambda user_id:section)
+        await cog.sync_battle_player(current)
+        stored=OwnedPokemon.from_raw(section.value["collection"][0])
+        self.assertEqual((stored.current_hp,stored.status),(3,"poison"))
+
     async def test_gym_challenge_starts_next_restart_safe_battle(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         player=OwnedPokemon.create("starter",7,14,seed=4)
