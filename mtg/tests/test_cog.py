@@ -104,6 +104,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(private_names)
         self.assertTrue(all(name not in rendered for name in private_names))
 
+    async def test_public_embed_labels_supported_combat_keywords(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1)
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:39"
+        game.players[10].battlefield=[__import__("mtg.engine",fromlist=["Permanent"]).Permanent(uid,"lea:39",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Flying, Vigilance",rendered)
+
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
         expired, active = Game(1, [10, 20], 1), Game(2, [30, 40], 2)

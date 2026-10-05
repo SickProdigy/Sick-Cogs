@@ -109,6 +109,62 @@ class ManaTests(unittest.TestCase):
         self.assertTrue(all(land.tapped for land in player.battlefield))
 
 
+
+class StaticKeywordCombatTests(unittest.TestCase):
+    def permanent(self,game,user,key,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=sick); game.players[user].battlefield.append(permanent)
+        return permanent
+
+    def attacking_game(self,key):
+        game=ready(); game.players[10].battlefield=[]; game.players[20].battlefield=[]
+        attacker=self.permanent(game,10,key)
+        game.phase="attackers"; game.priority_user=None
+        return game,attacker
+
+    def reach_block(self,blocker_key):
+        game,attacker=self.attacking_game("lea:46")
+        blocker=self.permanent(game,20,blocker_key)
+        game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+        return game,attacker,blocker
+
+    def test_defender_cannot_attack(self):
+        game,_=self.attacking_game("lea:225")
+        with self.assertRaisesRegex(GameError,"cannot attack"):
+            game.declare_attackers(10,[1])
+        self.assertEqual(game.attackers,[])
+        self.assertFalse(game.players[10].battlefield[0].tapped)
+
+    def test_vigilance_attacker_does_not_tap(self):
+        game,angel=self.attacking_game("lea:39")
+        game.declare_attackers(10,[1])
+        self.assertEqual(game.attackers,[angel.uid])
+        self.assertFalse(angel.tapped)
+
+    def test_ground_creature_cannot_block_flying(self):
+        game,_,_=self.reach_block("bear")
+        with self.assertRaisesRegex(GameError,"cannot block a creature with flying"):
+            game.declare_blockers(20,{1:1})
+        self.assertEqual(game.blocks,{})
+
+    def test_reach_and_flying_can_each_block_flying(self):
+        for key in ("lea:198","lea:69"):
+            with self.subTest(key=key):
+                game,attacker,blocker=self.reach_block(key)
+                game.declare_blockers(20,{1:1})
+                self.assertEqual(game.blocks,{attacker.uid:blocker.uid})
+
+    def test_static_keyword_combat_survives_game_round_trip(self):
+        game,angel=self.attacking_game("lea:39")
+        spider=self.permanent(game,20,"lea:198")
+        game.declare_attackers(10,[1]); game.pass_priority(10); game.pass_priority(20)
+        restored=Game.from_raw(game.to_raw())
+        self.assertIn("vigilance",restored.card(angel.uid).keywords)
+        self.assertIn("reach",restored.card(spider.uid).keywords)
+        restored.declare_blockers(20,{1:1})
+        self.assertEqual(restored.blocks,{angel.uid:spider.uid})
+
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

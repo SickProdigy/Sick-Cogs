@@ -62,7 +62,7 @@ def _attack_positions(game, user, difficulty):
     legal = []
     for position, permanent in enumerate(game.player(user).battlefield, 1):
         card = game.card(permanent.uid)
-        if card.creature and not permanent.tapped and (not permanent.sick or card.haste):
+        if card.creature and "defender" not in card.keywords and not permanent.tapped and (not permanent.sick or card.haste):
             legal.append(position)
     if difficulty == "easy":
         return legal[::2]
@@ -83,9 +83,17 @@ def _blocks(game, user, difficulty):
     ):
         if not blockers:
             break
-        attacker_power = game.card(attacker_uid).power
-        survivable = [item for item in blockers if game.card(item[1].uid).toughness + item[1].bonus > attacker_power]
-        choice = min(survivable or blockers, key=lambda item: game.card(item[1].uid).power + game.card(item[1].uid).toughness)
+        attacker = game.card(attacker_uid)
+        legal = [
+            item for item in blockers
+            if "flying" not in attacker.keywords
+            or {"flying", "reach"} & set(game.card(item[1].uid).keywords)
+        ]
+        if not legal:
+            continue
+        attacker_power = attacker.power
+        survivable = [item for item in legal if game.card(item[1].uid).toughness + item[1].bonus > attacker_power]
+        choice = min(survivable or legal, key=lambda item: game.card(item[1].uid).power + game.card(item[1].uid).toughness)
         assignments[attacker_position] = choice[0]
         blockers.remove(choice)
     return assignments

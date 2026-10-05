@@ -24,6 +24,7 @@ class Card:
     effect: Optional[str] = None
     amount: int = 0
     haste: bool = False
+    keywords: Tuple[str, ...] = ()
     type_line: str = ""
     set_code: str = ""
 
@@ -34,6 +35,10 @@ class Card:
     @property
     def creature(self):
         return self.kind == "Creature"
+
+    @property
+    def keyword_text(self):
+        return ", ".join(keyword.title() for keyword in self.keywords)
 
 
 _CATALOG_PATH = Path(__file__).with_name("data") / "cards.json"
@@ -49,6 +54,21 @@ BASE_CARDS = {
         }
     )
     for raw in _CATALOG["cards"]
+}
+
+ALPHA_KEYWORDS = {
+    "lea:39": ("flying", "vigilance"),
+    "lea:42": ("defender", "flying"),
+    "lea:46": ("flying",),
+    "lea:64": ("flying",),
+    "lea:69": ("flying",),
+    "lea:89": ("defender", "flying"),
+    "lea:170": ("flying",),
+    "lea:182": ("defender",),
+    "lea:198": ("reach",),
+    "lea:215": ("flying",),
+    "lea:224": ("defender",),
+    "lea:225": ("defender",),
 }
 
 CARDS = dict(BASE_CARDS)
@@ -69,6 +89,7 @@ for reference in PLAYABLE_ALPHA:
         power=int(reference.power),
         toughness=int(reference.toughness),
         text=reference.oracle_text,
+        keywords=ALPHA_KEYWORDS.get(reference.key, ()),
     )
 
 PACK_POOLS = {
@@ -83,3 +104,6 @@ def starter(color):
     if color == "green":
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
+
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS):
+    raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")

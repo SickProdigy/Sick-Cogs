@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.7.1"
+    __version__="0.8.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -117,7 +117,8 @@ class MTG(commands.Cog):
             for n,x in enumerate(p.battlefield,1):
                 c=g.card(x.uid); state=" ↷" if x.tapped else ""
                 stats=f" {c.power+x.bonus}/{c.toughness+x.bonus}" if c.creature else ""
-                field.append(f"{n}. {c.name}{stats}{state}")
+                abilities=f" [{c.keyword_text}]" if c.keyword_text else ""
+                field.append(f"{n}. {c.name}{stats}{abilities}{state}")
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value="\n".join(field) or "No permanents",inline=False)
         if g.stack: e.add_field(name="Stack",value=" → ".join(g.card(x.uid).name for x in reversed(g.stack)),inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."

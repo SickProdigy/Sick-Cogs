@@ -211,11 +211,11 @@ class Game:
         for pos in positions:
             if not 1<=pos<=len(p.battlefield): raise GameError("Bad attacker position.")
             x=p.battlefield[pos-1]; c=self.card(x.uid)
-            if not c.creature or x.tapped or (x.sick and not c.haste): raise GameError(f"{c.name} cannot attack.")
+            if not c.creature or x.tapped or (x.sick and not c.haste) or "defender" in c.keywords: raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
         for x in p.battlefield:
-            if x.uid in chosen: x.tapped=True
+            if x.uid in chosen and "vigilance" not in self.card(x.uid).keywords: x.tapped=True
         self.attackers=chosen; self.blocks={}; self.phase_passes=0
         self.phase="after_attackers" if chosen else "postcombat_main"
         self.priority_user=user
@@ -225,8 +225,10 @@ class Game:
         p=self.player(user); used=set(); self.blocks={}
         for a,b in assignments.items():
             if not 1<=a<=len(self.attackers) or not 1<=b<=len(p.battlefield): raise GameError("Bad combat position.")
-            x=p.battlefield[b-1]
-            if not self.card(x.uid).creature or x.tapped or x.uid in used: raise GameError("Invalid blocker.")
+            x=p.battlefield[b-1]; attacker=self.card(self.attackers[a-1]); blocker=self.card(x.uid)
+            if not blocker.creature or x.tapped or x.uid in used: raise GameError("Invalid blocker.")
+            if "flying" in attacker.keywords and not ({"flying","reach"} & set(blocker.keywords)):
+                raise GameError(f"{blocker.name} cannot block a creature with flying.")
             used.add(x.uid); self.blocks[self.attackers[a-1]]=x.uid
         self.phase="after_blockers"; self.phase_passes=0; self.priority_user=self.active_user
 

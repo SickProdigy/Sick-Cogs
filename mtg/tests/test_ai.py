@@ -90,6 +90,27 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(block.blocks, {attacker: blocker})
         self.assertEqual(block.priority_user, HUMAN)
 
+    def test_ai_skips_defenders_when_attacking(self):
+        game=solo(order=(AI,HUMAN)); advance_solo(game)
+        game.player(HUMAN).kept=True; game.player(AI).kept=True
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:225"
+        game.player(AI).battlefield=[Permanent(uid,"lea:225",sick=False)]
+        game.phase="attackers"; game.priority_user=None
+        advance_solo(game)
+        self.assertEqual(game.attackers,[])
+
+    def test_ai_uses_reach_but_not_ground_blocker_against_flying(self):
+        for blocker_key,expected in (("bear",False),("lea:198",True)):
+            with self.subTest(blocker=blocker_key):
+                game=solo(); advance_solo(game)
+                attacker=game.next_uid; game.next_uid+=1; game.cards[attacker]="lea:46"
+                blocker=game.next_uid; game.next_uid+=1; game.cards[blocker]=blocker_key
+                game.player(HUMAN).battlefield=[Permanent(attacker,"lea:46",sick=False)]
+                game.player(AI).battlefield=[Permanent(blocker,blocker_key,sick=False)]
+                game.attackers=[attacker]; game.phase="blockers"; game.priority_user=None
+                advance_solo(game)
+                self.assertEqual(bool(game.blocks),expected)
+
 
 if __name__ == "__main__":
     unittest.main()
