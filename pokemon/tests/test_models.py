@@ -1,6 +1,11 @@
+import io
 import unittest
+from pathlib import Path
+
+from PIL import Image
 from pokemon.data import SPECIES,effectiveness
 from pokemon.models import Battle,BattleError,OwnedPokemon
+from pokemon.renderer import BattleRenderer
 
 def battle(seed=1,wild=10):
     p=OwnedPokemon("abc",4,5)
@@ -27,6 +32,18 @@ class BattleTests(unittest.TestCase):
         a=battle(22);b=battle(22)
         self.assertEqual(a.throw_ball(),b.throw_ball())
         self.assertEqual(a.raw(),b.raw())
+    def test_failed_ball_allows_wild_response(self):
+        b=battle(1);old_hp=b.player_hp
+        self.assertFalse(b.throw_ball())
+        self.assertEqual(b.state,"active")
+        self.assertLessEqual(b.player_hp,old_hp)
+        self.assertGreater(b.rolls,0)
+    def test_quick_attack_beats_higher_speed(self):
+        player=OwnedPokemon.create("fast",19,5,seed=3)
+        b=Battle(1,100,1,2,3,player,25,5,30,30,seed=8)
+        b.use_move(1)
+        self.assertTrue(b.last_action.startswith("Quick Attack"))
+
     def test_caught_instance_is_global_identity(self):
         b=battle(3);b.state="caught"
         caught=b.caught()
@@ -40,5 +57,66 @@ class BattleTests(unittest.TestCase):
     def test_round_trip(self):
         b=battle();b.use_move(0)
         self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
+
+    def test_owned_pokemon_has_stable_moves_and_pp(self):
+        pokemon=OwnedPokemon("stable",4,5)
+        self.assertEqual(pokemon.moves,("scratch","ember"))
+        self.assertEqual(pokemon.move_pp["ember"],35)
+        self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).raw(),pokemon.raw())
+    def test_experience_levels_up(self):
+        pokemon=OwnedPokemon.create("xp",4,5,seed=7)
+        pokemon.experience=249
+        levels,evolved=pokemon.gain_experience(1)
+        self.assertEqual((levels,evolved,pokemon.level),(1,None,6))
+    def test_party_can_switch_after_fainting(self):
+        first=OwnedPokemon.create("first",4,5,seed=1)
+        second=OwnedPokemon.create("second",7,5,seed=2)
+        b=Battle(1,100,1,2,3,first,10,4,1,20,seed=5)
+        b.initialize_party([first,second]);b.player_hp=0;b._finish_if_needed()
+        self.assertTrue(b.needs_switch)
+        b.switch_next()
+        self.assertEqual(b.player.instance_id,"second")
+        self.assertGreater(b.player_hp,0)
+    def test_renderer_builds_expected_pngs(self):
+        source=io.BytesIO()
+        Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
+        data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
+        b=battle();encounter=renderer._encounter_sync(10,data);scene=renderer._battle_sync(b,data,data)
+        with Image.open(encounter) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
+
+
+class CatalogTests(unittest.TestCase):
+    def test_parses_bounded_api_record(self):
+        from pokemon.catalog import PokemonCatalog
+        raw = {
+            "id": 25,
+            "stats": [
+                {"stat": {"name": "hp"}, "base_stat": 35},
+                {"stat": {"name": "attack"}, "base_stat": 55},
+                {"stat": {"name": "defense"}, "base_stat": 40},
+                {"stat": {"name": "speed"}, "base_stat": 90},
+            ],
+            "types": [{"slot": 1, "type": {"name": "electric"}}],
+            "moves": [
+                {"move": {"name": "quick-attack"}},
+                {"move": {"name": "thunder-shock"}},
+            ],
+        }
+        species = PokemonCatalog.parse_api(
+            raw, {"name": "pikachu", "capture_rate": 190}
+        )
+        self.assertEqual(species.id, 25)
+        self.assertEqual(species.moves, ("thunder_shock", "quick_attack"))
+
+    def test_cache_rejects_unknown_move(self):
+        from pokemon.catalog import CatalogError, PokemonCatalog
+        raw = {
+            "id": 1, "name": "Test", "types": ["grass"], "hp": 1,
+            "attack": 1, "defense": 1, "speed": 1, "catch_rate": 1,
+            "moves": ["not-supported"],
+        }
+        with self.assertRaises(CatalogError):
+            PokemonCatalog.parse_cached(raw)
 
 if __name__=="__main__":unittest.main()

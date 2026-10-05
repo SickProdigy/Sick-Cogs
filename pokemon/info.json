@@ -1,6 +1,6 @@
 {
   "author": ["SickProdigy"],
-  "description": "An experimental global Pokémon collection with opt-in activity spawns, persistent wild battles, and catching.",
+  "description": "A global Pokémon collection with activity encounters, persistent wild battles, progression, catching, and generated retro scenes.",
   "disabled": false,
   "end_user_data_statement": "This cog stores Discord user IDs, globally owned Pokémon, party selections, inventory counts, catch provenance, active battles, and guild/channel spawn configuration. User deletion removes the requesting user's collection and active encounters.",
   "hidden": false,
@@ -8,10 +8,10 @@
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "Pokemon",
-  "permissions": ["embed_links"],
-  "requirements": [],
+  "permissions": ["embed_links", "attach_files"],
+  "requirements": ["Pillow>=11,<12"],
   "short": "Global Pokémon catching and wild battles",
   "tags": ["pokemon", "games", "collecting", "battles"],
   "type": "COG",
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
