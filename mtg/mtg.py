@@ -1,11 +1,16 @@
 import asyncio
 import logging
 import secrets
+import math
+import aiohttp
 from typing import Dict
 import discord
 from redbot.core import Config, commands
+from redbot.core.data_manager import cog_data_path
+from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_hand
+from .cards import CARDS
 from .engine import Game, GameError
-from .views import ChallengeView, GameView
+from .views import ChallengeView, GameView, HandPaginationView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -15,12 +20,14 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.1.3"
+    __version__="0.2.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
-        self.storage_lock=asyncio.Lock(); self.cleanup_task=None
+        self.storage_lock=asyncio.Lock(); self.cleanup_task=None; self.session=None; self.art_cache=None
     async def cog_load(self):
+        self.session=aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+        self.art_cache=ScryfallArtCache(cog_data_path(self)/"art_cache",self.session)
         raw=await self.config.games()
         for key,value in raw.items():
             try:
@@ -33,6 +40,7 @@ class MTG(commands.Cog):
         self.cleanup_task=asyncio.create_task(self._cleanup_loop())
     def cog_unload(self):
         if self.cleanup_task: self.cleanup_task.cancel()
+        if self.session and not self.session.closed: asyncio.create_task(self.session.close())
     def lock(self,gid): return self.locks.setdefault(gid,asyncio.Lock())
     async def create_game(self,a,b,channel):
         async with self.storage_lock:
@@ -91,6 +99,32 @@ class MTG(commands.Cog):
             channel=self.bot.get_channel(self.channels.get(game.game_id)); message=await channel.fetch_message(game.message_id)
             await message.edit(embed=self.game_embed(game),view=None if game.finished else GameView(self,game.game_id))
         except (discord.HTTPException,AttributeError): pass
+    async def send_hand(self,interaction,game_id,page,editing=False):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            content="This private hand is unavailable."
+            if editing: await interaction.edit_original_response(content=content,attachments=[],view=None)
+            else: await interaction.followup.send(content,ephemeral=True)
+            return
+        cards=game.hand(interaction.user.id); pages=max(1,math.ceil(len(cards)/HAND_PAGE_SIZE))
+        page=max(0,min(page,pages-1)); start=page*HAND_PAGE_SIZE; visible=cards[start:start+HAND_PAGE_SIZE]
+        visible_paths=[]
+        for card in visible:
+            try: visible_paths.append(await self.art_cache.get(card))
+            except (ArtError,aiohttp.ClientError,asyncio.TimeoutError,OSError):
+                log.warning("Could not cache art for %s",card.key,exc_info=True); visible_paths.append(None)
+        paths=[None]*start+visible_paths
+        text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
+        view=HandPaginationView(self,game_id,interaction.user.id,page,pages) if pages>1 else None
+        try:
+            image=await asyncio.to_thread(render_hand,cards,paths,page)
+            file=discord.File(image,filename=f"mtg-hand-{game_id}-{page+1}.png")
+            if editing: await interaction.edit_original_response(content=text,attachments=[file],view=view)
+            else: await interaction.followup.send(text,file=file,view=view,ephemeral=True)
+        except (ArtError,OSError):
+            log.warning("Could not render private hand",exc_info=True)
+            if editing: await interaction.edit_original_response(content=text,attachments=[],view=view)
+            else: await interaction.followup.send(text,view=view,ephemeral=True)
     async def act(self,i,game_id,action,label):
         game=self.games.get(game_id)
         if not game:
@@ -121,6 +155,39 @@ class MTG(commands.Cog):
         try: game=self.find(ctx.author.id)
         except GameError as e: await ctx.send(str(e)); return
         await ctx.send(embed=self.game_embed(game))
+    @mtg.command(name="card")
+    async def card_detail(self,ctx,*,query:str):
+        """Show one supported card by stable catalog key or name."""
+        query=query.casefold().strip()
+        matches=[card for card in CARDS.values() if query==card.key.casefold() or query==card.name.casefold()]
+        if not matches: matches=[card for card in CARDS.values() if query in card.name.casefold()]
+        if not matches:
+            await ctx.send("No supported card matched that search."); return
+        card=matches[0]
+        embed=discord.Embed(title=card.name,description=card.text or "No rules text.",color=discord.Color.dark_green())
+        embed.add_field(name="Type",value=card.kind)
+        embed.add_field(name="Mana",value=card.mana_cost or "None")
+        if card.creature: embed.add_field(name="Power / toughness",value=f"{card.power} / {card.toughness}")
+        embed.add_field(name="Catalog key",value=f"`{card.key}`")
+        embed.add_field(name="Oracle ID",value=f"`{card.oracle_id}`",inline=False)
+        embed.add_field(name="Source",value=f"[Scryfall](https://scryfall.com/card/{card.scryfall_id})",inline=False)
+        embed.set_footer(text="Card data and images: Scryfall. Unofficial fan content; not approved by Wizards.")
+        try:
+            path=await self.art_cache.get(card)
+            file=discord.File(path,filename=f"{card.key}.jpg")
+            embed.set_image(url=f"attachment://{card.key}.jpg")
+            await ctx.send(embed=embed,file=file)
+        except (ArtError,aiohttp.ClientError,asyncio.TimeoutError,OSError):
+            log.warning("Could not load card detail art for %s",card.key,exc_info=True)
+            await ctx.send(embed=embed)
+    @mtg.command(name="catalog")
+    async def catalog(self,ctx,*,query:str=None):
+        """List supported cards, optionally filtered by name."""
+        cards=list(CARDS.values())
+        if query: cards=[card for card in cards if query.casefold() in card.name.casefold() or query.casefold() in card.key.casefold()]
+        if not cards: await ctx.send("No supported cards matched that search."); return
+        lines=[f"`{card.key}` - **{card.name}** ({card.kind}, {card.mana_cost or 'no cost'})" for card in cards]
+        await ctx.send("\n".join(lines),allowed_mentions=discord.AllowedMentions.none())
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None):
         """Play/cast a hand position. Target: USER_ID or USER_ID:FIELD_POSITION."""

@@ -8,10 +8,10 @@
   "min_bot_version": "3.5.0",
   "min_python_version": [3, 9, 0],
   "name": "MTG",
-  "permissions": ["embed_links", "add_reactions"],
-  "requirements": [],
+  "permissions": ["embed_links", "attach_files", "add_reactions"],
+  "requirements": ["Pillow>=12.3.0,<13"],
   "short": "Persistent two-player MTG rules prototype",
   "tags": ["games", "cards", "mtg", "multiplayer"],
   "type": "COG",
-  "version": "0.1.3"
+  "version": "0.2.0"
 }

@@ -33,11 +33,10 @@ class GameView(discord.ui.View):
             await i.response.send_message("This match is over.",ephemeral=True); return False
         if game and i.user.id in game.order: return True
         await i.response.send_message("You are not a player in this match.",ephemeral=True); return False
-    @discord.ui.button(label="View hand",emoji="🂠",style=discord.ButtonStyle.primary,custom_id="hand")
+    @discord.ui.button(label="View hand",style=discord.ButtonStyle.primary,custom_id="hand")
     async def hand(self,i,b):
-        game=self.cog.games[self.game_id]; cards=game.hand(i.user.id)
-        lines=[f"**{n}. {c.name}** — {c.kind}, cost {c.cost}\n{c.text or 'No rules text.'}" for n,c in enumerate(cards,1)]
-        await i.response.send_message("\n\n".join(lines) or "Your hand is empty.",ephemeral=True)
+        await i.response.defer(ephemeral=True,thinking=True)
+        await self.cog.send_hand(i,self.game_id,0,editing=False)
     @discord.ui.button(label="Keep hand",style=discord.ButtonStyle.success,custom_id="keep")
     async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
@@ -46,3 +45,21 @@ class GameView(discord.ui.View):
     async def pass_turn(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.pass_priority(i.user.id),"pass")
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
     async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")
+
+class HandPaginationView(discord.ui.View):
+    def __init__(self,cog,game_id,user_id,page,pages):
+        super().__init__(timeout=180)
+        self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
+        self.previous.disabled=page<=0
+        self.next.disabled=page>=pages-1
+    async def interaction_check(self,i):
+        if i.user.id==self.user_id: return True
+        await i.response.send_message("This private hand belongs to another player.",ephemeral=True); return False
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary)
+    async def previous(self,i,b):
+        await i.response.defer()
+        await self.cog.send_hand(i,self.game_id,self.page-1,editing=True)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary)
+    async def next(self,i,b):
+        await i.response.defer()
+        await self.cog.send_hand(i,self.game_id,self.page+1,editing=True)
