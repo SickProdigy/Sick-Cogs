@@ -274,6 +274,10 @@ def _blocks(game, user, difficulty):
 
 def _activation_target(game,user,card,source_uid=None):
     opponent=game.opponent(user)
+    if card.activation_effect=="counter_color":
+        for position,spell in enumerate(reversed(game.stack),1):
+            if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
+        return None
     if card.activation_effect=="damage_any":
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)

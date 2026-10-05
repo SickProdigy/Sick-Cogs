@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),217)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),217)
+        self.assertEqual(len(CARDS),219)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),219)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),157)
-        self.assertEqual(len(REFERENCE_ALPHA),138)
+        self.assertEqual(len(PLAYABLE_ALPHA),159)
+        self.assertEqual(len(REFERENCE_ALPHA),136)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -95,6 +95,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:166"].ability_text,"Attacking creatures you control get +1/+0")
         self.assertTrue(CARDS["lea:162"].mana_flare); self.assertEqual(CARDS["lea:163"].land_tap_damage,1)
         self.assertEqual(CARDS["lea:75"].aura_tap_damage,2); self.assertEqual(CARDS["lea:229"].aura_extra_mana,"G")
+        self.assertEqual(CARDS["lea:100"].ability_text,"{B}{B}: Counter target green spell"); self.assertEqual(CARDS["lea:100"].target_color,"G")
+        self.assertEqual(CARDS["lea:206"].ability_text,"{G}{G}: Counter target black spell"); self.assertEqual(CARDS["lea:206"].target_color,"B")
         self.assertEqual(CARDS["lea:1"].aura_target_subtypes,("Wall",))
         self.assertTrue(CARDS["lea:1"].aura_attack_override)
         self.assertEqual({key:CARDS[key].aura_protection for key in ("lea:5","lea:8","lea:20","lea:33","lea:44")},{"lea:5":"B","lea:8":"U","lea:20":"G","lea:33":"R","lea:44":"W"})
@@ -151,7 +153,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("217 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("219 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

@@ -327,6 +327,10 @@ class Game:
         return value
 
     def _target_for_activation(self,card,user,target,source):
+        if card.activation_effect=="counter_color":
+            spell=self._target_stack(target)
+            if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
+            return f"S:{spell.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
             if attached is None or not self._aura_can_attach(card,attached,source): raise GameError(f"{card.name} is not attached to a legal permanent.")
@@ -752,7 +756,7 @@ class Game:
     def _resolve_ability(self,s):
         card=CARDS[s.key]; effect=s.ability_effect
         def target_permanent():
-            if not s.target or ":" not in s.target: return None,None
+            if not s.target or ":" not in s.target or s.target.upper().startswith("S:"): return None,None
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             return controller,next((x for x in controller.battlefield if x.uid==uid),None)
         def fizzle(reason):
@@ -767,6 +771,11 @@ class Game:
         elif effect=="regenerate":
             if target is None: fizzle("its source was gone"); return
             target.regeneration_shields+=1
+        elif effect=="counter_color":
+            uid=int(s.target.split(":",1)[1]); spell=next((item for item in self.stack if item.uid==uid and not item.ability_effect),None)
+            if spell is None or card.target_color not in self.spell_colors(spell): fizzle("its target was gone or changed color"); return
+            self.stack.remove(spell); self.player(spell.owner).graveyard.append(spell.uid)
+            self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
             self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
         elif effect=="damage_any":

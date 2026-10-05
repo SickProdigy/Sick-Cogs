@@ -243,6 +243,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
         self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Howl from Beyond (X=0)","S:2. Counterspell","S:3. Shock"])
 
+    async def test_public_embed_shows_color_counter_enchantment_and_pending_ability(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        grip=game.next_uid; game.next_uid+=1; game.cards[grip]="lea:100"; source=permanent_type(grip,"lea:100",sick=False)
+        first=game.next_uid; game.next_uid+=1; game.cards[first]="swamp"; second=game.next_uid; game.next_uid+=1; game.cards[second]="swamp"
+        game.player(10).battlefield=[source,permanent_type(first,"swamp",sick=False),permanent_type(second,"swamp",sick=False)]
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:197"; game.stack=[spell_type(20,spell,"lea:197","20:1")]; game.priority_user=10
+        game.activate_ability(10,1,"S:1"); rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Counter target green spell",rendered); self.assertIn("Deathgrip ability",rendered)
+
     async def test_public_embed_labels_activated_abilities_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

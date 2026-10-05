@@ -871,6 +871,48 @@ class AlphaCounterspellTests(unittest.TestCase):
         game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
         self.assertNotIn(target,game.player(20).battlefield); self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(blast,game.player(10).graveyard)
 
+class AlphaColorCounterEnchantmentTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_deathgrip_uses_stable_persisted_spell_target_after_source_leaves(self):
+        game=ready(); bear=self.add(game,10,"bear"); growth=self.add(game,10,"lea:197","hand"); self.add(game,10,"forest")
+        grip=self.add(game,20,"lea:100"); swamps=[self.add(game,20,"swamp") for _ in range(2)]
+        game.play(10,1,"10:1"); game.activate_ability(20,1,"S:1")
+        self.assertEqual(game.stack[-1].target,f"S:{growth}"); self.assertTrue(all(land.tapped for land in swamps))
+        restored=Game.from_raw(game.to_raw()); controller,source=restored.find_permanent(grip.uid); controller.battlefield.remove(source); controller.graveyard.append(grip.uid)
+        self.resolve_top(restored)
+        self.assertFalse(restored.stack); self.assertIn(growth,restored.player(10).graveyard); self.assertIn("countered",restored.log[-2])
+
+    def test_color_counter_rejects_wrong_color_and_abilities_without_payment(self):
+        game=ready(); shock=self.add(game,10,"shock","hand"); self.add(game,10,"mountain"); self.add(game,20,"lea:100"); swamps=[self.add(game,20,"swamp") for _ in range(2)]
+        game.play(10,1,"20")
+        with self.assertRaisesRegex(GameError,"must be G"): game.activate_ability(20,1,"S:1")
+        self.assertTrue(all(not land.tapped for land in swamps)); self.assertEqual(game.stack[-1].uid,shock)
+
+        ability=ready(); self.add(ability,10,"lea:73"); ability.priority_user=10; ability.activate_ability(10,1,"20")
+        self.add(ability,20,"lea:100"); self.add(ability,20,"swamp"); self.add(ability,20,"swamp")
+        with self.assertRaisesRegex(GameError,"ability, not a spell"): ability.activate_ability(20,1,"S:1")
+
+    def test_counter_ability_fizzles_if_lace_changes_the_spell_color(self):
+        game=ready(); bear=self.add(game,10,"bear"); growth=self.add(game,10,"lea:197","hand"); self.add(game,10,"forest")
+        self.add(game,20,"lea:100"); self.add(game,20,"swamp"); self.add(game,20,"swamp")
+        game.play(10,1,"10:1"); game.activate_ability(20,1,"S:1"); game.stack[0].color_override="B"
+        self.resolve_top(game)
+        self.assertEqual(len(game.stack),1); self.assertEqual(game.stack[-1].uid,growth); self.assertIn("changed color",game.log[-1])
+
+    def test_lifeforce_counters_black_spell(self):
+        game=ready(); target=self.add(game,10,"bear"); black=self.add(game,10,"lea:101","hand"); self.add(game,10,"swamp")
+        self.add(game,20,"lea:206"); self.add(game,20,"forest"); self.add(game,20,"forest")
+        game.play(10,1,"10:1"); game.activate_ability(20,1,"S:1"); self.resolve_top(game)
+        self.assertFalse(game.stack); self.assertIn(black,game.player(10).graveyard); self.assertEqual(game.current_colors(target),("G",))
+
+
 class AlphaXSpellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

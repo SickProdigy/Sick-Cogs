@@ -259,6 +259,16 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.current_stats(nightmare),(4,4))
         self.assertEqual(_target(game,AI,cards["lea:86"]),f"{HUMAN}:2")
 
+    def test_ai_activates_color_counter_enchantment_against_matching_spell(self):
+        game=solo(); advance_solo(game); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        bear=self.add(game,HUMAN,"bear"); growth=self.add(game,HUMAN,"lea:197","hand"); self.add(game,HUMAN,"forest")
+        grip=self.add(game,AI,"lea:100"); self.add(game,AI,"swamp"); self.add(game,AI,"swamp")
+        game.phase="precombat_main"; game.active_index=0; game.priority_user=HUMAN; game.play(HUMAN,1,f"{HUMAN}:1")
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].source_uid,grip.uid); self.assertEqual(game.stack[-1].target,f"S:{growth}"); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertFalse(game.stack); self.assertIn(growth,game.player(HUMAN).graveyard); self.assertIn(bear,game.player(HUMAN).battlefield)
+
     def test_ai_counters_opponent_spell_through_normal_actions(self):
         game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True
         shock=self.add(game,HUMAN,"shock","hand"); self.add(game,HUMAN,"mountain")

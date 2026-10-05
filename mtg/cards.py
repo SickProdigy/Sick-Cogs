@@ -180,6 +180,8 @@ ALPHA_TAP_ENCHANTMENTS = {
 }
 
 ALPHA_ENCHANTMENTS = {
+    "lea:100": {"activation_cost":"{B}{B}", "activation_effect":"counter_color", "target_color":"G", "activation_text":"Counter target green spell"},
+    "lea:206": {"activation_cost":"{G}{G}", "activation_effect":"counter_color", "target_color":"B", "activation_text":"Counter target black spell"},
     "lea:7": {"aura_target_types":("Creature",), "activation_cost":"{W}", "activated_power":1, "activated_toughness":1, "activation_attached":True, "activation_text":"Enchanted creature gets +1/+1 until end of turn"},
     "lea:108": {"aura_target_types":("Creature",), "aura_keyword":"fear"},
     "lea:184": {"aura_target_types":("Creature",), "aura_forest_scaling":True},
@@ -361,7 +363,7 @@ for reference in PLAYABLE_ALPHA:
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
         target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
-        target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",""),
+        target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("target_color","")),
         temporary_keyword=ALPHA_SPELLS.get(reference.key, {}).get("temporary_keyword",""),
         mana_color=ALPHA_SPELLS.get(reference.key, {}).get("mana_color",""),
         color_change=ALPHA_SPELLS.get(reference.key, {}).get("color_change",""),
