@@ -178,7 +178,7 @@ class Game:
         for pos in positions:
             if not 1<=pos<=len(p.battlefield): raise GameError("Bad attacker position.")
             x=p.battlefield[pos-1]; c=self.card(x.uid)
-            if not c.creature or x.tapped or (x.sick and c.key!="goblin"): raise GameError(f"{c.name} cannot attack.")
+            if not c.creature or x.tapped or (x.sick and not c.haste): raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
         for x in p.battlefield:

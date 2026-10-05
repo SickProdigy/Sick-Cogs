@@ -1,0 +1,1208 @@
+{
+  "schema": 1,
+  "source": "Scryfall card collection API",
+  "retrieved": "2026-10-05",
+  "cards": [
+    {
+      "key": "plains",
+      "name": "Plains",
+      "kind": "Land",
+      "scryfall_id": "8ab0f4c0-b331-4c57-b68f-2e24bb5ba06c",
+      "oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+      "mana_cost": "",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "basic",
+      "cost": 0,
+      "power": 0,
+      "toughness": 0,
+      "text": "Tap: Add one plains mana.",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "island",
+      "name": "Island",
+      "kind": "Land",
+      "scryfall_id": "f3cc07cd-cc79-4745-b0b7-eade60175cc3",
+      "oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+      "mana_cost": "",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "basic",
+      "cost": 0,
+      "power": 0,
+      "toughness": 0,
+      "text": "Tap: Add one island mana.",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "swamp",
+      "name": "Swamp",
+      "kind": "Land",
+      "scryfall_id": "b7387103-1df1-4fd0-9e91-1544509792c7",
+      "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+      "mana_cost": "",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "basic",
+      "cost": 0,
+      "power": 0,
+      "toughness": 0,
+      "text": "Tap: Add one swamp mana.",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "mountain",
+      "name": "Mountain",
+      "kind": "Land",
+      "scryfall_id": "2a844b96-6616-4c39-8f4f-5d14a3b2bd55",
+      "oracle_id": "a3fb7228-e76b-4e96-a40e-20b5fed75685",
+      "mana_cost": "",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "basic",
+      "cost": 0,
+      "power": 0,
+      "toughness": 0,
+      "text": "Tap: Add one mountain mana.",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "forest",
+      "name": "Forest",
+      "kind": "Land",
+      "scryfall_id": "dce15387-4114-4b3e-91aa-5b42b45c44ac",
+      "oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+      "mana_cost": "",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "basic",
+      "cost": 0,
+      "power": 0,
+      "toughness": 0,
+      "text": "Tap: Add one forest mana.",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "eager_cadet",
+      "name": "Eager Cadet",
+      "kind": "Creature",
+      "scryfall_id": "0732d372-1000-435e-905b-4a6c852ba427",
+      "oracle_id": "39780477-01ba-40c6-8fe6-2178efb10b92",
+      "mana_cost": "{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 1,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "devoted_hero",
+      "name": "Devoted Hero",
+      "kind": "Creature",
+      "scryfall_id": "c0cdbd28-958a-4955-badd-4848eef3f0fa",
+      "oracle_id": "fff6f2d0-22b5-41d0-99dc-bc817c3bd166",
+      "mana_cost": "{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 1,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "glory_seeker",
+      "name": "Glory Seeker",
+      "kind": "Creature",
+      "scryfall_id": "2bd51dd3-ce49-41cf-85ef-a5a1428bc71b",
+      "oracle_id": "55c60b29-52c5-428c-9229-11ed0e26bd71",
+      "mana_cost": "{1}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "knight_errant",
+      "name": "Knight Errant",
+      "kind": "Creature",
+      "scryfall_id": "d8d1d55b-6be0-4bb5-b452-ba4994b21774",
+      "oracle_id": "920cc1a7-ac6b-44c0-ade7-347f05bba0f2",
+      "mana_cost": "{1}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "pillarfield_ox",
+      "name": "Pillarfield Ox",
+      "kind": "Creature",
+      "scryfall_id": "53a5c7bd-7d08-421d-ad43-70bc0c2db4d4",
+      "oracle_id": "0f7c70c4-9795-4c76-8b27-043942a963c6",
+      "mana_cost": "{3}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 2,
+      "toughness": 4,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "savannah_lions",
+      "name": "Savannah Lions",
+      "kind": "Creature",
+      "scryfall_id": "9c9ac1bc-cdf3-4fa6-8319-a7ea164e9e47",
+      "oracle_id": "60ba93eb-39e6-4af2-9c66-cd38f72daff2",
+      "mana_cost": "{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 1,
+      "power": 2,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "coral_eel",
+      "name": "Coral Eel",
+      "kind": "Creature",
+      "scryfall_id": "00223901-d462-41b0-9749-b093058f682f",
+      "oracle_id": "10706fd1-7847-4316-be8d-59b56143ce45",
+      "mana_cost": "{1}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "maritime_guard",
+      "name": "Maritime Guard",
+      "kind": "Creature",
+      "scryfall_id": "1008ff1b-7fb0-4570-b23e-9fda14b97640",
+      "oracle_id": "0bb1c704-47f1-4d0c-8158-cfcd0b5e4d06",
+      "mana_cost": "{1}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 1,
+      "toughness": 3,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "armored_cancrix",
+      "name": "Armored Cancrix",
+      "kind": "Creature",
+      "scryfall_id": "3b455b0f-a69c-43b4-bbf5-605ed41f10e0",
+      "oracle_id": "445bb343-9758-459b-970f-47f1705f1e55",
+      "mana_cost": "{4}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 5,
+      "power": 2,
+      "toughness": 5,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "fortress_crab",
+      "name": "Fortress Crab",
+      "kind": "Creature",
+      "scryfall_id": "324681da-a28e-47ec-9810-5678de53e494",
+      "oracle_id": "075fd933-689c-4199-85bd-e7994d936145",
+      "mana_cost": "{3}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 1,
+      "toughness": 6,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "kraken_hatchling",
+      "name": "Kraken Hatchling",
+      "kind": "Creature",
+      "scryfall_id": "cc1f65c8-4941-41ac-9340-f741725ec71c",
+      "oracle_id": "08e6c786-d553-4c23-9137-cfad84146739",
+      "mana_cost": "{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 0,
+      "toughness": 4,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "merfolk_of_the_pearl_trident",
+      "name": "Merfolk of the Pearl Trident",
+      "kind": "Creature",
+      "scryfall_id": "a360fe4e-c9a6-42fa-a97a-8b5a0c19ef93",
+      "oracle_id": "218d9277-c179-4de3-9c7f-79b5a6d4fa38",
+      "mana_cost": "{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 1,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "scathe_zombies",
+      "name": "Scathe Zombies",
+      "kind": "Creature",
+      "scryfall_id": "037cbf71-1199-4457-9b09-f66e7cb294d5",
+      "oracle_id": "e0fefaf0-da20-4d58-8db7-019dba16c780",
+      "mana_cost": "{2}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "walking_corpse",
+      "name": "Walking Corpse",
+      "kind": "Creature",
+      "scryfall_id": "053b59b4-a22c-4228-aadc-ae9da6bb465e",
+      "oracle_id": "fea95888-e16a-4209-9cd4-623f7f4d2f67",
+      "mana_cost": "{1}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "barony_vampire",
+      "name": "Barony Vampire",
+      "kind": "Creature",
+      "scryfall_id": "b0130d04-05f2-44f5-bd6c-8b11f798b69e",
+      "oracle_id": "e886756a-298d-4f79-8699-8bfc9345352e",
+      "mana_cost": "{2}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 3,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "dross_crocodile",
+      "name": "Dross Crocodile",
+      "kind": "Creature",
+      "scryfall_id": "efd5c07e-4ece-4c8b-93c8-6abd7dd3a39a",
+      "oracle_id": "028fa430-722d-45aa-b415-3f84076091a9",
+      "mana_cost": "{3}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 5,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "skeletal_crocodile",
+      "name": "Skeletal Crocodile",
+      "kind": "Creature",
+      "scryfall_id": "ebcbbd6f-2915-4b4c-85d3-1d9b55d36c11",
+      "oracle_id": "90f9440a-0bf8-46eb-9cfa-16fb88a217d8",
+      "mana_cost": "{3}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 5,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "zombie_goliath",
+      "name": "Zombie Goliath",
+      "kind": "Creature",
+      "scryfall_id": "a4897302-7726-4827-9fa7-66ac0c264bd4",
+      "oracle_id": "eadd88b6-e75a-4482-8382-561718121772",
+      "mana_cost": "{4}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 5,
+      "power": 4,
+      "toughness": 3,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "goblin",
+      "name": "Raging Goblin",
+      "kind": "Creature",
+      "scryfall_id": "3480927c-10da-4817-9954-10aea2bc7100",
+      "oracle_id": "30997b43-fc13-41d3-8064-1ccc2cb6fd2b",
+      "mana_cost": "{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 1,
+      "toughness": 1,
+      "text": "Haste.",
+      "effect": null,
+      "amount": 0,
+      "haste": true
+    },
+    {
+      "key": "goblin_piker",
+      "name": "Goblin Piker",
+      "kind": "Creature",
+      "scryfall_id": "083ec3e7-950c-4e9d-aba5-02ed13d723f0",
+      "oracle_id": "50608184-90d3-43d2-a221-deb186c78323",
+      "mana_cost": "{1}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 1,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "giant",
+      "name": "Hill Giant",
+      "kind": "Creature",
+      "scryfall_id": "14c2be6a-9ca6-4d3a-8dd0-db4ea40799f8",
+      "oracle_id": "342199e0-15b6-4824-83da-25caef2592b3",
+      "mana_cost": "{3}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 3,
+      "toughness": 3,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "hurloon_minotaur",
+      "name": "Hurloon Minotaur",
+      "kind": "Creature",
+      "scryfall_id": "eb72cfc8-6235-4951-b1ba-6d9531f5eabf",
+      "oracle_id": "8f1dae40-b307-446e-bbd2-86aa35813871",
+      "mana_cost": "{1}{R}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 2,
+      "toughness": 3,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "minotaur_abomination",
+      "name": "Minotaur Abomination",
+      "kind": "Creature",
+      "scryfall_id": "9dca75a1-443d-4f8e-b12b-2aada3a8e3e4",
+      "oracle_id": "017568ea-613f-4057-9a8d-61b087d6dc92",
+      "mana_cost": "{4}{B}{B}",
+      "colors": [
+        "B"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 6,
+      "power": 4,
+      "toughness": 6,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "lightning_elemental",
+      "name": "Lightning Elemental",
+      "kind": "Creature",
+      "scryfall_id": "5f2a959e-7c17-4226-afcb-bc0bb5a4492b",
+      "oracle_id": "58aee5cb-7b88-446e-ab10-9f83c10d7227",
+      "mana_cost": "{3}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 4,
+      "toughness": 1,
+      "text": "Haste.",
+      "effect": null,
+      "amount": 0,
+      "haste": true
+    },
+    {
+      "key": "bear",
+      "name": "Bear Cub",
+      "kind": "Creature",
+      "scryfall_id": "d8662ebb-068b-41d2-b504-4b5854e4d4aa",
+      "oracle_id": "ed206651-3d9b-4546-8d45-0682817192fd",
+      "mana_cost": "{1}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "centaur",
+      "name": "Centaur Courser",
+      "kind": "Creature",
+      "scryfall_id": "e8b67ee8-3189-4426-8b1a-b540267768fd",
+      "oracle_id": "2f5bf099-2e01-4e1c-9ebf-0ce0ac66939e",
+      "mana_cost": "{2}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 3,
+      "toughness": 3,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "grizzly_bears",
+      "name": "Grizzly Bears",
+      "kind": "Creature",
+      "scryfall_id": "409f9b88-f03e-40b6-9883-68c14c37c0de",
+      "oracle_id": "14c8f55d-d177-4c25-a931-ebeb9e6062a0",
+      "mana_cost": "{1}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "runeclaw_bear",
+      "name": "Runeclaw Bear",
+      "kind": "Creature",
+      "scryfall_id": "d1995238-79cc-4381-9595-71ef11ea1e36",
+      "oracle_id": "ec49dfcf-d16d-4621-af4b-4a6f09043221",
+      "mana_cost": "{1}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 2,
+      "toughness": 2,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "spined_wurm",
+      "name": "Spined Wurm",
+      "kind": "Creature",
+      "scryfall_id": "0de97b4e-42c7-47e5-a523-a47eadd068f7",
+      "oracle_id": "05425f2f-7228-4bf5-8fe1-6fe99107e8e0",
+      "mana_cost": "{4}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 5,
+      "power": 5,
+      "toughness": 4,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "craw_wurm",
+      "name": "Craw Wurm",
+      "kind": "Creature",
+      "scryfall_id": "3875f73d-6108-488b-bd34-4cf2c23ce6b3",
+      "oracle_id": "6a462a69-3e42-41de-a3aa-a488d9f38d69",
+      "mana_cost": "{4}{G}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 6,
+      "power": 6,
+      "toughness": 4,
+      "text": "",
+      "effect": null,
+      "amount": 0,
+      "haste": false
+    },
+    {
+      "key": "shock",
+      "name": "Shock",
+      "kind": "Instant",
+      "scryfall_id": "b23900fb-efe9-43ab-9f67-4545dd01fb9c",
+      "oracle_id": "a9d288b8-cdc1-4e55-a0c9-d6edfc95e65d",
+      "mana_cost": "{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 2 damage to a player.",
+      "effect": "damage",
+      "amount": 2,
+      "haste": false
+    },
+    {
+      "key": "strike",
+      "name": "Lightning Strike",
+      "kind": "Instant",
+      "scryfall_id": "88b13bc0-da54-4c3b-917c-7c8345a329f5",
+      "oracle_id": "f34b9bc4-7bfe-47fd-ba23-4eeeb46026eb",
+      "mana_cost": "{1}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 3 damage to a player.",
+      "effect": "damage",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "lightning_bolt",
+      "name": "Lightning Bolt",
+      "kind": "Instant",
+      "scryfall_id": "7673784e-db4b-43a1-8d55-1bb9fc1e284f",
+      "oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+      "mana_cost": "{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 1,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 3 damage to a player.",
+      "effect": "damage",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "volcanic_hammer",
+      "name": "Volcanic Hammer",
+      "kind": "Sorcery",
+      "scryfall_id": "9db3f454-4aeb-4e48-b961-bea760ea8ddf",
+      "oracle_id": "98fa5a06-0553-40fd-999c-bc31c9b3f4db",
+      "mana_cost": "{1}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 3 damage to a player.",
+      "effect": "damage",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "lava_axe",
+      "name": "Lava Axe",
+      "kind": "Sorcery",
+      "scryfall_id": "c3dab325-8f4f-4288-9f3f-960e52b4335b",
+      "oracle_id": "387b6b07-a283-412d-94c3-f7f1dc76e858",
+      "mana_cost": "{4}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 5,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 5 damage to a player.",
+      "effect": "damage",
+      "amount": 5,
+      "haste": false
+    },
+    {
+      "key": "searing_spear",
+      "name": "Searing Spear",
+      "kind": "Instant",
+      "scryfall_id": "44c5f884-d071-40c2-bb2c-925dc2197ea3",
+      "oracle_id": "aafd44c1-74a9-4aa7-a4a2-67eb39a07478",
+      "mana_cost": "{1}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 3 damage to a player.",
+      "effect": "damage",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "open_fire",
+      "name": "Open Fire",
+      "kind": "Instant",
+      "scryfall_id": "448f9fb5-ffb5-4325-9f81-ce8782e5f9e9",
+      "oracle_id": "8b218023-50b8-4d9d-b17b-9647479d3675",
+      "mana_cost": "{2}{R}",
+      "colors": [
+        "R"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 0,
+      "toughness": 0,
+      "text": "Deal 3 damage to a player.",
+      "effect": "damage",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "growth",
+      "name": "Giant Growth",
+      "kind": "Instant",
+      "scryfall_id": "fd1f95bf-48ea-455a-8a6c-0249b11c8900",
+      "oracle_id": "5748ebf1-24e3-499d-ab7c-c2cebd462a24",
+      "mana_cost": "{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 0,
+      "toughness": 0,
+      "text": "A creature gets +3/+3 until end of turn.",
+      "effect": "pump",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "titanic_growth",
+      "name": "Titanic Growth",
+      "kind": "Instant",
+      "scryfall_id": "46917de3-5e98-4dd6-8950-fc10338515df",
+      "oracle_id": "61e09dd9-7870-48c2-9177-d6abc3162692",
+      "mana_cost": "{1}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "A creature gets +4/+4 until end of turn.",
+      "effect": "pump",
+      "amount": 4,
+      "haste": false
+    },
+    {
+      "key": "might_of_oaks",
+      "name": "Might of Oaks",
+      "kind": "Instant",
+      "scryfall_id": "438a324b-cf3e-4a0f-95c4-cd548586f7e5",
+      "oracle_id": "8331f281-819b-4a0b-bad7-bd86dbedb877",
+      "mana_cost": "{3}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "rare",
+      "pack_slot": "rare",
+      "cost": 4,
+      "power": 0,
+      "toughness": 0,
+      "text": "A creature gets +7/+7 until end of turn.",
+      "effect": "pump",
+      "amount": 7,
+      "haste": false
+    },
+    {
+      "key": "monstrous_growth",
+      "name": "Monstrous Growth",
+      "kind": "Sorcery",
+      "scryfall_id": "7e5a2687-af7a-42ad-8938-f3534c7da222",
+      "oracle_id": "35a05836-38d7-45c7-ac9a-996a682c2129",
+      "mana_cost": "{1}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "A creature gets +4/+4 until end of turn.",
+      "effect": "pump",
+      "amount": 4,
+      "haste": false
+    },
+    {
+      "key": "renew",
+      "name": "Natural Spring",
+      "kind": "Sorcery",
+      "scryfall_id": "983874b1-3179-4ac6-a4f3-efa133331c6f",
+      "oracle_id": "f7571a2e-aaf3-4148-ab76-2a2e35273c70",
+      "mana_cost": "{3}{G}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 5,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 8 life.",
+      "effect": "life",
+      "amount": 8,
+      "haste": false
+    },
+    {
+      "key": "soothing_balm",
+      "name": "Soothing Balm",
+      "kind": "Instant",
+      "scryfall_id": "96b8f4be-9f4d-4373-8141-a03518ecd38a",
+      "oracle_id": "1f493e26-a556-4ca0-bb44-5408800ccf82",
+      "mana_cost": "{1}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 5 life.",
+      "effect": "life",
+      "amount": 5,
+      "haste": false
+    },
+    {
+      "key": "angels_mercy",
+      "name": "Angel's Mercy",
+      "kind": "Instant",
+      "scryfall_id": "43e6d650-4e96-43a3-8b94-7f044d3b2f82",
+      "oracle_id": "6b232bb7-d372-4174-a049-5f8d620810e6",
+      "mana_cost": "{2}{W}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 7 life.",
+      "effect": "life",
+      "amount": 7,
+      "haste": false
+    },
+    {
+      "key": "sacred_nectar",
+      "name": "Sacred Nectar",
+      "kind": "Sorcery",
+      "scryfall_id": "bcdd5e1c-47db-4960-860c-2af14b734b59",
+      "oracle_id": "30870ee5-6ad7-48a9-983e-d3b018f2344f",
+      "mana_cost": "{1}{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 4 life.",
+      "effect": "life",
+      "amount": 4,
+      "haste": false
+    },
+    {
+      "key": "chaplains_blessing",
+      "name": "Chaplain's Blessing",
+      "kind": "Sorcery",
+      "scryfall_id": "f70ea481-1751-4097-af41-2d13fe79e788",
+      "oracle_id": "195837b4-e5e4-479d-8dab-6ac77f9fcd83",
+      "mana_cost": "{W}",
+      "colors": [
+        "W"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 1,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 5 life.",
+      "effect": "life",
+      "amount": 5,
+      "haste": false
+    },
+    {
+      "key": "heroes_reunion",
+      "name": "Heroes' Reunion",
+      "kind": "Instant",
+      "scryfall_id": "99b56515-f688-495c-b721-2b9abc6628c2",
+      "oracle_id": "beab66e0-2b6c-478f-ba42-8c0c216a527e",
+      "mana_cost": "{G}{W}",
+      "colors": [
+        "G",
+        "W"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 2,
+      "power": 0,
+      "toughness": 0,
+      "text": "You gain 7 life.",
+      "effect": "life",
+      "amount": 7,
+      "haste": false
+    },
+    {
+      "key": "inspire",
+      "name": "Harmonize",
+      "kind": "Sorcery",
+      "scryfall_id": "bd7138fb-6aa7-455e-b1f7-ca08d747277d",
+      "oracle_id": "7eff84f1-f772-497a-b350-bbc93d0230f7",
+      "mana_cost": "{2}{G}{G}",
+      "colors": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 4,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 3 cards.",
+      "effect": "draw",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "divination",
+      "name": "Divination",
+      "kind": "Sorcery",
+      "scryfall_id": "cb3b35b8-f321-46d8-a441-6b9a6efa9021",
+      "oracle_id": "273b339c-964b-4a18-8eb5-ceb8abcdfd9e",
+      "mana_cost": "{2}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 2 cards.",
+      "effect": "draw",
+      "amount": 2,
+      "haste": false
+    },
+    {
+      "key": "concentrate",
+      "name": "Concentrate",
+      "kind": "Sorcery",
+      "scryfall_id": "5aca3338-30a6-4ce4-b74c-a18144b6efc9",
+      "oracle_id": "a3d287ec-1a39-4f91-acf1-7c1d2c00ed89",
+      "mana_cost": "{2}{U}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 4,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 3 cards.",
+      "effect": "draw",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "counsel_of_the_soratami",
+      "name": "Counsel of the Soratami",
+      "kind": "Sorcery",
+      "scryfall_id": "1224718a-e1a7-473d-ac9d-497e624376cd",
+      "oracle_id": "62ddc5ae-ced9-4319-854c-1a114c6afc3f",
+      "mana_cost": "{2}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 3,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 2 cards.",
+      "effect": "draw",
+      "amount": 2,
+      "haste": false
+    },
+    {
+      "key": "brilliant_plan",
+      "name": "Brilliant Plan",
+      "kind": "Sorcery",
+      "scryfall_id": "115a5d53-8638-44a9-a889-f2d73a02e672",
+      "oracle_id": "d83e1a42-11d1-412a-b66c-850c7a528777",
+      "mana_cost": "{4}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 5,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 3 cards.",
+      "effect": "draw",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "jaces_ingenuity",
+      "name": "Jace's Ingenuity",
+      "kind": "Instant",
+      "scryfall_id": "ad4932ba-e272-4f22-89f5-a6153ca570b5",
+      "oracle_id": "ce588fd3-642e-4df9-8061-6fcfc6e81270",
+      "mana_cost": "{3}{U}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 5,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 3 cards.",
+      "effect": "draw",
+      "amount": 3,
+      "haste": false
+    },
+    {
+      "key": "tidings",
+      "name": "Tidings",
+      "kind": "Sorcery",
+      "scryfall_id": "6a123f44-0a72-46d0-a73d-b4ab01b6c2df",
+      "oracle_id": "72897780-094d-4a21-8b1c-419a9defd2fb",
+      "mana_cost": "{3}{U}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "pack_slot": "uncommon",
+      "cost": 5,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 4 cards.",
+      "effect": "draw",
+      "amount": 4,
+      "haste": false
+    },
+    {
+      "key": "weave_fate",
+      "name": "Weave Fate",
+      "kind": "Instant",
+      "scryfall_id": "04e57fc1-1633-447f-ae32-ad7da25a4177",
+      "oracle_id": "ff568a29-e31a-4bc3-b8a3-8fa56f91d52d",
+      "mana_cost": "{3}{U}",
+      "colors": [
+        "U"
+      ],
+      "rarity": "common",
+      "pack_slot": "common",
+      "cost": 4,
+      "power": 0,
+      "toughness": 0,
+      "text": "Draw 2 cards.",
+      "effect": "draw",
+      "amount": 2,
+      "haste": false
+    }
+  ]
+}

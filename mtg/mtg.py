@@ -20,7 +20,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.3.0"
+    __version__="0.4.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -210,7 +210,8 @@ class MTG(commands.Cog):
         if query: cards=[card for card in cards if query.casefold() in card.name.casefold() or query.casefold() in card.key.casefold()]
         if not cards: await ctx.send("No supported cards matched that search."); return
         lines=[f"`{card.key}` - **{card.name}** ({card.kind}, {card.mana_cost or 'no cost'})" for card in cards]
-        await ctx.send("\n".join(lines),allowed_mentions=discord.AllowedMentions.none())
+        for start in range(0,len(lines),15):
+            await ctx.send("\n".join(lines[start:start+15]),allowed_mentions=discord.AllowedMentions.none())
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None):
         """Play/cast a hand position. Target: USER_ID or USER_ID:FIELD_POSITION."""

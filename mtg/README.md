@@ -2,7 +2,7 @@
 
 MTG is an experimental two-player Magic: The Gathering rules prototype for Red.
 
-Version 0.3.0 supports a small curated card pool and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, paginated private hand images with a text fallback, and a public rendered playmat layered over the accessible match embed. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
+Version 0.4.0 supports a curated catalog of 60 unique Scryfall-backed cards and two fixed 60-card beginner decks. It adds stable Scryfall printing/oracle identifiers, card search and detail embeds, paginated private hand images with a text fallback, and a public rendered playmat layered over the accessible match embed. It is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
 
 ## Play
 
@@ -21,7 +21,7 @@ Pass no positions to attack or block to decline combat. Hands are returned as pr
 
 Opening hands and London-style mulligans, a randomized starting player, 20 life, five broad turn phases, one land per turn, automatic land tapping, creatures and summoning sickness, haste on Raging Goblin, a response stack with priority passing before phase changes and combat damage, combat, graveyards, empty-library loss, concessions, and persistent recovery.
 
-This is a learning prototype. The supported-card list in `cards.py` is authoritative.
+This is a learning prototype. The versioned supported-card catalog in `data/cards.json` is authoritative. It currently contains five basics, thirty creatures, thirteen instants, and twelve sorceries. Every entry is limited to an engine-supported shape and is grouped by source rarity for future pack work; pack generation and ownership remain deliberately unimplemented.
 
 ## Card data and artwork
 
