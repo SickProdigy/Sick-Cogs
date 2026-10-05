@@ -156,6 +156,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Protection From B",rendered); self.assertIn("Active protection: R",rendered); self.assertIn("Attached to White Knight",rendered)
 
+    async def test_public_embed_shows_changed_permanent_and_spell_colors(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        bear=game.next_uid; game.next_uid+=1; game.cards[bear]="bear"; game.player(10).battlefield=[permanent_type(bear,"bear",sick=False,color_override="B")]
+        shock=game.next_uid; game.next_uid+=1; game.cards[shock]="shock"; game.stack=[spell_type(10,shock,"shock","20",color_override="U")]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Color: Black",rendered); self.assertIn("Shock [U]",rendered)
+
     async def test_public_embed_shows_trample_keyword(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -154,6 +154,16 @@ class SoloAITests(unittest.TestCase):
         game.blocks={123:creature_uid}
         self.assertEqual(_target(game,AI,__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:36"]),f"{AI}:1")
 
+    def test_ai_chooses_legal_lace_targets_and_uses_live_colors(self):
+        game=solo(); advance_solo(game); cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        protected=self.add(game,HUMAN,"lea:43"); legal=self.add(game,HUMAN,"bear")
+        self.assertEqual(_target(game,AI,cards["lea:101"]),f"{HUMAN}:2")
+        legal.color_override="B"; self.assertIsNone(_target(game,AI,cards["lea:130"]))
+        legal.color_override="U"; self.assertEqual(_target(game,AI,cards["lea:169"]),f"{HUMAN}:2")
+        from mtg.engine import Spell
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="shock"; game.stack=[Spell(HUMAN,uid,"shock",str(AI))]
+        self.assertEqual(_target(game,AI,cards["lea:32"]),"S:1")
+
     def test_ai_targets_opponent_land_for_destruction(self):
         game=solo(); advance_solo(game)
         land_uid=game.next_uid; game.next_uid+=1; game.cards[land_uid]="lea:284"

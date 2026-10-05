@@ -4,10 +4,15 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
+    if card.effect=="set_color":
+        for position,spell in enumerate(reversed(game.stack),1):
+            if not spell.ability_effect and spell.owner!=user: return f"S:{position}"
+        choices=[(game.card(permanent.uid).cost,position) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if _can_target(game,card,permanent)]
+        return f"{game.opponent(user)}:{max(choices)[1]}" if choices else None
     if card.aura_target_types:
         target_user=game.opponent(user) if card.aura_hostile else user
         choices=[]
@@ -18,9 +23,9 @@ def _target(game, user, card):
     if card.effect in ("counter_spell","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
-            if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in target.colors): return f"S:{position}"
+            if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in game.spell_colors(spell)): return f"S:{position}"
         if card.effect=="elemental_blast":
-            targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if card.target_color in game.card(permanent.uid).colors and _can_target(game,card,permanent)]
+            targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if card.target_color in game.current_colors(permanent) and _can_target(game,card,permanent)]
             if targets:
                 position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.card(item[1].uid).creature else 0))
                 return f"{game.opponent(user)}:{position}"
@@ -62,7 +67,7 @@ def _target(game, user, card):
             target=game.card(permanent.uid)
             if not target.creature or not _can_target(game,card,permanent): continue
             if card.target_nonartifact and "Artifact" in target.type_line: continue
-            if card.target_nonblack and "B" in target.colors: continue
+            if card.target_nonblack and "B" in game.current_colors(permanent): continue
             creatures.append((position,permanent))
         if not creatures: return None
         position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
@@ -176,6 +181,8 @@ def _play_one(game, user, difficulty):
             score=15 if target and target.startswith("S:") else 11
         elif card.effect in ("regenerate_target","grant_keyword","tap_or_untap"):
             score=10
+        elif card.effect=="set_color":
+            score=4
         elif card.effect=="destroy_wall":
             score=11
         elif card.effect=="add_mana":
@@ -249,7 +256,7 @@ def _activation_target(game,user,card,source_uid=None):
     for position,permanent in enumerate(game.player(opponent).battlefield,1):
         target=game.card(permanent.uid)
         if not _can_target(game,card,permanent): continue
-        if card.activation_effect=="destroy_black_permanent" and "B" in target.colors: candidates.append((target.cost,position))
+        if card.activation_effect=="destroy_black_permanent" and "B" in game.current_colors(permanent): candidates.append((target.cost,position))
         elif card.activation_effect=="destroy_tapped_creature" and target.creature and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
     if candidates: return f"{opponent}:{max(candidates)[1]}"
@@ -271,14 +278,14 @@ def _regeneration_threatened(game,user,permanent):
     stable=f"{user}:{permanent.uid}"; toughness=game.current_stats(permanent)[1]-permanent.damage
     for item in game.stack:
         card=game.card(item.uid)
-        if item.target!=stable or game._protected_from(permanent,card): continue
+        if item.target!=stable or game._protected_from(permanent,card,game.ability_source_colors(item) if item.ability_effect else game.spell_colors(item)): continue
         if item.ability_effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"): return True
         if item.ability_effect=="damage_any" and card.activation_amount>=toughness: return True
         if not item.ability_effect and card.effect in ("destroy_permanent","elemental_blast"): return True
         if not item.ability_effect and card.effect in ("damage","damage_any") and card.amount>=toughness: return True
     for item in game.stack:
         card=game.card(item.uid)
-        if item.ability_effect or card.effect not in ("earthquake_x","hurricane_x") or item.x_value<toughness or game._protected_from(permanent,card): continue
+        if item.ability_effect or card.effect not in ("earthquake_x","hurricane_x") or item.x_value<toughness or game._protected_from(permanent,card,game.spell_colors(item)): continue
         flying="flying" in game.current_keywords(permanent)
         if (card.effect=="earthquake_x" and not flying) or (card.effect=="hurricane_x" and flying): return True
     if game.phase not in ("after_blockers","after_first_strike"): return False

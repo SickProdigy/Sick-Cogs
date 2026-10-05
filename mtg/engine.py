@@ -24,6 +24,7 @@ class Permanent:
     regeneration_shields: int = 0
     cant_regenerate: bool = False
     attached_to: Optional[int] = None
+    color_override: str = ""
 
 @dataclass
 class Player:
@@ -50,6 +51,7 @@ class Spell:
     x_value: int = 0
     ability_effect: str = ""
     source_uid: Optional[int] = None
+    color_override: str = ""
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -137,16 +139,24 @@ class Game:
         return subtype in card.type_line.split(" — ",1)[-1].split()
     def _aura_type_legal(self,aura_card,target_card):
         return any(target_card.has_type(kind) for kind in aura_card.aura_target_types) and all(self._has_subtype(target_card,subtype) for subtype in aura_card.aura_target_subtypes)
+    def current_colors(self,permanent):
+        return (permanent.color_override,) if permanent.color_override else self.card(permanent.uid).colors
+    def spell_colors(self,spell):
+        return (spell.color_override,) if spell.color_override else self.card(spell.uid).colors
+    def ability_source_colors(self,spell):
+        _,source=self.find_permanent(spell.source_uid)
+        return self.current_colors(source) if source is not None else self.spell_colors(spell)
     def current_protections(self,permanent,exclude_aura_uid=None):
         protections=set(self.card(permanent.uid).protection_colors)
         protections.update(self.card(aura.uid).aura_protection for aura in self.attached_auras(permanent) if aura.uid!=exclude_aura_uid and self.card(aura.uid).aura_protection)
         return protections
-    def _protected_from(self,permanent,source_card):
-        return bool(set(source_card.colors) & self.current_protections(permanent))
-    def _aura_can_attach(self,aura_card,target,aura=None):
+    def _protected_from(self,permanent,source_card,source_colors=None):
+        return bool(set(source_card.colors if source_colors is None else source_colors) & self.current_protections(permanent))
+    def _aura_can_attach(self,aura_card,target,aura=None,colors=None):
         if not self._aura_type_legal(aura_card,self.card(target.uid)): return False
         excluded=aura.uid if aura is not None and aura_card.protection_self_exception else None
-        return not bool(set(aura_card.colors) & self.current_protections(target,excluded))
+        aura_colors=self.current_colors(aura) if aura is not None else aura_card.colors if colors is None else colors
+        return not bool(set(aura_colors) & self.current_protections(target,excluded))
     def _stable_target_permanent(self,target):
         if not target or target.upper().startswith(("S:","G:")): return None
         parts=target.split(":")
@@ -269,7 +279,7 @@ class Game:
         if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
         if card.activation_effect=="damage_any" and not target_card.creature: raise GameError("Target permanent is not a creature.")
-        if card.activation_effect=="destroy_black_permanent" and "B" not in target_card.colors: raise GameError("Target permanent is not black.")
+        if card.activation_effect=="destroy_black_permanent" and "B" not in self.current_colors(permanent): raise GameError("Target permanent is not black.")
         if card.activation_effect=="destroy_tapped_creature" and (not target_card.creature or not permanent.tapped): raise GameError("Target must be a tapped creature.")
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
         if card.activation_effect=="unblockable" and (not target_card.creature or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
@@ -286,7 +296,7 @@ class Game:
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
-            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card): return False
+            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card,self.current_colors(permanent)): return False
         except GameError: return False
         excluded=(permanent.uid,) if activation_tap else ()
         return self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded) is not None
@@ -301,7 +311,7 @@ class Game:
         if activation_tap and card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
-        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
+        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
         excluded=(permanent.uid,) if activation_tap else ()
         payment=self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded)
         if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
@@ -315,7 +325,7 @@ class Game:
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
-        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid))
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override))
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
         self.priority_user=self.opponent(user)
@@ -420,7 +430,7 @@ class Game:
         if c.effect in ("counter_spell","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
-                if c.target_color and c.target_color not in target_card.colors: raise GameError(f"Target spell must be {c.target_color}.")
+                if c.target_color and c.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {c.target_color}.")
                 return f"S:{spell.uid}"
             if c.effect=="counter_spell": raise GameError("Counterspell requires an S:POSITION stack target.")
             if not target or ":" not in target: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.")
@@ -429,8 +439,17 @@ class Game:
             battlefield=self.player(target_user).battlefield
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
             permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
-            if c.target_color not in target_card.colors: raise GameError(f"Target permanent must be {c.target_color}.")
+            if c.target_color not in self.current_colors(permanent): raise GameError(f"Target permanent must be {c.target_color}.")
             return f"{target_user}:{permanent.uid}"
+        if c.effect=="set_color":
+            if target and target.upper().startswith("S:"):
+                spell=self._target_stack(target); return f"S:{spell.uid}"
+            if not target or ":" not in target: raise GameError("Color-change target must be S:POSITION or USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as e: raise GameError("Color-change target must be S:POSITION or USER_ID:POSITION.") from e
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            return f"{target_user}:{battlefield[pos-1].uid}"
         if c.effect=="damage":
             try: target_user=int(target) if target is not None else self.opponent(user)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
@@ -468,7 +487,7 @@ class Game:
             target_user,permanent=self._target_creature(target)
             target_card=self.card(permanent.uid)
             if c.target_nonartifact and "Artifact" in target_card.type_line: raise GameError("Target must be a nonartifact creature.")
-            if c.target_nonblack and "B" in target_card.colors: raise GameError("Target must be a nonblack creature.")
+            if c.target_nonblack and "B" in self.current_colors(permanent): raise GameError("Target must be a nonblack creature.")
             return f"{target_user}:{permanent.uid}"
         if c.effect in ("pump","pump_blocking","pump_power_x"):
             target_user,permanent=self._target_creature(target)
@@ -598,7 +617,7 @@ class Game:
         if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
         if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
-        if set(blocker.colors) & self.current_protections(attacker_perm): return False,f"{attacker.name} has protection from {blocker.name}."
+        if set(self.current_colors(blocker_perm)) & self.current_protections(attacker_perm): return False,f"{attacker.name} has protection from {blocker.name}."
         if any(self.card(aura.uid).aura_blocked_except_wall for aura in self.attached_auras(attacker_perm)) and not self._has_subtype(blocker,"Wall"):
             return False,f"{attacker.name} can only be blocked by Walls."
         if "flying" in attacker_keywords and not ({"flying","reach"} & blocker_keywords):
@@ -635,9 +654,9 @@ class Game:
                     lethal=max(0,self.current_stats(b)[1]-b.damage)
                     chosen=self.trample_assignments.get(uid,lethal)
                     assigned=min(power,max(lethal,chosen)) if trample else power
-                    if not self._protected_from(b,self.card(a.uid)): b.damage+=assigned
+                    if not self._protected_from(b,self.card(a.uid),self.current_colors(a)): b.damage+=assigned
                     if trample: dfn.life-=max(0,power-assigned)
-            if blocker_strikes and not self._protected_from(a,self.card(b.uid)): a.damage+=max(0,self.current_stats(b)[0])
+            if blocker_strikes and not self._protected_from(a,self.card(b.uid),self.current_colors(b)): a.damage+=max(0,self.current_stats(b)[0])
         self._sba(); self._life()
 
     def _end_combat(self):
@@ -674,7 +693,7 @@ class Game:
             self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
-        if target is not None and effect not in ("self","regenerate") and self._protected_from(target,card): fizzle("its target gained protection"); return
+        if target is not None and effect not in ("self","regenerate") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
         if effect=="self":
             if target is None: fizzle("its source was gone"); return
             target.power_bonus+=card.activated_power; target.toughness_bonus+=card.activated_toughness
@@ -690,7 +709,7 @@ class Game:
             self.player(s.owner).life-=card.activation_self_damage
         elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"):
             legal=target_card is not None
-            if effect=="destroy_black_permanent": legal=legal and "B" in target_card.colors
+            if effect=="destroy_black_permanent": legal=legal and "B" in self.current_colors(target)
             elif effect=="destroy_tapped_creature": legal=legal and target_card.creature and target.tapped
             else: legal=legal and "Wall" in target_card.type_line.split(" — ",1)[-1].split()
             if not legal: fizzle("its target was gone or illegal"); return
@@ -710,19 +729,19 @@ class Game:
         if s.ability_effect: self._resolve_ability(s); return
         p=self.players[s.owner]; c=CARDS[s.key]
         protected=self._stable_target_permanent(s.target)
-        if protected is not None and self._protected_from(protected,c):
+        if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target gained protection."); return
         if c.aura_target_types:
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
-            if target is None or not self._aura_can_attach(c,target):
+            if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            p.battlefield.append(Permanent(s.uid,c.key,sick=False,attached_to=target.uid))
-        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
+            p.battlefield.append(Permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override))
+        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key,color_override=s.color_override))
         elif c.effect in ("counter_spell","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
                 target_card=self.card(target.uid) if target is not None else None
-                legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in target_card.colors)
+                legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in self.spell_colors(target))
                 if not legal:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)
@@ -730,9 +749,21 @@ class Game:
             else:
                 user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
                 target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
-                if target_card is None or c.target_color not in target_card.colors:
+                if target_card is None or c.target_color not in self.current_colors(target):
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 self._destroy(controller,target)
+            p.graveyard.append(s.uid)
+        elif c.effect=="set_color":
+            if s.target.startswith("S:"):
+                target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid and not spell.ability_effect),None)
+                if target is None:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                target.color_override=c.color_change
+            else:
+                user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
+                if target is None:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                target.color_override=c.color_change
             p.graveyard.append(s.uid)
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
@@ -798,7 +829,7 @@ class Game:
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             target_card=self.card(target.uid) if target is not None else None
-            legal=target_card is not None and target_card.creature and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in target_card.colors)
+            legal=target_card is not None and target_card.creature and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in self.current_colors(target))
             if not legal:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
@@ -813,7 +844,7 @@ class Game:
                     card=self.card(permanent.uid)
                     keywords=self.current_keywords(permanent)
                     affected=card.creature and ((c.effect=="earthquake_x" and "flying" not in keywords) or (c.effect=="hurricane_x" and "flying" in keywords))
-                    if affected and not self._protected_from(permanent,c): permanent.damage+=s.x_value
+                    if affected and not self._protected_from(permanent,c,self.spell_colors(s)): permanent.damage+=s.x_value
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_creatures":
             for controller in self.players.values():

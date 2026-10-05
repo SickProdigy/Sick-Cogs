@@ -701,6 +701,88 @@ class AlphaRegenerationTests(unittest.TestCase):
         restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]; self.assertEqual(restored.current_stats(saved),(3,3))
         restored.player(10).battlefield.remove(next(x for x in restored.player(10).battlefield if x.uid==swamp.uid)); self.assertEqual(restored.current_stats(saved),(2,2))
 
+class AlphaColorChangeTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_each_lace_changes_permanent_color_and_overwrites_indefinitely(self):
+        for key,color,land in (("lea:32","W","plains"),("lea:82","U","island"),("lea:101","B","swamp"),("lea:139","R","mountain"),("lea:207","G","forest")):
+            with self.subTest(key=key):
+                game=ready(); target=self.add(game,20,"bear"); spell=self.add(game,10,key,"hand"); self.add(game,10,land)
+                game.play(10,1,"20:1"); self.resolve_top(game)
+                self.assertEqual(game.current_colors(target),(color,)); self.assertIn(spell,game.player(10).graveyard)
+                restored=Game.from_raw(game.to_raw()); saved=restored.player(20).battlefield[0]
+                self.assertEqual(restored.current_colors(saved),(color,))
+        game=ready(); target=self.add(game,20,"bear"); target.color_override="B"; target.color_override="G"
+        self.assertEqual(game.current_colors(target),("G",))
+
+    def test_color_change_rewrites_terror_and_elemental_blast_legality(self):
+        game=ready(); target=self.add(game,20,"bear"); target.color_override="B"; terror=self.add(game,10,"lea:130","hand")
+        swamps=[self.add(game,10,"swamp") for _ in range(2)]
+        with self.assertRaisesRegex(GameError,"nonblack"): game.play(10,1,"20:1")
+        self.assertIn(terror,game.player(10).hand); self.assertTrue(all(not land.tapped for land in swamps))
+        target.color_override="G"; game.play(10,1,"20:1"); self.resolve_top(game); self.assertIn(target.uid,game.player(20).graveyard)
+
+        blast=ready(); permanent=self.add(blast,20,"bear"); permanent.color_override="U"
+        spell=self.add(blast,10,"lea:169","hand"); self.add(blast,10,"mountain")
+        blast.play(10,1,"20:1"); self.resolve_top(blast)
+        self.assertIn(permanent.uid,blast.player(20).graveyard); self.assertIn(spell,blast.player(10).graveyard)
+
+    def test_color_change_updates_paladin_and_stack_blast_restrictions(self):
+        game=ready(); target=self.add(game,20,"bear"); target.color_override="B"; paladin=self.add(game,10,"lea:29")
+        self.add(game,10,"plains"); self.add(game,10,"plains"); game.priority_user=10
+        game.activate_ability(10,1,"20:1"); target.color_override="G"; self.resolve_top(game)
+        self.assertIn(target,game.player(20).battlefield); self.assertIn("illegal",game.log[-1])
+
+        blast=ready(); shock=self.add(blast,20,"shock","hand"); self.add(blast,20,"mountain"); blast.priority_user=20
+        blast.play(20,1,"10"); blast.stack[-1].color_override="U"
+        red_blast=self.add(blast,10,"lea:169","hand"); self.add(blast,10,"mountain"); blast.play(10,1,"S:1")
+        self.resolve_top(blast)
+        self.assertFalse(blast.stack); self.assertIn(shock,blast.player(20).graveyard); self.assertIn(red_blast,blast.player(10).graveyard)
+
+    def test_lace_changes_spell_color_and_permanent_keeps_it_after_resolution(self):
+        game=ready(); creature=self.add(game,10,"bear","hand"); self.add(game,10,"forest"); self.add(game,10,"forest")
+        game.play(10,1)
+        lace=self.add(game,20,"lea:101","hand"); self.add(game,20,"swamp"); game.play(20,1,"S:1")
+        self.resolve_top(game); self.assertEqual(game.spell_colors(game.stack[-1]),("B",))
+        self.resolve_top(game); permanent=next(x for x in game.player(10).battlefield if x.uid==creature)
+        self.assertEqual(game.current_colors(permanent),("B",)); self.assertIn(lace,game.player(20).graveyard)
+
+    def test_spell_that_gains_protected_color_fizzles_on_resolution(self):
+        game=ready(); knight=self.add(game,20,"lea:43"); bolt=self.add(game,10,"lea:161","hand"); self.add(game,10,"mountain")
+        game.play(10,1,"20:1")
+        lace=self.add(game,20,"lea:101","hand"); self.add(game,20,"swamp"); game.play(20,1,"S:1")
+        self.resolve_top(game); self.assertEqual(game.spell_colors(game.stack[-1]),("B",))
+        self.resolve_top(game); self.assertEqual(knight.damage,0); self.assertIn(bolt,game.player(10).graveyard); self.assertIn("protection",game.log[-1])
+
+    def test_color_changes_affect_combat_auras_and_ability_source_protection(self):
+        game=ready(); attacker=self.add(game,10,"lea:43"); blocker=self.add(game,20,"bear"); blocker.color_override="B"; game.active_index=0
+        self.assertFalse(game.can_block(attacker.uid,blocker.uid)[0])
+
+        aura_game=ready(); target=self.add(aura_game,20,"bear"); ward=self.add(aura_game,20,"lea:5"); ward.attached_to=target.uid
+        aura=self.add(aura_game,10,"lea:24"); aura.attached_to=target.uid; aura.color_override="B"; aura_game._sba()
+        self.assertIn(aura.uid,aura_game.player(10).graveyard); self.assertIn(ward,aura_game.player(20).battlefield)
+
+        ability=ready(); victim=self.add(ability,20,"bear"); blue_ward=self.add(ability,20,"lea:8"); blue_ward.attached_to=victim.uid
+        wizard=self.add(ability,10,"lea:73"); wizard.color_override="R"; ability.priority_user=10
+        ability.activate_ability(10,1,"20:1"); wizard.color_override="U"; self.resolve_top(ability)
+        self.assertEqual(victim.damage,0); self.assertIn("protection",ability.log[-1])
+
+    def test_lace_cannot_target_protected_permanent_or_stack_ability(self):
+        game=ready(); knight=self.add(game,20,"lea:43"); spell=self.add(game,10,"lea:101","hand"); swamp=self.add(game,10,"swamp")
+        with self.assertRaisesRegex(GameError,"protection"): game.play(10,1,"20:1")
+        self.assertIn(spell,game.player(10).hand); self.assertFalse(swamp.tapped)
+        other=ready(); wizard=self.add(other,10,"lea:73"); other.activate_ability(10,1,"20")
+        lace=self.add(other,20,"lea:82","hand"); self.add(other,20,"island")
+        with self.assertRaisesRegex(GameError,"ability, not a spell"): other.play(20,1,"S:1")
+        self.assertIn(lace,other.player(20).hand)
+
+
 class AlphaCounterspellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

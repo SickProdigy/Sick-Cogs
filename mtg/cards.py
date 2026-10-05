@@ -34,6 +34,7 @@ class Card:
     target_color: str = ""
     temporary_keyword: str = ""
     mana_color: str = ""
+    color_change: str = ""
     aura_target_types: Tuple[str, ...] = ()
     aura_target_subtypes: Tuple[str, ...] = ()
     aura_power: int = 0
@@ -218,6 +219,11 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 }
 
 ALPHA_SPELLS = {
+    "lea:32": {"effect":"set_color", "color_change":"W"},
+    "lea:82": {"effect":"set_color", "color_change":"U"},
+    "lea:101": {"effect":"set_color", "color_change":"B"},
+    "lea:139": {"effect":"set_color", "color_change":"R"},
+    "lea:207": {"effect":"set_color", "color_change":"G"},
     "lea:17": {"effect":"regenerate_target"},
     "lea:60": {"effect":"grant_keyword", "temporary_keyword":"flying"},
     "lea:85": {"effect":"tap_or_untap", "target_types":("Artifact","Creature","Land")},
@@ -318,6 +324,7 @@ for reference in PLAYABLE_ALPHA:
         target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",""),
         temporary_keyword=ALPHA_SPELLS.get(reference.key, {}).get("temporary_keyword",""),
         mana_color=ALPHA_SPELLS.get(reference.key, {}).get("mana_color",""),
+        color_change=ALPHA_SPELLS.get(reference.key, {}).get("color_change",""),
         aura_target_types=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_types",()),
         aura_target_subtypes=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_subtypes",()),
         aura_power=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_power",0),
