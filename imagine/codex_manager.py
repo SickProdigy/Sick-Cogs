@@ -46,7 +46,7 @@ class CodexAppServer:
             "clientInfo": {
                 "name": "sick-cogs-imagine",
                 "title": "Sick-Cogs Imagine",
-                "version": "1.0.0",
+                "version": "0.2.1",
             }
         })
         await self.notify("initialized", {})
