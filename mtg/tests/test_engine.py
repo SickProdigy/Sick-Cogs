@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices")
         for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
@@ -405,6 +405,65 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         game.activate_ability(10,1)
         self.assertEqual(game.phase_passes,0); self.assertEqual(game.stack[0].passes,0); self.assertEqual(game.current_stats(dragon),(6,5))
 
+
+    def test_temporary_flying_persists_changes_blocking_and_cleans_up(self):
+        game=ready(); brigade=self.add(game,10,"lea:153"); self.add(game,10,"mountain"); blocker=self.add(game,20,"bear")
+        game.active_index=0; game.attackers=[brigade.uid]; game.phase="after_attackers"
+        game.activate_ability(10,1)
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]
+        self.assertIn("flying",restored.current_keywords(saved))
+        self.assertFalse(restored.can_block(saved.uid,blocker.uid)[0])
+        restored._cleanup()
+        self.assertNotIn("flying",restored.current_keywords(saved))
+
+    def test_temporary_flying_changes_flying_mass_damage_filters(self):
+        game=ready(); brigade=self.add(game,10,"lea:153"); self.add(game,10,"mountain")
+        game.activate_ability(10,1)
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:200"
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game._resolve(spell_type(10,spell,"lea:200",x_value=1))
+        self.assertIn(brigade.uid,game.player(10).graveyard)
+
+    def test_dragon_whelp_fourth_activation_schedules_end_step_sacrifice(self):
+        game=ready(); whelp=self.add(game,10,"lea:141")
+        for _ in range(4): self.add(game,10,"mountain")
+        for _ in range(3): game.activate_ability(10,1)
+        self.assertFalse(whelp.sacrifice_at_end_step)
+        game.activate_ability(10,1)
+        self.assertEqual(game.current_stats(whelp),(6,3)); self.assertTrue(whelp.sacrifice_at_end_step)
+        restored=Game.from_raw(game.to_raw()); restored.phase="postcombat_main"; restored._advance()
+        self.assertIn(whelp.uid,restored.end_step_sacrifices)
+        restored=Game.from_raw(restored.to_raw())
+        restored.pass_priority(10); restored.pass_priority(20)
+        self.assertNotIn(whelp.uid,[x.uid for x in restored.player(10).battlefield])
+        self.assertIn(whelp.uid,restored.player(10).graveyard)
+
+    def test_whelp_scheduled_during_end_step_waits_for_next_end_step(self):
+        game=ready(); whelp=self.add(game,10,"lea:141")
+        for _ in range(4): self.add(game,10,"mountain")
+        game.phase="ending"
+        for _ in range(4): game.activate_ability(10,1)
+        game._advance()
+        self.assertIn(whelp.uid,[x.uid for x in game.player(10).battlefield])
+        self.assertTrue(next(x for x in game.player(10).battlefield if x.uid==whelp.uid).sacrifice_at_end_step)
+        game.phase="postcombat_main"; game._advance()
+        self.assertIn(whelp.uid,game.end_step_sacrifices)
+        game.pass_priority(game.active_user); game.pass_priority(game.opponent(game.active_user))
+        self.assertIn(whelp.uid,game.player(10).graveyard)
+
+
+    def test_players_can_bounce_whelp_in_response_to_sacrifice_trigger(self):
+        game=ready(); whelp=self.add(game,10,"lea:141")
+        for _ in range(4): self.add(game,10,"mountain")
+        island=self.add(game,20,"island")
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:86"; game.player(20).hand.insert(0,spell)
+        for _ in range(4): game.activate_ability(10,1)
+        game.phase="postcombat_main"; game._advance(); game.pass_priority(10)
+        game.play(20,1,"10:1"); game.pass_priority(10); game.pass_priority(20)
+        self.assertIn(whelp.uid,game.player(10).hand); self.assertTrue(island.tapped)
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertNotIn(whelp.uid,game.player(10).graveyard); self.assertFalse(game.end_step_sacrifices)
+
 class AlphaCounterspellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
@@ -462,10 +521,14 @@ class AlphaXSpellTests(unittest.TestCase):
         game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(10,spell,"lea:50","10",x_value=2)]
         raw=game.to_raw()
         for player in raw["players"].values():
-            for saved in player["battlefield"]: saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
+            for saved in player["battlefield"]:
+                saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
+                saved.pop("temporary_keywords",None); saved.pop("activations_this_turn",None); saved.pop("sacrifice_at_end_step",None)
         raw["stack"][0].pop("x_value")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
-        self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death); self.assertEqual(restored.stack[0].x_value,0)
+        self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death)
+        self.assertEqual(restored_permanent.temporary_keywords,[]); self.assertEqual(restored_permanent.activations_this_turn,0); self.assertFalse(restored_permanent.sacrifice_at_end_step)
+        self.assertEqual(restored.stack[0].x_value,0)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
         game=ready(); spell=self.add(game,10,"lea:50"); self.lands(game,10,["island","island","mountain","mountain","mountain"])

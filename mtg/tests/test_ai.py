@@ -244,6 +244,14 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.current_stats(dragon),(7,5)); self.assertEqual(game.priority_user,HUMAN)
         self.assertEqual(sum(event["action"]=="ai_activate" for event in game.history),2)
 
+    def test_ai_gives_attacking_balloon_brigade_flying_before_blockers(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
+        brigade=self.add(game,AI,"lea:153"); self.add(game,AI,"mountain")
+        game.active_index=0; game.attackers=[brigade.uid]; game.phase="after_attackers"; game.priority_user=AI
+        advance_solo(game)
+        self.assertIn("flying",game.current_keywords(brigade)); self.assertEqual(game.priority_user,HUMAN)
+        self.assertEqual(sum(event["action"]=="ai_activate" for event in game.history),1)
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

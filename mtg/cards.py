@@ -39,6 +39,8 @@ class Card:
     activation_cost: str = ""
     activated_power: int = 0
     activated_toughness: int = 0
+    activated_keyword: str = ""
+    sacrifice_after_activations: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -59,7 +61,14 @@ class Card:
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
         if self.activation_cost:
-            abilities.append(f"{self.activation_cost}: {self.activated_power:+d}/{self.activated_toughness:+d} until end of turn")
+            effects=[]
+            if self.activated_power or self.activated_toughness:
+                effects.append(f"{self.activated_power:+d}/{self.activated_toughness:+d} until end of turn")
+            if self.activated_keyword:
+                effects.append(f"Gains {self.activated_keyword.title()} until end of turn")
+            if self.sacrifice_after_activations:
+                effects.append(f"Sacrifice at the next end step after activation {self.sacrifice_after_activations}")
+            abilities.append(f"{self.activation_cost}: "+"; ".join(effects))
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -106,6 +115,8 @@ ALPHA_MANA_CREATURES = {
 }
 
 ALPHA_ACTIVATED_CREATURES = {
+    "lea:141": {"activation_cost":"{R}", "activated_power":1, "sacrifice_after_activations":4},
+    "lea:153": {"activation_cost":"{R}", "activated_keyword":"flying"},
     "lea:90": {"activation_cost":"{U}", "activated_power":1},
     "lea:109": {"activation_cost":"{B}", "activated_power":1, "activated_toughness":1},
     "lea:155": {"activation_cost":"{R}", "activated_toughness":1},
@@ -159,6 +170,7 @@ ALPHA_KEYWORDS = {
     "lea:69": ("flying",),
     "lea:89": ("defender", "flying"),
     "lea:90": ("defender",),
+    "lea:141": ("flying",),
     "lea:95": ("swampwalk",),
     "lea:118": ("flying",),
     "lea:155": ("flying",),
@@ -210,6 +222,8 @@ for reference in PLAYABLE_ALPHA:
         activation_cost=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_cost",""),
         activated_power=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_power",0),
         activated_toughness=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0),
+        activated_keyword=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_keyword",""),
+        sacrifice_after_activations=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("sacrifice_after_activations",0),
     )
 
 PACK_POOLS = {

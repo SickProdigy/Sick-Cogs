@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.21.0"
+    __version__="0.22.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -117,7 +117,10 @@ class MTG(commands.Cog):
             for n,x in enumerate(p.battlefield,1):
                 c=g.card(x.uid); state=" ↷" if x.tapped else ""
                 stats=(lambda value:f" {value[0]}/{value[1]}")(g.current_stats(x)) if c.creature else ""
-                abilities=f" [{c.ability_text}]" if c.ability_text else ""
+                active=sorted(g.current_keywords(x)-set(c.keywords))
+                ability_parts=[c.ability_text] if c.ability_text else []
+                if active: ability_parts.append("Active: "+", ".join(word.title() for word in active))
+                abilities=" ["+" / ".join(ability_parts)+"]" if ability_parts else ""
                 field.append(f"{n}. {c.name}{stats}{abilities}{state}")
             pool=" ".join(f"{{{symbol}}}×{count}" for symbol,count in sorted(p.mana_pool.items()))
             value="\n".join(field) or "No permanents"
@@ -125,6 +128,8 @@ class MTG(commands.Cog):
             if pool: value+=f"\nMana pool: {pool}"
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.stack: e.add_field(name="Stack · target with S:POSITION",value="\n".join(f"S:{position}. {g.card(spell.uid).name}{f' (X={spell.x_value})' if '{X}' in g.card(spell.uid).mana_cost else ''}" for position,spell in enumerate(reversed(g.stack),1)),inline=False)
+        if g.end_step_sacrifices:
+            e.add_field(name="Pending end-step trigger",value="Sacrifice "+", ".join(g.card(uid).name for uid in g.end_step_sacrifices)+" · players may respond",inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e

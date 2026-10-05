@@ -203,13 +203,14 @@ def _blocks(game, user, difficulty):
 
 
 def _activate_combat_pump(game,user):
-    if game.phase not in ("after_blockers","after_first_strike"): return None
+    if game.phase not in ("after_attackers","after_blockers","after_first_strike"): return None
     combat=set(game.attackers if game.active_user==user else game.blocks.values())
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
         card=game.card(permanent.uid)
-        if permanent.uid in combat and (card.activated_power or card.activated_toughness) and game.can_activate(user,position):
-            candidates.append((card.activated_power+card.activated_toughness,sum(game.current_stats(permanent)),position))
+        keyword_helpful=card.activated_keyword and card.activated_keyword not in game.current_keywords(permanent) and game.active_user==user
+        if permanent.uid in combat and (card.activated_power or card.activated_toughness or keyword_helpful) and game.can_activate(user,position):
+            candidates.append((card.activated_power+card.activated_toughness+bool(keyword_helpful),sum(game.current_stats(permanent)),position))
     if not candidates: return None
     position=max(candidates)[2]; game.activate_ability(user,position); return "activate"
 

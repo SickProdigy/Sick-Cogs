@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 26 creatures playable through 0.21.0; 51 remain |
+| Creatures with abilities | 77 | 28 creatures playable through 0.22.0; 49 remain |
 | Instants and sorceries | 70 | 29 spells playable through 0.20.0; 41 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Seven mana artifacts playable through 0.14.0; 35 remain |
@@ -45,12 +45,14 @@ The 0.20.0 X-spell promotion adds Braingeyser, Howl from Beyond, Disintegrate, E
 
 The 0.21.0 paid-pump promotion adds Frozen Shade, Granite Gargoyle, Shivan Dragon, Wall of Fire, and Wall of Water. `[p]mtg activate POSITION` pays the printed colored cost through the shared mana assignment engine without incorrectly applying summoning sickness to non-tap abilities. Separate persisted power/toughness bonuses support +1/+0, +0/+1, and +1/+1, affect combat and public rendering immediately, and clear at cleanup. The solo opponent repeatedly activates a participating attacker or blocker while it can legally pay.
 
+The 0.22.0 temporary-keyword and delayed-trigger promotion adds Goblin Balloon Brigade and Dragon Whelp. Temporary flying is persisted, displayed publicly, consulted by blocker legality and flying-sensitive mass damage, and removed at cleanup. Dragon Whelp counts activations per turn and schedules its sacrifice after the fourth; the pending end-step trigger survives reloads and grants both players priority, so an instant such as Unsummon can legally save it before resolution. Solo AI grants an attacking Balloon Brigade flying before blockers and uses Whelp through the shared combat-pump path.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, Ironclaw Orcs’ block restriction, summoning-sick creature mana activation, and live characteristic power/toughness are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
 3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, conditional/X counterspells, discard, library search, control changes, remaining board-wide effects, modes, multi-target division, and conditional X costs remain.
-4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activations, activation payments, tap costs, targets, untap restrictions, regeneration shields, and more complex activation controls remain.
+4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activation payments, temporary keywords, and delayed sacrifice triggers are complete. Tap costs, activation targets, untap restrictions, regeneration shields, and more complex activation controls remain.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.
 6. **Complex Alpha behavior:** X costs, copying, control changes, extra turns, delayed effects, face-down state, card-specific choices, and remaining manual exceptions.
 7. **Completion audit:** per-card behavior matrix, AI safety, persistence round trips, Discord component limits, complete-match simulations, and hands-on test matches.

@@ -126,6 +126,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Exile: 1",rendered); self.assertIn("Graveyard: 0",rendered)
 
+    async def test_public_embed_shows_active_temporary_keywords(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:153"
+        game.players[10].battlefield=[permanent_type(uid,"lea:153",sick=False,temporary_keywords=["flying"])]
+        self.assertIn("Active: Flying",str(cog.game_embed(game).to_dict()))
+        game.end_step_sacrifices=[uid]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Pending end-step trigger",rendered); self.assertIn("players may respond",rendered)
+
     async def test_public_embed_shows_live_characteristic_stats(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
