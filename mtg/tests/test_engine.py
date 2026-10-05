@@ -308,6 +308,54 @@ class StaticKeywordCombatTests(unittest.TestCase):
         self.assertIn(giant,game.players[10].battlefield)
 
 
+class AlphaCharacteristicStatsTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_nightmare_tracks_swamps_and_survives_round_trip(self):
+        game=ready(); nightmare=self.add(game,10,"lea:118")
+        self.assertEqual(game.current_stats(nightmare),(0,0))
+        swamp=self.add(game,10,"swamp")
+        self.assertEqual(game.current_stats(nightmare),(1,1))
+        restored=Game.from_raw(game.to_raw())
+        restored_nightmare=next(x for x in restored.player(10).battlefield if x.uid==nightmare.uid)
+        self.assertEqual(restored.current_stats(restored_nightmare),(1,1))
+        self.assertIn("flying",game.card(nightmare.uid).keywords)
+        game.player(10).battlefield.remove(swamp); game._sba()
+        self.assertIn(nightmare.uid,game.player(10).graveyard)
+
+    def test_plague_rats_count_both_players_and_cascade_state_actions(self):
+        game=ready(); first=self.add(game,10,"lea:121"); second=self.add(game,10,"lea:121"); enemy=self.add(game,20,"lea:121")
+        self.assertEqual(game.current_stats(first),(3,3)); self.assertEqual(game.current_stats(enemy),(3,3))
+        game.player(20).battlefield.remove(enemy); game.player(20).graveyard.append(enemy.uid)
+        first.damage=2; second.damage=1; game._sba()
+        self.assertFalse(any(game.card(x.uid).name=="Plague Rats" for x in game.player(10).battlefield))
+        self.assertIn(first.uid,game.player(10).graveyard); self.assertIn(second.uid,game.player(10).graveyard)
+
+    def test_keldon_warlord_counts_own_non_wall_creatures(self):
+        game=ready(); warlord=self.add(game,10,"lea:160"); self.add(game,10,"bear"); self.add(game,10,"lea:182"); self.add(game,20,"bear")
+        self.assertEqual(game.current_stats(warlord),(2,2))
+        self.assertEqual(game.projected_stats(10,game.card(warlord.uid)),(3,3))
+
+    def test_combat_and_block_restrictions_use_live_power(self):
+        game=ready(); warlord=self.add(game,10,"lea:160"); helper=self.add(game,10,"bear"); blocker=self.add(game,20,"lea:159")
+        game.attackers=[warlord.uid]
+        legal,reason=game.can_block(warlord.uid,blocker.uid)
+        self.assertFalse(legal); self.assertIn("power 2",reason)
+        game.player(10).battlefield.remove(helper)
+        self.assertTrue(game.can_block(warlord.uid,blocker.uid)[0])
+        game.blocks={}; game._combat_damage(False)
+        self.assertEqual(game.player(20).life,19)
+
+    def test_swords_uses_dynamic_power_before_exile(self):
+        game=ready(); caster=game.player(10); target_player=game.player(20)
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:40"; caster.hand.insert(0,spell)
+        self.add(game,10,"plains")
+        nightmare=self.add(game,20,"lea:118"); self.add(game,20,"swamp"); self.add(game,20,"swamp")
+        game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
+        self.assertIn(nightmare.uid,target_player.exile); self.assertEqual(target_player.life,22)
+
 class AlphaTargetedSpellTests(unittest.TestCase):
     def put_in_hand(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

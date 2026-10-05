@@ -211,6 +211,14 @@ class SoloAITests(unittest.TestCase):
         self.assertIn(_target(game,AI,cards["lea:214"]),{"G:1","G:2"})
 
 
+    def test_ai_values_live_characteristic_power_for_targets(self):
+        game=solo(); advance_solo(game)
+        self.add(game,HUMAN,"giant"); nightmare=self.add(game,HUMAN,"lea:118")
+        for _ in range(4): self.add(game,HUMAN,"swamp")
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(game.current_stats(nightmare),(4,4))
+        self.assertEqual(_target(game,AI,cards["lea:86"]),f"{HUMAN}:2")
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

@@ -126,6 +126,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Exile: 1",rendered); self.assertIn("Graveyard: 0",rendered)
 
+    async def test_public_embed_shows_live_characteristic_stats(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        nightmare=game.next_uid; game.next_uid+=1; game.cards[nightmare]="lea:118"
+        game.players[10].battlefield=[permanent_type(nightmare,"lea:118",sick=False)]
+        for _ in range(3):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]="swamp"; game.players[10].battlefield.append(permanent_type(uid,"swamp",sick=False))
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Nightmare 3/3",rendered)
+
     async def test_graveyard_command_lists_public_stable_positions(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))
         game=Game(1,[10,20],1); uid=game.players[10].library.pop(); game.players[10].graveyard.append(uid)

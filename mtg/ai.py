@@ -12,12 +12,12 @@ def _target(game, user, card):
     if card.effect=="return_creature_hand":
         creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).creature]
         if not creatures: return None
-        position,_=max(creatures,key=lambda item:game.card(item[1].uid).power+item[1].bonus+game.card(item[1].uid).toughness)
+        position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
         return f"{game.opponent(user)}:{position}"
     if card.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
         choices=[(position,uid) for position,uid in enumerate(game.player(user).graveyard,1) if card.effect=="return_grave_card_hand" or game.card(uid).creature]
         if not choices: return None
-        position,_=max(choices,key=lambda item:(game.card(item[1]).power+game.card(item[1]).toughness,game.card(item[1]).cost))
+        position,_=max(choices,key=lambda item:(sum(game.projected_stats(user,game.card(item[1]))),game.card(item[1]).cost))
         return f"G:{position}"
     if card.effect in ("destroy_creature","exile_creature_life"):
         creatures=[]
@@ -28,7 +28,7 @@ def _target(game, user, card):
             if card.target_nonblack and "B" in target.colors: continue
             creatures.append((position,permanent))
         if not creatures: return None
-        position,_=max(creatures,key=lambda item:game.card(item[1].uid).power+item[1].bonus+game.card(item[1].uid).toughness)
+        position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
         return f"{game.opponent(user)}:{position}"
     if card.effect == "destroy_permanent":
         targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).kind in card.target_types]
@@ -49,7 +49,7 @@ def _target(game, user, card):
         if card.effect == "pump_blocking":
             blocking=set(game.blocks.values()); creatures=[item for item in creatures if item[1].uid in blocking]
         if not creatures: return None
-        position, _ = max(creatures, key=lambda item: game.card(item[1].uid).power + item[1].bonus)
+        position, _ = max(creatures, key=lambda item: game.current_stats(item[1])[0])
         return f"{user}:{position}"
     return None
 
@@ -101,7 +101,7 @@ def _play_one(game, user, difficulty):
             continue
         score = 0
         if card.creature:
-            score = card.power + card.toughness
+            score = sum(game.projected_stats(user,card))
         elif card.kind == "Artifact" and card.produces:
             score = 5
         elif card.effect in ("damage","damage_any"):
@@ -162,17 +162,17 @@ def _blocks(game, user, difficulty):
         blockers = blockers[::2]
     assignments = {}
     for attacker_position, attacker_uid in sorted(
-        enumerate(game.attackers, 1), key=lambda item: game.card(item[1]).power, reverse=True
+        enumerate(game.attackers, 1), key=lambda item: game.current_stats(next(x for x in game.player(game.active_user).battlefield if x.uid==item[1]))[0], reverse=True
     ):
         if not blockers:
             break
-        attacker = game.card(attacker_uid)
+        attacker_perm=next(x for x in game.player(game.active_user).battlefield if x.uid==attacker_uid)
         legal = [item for item in blockers if game.can_block(attacker_uid,item[1].uid)[0]]
         if not legal:
             continue
-        attacker_power = attacker.power
-        survivable = [item for item in legal if game.card(item[1].uid).toughness + item[1].bonus > attacker_power]
-        choice = min(survivable or legal, key=lambda item: game.card(item[1].uid).power + game.card(item[1].uid).toughness)
+        attacker_power = game.current_stats(attacker_perm)[0]
+        survivable = [item for item in legal if game.current_stats(item[1])[1] > attacker_power]
+        choice = min(survivable or legal, key=lambda item: sum(game.current_stats(item[1])))
         assignments[attacker_position] = choice[0]
         blockers.remove(choice)
     return assignments

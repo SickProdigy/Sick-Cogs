@@ -34,6 +34,7 @@ class Card:
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
+    characteristic_pt: Optional[str] = None
     type_line: str = ""
     set_code: str = ""
 
@@ -95,6 +96,12 @@ ALPHA_MANA_CREATURES = {
     "lea:210": ("G",),
 }
 
+ALPHA_CHARACTERISTIC_CREATURES = {
+    "lea:118": "swamps",
+    "lea:121": "plague_rats",
+    "lea:160": "non_wall_creatures",
+}
+
 ALPHA_SPELLS = {
     "lea:36": {"effect":"pump_blocking", "amount":7},
     "lea:47": {"effect":"draw_target", "amount":3},
@@ -126,6 +133,7 @@ ALPHA_KEYWORDS = {
     "lea:69": ("flying",),
     "lea:89": ("defender", "flying"),
     "lea:95": ("swampwalk",),
+    "lea:118": ("flying",),
     "lea:170": ("flying",),
     "lea:182": ("defender",),
     "lea:191": ("first_strike",),
@@ -153,8 +161,8 @@ for reference in PLAYABLE_ALPHA:
         rarity=reference.rarity,
         pack_slot="alpha",
         cost=int(reference.mana_value),
-        power=int(reference.power) if reference.power is not None else 0,
-        toughness=int(reference.toughness) if reference.toughness is not None else 0,
+        power=int(reference.power) if str(reference.power).isdigit() else 0,
+        toughness=int(reference.toughness) if str(reference.toughness).isdigit() else 0,
         text=reference.oracle_text,
         effect=ALPHA_SPELLS.get(reference.key, {}).get("effect"),
         amount=ALPHA_SPELLS.get(reference.key, {}).get("amount",0),
@@ -167,6 +175,7 @@ for reference in PLAYABLE_ALPHA:
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
+        characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),
     )
 
 PACK_POOLS = {
@@ -182,7 +191,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_MANA_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

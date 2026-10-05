@@ -87,6 +87,24 @@ class Game:
         except KeyError as e: raise GameError("You are not in this game.") from e
     def card(self,uid): return CARDS[self.cards[uid]]
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
+    def characteristic_stats(self,user,card,entering=False):
+        player=self.player(user)
+        if card.characteristic_pt=="swamps":
+            value=sum(self.card(x.uid).has_land_type("swamp") for x in player.battlefield)
+        elif card.characteristic_pt=="plague_rats":
+            value=sum(self.card(x.uid).name=="Plague Rats" for p in self.players.values() for x in p.battlefield)+(1 if entering else 0)
+        elif card.characteristic_pt=="non_wall_creatures":
+            value=sum(self.card(x.uid).creature and "Wall" not in self.card(x.uid).type_line for x in player.battlefield)+(1 if entering else 0)
+        else:
+            return card.power,card.toughness
+        return value,value
+    def current_stats(self,permanent):
+        owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
+        if owner is None: raise GameError("Permanent is not on the battlefield.")
+        power,toughness=self.characteristic_stats(owner,self.card(permanent.uid))
+        return power+permanent.bonus,toughness+permanent.bonus
+    def projected_stats(self,user,card):
+        return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -357,7 +375,8 @@ class Game:
         for land_type in ("plains","island","swamp","mountain","forest"):
             if f"{land_type}walk" in attacker.keywords and any(self.card(x.uid).has_land_type(land_type) for x in defender.battlefield):
                 return False,f"{attacker.name} can't be blocked while the defender controls a {land_type.title()}."
-        power=attacker.power+next((x.bonus for x in self.players[self.active_user].battlefield if x.uid==attacker_uid),0)
+        attacker_perm=next(x for x in self.players[self.active_user].battlefield if x.uid==attacker_uid)
+        power=self.current_stats(attacker_perm)[0]
         if blocker.max_block_power is not None and power>blocker.max_block_power:
             return False,f"{blocker.name} can't block a creature with power {power}."
         return True,""
@@ -378,9 +397,9 @@ class Game:
             attacker_strikes=("first_strike" in self.card(a.uid).keywords)==first_strike
             blocker_strikes=b is not None and (("first_strike" in self.card(b.uid).keywords)==first_strike)
             if attacker_strikes:
-                if block_uid is None: dfn.life-=self.card(a.uid).power+a.bonus
-                elif b is not None: b.damage+=self.card(a.uid).power+a.bonus
-            if blocker_strikes: a.damage+=self.card(b.uid).power+b.bonus
+                if block_uid is None: dfn.life-=self.current_stats(a)[0]
+                elif b is not None: b.damage+=self.current_stats(a)[0]
+            if blocker_strikes: a.damage+=self.current_stats(b)[0]
         self._sba(); self._life()
 
     def _end_combat(self):
@@ -429,9 +448,10 @@ class Game:
             legal=target_card is not None and target_card.creature and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in target_card.colors)
             if not legal:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
             controller.battlefield.remove(target)
             if c.effect=="exile_creature_life":
-                controller.exile.append(target.uid); controller.life+=max(0,target_card.power+target.bonus)
+                controller.exile.append(target.uid); controller.life+=life_gain
             else: controller.graveyard.append(target.uid)
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_creatures":
@@ -463,13 +483,13 @@ class Game:
     def _perm(self,p,uid):
         return next(x for x in p.battlefield if x.uid==uid)
     def _sba(self):
-        for p in self.players.values():
-            alive=[]
-            for x in p.battlefield:
-                c=self.card(x.uid)
-                if c.creature and x.damage>=c.toughness+x.bonus: p.graveyard.append(x.uid)
-                else: alive.append(x)
-            p.battlefield=alive
+        while True:
+            doomed={p.user_id:[x for x in p.battlefield if self.card(x.uid).creature and x.damage>=self.current_stats(x)[1]] for p in self.players.values()}
+            if not any(doomed.values()): return
+            for p in self.players.values():
+                deaths=doomed[p.user_id]
+                p.battlefield=[x for x in p.battlefield if x not in deaths]
+                p.graveyard.extend(x.uid for x in deaths)
     def _cleanup(self):
         for p in self.players.values():
             for x in p.battlefield: x.damage=x.bonus=0
