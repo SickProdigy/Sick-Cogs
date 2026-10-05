@@ -56,6 +56,7 @@ Current develop experiments include:
 - `advancedhelp` — audience-first, permission-filtered interactive Red help.
 - `codex` — private manual Codex allowance-cycle reminders.
 - `twitter` — native X API post announcements.
+- `mtg` — experimental persistent two-player Magic rules prototype.
 
 ## External Cog Sync Helper
 
