@@ -381,6 +381,17 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertEqual(game.stack[-1].uid,aura); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
+    def test_ai_casts_scaling_aura_and_activates_blessing_in_combat(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        bear=self.add(game,AI,"bear"); aspect=self.add(game,AI,"lea:184","hand"); self.add(game,AI,"forest"); self.add(game,AI,"forest")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].uid,aspect); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+
+        pump=solo(order=(AI,HUMAN)); pump.player(HUMAN).kept=True; pump.player(AI).kept=True; pump.player(AI).hand=[]
+        attacker=self.add(pump,AI,"bear"); aura=self.add(pump,AI,"lea:7"); aura.attached_to=attacker.uid; self.add(pump,AI,"plains")
+        pump.active_index=0; pump.attackers=[attacker.uid]; pump.phase="after_attackers"; pump.priority_user=AI
+        advance_solo(pump); self.assertEqual(pump.stack[-1].source_uid,aura.uid); self.assertEqual(pump.stack[-1].target,f"{AI}:{attacker.uid}")
+
     def test_ai_activates_an_attached_combat_pump(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         bear=self.add(game,AI,"bear"); aura=self.add(game,AI,"lea:150"); aura.attached_to=bear.uid; self.add(game,AI,"mountain")

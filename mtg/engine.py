@@ -122,6 +122,12 @@ class Game:
         return None,None
     def attached_auras(self,permanent):
         return [aura for player in self.players.values() for aura in player.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_target_types]
+    def aura_stats(self,aura):
+        card=self.card(aura.uid)
+        if not card.aura_forest_scaling: return card.aura_power,card.aura_toughness
+        controller,_=self.find_permanent(aura.uid)
+        forests=sum(self.card(x.uid).has_land_type("forest") for x in controller.battlefield)
+        return forests//2,(forests+1)//2
     def continuous_lords(self,permanent):
         controller=next((player for player in self.players.values() if permanent in player.battlefield),None)
         if controller is None: return []
@@ -168,10 +174,11 @@ class Game:
         if owner is None: raise GameError("Permanent is not on the battlefield.")
         card=self.card(permanent.uid); power,toughness=self.characteristic_stats(owner,card)
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
-        auras=[self.card(aura.uid) for aura in self.attached_auras(permanent)]
+        auras=self.attached_auras(permanent)
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
         globals_=[source for source_user,player in self.players.items() for source in player.battlefield if self.global_buff_applies(source,source_user,permanent,owner)]
-        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+sum(lord.lord_power for lord in lords)+sum(self.card(source.uid).global_power for source in globals_)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+sum(lord.lord_toughness for lord in lords)+sum(self.card(source.uid).global_toughness for source in globals_)+permanent.bonus+permanent.toughness_bonus
+        aura_bonuses=[self.aura_stats(aura) for aura in auras]
+        return power+swamp_bonus+sum(bonus[0] for bonus in aura_bonuses)+sum(lord.lord_power for lord in lords)+sum(self.card(source.uid).global_power for source in globals_)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(bonus[1] for bonus in aura_bonuses)+sum(lord.lord_toughness for lord in lords)+sum(self.card(source.uid).global_toughness for source in globals_)+permanent.bonus+permanent.toughness_bonus
     def global_buff_applies(self,source,source_user,target,target_user):
         effect=self.card(source.uid); target_card=self.card(target.uid)
         if not target_card.creature or not (effect.global_power or effect.global_toughness): return False
@@ -629,6 +636,8 @@ class Game:
         if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
         if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
+        if "fear" in attacker_keywords and not (blocker.has_type("Artifact") or "B" in self.current_colors(blocker_perm)):
+            return False,f"{blocker.name} cannot block a creature with fear."
         if set(self.current_colors(blocker_perm)) & self.current_protections(attacker_perm): return False,f"{attacker.name} has protection from {blocker.name}."
         if any(self.card(aura.uid).aura_blocked_except_wall for aura in self.attached_auras(attacker_perm)) and not self._has_subtype(blocker,"Wall"):
             return False,f"{attacker.name} can only be blocked by Walls."

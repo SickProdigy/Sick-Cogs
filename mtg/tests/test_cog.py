@@ -156,6 +156,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Castle",rendered); self.assertIn("Untapped creatures you control get +0/+2",rendered); self.assertIn("Bear Cub 2/4",rendered)
 
+    async def test_public_embed_shows_forest_scaled_aura_stats_and_fear(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        def add(user,key,attached_to=None):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=permanent_type(uid,key,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+        bear=add(10,"bear"); add(10,"lea:184",bear.uid); add(10,"lea:108",bear.uid); add(10,"forest"); add(10,"forest"); add(10,"forest")
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Bear Cub 3/4",rendered); self.assertIn("Enchanted creature gets +X/+Y for Forests you control",rendered); self.assertIn("Enchanted creature has Fear",rendered)
+
     async def test_public_embed_shows_printed_and_granted_protection(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

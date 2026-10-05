@@ -39,6 +39,7 @@ class Card:
     aura_target_subtypes: Tuple[str, ...] = ()
     aura_power: int = 0
     aura_toughness: int = 0
+    aura_forest_scaling: bool = False
     aura_keyword: str = ""
     aura_attack_override: bool = False
     aura_blocked_except_wall: bool = False
@@ -106,6 +107,7 @@ class Card:
             abilities.append(", ".join(costs)+": "+"; ".join(effects))
         aura=[]
         if self.aura_power or self.aura_toughness: aura.append(f"Enchanted creature gets {self.aura_power:+d}/{self.aura_toughness:+d}")
+        if self.aura_forest_scaling: aura.append("Enchanted creature gets +X/+Y for Forests you control")
         if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
         if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
@@ -163,6 +165,9 @@ ALPHA_GLOBAL_ENCHANTMENTS = {
 }
 
 ALPHA_ENCHANTMENTS = {
+    "lea:7": {"aura_target_types":("Creature",), "activation_cost":"{W}", "activated_power":1, "activated_toughness":1, "activation_attached":True, "activation_text":"Enchanted creature gets +1/+1 until end of turn"},
+    "lea:108": {"aura_target_types":("Creature",), "aura_keyword":"fear"},
+    "lea:184": {"aura_target_types":("Creature",), "aura_forest_scaling":True},
     "lea:5": {"aura_target_types":("Creature",), "aura_protection":"B", "protection_self_exception":True},
     "lea:8": {"aura_target_types":("Creature",), "aura_protection":"U", "protection_self_exception":True},
     "lea:20": {"aura_target_types":("Creature",), "aura_protection":"G", "protection_self_exception":True},
@@ -349,6 +354,7 @@ for reference in PLAYABLE_ALPHA:
         aura_target_subtypes=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_subtypes",()),
         aura_power=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_power",0),
         aura_toughness=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_toughness",0),
+        aura_forest_scaling=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_forest_scaling",False),
         aura_keyword=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_keyword",""),
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),

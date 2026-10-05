@@ -164,7 +164,8 @@ def _play_one(game, user, difficulty):
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
         elif card.aura_target_types:
-            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
+            scaling=sum(game.card(permanent.uid).has_land_type("forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
+            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
         elif card.effect=="damage_x_exile":

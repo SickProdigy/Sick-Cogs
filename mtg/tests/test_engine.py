@@ -1322,6 +1322,29 @@ class AlphaAuraTests(unittest.TestCase):
         burrowing=self.add(game,10,"lea:138",attached_to=attacker.uid); self.add(game,20,"mountain")
         legal,reason=game.can_block(attacker.uid,blocker.uid); self.assertFalse(legal); self.assertIn("Mountain",reason)
 
+    def test_blessing_uses_attached_repeatable_power_and_toughness_pump(self):
+        game=ready(); bear=self.add(game,10,"bear"); aura=self.add(game,10,"lea:7",attached_to=bear.uid); self.add(game,10,"plains")
+        game.priority_user=10; game.activate_ability(10,2); self.assertEqual(game.stack[-1].target,f"10:{bear.uid}")
+        self.resolve_top(game); self.assertEqual(game.current_stats(bear),(3,3)); self.assertIn(aura,game.player(10).battlefield)
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]; self.assertEqual(restored.current_stats(saved),(3,3))
+        restored._cleanup(); self.assertEqual(restored.current_stats(saved),(2,2))
+
+    def test_fear_allows_only_black_or_artifact_creatures_to_block(self):
+        game=ready(); attacker=self.add(game,10,"bear"); self.add(game,10,"lea:108",attached_to=attacker.uid)
+        ordinary=self.add(game,20,"bear"); black=self.add(game,20,"lea:125"); artifact=self.add(game,20,"lea:267")
+        game.active_index=0
+        self.assertFalse(game.can_block(attacker.uid,ordinary.uid)[0])
+        self.assertTrue(game.can_block(attacker.uid,black.uid)[0]); self.assertTrue(game.can_block(attacker.uid,artifact.uid)[0])
+        black.color_override="G"; self.assertFalse(game.can_block(attacker.uid,black.uid)[0])
+
+    def test_aspect_of_wolf_uses_its_controllers_live_forest_count(self):
+        game=ready(); bear=self.add(game,20,"bear"); aura=self.add(game,10,"lea:184",attached_to=bear.uid)
+        forests=[self.add(game,10,"forest") for _ in range(3)]; self.add(game,20,"forest")
+        self.assertEqual(game.current_stats(bear),(3,4))
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(20).battlefield[0]; self.assertEqual(restored.current_stats(saved),(3,4))
+        saved.damage=3; controller=restored.player(10); controller.battlefield.remove(controller.battlefield[-1]); controller.graveyard.append(forests[-1].uid); restored._sba()
+        self.assertIn(saved.uid,restored.player(20).graveyard); self.assertIn(aura.uid,restored.player(10).graveyard)
+
     def test_animate_wall_allows_only_an_enchanted_wall_to_attack(self):
         game=ready(); wall=self.add(game,10,"lea:225")
         game.phase="attackers"; game.priority_user=None
