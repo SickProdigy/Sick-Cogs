@@ -8,9 +8,9 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 16 combat-ability creatures playable through 0.9.0; 61 remain |
-| Instants and sorceries | 70 | 11 spells playable through 0.12.0; 59 remain |
+| Instants and sorceries | 70 | 13 spells playable through 0.13.0; 57 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
-| Artifacts | 42 | Artifact permanents, mana abilities, activation costs, and continuous effects |
+| Artifacts | 42 | Five Moxen playable in 0.13.0; 37 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -27,12 +27,14 @@ The 0.11.0 targeted-spell promotion adds Lightning Bolt, Psionic Blast, Giant Gr
 
 The 0.12.0 mana-pool and land-destruction promotion adds Armageddon, Sinkhole, Flashfires, Stone Rain, Ice Storm, and Tsunami. Players may manually tap a land for a chosen color while they have priority; the public, persisted pool can pay later spells in that step and empties at the next step or phase boundary. Targeted destruction uses stable permanent identity and can fizzle, while mass effects inspect basic land types so Alpha duals interact correctly.
 
+The 0.13.0 artifact-foundation promotion adds Mox Emerald, Mox Jet, Mox Pearl, Mox Ruby, Mox Sapphire, Shatter, and Disenchant. The Moxen cast for zero, resolve as persisted artifact permanents, can produce mana immediately, and participate in automatic or manual payment. Shatter and Disenchant validate permanent types before payment and again on resolution; Disenchant supports both artifact and enchantment targets. Black Lotus and Sol Ring remain reference-only until sacrifice costs and multi-mana activations are represented without losing surplus mana.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, and Ironclaw Orcs’ block restriction are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
-3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, and floating-mana responses are complete. Destroy/sacrifice, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, modes, and X costs remain.
-4. **Artifacts and activated abilities:** artifact permanents, mana pools, chosen colors, tap/sacrifice costs, reusable activations, and activation controls.
+3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, modes, and X costs remain.
+4. **Artifacts and activated abilities (in progress):** artifact permanents, one-mana tap abilities, mana pools, chosen colors, and artifact destruction are complete. Tap-plus-sacrifice costs, multi-mana production, reusable non-mana activations, and activation controls remain.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.
 6. **Complex Alpha behavior:** X costs, copying, control changes, extra turns, delayed effects, face-down state, card-specific choices, and remaining manual exceptions.
 7. **Completion audit:** per-card behavior matrix, AI safety, persistence round trips, Discord component limits, complete-match simulations, and hands-on test matches.

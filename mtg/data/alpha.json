@@ -423,7 +423,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "spell",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:19",
@@ -3989,7 +3989,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "spell",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:174",
@@ -5889,7 +5889,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:262",
@@ -5910,7 +5910,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:263",
@@ -5931,7 +5931,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:264",
@@ -5952,7 +5952,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:265",
@@ -5973,7 +5973,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:266",

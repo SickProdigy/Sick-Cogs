@@ -130,9 +130,9 @@ class Game:
         for symbol,count in player.mana_pool.items():
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
         for permanent in player.battlefield:
-            land=self.card(permanent.uid)
-            if land.land and not permanent.tapped:
-                sources.append(("land",str(permanent.uid),land.produces,permanent))
+            source=self.card(permanent.uid)
+            if source.produces and not permanent.tapped:
+                sources.append(("permanent",str(permanent.uid),source.produces,permanent))
 
         def assign(symbols,remaining,selected):
             if not symbols: return selected,remaining
@@ -152,7 +152,7 @@ class Game:
         selected+=sorted(remaining,key=lambda source:source[0]!="pool")[:generic]
         lands=[]; pool={}
         for kind,identifier,options,permanent in selected:
-            if kind=="land": lands.append(permanent)
+            if kind=="permanent": lands.append(permanent)
             else:
                 symbol=options[0]; pool[symbol]=pool.get(symbol,0)+1
         return lands,pool
@@ -164,7 +164,7 @@ class Game:
         self._priority(user); player=self.player(user)
         if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
-        if not card.land or not card.produces: raise GameError("That permanent has no supported mana ability.")
+        if not card.produces: raise GameError("That permanent has no supported mana ability.")
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
@@ -231,6 +231,15 @@ class Game:
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
+        if c.effect=="destroy_permanent":
+            if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]; kind=self.card(permanent.uid).kind
+            if kind not in c.target_types: raise GameError("Target has an unsupported permanent type.")
+            return f"{target_user}:{permanent.uid}"
         if c.effect=="destroy_land":
             if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
             try: target_user,pos=(int(x) for x in target.split(":"))
@@ -351,7 +360,7 @@ class Game:
 
     def _resolve(self,s):
         p=self.players[s.owner]; c=CARDS[s.key]
-        if c.creature: p.battlefield.append(Permanent(s.uid,c.key))
+        if c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect=="draw_target": self._draw(self.player(int(s.target)),c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
@@ -368,6 +377,12 @@ class Game:
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             target.bonus+=c.amount; p.graveyard.append(s.uid)
+        elif c.effect=="destroy_permanent":
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            target=next((x for x in controller.battlefield if x.uid==uid),None)
+            if target is None or self.card(target.uid).kind not in c.target_types:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            controller.battlefield.remove(target); controller.graveyard.append(target.uid); p.graveyard.append(s.uid)
         elif c.effect=="destroy_land":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)

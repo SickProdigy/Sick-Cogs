@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
-from mtg.cards import CARDS, starter
+from unittest.mock import patch
+from mtg.cards import CARDS, Card, starter
 from mtg.engine import Game, GameError, Permanent
 
 def ready(seed=7):
@@ -411,6 +412,64 @@ class AlphaLandDestructionTests(unittest.TestCase):
         game.pass_priority(10); game.play(20,1,"20:1")
         self.assertEqual(game.players[20].mana_pool,{})
         self.assertIn(growth,[spell.uid for spell in game.stack]); self.assertEqual(bear.bonus,0)
+
+
+class AlphaArtifactTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.players[user].hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.players[user].battlefield.append(permanent); return permanent
+
+    def resolve(self,game):
+        game.pass_priority(20); game.pass_priority(10)
+
+    def test_mox_casts_as_persistent_immediate_mana_artifact(self):
+        game=ready(); mox=self.add(game,10,"lea:264","hand")
+        game.play(10,1); self.resolve(game)
+        permanent=game.players[10].battlefield[0]
+        self.assertEqual(permanent.uid,mox); self.assertEqual(game.card(mox).kind,"Artifact")
+        self.assertTrue(permanent.sick)
+        game.activate_mana(10,1)
+        self.assertTrue(permanent.tapped); self.assertEqual(game.players[10].mana_pool,{"R":1})
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.players[10].mana_pool,{"R":1})
+        self.assertTrue(restored.players[10].battlefield[0].tapped)
+
+    def test_automatic_payment_can_use_mox(self):
+        game=ready(); mox=self.add(game,10,"lea:264"); mountain=self.add(game,10,"mountain")
+        self.add(game,10,"lea:161","hand")
+        game.play(10,1,"20")
+        self.assertTrue(mox.tapped); self.assertFalse(mountain.tapped)
+
+    def test_shatter_destroys_artifact_and_illegal_target_preserves_costs(self):
+        game=ready(); target=self.add(game,20,"lea:261"); spell=self.add(game,10,"lea:173","hand")
+        lands=[self.add(game,10,key) for key in ("mountain","mountain")]
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertNotIn(target,game.players[20].battlefield); self.assertIn(target.uid,game.players[20].graveyard)
+        self.assertIn(spell,game.players[10].graveyard)
+
+        invalid=ready(); held=self.add(invalid,10,"lea:173","hand")
+        sources=[self.add(invalid,10,key) for key in ("mountain","mountain")]
+        self.add(invalid,20,"forest")
+        with self.assertRaisesRegex(GameError,"unsupported permanent type"):
+            invalid.play(10,1,"20:1")
+        self.assertEqual(invalid.players[10].hand[0],held); self.assertTrue(all(not source.tapped for source in sources))
+
+    def test_disenchant_supports_enchantments_and_fizzles_when_target_leaves(self):
+        enchantment=Card("test_enchantment","Test Enchantment","Enchantment","test-scryfall","test-oracle")
+        with patch.dict(CARDS,{"test_enchantment":enchantment}):
+            game=ready(); target=self.add(game,20,"test_enchantment")
+            spell=self.add(game,10,"lea:18","hand")
+            for key in ("plains","plains"): self.add(game,10,key)
+            game.play(10,1,"20:1"); self.resolve(game)
+            self.assertNotIn(target,game.players[20].battlefield); self.assertIn(spell,game.players[10].graveyard)
+
+            fizzled=ready(); vanished=self.add(fizzled,20,"test_enchantment")
+            self.add(fizzled,10,"lea:18","hand")
+            for key in ("plains","plains"): self.add(fizzled,10,key)
+            fizzled.play(10,1,"20:1"); fizzled.players[20].battlefield.remove(vanished)
+            fizzled.players[20].graveyard.append(vanished.uid); self.resolve(fizzled)
+            self.assertIn("fizzled",fizzled.log[-1])
 
 
 class SpellTests(unittest.TestCase):

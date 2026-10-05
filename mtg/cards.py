@@ -26,6 +26,7 @@ class Card:
     amount: int = 0
     self_damage: int = 0
     land_type: str = ""
+    target_types: Tuple[str, ...] = ()
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -48,7 +49,7 @@ class Card:
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
-        if self.land and self.produces: abilities.append("Produces "+"/".join(self.produces))
+        if self.produces: abilities.append("Produces "+"/".join(self.produces))
         return ", ".join(abilities)
 
     def has_land_type(self,land_type):
@@ -73,6 +74,14 @@ BASE_CARDS = {
 
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
 
+ALPHA_ARTIFACTS = {
+    "lea:261": ("G",),
+    "lea:262": ("B",),
+    "lea:263": ("W",),
+    "lea:264": ("R",),
+    "lea:265": ("U",),
+}
+
 ALPHA_SPELLS = {
     "lea:36": {"effect":"pump_blocking", "amount":7},
     "lea:47": {"effect":"draw_target", "amount":3},
@@ -85,6 +94,8 @@ ALPHA_SPELLS = {
     "lea:177": {"effect":"destroy_land"},
     "lea:201": {"effect":"destroy_land"},
     "lea:221": {"effect":"destroy_land_type", "land_type":"island"},
+    "lea:18": {"effect":"destroy_permanent", "target_types":("Artifact","Enchantment")},
+    "lea:173": {"effect":"destroy_permanent", "target_types":("Artifact",)},
 }
 
 ALPHA_KEYWORDS = {
@@ -110,14 +121,14 @@ for reference in PLAYABLE_ALPHA:
     CARDS[reference.key] = Card(
         key=reference.key,
         name=reference.name,
-        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family == "spell" else "Creature",
+        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family in {"spell","artifact"} else "Creature",
         type_line=reference.type_line,
         set_code="lea",
         scryfall_id=reference.scryfall_id,
         oracle_id=reference.oracle_id,
         mana_cost=reference.mana_cost,
         colors=reference.colors,
-        produces=reference.color_identity if reference.support_family == "land" else (),
+        produces=ALPHA_ARTIFACTS.get(reference.key, reference.color_identity if reference.support_family == "land" else ()),
         rarity=reference.rarity,
         pack_slot="alpha",
         cost=int(reference.mana_value),
@@ -128,6 +139,7 @@ for reference in PLAYABLE_ALPHA:
         amount=ALPHA_SPELLS.get(reference.key, {}).get("amount",0),
         self_damage=ALPHA_SPELLS.get(reference.key, {}).get("self_damage",0),
         land_type=ALPHA_SPELLS.get(reference.key, {}).get("land_type",""),
+        target_types=ALPHA_SPELLS.get(reference.key, {}).get("target_types",()),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
     )
@@ -153,3 +165,6 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALP
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
     raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
+
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):
+    raise RuntimeError("Playable Alpha artifacts do not match the validated artifact map.")

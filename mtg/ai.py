@@ -9,6 +9,11 @@ def _target(game, user, card):
         return str(game.opponent(user))
     if card.effect == "draw_target":
         return str(user)
+    if card.effect == "destroy_permanent":
+        targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).kind in card.target_types]
+        if not targets: return None
+        position,_=max(targets,key=lambda item:(bool(game.card(item[1].uid).produces),game.card(item[1].uid).cost))
+        return f"{game.opponent(user)}:{position}"
     if card.effect == "destroy_land":
         lands=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).land]
         if not lands: return None
@@ -44,11 +49,13 @@ def _play_one(game, user, difficulty):
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
         target = _target(game, user, card)
-        if card.effect in ("pump","pump_blocking","destroy_land") and target is None:
+        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent") and target is None:
             continue
         score = 0
         if card.creature:
             score = card.power + card.toughness
+        elif card.kind == "Artifact" and card.produces:
+            score = 5
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
         elif card.effect in ("draw","draw_target"):
@@ -59,6 +66,8 @@ def _play_one(game, user, difficulty):
             score = 4 + card.amount
         elif card.effect == "destroy_land":
             score = 11
+        elif card.effect == "destroy_permanent":
+            score = 10
         elif card.effect in ("destroy_all_lands","destroy_land_type"):
             enemy=sum(1 for permanent in game.player(game.opponent(user)).battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
             own=sum(1 for permanent in player.battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))

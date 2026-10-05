@@ -153,5 +153,13 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(_target(game,AI,card),f"{HUMAN}:1")
 
 
+    def test_ai_targets_opponent_mox_for_shatter(self):
+        game=solo(); advance_solo(game)
+        artifact_uid=game.next_uid; game.next_uid+=1; game.cards[artifact_uid]="lea:261"
+        game.player(HUMAN).battlefield=[Permanent(artifact_uid,"lea:261",sick=True)]
+        card=__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:173"]
+        self.assertEqual(_target(game,AI,card),f"{HUMAN}:1")
+
+
 if __name__ == "__main__":
     unittest.main()

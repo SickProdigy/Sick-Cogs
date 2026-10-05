@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import ALPHA_KEYWORDS, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.cards import ALPHA_ARTIFACTS, ALPHA_KEYWORDS, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
@@ -14,13 +14,13 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),121)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),121)
+        self.assertEqual(len(CARDS),128)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),128)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
-        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type"})
-        self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery"} for card in CARDS.values()))
+        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent"})
+        self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact"} for card in CARDS.values()))
         self.assertTrue(all(card.power>=0 and card.toughness>=0 for card in CARDS.values()))
 
     def test_pack_pools_cover_catalog_without_duplicates(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),61)
-        self.assertEqual(len(REFERENCE_ALPHA),234)
+        self.assertEqual(len(PLAYABLE_ALPHA),68)
+        self.assertEqual(len(REFERENCE_ALPHA),227)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -55,7 +55,12 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(promoted_lands,ALPHA_LAND_KEYS)
         promoted_spells={card.key for card in PLAYABLE_ALPHA if card.support_family=="spell"}
         self.assertEqual(promoted_spells,set(ALPHA_SPELLS))
-        self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery")) for card in PLAYABLE_ALPHA))
+        promoted_artifacts={card.key for card in PLAYABLE_ALPHA if card.support_family=="artifact"}
+        self.assertEqual(promoted_artifacts,set(ALPHA_ARTIFACTS))
+        self.assertTrue(all(CARDS[key].kind=="Artifact" and CARDS[key].produces for key in ALPHA_ARTIFACTS))
+        self.assertEqual(CARDS["lea:264"].ability_text,"Produces R")
+        self.assertEqual(CARDS["lea:18"].target_types,("Artifact","Enchantment"))
+        self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery","Artifact")) for card in PLAYABLE_ALPHA))
         self.assertTrue(all(CARDS[key].land and CARDS[key].produces for key in ALPHA_LAND_KEYS))
 
     def test_alpha_search_handles_names_printing_keys_and_basic_art(self):
@@ -84,7 +89,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         await MTG.catalog.callback(cog,ctx,query=None)
         sent=ctx.send.await_args.kwargs; embed=sent["embed"]; view=sent["view"]
         self.assertEqual(len(embed.description.splitlines()),15)
-        self.assertIn("121 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("128 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
