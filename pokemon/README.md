@@ -11,6 +11,7 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Modern encounter art plus a generated Game Boy-inspired battle scene with bounded sprite/render caches and accessible embed text.
+- An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
 - Red user-data deletion releases affected encounters.
 
 Collections are global only within one bot installation. Separate bots do not share data.
@@ -24,7 +25,13 @@ Collections are global only within one bot installation. Separate bots do not sh
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
 
-Player commands include `[p]pokemon collection`, `pokedex`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+
+## Pokédex styles
+
+The Retro style is the initial bot default. The bot owner can change that with `[p]pokemon set pokedexstyle retro|compact`. Members can select their own style with `[p]pokemon pokedexstyle retro|compact` or return to the owner-selected default with `[p]pokemon pokedexstyle default`. The style selector inside the interactive Pokédex also saves the member's choice.
+
+Presentation is intentionally modular: a style implements list and detail embed rendering and is registered in `POKEDEX_STYLES`. Navigation, filtering, search, generation selection, ownership checks, and unseen/seen/caught disclosure rules remain shared. Community themes must preserve those disclosure rules, remain readable on mobile, avoid proprietary assets, and retain usable embed text independent of decorative imagery. Unknown or removed style keys safely fall back to Retro.
 
 ## Boundaries
 
