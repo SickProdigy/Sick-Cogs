@@ -202,6 +202,17 @@ def _blocks(game, user, difficulty):
     return assignments
 
 
+def _activate_combat_pump(game,user):
+    if game.phase not in ("after_blockers","after_first_strike"): return None
+    combat=set(game.attackers if game.active_user==user else game.blocks.values())
+    candidates=[]
+    for position,permanent in enumerate(game.player(user).battlefield,1):
+        card=game.card(permanent.uid)
+        if permanent.uid in combat and (card.activated_power or card.activated_toughness) and game.can_activate(user,position):
+            candidates.append((card.activated_power+card.activated_toughness,sum(game.current_stats(permanent)),position))
+    if not candidates: return None
+    position=max(candidates)[2]; game.activate_ability(user,position); return "activate"
+
 def advance_solo(game: Game):
     """Advance a persisted solo match until the human must act."""
     user = getattr(game, "ai_user", None)
@@ -237,7 +248,7 @@ def advance_solo(game: Game):
             continue
         if game.priority_user != user:
             return changed
-        action = _play_one(game, user, difficulty)
+        action = _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

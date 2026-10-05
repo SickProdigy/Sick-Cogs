@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.20.0"
+    __version__="0.21.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -359,6 +359,10 @@ class MTG(commands.Cog):
     async def mana(self,ctx,position:int,color:str=None):
         """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
+    @mtg.command(name="activate")
+    async def activate(self,ctx,position:int):
+        """Activate the supported non-mana ability of a battlefield permanent."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
         """Play/cast a hand position with optional target and X; use - for no target."""

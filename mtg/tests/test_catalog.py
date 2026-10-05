@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import ALPHA_ARTIFACTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_KEYWORDS, ALPHA_MANA_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.cards import ALPHA_ACTIVATED_CREATURES, ALPHA_ARTIFACTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_KEYWORDS, ALPHA_MANA_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),151)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),151)
+        self.assertEqual(len(CARDS),156)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),156)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,18 +42,24 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),91)
-        self.assertEqual(len(REFERENCE_ALPHA),204)
+        self.assertEqual(len(PLAYABLE_ALPHA),96)
+        self.assertEqual(len(REFERENCE_ALPHA),199)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
             "digital_adaptation_required":1,
         })
         promoted_abilities={card.key for card in PLAYABLE_ALPHA if card.support_family=="creature_ability"}
-        self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|set(ALPHA_MANA_CREATURES)|set(ALPHA_CHARACTERISTIC_CREATURES)|{"lea:159"})
+        self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|set(ALPHA_MANA_CREATURES)|set(ALPHA_CHARACTERISTIC_CREATURES)|set(ALPHA_ACTIVATED_CREATURES)|{"lea:159"})
         self.assertEqual(CARDS["lea:186"].ability_text,"Flying, Produces W/U/B/R/G")
         self.assertEqual(CARDS["lea:210"].ability_text,"Produces G")
         self.assertEqual({key:CARDS[key].characteristic_pt for key in ALPHA_CHARACTERISTIC_CREATURES},ALPHA_CHARACTERISTIC_CREATURES)
+        for key,ability in ALPHA_ACTIVATED_CREATURES.items():
+            self.assertEqual(CARDS[key].activation_cost,ability["activation_cost"])
+            self.assertEqual(CARDS[key].activated_power,ability.get("activated_power",0))
+            self.assertEqual(CARDS[key].activated_toughness,ability.get("activated_toughness",0))
+        self.assertEqual(CARDS["lea:90"].ability_text,"Defender, {U}: +1/+0 until end of turn")
+        self.assertEqual(CARDS["lea:155"].ability_text,"Flying, {R}: +0/+1 until end of turn")
         promoted_lands={card.key for card in PLAYABLE_ALPHA if card.support_family=="land"}
         self.assertEqual(promoted_lands,ALPHA_LAND_KEYS)
         promoted_spells={card.key for card in PLAYABLE_ALPHA if card.support_family=="spell"}
@@ -100,7 +106,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("151 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("156 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

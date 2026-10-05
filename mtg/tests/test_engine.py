@@ -356,6 +356,55 @@ class AlphaCharacteristicStatsTests(unittest.TestCase):
         game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
         self.assertIn(nightmare.uid,target_player.exile); self.assertEqual(target_player.life,22)
 
+class AlphaActivatedPumpTests(unittest.TestCase):
+    def add(self,game,user,key,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_pump_activations_pay_mana_and_ignore_summoning_sickness(self):
+        game=ready(); shade=self.add(game,10,"lea:109",sick=True); first=self.add(game,10,"swamp"); second=self.add(game,10,"swamp")
+        game.activate_ability(10,1); game.activate_ability(10,1)
+        self.assertEqual(game.current_stats(shade),(2,3)); self.assertEqual((shade.power_bonus,shade.toughness_bonus),(2,2))
+        self.assertTrue(first.tapped); self.assertTrue(second.tapped)
+
+    def test_asymmetric_pumps_persist_and_cleanup(self):
+        for key,land,expected in (("lea:174","mountain",(6,5)),("lea:155","mountain",(2,3)),("lea:90","island",(1,5)),("lea:181","mountain",(1,5))):
+            with self.subTest(key=key):
+                game=ready(); creature=self.add(game,10,key); self.add(game,10,land)
+                game.activate_ability(10,1); restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]
+                self.assertEqual(restored.current_stats(saved),expected)
+                restored._cleanup(); self.assertEqual((saved.power_bonus,saved.toughness_bonus),(0,0))
+
+    def test_toughness_activation_changes_combat_survival(self):
+        game=ready(); attacker=self.add(game,20,"bear"); gargoyle=self.add(game,10,"lea:155"); self.add(game,10,"mountain")
+        game.active_index=1; game.attackers=[attacker.uid]; game.blocks={attacker.uid:gargoyle.uid}; game.phase="after_blockers"; game.priority_user=10
+        game.activate_ability(10,1); game._combat_damage(False)
+        self.assertIn(gargoyle,game.player(10).battlefield); self.assertEqual(gargoyle.damage,2); self.assertIn(attacker.uid,game.player(20).graveyard)
+
+    def test_activation_spends_pool_before_sources_and_preserves_surplus(self):
+        game=ready(); dragon=self.add(game,10,"lea:174"); game.player(10).mana_pool={"R":2}
+        game.activate_ability(10,1)
+        self.assertEqual(game.player(10).mana_pool,{"R":1}); self.assertEqual(game.current_stats(dragon),(6,5))
+
+    def test_activation_rejects_missing_ability_or_mana_without_mutation(self):
+        no_ability=ready(); bear=self.add(no_ability,10,"bear")
+        with self.assertRaisesRegex(GameError,"no supported activated ability"):
+            no_ability.activate_ability(10,1)
+        self.assertEqual(no_ability.current_stats(bear),(2,2))
+
+        no_mana=ready(); dragon=self.add(no_mana,10,"lea:174")
+        with self.assertRaisesRegex(GameError,"cannot pay"):
+            no_mana.activate_ability(10,1)
+        self.assertEqual(no_mana.current_stats(dragon),(5,5))
+
+    def test_activation_resets_priority_passes_and_stack_passes(self):
+        game=ready(); dragon=self.add(game,10,"lea:174"); self.add(game,10,"mountain")
+        spell_uid=game.next_uid; game.next_uid+=1; game.cards[spell_uid]="shock"
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game.stack=[spell_type(20,spell_uid,"shock","10",passes=1)]; game.phase_passes=1
+        game.activate_ability(10,1)
+        self.assertEqual(game.phase_passes,0); self.assertEqual(game.stack[0].passes,0); self.assertEqual(game.current_stats(dragon),(6,5))
+
 class AlphaCounterspellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
@@ -413,10 +462,10 @@ class AlphaXSpellTests(unittest.TestCase):
         game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(10,spell,"lea:50","10",x_value=2)]
         raw=game.to_raw()
         for player in raw["players"].values():
-            for saved in player["battlefield"]: saved.pop("power_bonus",None); saved.pop("exile_on_death",None)
+            for saved in player["battlefield"]: saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
         raw["stack"][0].pop("x_value")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
-        self.assertEqual(restored_permanent.power_bonus,0); self.assertFalse(restored_permanent.exile_on_death); self.assertEqual(restored.stack[0].x_value,0)
+        self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death); self.assertEqual(restored.stack[0].x_value,0)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
         game=ready(); spell=self.add(game,10,"lea:50"); self.lands(game,10,["island","island","mountain","mountain","mountain"])

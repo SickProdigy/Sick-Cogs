@@ -236,6 +236,14 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.stack[-1].x_value,2); self.assertEqual(game.stack[-1].target,str(HUMAN))
 
+    def test_ai_uses_paid_pump_abilities_during_combat(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
+        dragon=self.add(game,AI,"lea:174"); self.add(game,AI,"mountain"); self.add(game,AI,"mountain")
+        game.active_index=0; game.attackers=[dragon.uid]; game.blocks={}; game.phase="after_blockers"; game.priority_user=AI
+        advance_solo(game)
+        self.assertEqual(game.current_stats(dragon),(7,5)); self.assertEqual(game.priority_user,HUMAN)
+        self.assertEqual(sum(event["action"]=="ai_activate" for event in game.history),2)
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

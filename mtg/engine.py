@@ -16,6 +16,7 @@ class Permanent:
     damage: int = 0
     bonus: int = 0
     power_bonus: int = 0
+    toughness_bonus: int = 0
     exile_on_death: bool = False
 
 @dataclass
@@ -105,7 +106,7 @@ class Game:
         owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
         if owner is None: raise GameError("Permanent is not on the battlefield.")
         power,toughness=self.characteristic_stats(owner,self.card(permanent.uid))
-        return power+permanent.bonus+permanent.power_bonus,toughness+permanent.bonus
+        return power+permanent.bonus+permanent.power_bonus,toughness+permanent.bonus+permanent.toughness_bonus
     def projected_stats(self,user,card):
         return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
 
@@ -137,8 +138,8 @@ class Game:
         self.log.append(f"Turn {self.turn}: {self.active_user}.")
 
     @staticmethod
-    def _mana_requirements(card,x_value=0):
-        symbols=re.findall(r"\{([^}]+)\}",card.mana_cost or "")
+    def _mana_requirements(card,x_value=0,mana_cost=None):
+        symbols=re.findall(r"\{([^}]+)\}",card.mana_cost if mana_cost is None else mana_cost)
         generic=0; colored=[]
         for symbol in symbols:
             if symbol.isdigit(): generic+=int(symbol)
@@ -147,8 +148,8 @@ class Game:
             else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
         return generic,colored
 
-    def _mana_payment(self,player,card,x_value=0):
-        generic,colored=self._mana_requirements(card,x_value)
+    def _mana_payment(self,player,card,x_value=0,mana_cost=None):
+        generic,colored=self._mana_requirements(card,x_value,mana_cost)
         sources=[]
         for symbol,count in player.mana_pool.items():
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
@@ -187,6 +188,29 @@ class Game:
         value=0
         while self.can_pay(user,card,value+1): value+=1
         return value
+
+    def can_activate(self,user,position):
+        player=self.player(user)
+        if not 1<=position<=len(player.battlefield): return False
+        card=self.card(player.battlefield[position-1].uid)
+        return bool(card.activation_cost and self._mana_payment(player,card,mana_cost=card.activation_cost) is not None)
+
+    def activate_ability(self,user,position):
+        self._priority(user); player=self.player(user)
+        if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
+        if not card.activation_cost: raise GameError("That permanent has no supported activated ability.")
+        payment=self._mana_payment(player,card,mana_cost=card.activation_cost)
+        if payment is None: raise GameError(f"You cannot pay {card.activation_cost} for {card.name}.")
+        sources,pool=payment
+        for source in sources: source.tapped=True
+        for symbol,count in pool.items():
+            player.mana_pool[symbol]-=count
+            if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
+        permanent.power_bonus+=card.activated_power; permanent.toughness_bonus+=card.activated_toughness
+        self.phase_passes=0
+        for spell in self.stack: spell.passes=0
+        self.log.append(f"{user} activated {card.name} ({card.activated_power:+d}/{card.activated_toughness:+d}).")
 
     def activate_mana(self,user,position,color=None):
         self._priority(user); player=self.player(user)
@@ -566,7 +590,7 @@ class Game:
                 p.graveyard.extend(x.uid for x in deaths if not x.exile_on_death)
     def _cleanup(self):
         for p in self.players.values():
-            for x in p.battlefield: x.damage=x.bonus=x.power_bonus=0; x.exile_on_death=False
+            for x in p.battlefield: x.damage=x.bonus=x.power_bonus=x.toughness_bonus=0; x.exile_on_death=False
     def _life(self):
         losers=[p.user_id for p in self.players.values() if p.life<=0]
         if len(losers)==2: self._finish(None,"both players reached zero life")

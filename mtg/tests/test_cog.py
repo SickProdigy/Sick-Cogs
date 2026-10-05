@@ -146,6 +146,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
         self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Howl from Beyond (X=0)","S:2. Counterspell","S:3. Shock"])
 
+    async def test_activate_command_uses_shared_game_action(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.activate.callback(cog,ctx,position=3)
+        _,mutation,action=cog.mutate_ctx.await_args.args
+        game=SimpleNamespace(activate_ability=Mock()); mutation(game)
+        game.activate_ability.assert_called_once_with(10,3); self.assertEqual(action,"activate")
+
     async def test_play_command_accepts_x_and_dash_for_no_target(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
         await MTG.play.callback(cog,ctx,position=2,target="-",x_value=3)
