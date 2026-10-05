@@ -51,7 +51,7 @@ class Imagine(commands.Cog):
     """Private, provider-neutral image generation."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "0.2.1"
+    __version__ = "1.0.0"
 
     def __init__(self, bot):
         self.bot = bot
