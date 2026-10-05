@@ -49,9 +49,9 @@ class TurnTests(unittest.TestCase):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty")
-        for player in raw["players"].values(): player.pop("mana_pool")
+        for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
         restored=Game.from_raw(raw)
-        self.assertTrue(all(player.mana_pool=={} for player in restored.players.values()))
+        self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[])
         self.assertGreater(restored.updated_at,0)
 
@@ -496,6 +496,52 @@ class AlphaArtifactTests(unittest.TestCase):
             fizzled.play(10,1,"20:1"); fizzled.players[20].battlefield.remove(vanished)
             fizzled.players[20].graveyard.append(vanished.uid); self.resolve(fizzled)
             self.assertIn("fizzled",fizzled.log[-1])
+
+
+class AlphaCreatureRemovalTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.players[user].hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.players[user].battlefield.append(permanent); return permanent
+
+    def resolve(self,game):
+        game.pass_priority(20); game.pass_priority(10)
+
+    def test_swords_exiles_creature_and_controller_gains_current_power(self):
+        game=ready(); target=self.add(game,20,"bear"); target.bonus=3
+        spell=self.add(game,10,"lea:40","hand"); self.add(game,10,"plains")
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertNotIn(target,game.players[20].battlefield); self.assertNotIn(target.uid,game.players[20].graveyard)
+        self.assertIn(target.uid,game.players[20].exile); self.assertEqual(game.players[20].life,25)
+        self.assertIn(spell,game.players[10].graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.players[20].exile,[target.uid])
+
+    def test_swords_fizzles_without_life_when_target_leaves(self):
+        game=ready(); target=self.add(game,20,"bear"); self.add(game,10,"lea:40","hand"); self.add(game,10,"plains")
+        game.play(10,1,"20:1"); game.players[20].battlefield.remove(target); game.players[20].graveyard.append(target.uid)
+        self.resolve(game)
+        self.assertEqual(game.players[20].life,20); self.assertIn("fizzled",game.log[-1])
+
+    def test_terror_enforces_nonartifact_nonblack_and_destroys_legal_creature(self):
+        for illegal_key,message in (("lea:267","nonartifact"),("lea:125","nonblack")):
+            with self.subTest(target=illegal_key):
+                game=ready(); held=self.add(game,10,"lea:130","hand"); sources=[self.add(game,10,"swamp") for _ in range(2)]
+                self.add(game,20,illegal_key)
+                with self.assertRaisesRegex(GameError,message): game.play(10,1,"20:1")
+                self.assertEqual(game.players[10].hand[0],held); self.assertTrue(all(not source.tapped for source in sources))
+        game=ready(); target=self.add(game,20,"bear"); self.add(game,10,"lea:130","hand")
+        for _ in range(2): self.add(game,10,"swamp")
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertNotIn(target,game.players[20].battlefield); self.assertIn(target.uid,game.players[20].graveyard)
+
+    def test_wrath_destroys_all_creatures_but_preserves_other_permanents(self):
+        game=ready(); own=self.add(game,10,"bear"); enemy=self.add(game,20,"lea:125")
+        artifact=self.add(game,20,"lea:261"); land=self.add(game,20,"forest")
+        self.add(game,10,"lea:45","hand")
+        for _ in range(4): self.add(game,10,"plains")
+        game.play(10,1); self.resolve(game)
+        self.assertIn(own.uid,game.players[10].graveyard); self.assertIn(enemy.uid,game.players[20].graveyard)
+        self.assertIn(artifact,game.players[20].battlefield); self.assertIn(land,game.players[20].battlefield)
 
 
 class SpellTests(unittest.TestCase):

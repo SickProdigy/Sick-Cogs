@@ -29,6 +29,8 @@ class Card:
     target_types: Tuple[str, ...] = ()
     mana_amount: int = 1
     sacrifice_for_mana: bool = False
+    target_nonartifact: bool = False
+    target_nonblack: bool = False
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -102,6 +104,9 @@ ALPHA_SPELLS = {
     "lea:221": {"effect":"destroy_land_type", "land_type":"island"},
     "lea:18": {"effect":"destroy_permanent", "target_types":("Artifact","Enchantment")},
     "lea:173": {"effect":"destroy_permanent", "target_types":("Artifact",)},
+    "lea:40": {"effect":"exile_creature_life"},
+    "lea:45": {"effect":"destroy_all_creatures"},
+    "lea:130": {"effect":"destroy_creature", "target_nonartifact":True, "target_nonblack":True},
 }
 
 ALPHA_KEYWORDS = {
@@ -148,6 +153,8 @@ for reference in PLAYABLE_ALPHA:
         target_types=ALPHA_SPELLS.get(reference.key, {}).get("target_types",()),
         mana_amount=ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1),
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
+        target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
+        target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
     )

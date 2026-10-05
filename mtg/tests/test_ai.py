@@ -189,5 +189,15 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.stack[-1].uid,growth); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
 
+    def test_ai_removal_targets_obey_terror_restrictions(self):
+        game=solo(); advance_solo(game)
+        artifact=self.add(game,HUMAN,"lea:267"); black=self.add(game,HUMAN,"lea:125"); legal=self.add(game,HUMAN,"bear")
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(_target(game,AI,cards["lea:130"]),f"{HUMAN}:3")
+        self.assertEqual(_target(game,AI,cards["lea:40"]),f"{HUMAN}:1")
+        game.player(HUMAN).battlefield.remove(legal)
+        self.assertIsNone(_target(game,AI,cards["lea:130"]))
+
+
 if __name__ == "__main__":
     unittest.main()

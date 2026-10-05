@@ -24,6 +24,7 @@ class Player:
     library: List[int] = field(default_factory=list)
     hand: List[int] = field(default_factory=list)
     graveyard: List[int] = field(default_factory=list)
+    exile: List[int] = field(default_factory=list)
     mana_pool: Dict[str, int] = field(default_factory=dict)
     battlefield: List[Permanent] = field(default_factory=list)
     land_played: bool = False
@@ -225,6 +226,12 @@ class Game:
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID or USER_ID:POSITION.") from e
             self.player(target_user); return str(target_user)
+        if c.effect in ("destroy_creature","exile_creature_life"):
+            target_user,permanent=self._target_creature(target)
+            target_card=self.card(permanent.uid)
+            if c.target_nonartifact and "Artifact" in target_card.type_line: raise GameError("Target must be a nonartifact creature.")
+            if c.target_nonblack and "B" in target_card.colors: raise GameError("Target must be a nonblack creature.")
+            return f"{target_user}:{permanent.uid}"
         if c.effect in ("pump","pump_blocking"):
             target_user,permanent=self._target_creature(target)
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
@@ -380,6 +387,24 @@ class Game:
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             target.bonus+=c.amount; p.graveyard.append(s.uid)
+        elif c.effect in ("destroy_creature","exile_creature_life"):
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            target=next((x for x in controller.battlefield if x.uid==uid),None)
+            target_card=self.card(target.uid) if target is not None else None
+            legal=target_card is not None and target_card.creature and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and "B" in target_card.colors)
+            if not legal:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            controller.battlefield.remove(target)
+            if c.effect=="exile_creature_life":
+                controller.exile.append(target.uid); controller.life+=max(0,target_card.power+target.bonus)
+            else: controller.graveyard.append(target.uid)
+            p.graveyard.append(s.uid)
+        elif c.effect=="destroy_all_creatures":
+            for controller in self.players.values():
+                destroyed=[x for x in controller.battlefield if self.card(x.uid).creature]
+                controller.battlefield=[x for x in controller.battlefield if x not in destroyed]
+                controller.graveyard.extend(x.uid for x in destroyed)
+            p.graveyard.append(s.uid)
         elif c.effect=="destroy_permanent":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
@@ -436,6 +461,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

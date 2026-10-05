@@ -176,7 +176,7 @@ def render_battlefield(game, names, paths, background_path):
         pool=" ".join(f"{symbol}{count}" for symbol,count in sorted(player.mana_pool.items())) or "-"
         summary = (
             f"{names[user]}  |  Life {player.life}  |  Hand {len(player.hand)}  |  "
-            f"Library {len(player.library)}  |  Graveyard {len(player.graveyard)}  |  Mana {pool}  |  Exile 0"
+            f"Library {len(player.library)}  |  Graveyard {len(player.graveyard)}  |  Mana {pool}  |  Exile {len(player.exile)}"
         )
         draw.text((214, y0 + 12), summary, fill=(249, 241, 220), font=label_font)
         permanents = player.battlefield[:8]

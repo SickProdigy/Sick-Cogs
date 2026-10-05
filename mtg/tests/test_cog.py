@@ -122,6 +122,9 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.players[10].mana_pool={"B":1,"R":2}
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Mana pool",rendered); self.assertIn("{R}×2",rendered)
+        game.players[10].exile=[uid]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Exile: 1",rendered); self.assertIn("Graveyard: 0",rendered)
 
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
