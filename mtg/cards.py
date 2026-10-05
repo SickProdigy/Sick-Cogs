@@ -43,6 +43,9 @@ class Card:
     aura_blocked_except_wall: bool = False
     aura_hostile: bool = False
     activation_attached: bool = False
+    protection_colors: Tuple[str, ...] = ()
+    aura_protection: str = ""
+    protection_self_exception: bool = False
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -92,9 +95,11 @@ class Card:
         aura=[]
         if self.aura_power or self.aura_toughness: aura.append(f"Enchanted creature gets {self.aura_power:+d}/{self.aura_toughness:+d}")
         if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
+        if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
         if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
         abilities.extend(aura)
+        if self.protection_colors: abilities.append("Protection From "+"/".join(self.protection_colors))
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -126,6 +131,11 @@ BASE_CARDS = {
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
 
 ALPHA_ENCHANTMENTS = {
+    "lea:5": {"aura_target_types":("Creature",), "aura_protection":"B", "protection_self_exception":True},
+    "lea:8": {"aura_target_types":("Creature",), "aura_protection":"U", "protection_self_exception":True},
+    "lea:20": {"aura_target_types":("Creature",), "aura_protection":"G", "protection_self_exception":True},
+    "lea:33": {"aura_target_types":("Creature",), "aura_protection":"R", "protection_self_exception":True},
+    "lea:44": {"aura_target_types":("Creature",), "aura_protection":"W", "protection_self_exception":True},
     "lea:1": {"aura_target_types":("Creature",), "aura_target_subtypes":("Wall",), "aura_attack_override":True},
     "lea:23": {"aura_target_types":("Creature",), "aura_toughness":2, "activation_cost":"{W}", "activated_toughness":1, "activation_attached":True, "activation_text":"Enchanted creature gets +0/+1 until end of turn"},
     "lea:24": {"aura_target_types":("Creature",), "aura_power":1, "aura_toughness":2},
@@ -179,6 +189,11 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:181": {"activation_cost":"{R}", "activated_power":1},
 }
 
+ALPHA_PROTECTIONS = {
+    "lea:43": ("B",),
+    "lea:94": ("W",),
+}
+
 ALPHA_CHARACTERISTIC_CREATURES = {
     "lea:118": "swamps",
     "lea:121": "plague_rats",
@@ -226,11 +241,13 @@ ALPHA_SPELLS = {
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
+    "lea:43": ("first_strike",),
     "lea:46": ("flying",),
     "lea:64": ("flying",),
     "lea:69": ("flying",),
     "lea:89": ("defender", "flying"),
     "lea:90": ("defender",),
+    "lea:94": ("first_strike",),
     "lea:141": ("flying",),
     "lea:95": ("swampwalk",),
     "lea:118": ("flying",),
@@ -291,6 +308,9 @@ for reference in PLAYABLE_ALPHA:
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_hostile",False),
+        aura_protection=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_protection",""),
+        protection_self_exception=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("protection_self_exception",False),
+        protection_colors=ALPHA_PROTECTIONS.get(reference.key,()),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),
@@ -321,7 +341,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

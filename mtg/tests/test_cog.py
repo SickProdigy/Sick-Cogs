@@ -147,6 +147,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Bear Cub 3/4",rendered); self.assertIn("Attached to Bear Cub",rendered)
 
+    async def test_public_embed_shows_printed_and_granted_protection(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        knight=game.next_uid; game.next_uid+=1; game.cards[knight]="lea:43"; protected=permanent_type(knight,"lea:43",sick=False)
+        ward=game.next_uid; game.next_uid+=1; game.cards[ward]="lea:33"; aura=permanent_type(ward,"lea:33",sick=False,attached_to=knight)
+        game.player(10).battlefield=[protected,aura]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Protection From B",rendered); self.assertIn("Active protection: R",rendered); self.assertIn("Attached to White Knight",rendered)
+
     async def test_public_embed_shows_live_characteristic_stats(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

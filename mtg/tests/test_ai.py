@@ -199,6 +199,27 @@ class SoloAITests(unittest.TestCase):
         self.assertIsNone(_target(game,AI,cards["lea:130"]))
 
 
+    def test_ai_avoids_targets_with_matching_color_protection(self):
+        game=solo(); advance_solo(game)
+        protected=self.add(game,HUMAN,"lea:94"); legal=self.add(game,HUMAN,"bear")
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(_target(game,AI,cards["lea:40"]),f"{HUMAN}:2")
+        game.player(HUMAN).battlefield=[protected]
+        self.assertIsNone(_target(game,AI,cards["lea:40"]))
+
+        aura_game=solo(); advance_solo(aura_game)
+        protected=self.add(aura_game,HUMAN,"lea:43"); legal=self.add(aura_game,HUMAN,"bear")
+        self.assertEqual(_target(aura_game,AI,cards["lea:134"]),f"{HUMAN}:2")
+        aura_game.player(HUMAN).battlefield=[protected]
+        self.assertIsNone(_target(aura_game,AI,cards["lea:134"]))
+
+    def test_ai_does_not_assign_a_matching_color_blocker(self):
+        game=solo(); advance_solo(game)
+        attacker=self.add(game,HUMAN,"lea:43"); blocker=self.add(game,AI,"lea:94")
+        game.attackers=[attacker.uid]; game.phase="blockers"; game.priority_user=None
+        advance_solo(game)
+        self.assertEqual(game.blocks,{})
+
     def test_ai_chooses_legal_bounce_and_graveyard_targets(self):
         game=solo(); advance_solo(game)
         weak=self.add(game,HUMAN,"bear"); strong=self.add(game,HUMAN,"giant")

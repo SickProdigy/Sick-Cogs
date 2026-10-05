@@ -1119,6 +1119,90 @@ class AlphaAuraTests(unittest.TestCase):
         self.assertEqual(game.current_stats(target),(2,2)); self.assertIn(target,game.player(20).battlefield); self.assertIn(aura.uid,game.player(10).graveyard)
 
 
+class AlphaProtectionTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_knights_have_first_strike_and_printed_protection(self):
+        game=ready(); white=self.add(game,10,"lea:43"); black=self.add(game,20,"lea:94")
+        self.assertEqual(game.current_keywords(white),{"first_strike"}); self.assertEqual(game.current_protections(white),{"B"})
+        self.assertEqual(game.current_keywords(black),{"first_strike"}); self.assertEqual(game.current_protections(black),{"W"})
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.current_protections(restored.player(10).battlefield[0]),{"B"})
+
+    def test_protection_rejects_spells_before_payment(self):
+        game=ready(); knight=self.add(game,20,"lea:94"); swords=self.add(game,10,"lea:40","hand"); plains=self.add(game,10,"plains")
+        with self.assertRaisesRegex(GameError,"protection"): game.play(10,1,"20:1")
+        self.assertIn(swords,game.player(10).hand); self.assertFalse(plains.tapped)
+        other=ready(); white=self.add(other,20,"lea:43"); terror=self.add(other,10,"lea:130","hand"); swamps=[self.add(other,10,"swamp") for _ in range(2)]
+        with self.assertRaisesRegex(GameError,"protection"): other.play(10,1,"20:1")
+        self.assertIn(terror,other.player(10).hand); self.assertTrue(all(not land.tapped for land in swamps))
+
+    def test_targeted_spell_fizzles_when_target_gains_protection(self):
+        game=ready(); target=self.add(game,20,"bear"); bolt=self.add(game,10,"lea:161","hand"); self.add(game,10,"mountain")
+        game.play(10,1,"20:1")
+        ward=self.add(game,20,"lea:33",attached_to=target.uid)
+        self.resolve_top(game)
+        self.assertEqual(target.damage,0); self.assertIn(bolt,game.player(10).graveyard); self.assertIn("protection",game.log[-1])
+        self.assertIn(ward,game.player(20).battlefield)
+
+    def test_protection_prevents_matching_mass_damage_but_not_wrath(self):
+        game=ready(); protected=self.add(game,20,"bear"); ward=self.add(game,20,"lea:33",attached_to=protected.uid); exposed=self.add(game,20,"goblin")
+        quake=self.add(game,10,"lea:146","hand"); self.add(game,10,"mountain"); self.add(game,10,"mountain")
+        game.play(10,1,x_value=1); self.resolve_top(game)
+        self.assertEqual(protected.damage,0); self.assertIn(exposed.uid,game.player(20).graveyard)
+        game.priority_user=10; wrath=self.add(game,10,"lea:45","hand")
+        for _ in range(2): self.add(game,10,"plains")
+        for _ in range(2): self.add(game,10,"mountain")
+        game.play(10,1); self.resolve_top(game)
+        self.assertIn(protected.uid,game.player(20).graveyard); self.assertIn(ward.uid,game.player(20).graveyard)
+
+    def test_protection_restricts_blockers_and_prevents_existing_combat_damage(self):
+        game=ready(); white=self.add(game,10,"lea:43"); black=self.add(game,20,"lea:94"); red=self.add(game,20,"goblin")
+        game.active_index=0
+        self.assertFalse(game.can_block(white.uid,black.uid)[0]); self.assertTrue(game.can_block(white.uid,red.uid)[0])
+        game.attackers=[white.uid]; game.blocks={white.uid:black.uid}; game.blocked_attackers=[white.uid]
+        game._combat_damage(True)
+        self.assertEqual(white.damage,0); self.assertEqual(black.damage,0)
+        self.assertIn(white,game.player(10).battlefield); self.assertIn(black,game.player(20).battlefield)
+
+    def test_white_ward_keeps_itself_but_removes_other_white_aura(self):
+        game=ready(); target=self.add(game,10,"bear")
+        strength=self.add(game,10,"lea:24",attached_to=target.uid); ward=self.add(game,10,"lea:44",attached_to=target.uid)
+        self.assertEqual(game.current_protections(target),{"W"}); game._sba()
+        self.assertIn(ward,game.player(10).battlefield); self.assertIn(strength.uid,game.player(10).graveyard)
+        self.assertEqual(game.current_protections(target),{"W"}); self.assertEqual(game.current_stats(target),(2,2))
+
+    def test_new_ward_removes_matching_color_aura_and_matching_aura_cannot_be_cast(self):
+        game=ready(); target=self.add(game,20,"bear"); weakness=self.add(game,10,"lea:134",attached_to=target.uid)
+        ward=self.add(game,20,"lea:5",attached_to=target.uid); game._sba()
+        self.assertIn(weakness.uid,game.player(10).graveyard); self.assertIn(ward,game.player(20).battlefield)
+        illegal=ready(); knight=self.add(illegal,20,"lea:43"); held=self.add(illegal,10,"lea:134","hand"); swamp=self.add(illegal,10,"swamp")
+        with self.assertRaisesRegex(GameError,"cannot enchant"): illegal.play(10,1,"20:1")
+        self.assertIn(held,illegal.player(10).hand); self.assertFalse(swamp.tapped)
+
+    def test_protection_rejects_and_fizzles_targeted_activated_abilities(self):
+        game=ready(); target=self.add(game,20,"bear"); ward=self.add(game,20,"lea:8",attached_to=target.uid); wizard=self.add(game,10,"lea:73")
+        game.priority_user=10
+        with self.assertRaisesRegex(GameError,"protection"): game.activate_ability(10,1,"20:1")
+        self.assertFalse(wizard.tapped)
+        other=ready(); victim=self.add(other,20,"bear"); wizard=self.add(other,10,"lea:73")
+        other.activate_ability(10,1,"20:1"); self.add(other,20,"lea:8",attached_to=victim.uid)
+        self.resolve_top(other)
+        self.assertEqual(victim.damage,0); self.assertIn("protection",other.log[-1])
+
+    def test_each_ward_grants_its_declared_color(self):
+        for key,color in (("lea:5","B"),("lea:8","U"),("lea:20","G"),("lea:33","R"),("lea:44","W")):
+            with self.subTest(key=key):
+                game=ready(); target=self.add(game,10,"bear"); aura=self.add(game,10,key,attached_to=target.uid)
+                game._sba(); self.assertIn(aura,game.player(10).battlefield); self.assertEqual(game.current_protections(target),{color})
+
+
 class AlphaUtilitySpellTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

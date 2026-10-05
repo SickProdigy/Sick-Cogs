@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.26.0"
+    __version__="0.27.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -118,8 +118,10 @@ class MTG(commands.Cog):
                 c=g.card(x.uid); state=" ↷" if x.tapped else ""
                 stats=(lambda value:f" {value[0]}/{value[1]}")(g.current_stats(x)) if c.creature else ""
                 active=sorted(g.current_keywords(x)-set(c.keywords))
+                active_protection=sorted(g.current_protections(x)-set(c.protection_colors))
                 ability_parts=[c.ability_text] if c.ability_text else []
                 if active: ability_parts.append("Active: "+", ".join(word.title() for word in active))
+                if active_protection: ability_parts.append("Active protection: "+"/".join(active_protection))
                 if x.regeneration_shields: ability_parts.append(f"Regeneration shield ×{x.regeneration_shields}")
                 if x.attached_to:
                     _,target=g.find_permanent(x.attached_to)
