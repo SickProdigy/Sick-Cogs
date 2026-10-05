@@ -11,6 +11,7 @@ class Species:
     speed: int
     catch_rate: int
     moves: tuple
+    learnset: tuple = ()
 
 @dataclass(frozen=True)
 class Move:
@@ -56,6 +57,11 @@ def effectiveness(move_type,defender_types):
     value=1.0
     for kind in defender_types:value*=TYPE.get((move_type,kind),1.0)
     return value
+def moves_for_level(species_id,level):
+    species=SPECIES[species_id]
+    learned=[move for learned_level,move in species.learnset if learned_level<=level]
+    return tuple((learned or list(species.moves) or ["tackle"])[-4:])
+
 def sprite(species_id,back=False,shiny=False):
     folder="back/" if back else ""
     if shiny: folder+="shiny/"
@@ -68,4 +74,4 @@ def generation_for(species_id):
     return 9
 
 NATURES=("Hardy","Lonely","Brave","Adamant","Naughty","Bold","Docile","Relaxed","Impish","Lax","Timid","Hasty","Serious","Jolly","Naive","Modest","Mild","Quiet","Bashful","Rash","Calm","Gentle","Sassy","Careful","Quirky")
-EVOLUTIONS={1:(2,16),2:(3,32),4:(5,16),5:(6,36),7:(8,16),8:(9,36),10:(11,7),11:(12,10),16:(17,18),17:(18,36),19:(20,20),23:(24,22),25:(26,100),29:(30,16),30:(31,100),32:(33,16),33:(34,100),41:(42,22),52:(53,28)}
+EVOLUTIONS={1:(2,16),2:(3,32),4:(5,16),5:(6,36),7:(8,16),8:(9,36),10:(11,7),11:(12,10),13:(14,7),14:(15,10),16:(17,18),17:(18,36),19:(20,20),21:(22,20),23:(24,22),27:(28,22),29:(30,16),32:(33,16),41:(42,22),43:(44,21),46:(47,24),48:(49,31),50:(51,26),52:(53,28),54:(55,33),56:(57,28),60:(61,25),63:(64,16),66:(67,28),69:(70,21),72:(73,30),74:(75,25),77:(78,40),79:(80,37),81:(82,30),84:(85,31),86:(87,34),88:(89,38),92:(93,25),96:(97,26),98:(99,28),100:(101,30),104:(105,28),109:(110,35),111:(112,42),116:(117,32),118:(119,33),129:(130,20),138:(139,40),140:(141,40),147:(148,30),148:(149,55)}

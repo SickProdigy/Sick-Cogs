@@ -12,13 +12,22 @@ from .catalog import CatalogError,PokemonCatalog
 from .data import MOVES,SPECIES,generation_for,sprite
 from .models import Battle,BattleError,OwnedPokemon
 from .renderer import BattleRenderer,RenderError
-from .views import BattleView,EncounterView
+from .views import BagView,BattleView,EncounterView,FightView,PartyView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":20,"threshold_min":12,"threshold_max":25,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":300,"last_spawn_at":None,"generations":[1]}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal"}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{}}
-GLOBAL={"schema":2,"next_encounter":1,"encounters":{}}
+GLOBAL={"schema":3,"next_encounter":1,"encounters":{}}
+PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
+
+def pace_for_settings(minimum,maximum,cooldown):
+    for name,values in PACE.items():
+        if values==(minimum,maximum,cooldown):return name
+    return "custom"
+
+def scaled_wild_level(player_level,offset):
+    return max(2,min(100,player_level+offset))
 
 def activity_weight(active_users):
     return 1+min(2,max(0,active_users-1))
@@ -33,7 +42,7 @@ def encounter_is_expired(raw,now):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.3.0";__author__="SickProdigy"
+    __version__="0.4.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -45,7 +54,9 @@ class Pokemon(commands.Cog):
         for key,raw in (await self.config.encounters()).items():
             if raw.get("battle"):
                 battle=Battle.from_raw(raw["battle"]);self.battles[battle.encounter_id]=battle
-                if battle.state=="active":self.bot.add_view(BattleView(self,battle.encounter_id),message_id=battle.message_id)
+                if battle.state=="active":
+                    for view in (BattleView, FightView, PartyView, BagView):
+                        self.bot.add_view(view(self,battle.encounter_id),message_id=battle.message_id)
             elif raw.get("state")=="open":self.bot.add_view(EncounterView(self,int(key)),message_id=raw.get("message_id"))
     def cog_unload(self):
         self.cleanup_loop.cancel();self.bot.loop.create_task(self.renderer.close())
@@ -68,14 +79,19 @@ class Pokemon(commands.Cog):
     @cleanup_loop.before_loop
     async def before_cleanup(self):await self.bot.wait_until_ready()
     async def _migrate(self):
-        if await self.config.schema()>=2:return
-        for user_id,data in (await self.config.all_users()).items():
-            collection=data.get("collection",[])
-            party=data.get("party",[])
-            if party and isinstance(party[0],int):data["party"]=[collection[x]["instance_id"] for x in party if 0<=x<len(collection)]
-            data.setdefault("transactions",{})
-            await self.config.user_from_id(int(user_id)).set(data)
-        await self.config.schema.set(2)
+        schema=await self.config.schema()
+        if schema<2:
+            for user_id,data in (await self.config.all_users()).items():
+                collection=data.get("collection",[])
+                party=data.get("party",[])
+                if party and isinstance(party[0],int):data["party"]=[collection[x]["instance_id"] for x in party if 0<=x<len(collection)]
+                data.setdefault("transactions",{})
+                await self.config.user_from_id(int(user_id)).set(data)
+        if schema<3:
+            for guild_id,data in (await self.config.all_guilds()).items():
+                pace=pace_for_settings(data.get("threshold_min",12),data.get("threshold_max",25),data.get("spawn_cooldown",300))
+                await self.config.guild_from_id(int(guild_id)).pace.set(pace)
+        if schema<3:await self.config.schema.set(3)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):
@@ -111,7 +127,7 @@ class Pokemon(commands.Cog):
         pool=available_species(conf["generations"])
         if not pool:raise RuntimeError("No Pokémon are available for the configured generations.")
         chosen=random.SystemRandom().choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
-        sid=chosen.id;level=random.SystemRandom().randrange(3,9)
+        sid=chosen.id;level=0
         embed=discord.Embed(title=f"A wild {SPECIES[sid].name} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
             image=await self.renderer.encounter(sid);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
@@ -136,6 +152,9 @@ class Pokemon(commands.Cog):
             if not owned_raw:
                 await i.response.send_message("Your active party needs repair.",ephemeral=True);return
             owned=OwnedPokemon.from_raw(owned_raw)
+            if not raw.get("level_locked"):
+                raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
+                raw["level_locked"]=True
             collection={item["instance_id"]:item for item in user["collection"]}
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
@@ -160,6 +179,9 @@ class Pokemon(commands.Cog):
         e.add_field(name=f"{wild.name} HP",value=f"{b.wild_hp}/{b.wild_max_hp}",inline=True)
         e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
         e.add_field(name="Moves",value=" · ".join(f"{n+1}. {MOVES[k].name} ({b.player.move_pp.get(k,MOVES[k].pp)} PP)" for n,k in enumerate(b.player.moves)),inline=False)
+        needed=b.player.level*b.player.level*10 if b.player.level<100 else 0
+        e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
+        e.set_footer(text="Defeat it for XP, catch it from Bag, switch Pokémon, or run.")
         return e
     async def battle_action(self,i,eid,action):
         battle=self.battles.get(eid)
@@ -292,7 +314,13 @@ class Pokemon(commands.Cog):
     @pokemon.command(name="profile")
     async def profile(self,ctx):
         conf=await self.config.user(ctx.author).all()
-        await ctx.send(f"Pokémon: **{len(conf['collection'])}** · Party: **{len(conf['party'])}/6** · Poké Balls: **{conf['balls']}**")
+        owned={item["instance_id"]:item for item in conf["collection"]}
+        lead=owned.get(conf["party"][0]) if conf["party"] else None
+        progress="No active Pokémon"
+        if lead:
+            needed=lead["level"]*lead["level"]*10 if lead["level"]<100 else 0
+            progress=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']} · " + ("MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP")
+        await ctx.send(f"Pokémon: **{len(conf['collection'])}** · Party: **{len(conf['party'])}/6** · Poké Balls: **{conf['balls']}**\nLead: {progress}")
     @pokemon.group(name="set",invoke_without_command=True)
     @commands.admin_or_permissions(manage_guild=True)
     async def pokemon_set(self,ctx):await ctx.send_help()
@@ -315,20 +343,36 @@ class Pokemon(commands.Cog):
             f"Enabled: **{conf['enabled']}**\n"
             f"Channels: {channels}\n"
             f"Threshold: {conf['threshold_min']}–{conf['threshold_max']}\n"
+            f"Pace: {conf['pace']}\n"
             f"Cooldown: {conf['spawn_cooldown']}s\n"
             f"Encounter/battle expiry: {conf['encounter_timeout']}s/{conf['battle_timeout']}s\n"
             f"Generations: {', '.join(map(str,conf['generations']))}\n"
             f"Active: {conf['active_encounter'] or 'None'}\n"
             f"Catalog species: {len(SPECIES)}"
         )
+    @pokemon_set.command(name="pace")
+    async def pace(self,ctx,setting:str):
+        setting=setting.casefold()
+        if setting not in PACE:
+            await ctx.send("Choose active, normal, or relaxed.");return
+        minimum,maximum,cooldown=PACE[setting]
+        await self.config.guild(ctx.guild).threshold_min.set(minimum)
+        await self.config.guild(ctx.guild).threshold_max.set(maximum)
+        await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
+        await self.config.guild(ctx.guild).spawn_cooldown.set(cooldown)
+        await self.config.guild(ctx.guild).pace.set(setting)
+        await ctx.send(f"Encounter pace set to {setting}: {minimum}–{maximum} activity points, {cooldown}s cooldown.")
+
     @pokemon_set.command(name="threshold")
     async def threshold(self,ctx,minimum:int,maximum:int):
         if not 5<=minimum<=maximum<=500:await ctx.send("Use 5–500 with minimum <= maximum.");return
+        await self.config.guild(ctx.guild).pace.set("custom")
         await self.config.guild(ctx.guild).threshold_min.set(minimum);await self.config.guild(ctx.guild).threshold_max.set(maximum)
         await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1));await ctx.send("Spawn threshold updated.")
     @pokemon_set.command(name="cooldown")
     async def cooldown(self,ctx,seconds:int):
         if not 60<=seconds<=86400:await ctx.send("Use 60–86400 seconds.");return
+        await self.config.guild(ctx.guild).pace.set("custom")
         await self.config.guild(ctx.guild).spawn_cooldown.set(seconds);await ctx.send("Spawn cooldown updated.")
     @pokemon_set.command(name="expiry")
     async def expiry(self,ctx,encounter_minutes:int,battle_minutes:int):

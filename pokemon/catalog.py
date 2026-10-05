@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.3 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.4 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
@@ -33,6 +33,11 @@ class PokemonCatalog:
             except (OSError, ValueError, TypeError, KeyError) as exc:
                 raise CatalogError("The Pokémon catalog cache is invalid.") from exc
             for item in parsed:
+                previous=SPECIES.get(item.id)
+                if previous and previous.learnset and not item.learnset:
+                    learned=previous.learnset
+                    moves=tuple(move for level,move in learned if level<=5)[-4:] or item.moves
+                    item=Species(item.id,item.name,item.types,item.hp,item.attack,item.defense,item.speed,item.catch_rate,moves,learned)
                 SPECIES[item.id] = item
             loaded = max(loaded, len(parsed))
         return loaded
@@ -102,17 +107,20 @@ class PokemonCatalog:
             str(item["type"]["name"])
             for item in sorted(pokemon["types"], key=lambda value: value["slot"])
         )
-        available = {
-            str(item["move"]["name"]).replace("-", "_")
-            for item in pokemon["moves"]
-            if not item.get("version_group_details")
-            or any(
-                detail.get("move_learn_method", {}).get("name") == "level-up"
-                and detail.get("version_group", {}).get("name") in {"red-blue", "yellow"}
-                for detail in item["version_group_details"]
-            )
-        }
-        moves = tuple(key for key in MOVES if key in available)[:2]
+        learned = {}
+        for item in pokemon["moves"]:
+            key = str(item["move"]["name"]).replace("-", "_")
+            if key not in MOVES:
+                continue
+            for detail in item.get("version_group_details", []):
+                if (
+                    detail.get("move_learn_method", {}).get("name") == "level-up"
+                    and detail.get("version_group", {}).get("name") in {"red-blue", "yellow"}
+                ):
+                    level = int(detail.get("level_learned_at", 0))
+                    learned[key] = min(level, learned.get(key, level))
+        learnset = tuple(sorted((level, key) for key, level in learned.items()))
+        moves = tuple(key for level, key in learnset if level <= 5)[-4:]
         if not moves:
             moves = ("tackle",)
         display = str(species["name"]).replace("-", " ").title()
@@ -126,6 +134,7 @@ class PokemonCatalog:
             stats["speed"],
             int(species["capture_rate"]),
             moves,
+            learnset,
         )
 
     @staticmethod
@@ -140,6 +149,7 @@ class PokemonCatalog:
             "speed": item.speed,
             "catch_rate": item.catch_rate,
             "moves": list(item.moves),
+            "learnset": [list(value) for value in item.learnset],
         }
 
     @staticmethod
@@ -154,9 +164,10 @@ class PokemonCatalog:
             int(raw["speed"]),
             int(raw["catch_rate"]),
             tuple(str(value) for value in raw["moves"]),
+            tuple((int(value[0]),str(value[1])) for value in raw.get("learnset",[])),
         )
         if not 1 <= item.id <= MAX_SPECIES or not item.types or not item.moves:
             raise CatalogError("Cached species data is out of bounds.")
-        if any(move not in MOVES for move in item.moves):
+        if any(move not in MOVES for move in item.moves) or any(move not in MOVES or not 0<=level<=100 for level,move in item.learnset):
             raise CatalogError("Cached species uses an unsupported move.")
         return item
