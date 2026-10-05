@@ -169,20 +169,37 @@ class Game:
         self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
         self.log.append(f"{user} cast {c.name}.")
 
+    def _target_creature(self,target,message="Target must be USER_ID:POSITION."):
+        if not target or ":" not in target: raise GameError(message)
+        try: target_user,pos=(int(x) for x in target.split(":"))
+        except (TypeError,ValueError) as e: raise GameError(message) from e
+        battlefield=self.player(target_user).battlefield
+        if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=battlefield[pos-1]
+        if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
+        return target_user,permanent
+
     def _target_for_cast(self,c,user,target):
         if c.effect=="damage":
             try: target_user=int(target) if target is not None else self.opponent(user)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
-        if c.effect=="pump":
-            if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
-            try: target_user,pos=(int(x) for x in target.split(":"))
-            except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
-            battlefield=self.player(target_user).battlefield
-            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
-            permanent=battlefield[pos-1]
-            if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
+        if c.effect=="damage_any":
+            if target and ":" in target:
+                target_user,permanent=self._target_creature(target,"Target must be a player ID or USER_ID:POSITION.")
+                return f"{target_user}:{permanent.uid}"
+            try: target_user=int(target)
+            except (TypeError,ValueError) as e: raise GameError("Target must be a player ID or USER_ID:POSITION.") from e
+            self.player(target_user); return str(target_user)
+        if c.effect in ("pump","pump_blocking"):
+            target_user,permanent=self._target_creature(target)
+            if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
+                raise GameError(f"{c.name} must target a blocking creature.")
             return f"{target_user}:{permanent.uid}"
+        if c.effect=="draw_target":
+            try: target_user=int(target)
+            except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
+            self.player(target_user); return str(target_user)
         if target is not None: raise GameError(f"{c.name} does not use a target.")
         return None
 
@@ -296,10 +313,17 @@ class Game:
         p=self.players[s.owner]; c=CARDS[s.key]
         if c.creature: p.battlefield.append(Permanent(s.uid,c.key))
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
+        elif c.effect=="draw_target": self._draw(self.player(int(s.target)),c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
-        elif c.effect=="damage":
-            target=self.player(int(s.target or self.opponent(s.owner))); target.life-=c.amount; p.graveyard.append(s.uid)
-        elif c.effect=="pump":
+        elif c.effect in ("damage","damage_any"):
+            if ":" in (s.target or ""):
+                user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
+                if target is None:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+                target.damage+=c.amount
+            else: self.player(int(s.target or self.opponent(s.owner))).life-=c.amount
+            p.life-=c.self_damage; p.graveyard.append(s.uid)
+        elif c.effect in ("pump","pump_blocking"):
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
@@ -320,8 +344,9 @@ class Game:
         for p in self.players.values():
             for x in p.battlefield: x.damage=x.bonus=0
     def _life(self):
-        for p in self.players.values():
-            if p.life<=0: self._finish(self.opponent(p.user_id),"zero life"); break
+        losers=[p.user_id for p in self.players.values() if p.life<=0]
+        if len(losers)==2: self._finish(None,"both players reached zero life")
+        elif losers: self._finish(self.opponent(losers[0]),"zero life")
     def concede(self,user):
         self.player(user)
         if self.finished: raise GameError("Game is over.")

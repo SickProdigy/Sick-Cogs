@@ -5,16 +5,19 @@ DIFFICULTIES = ("easy", "normal")
 
 
 def _target(game, user, card):
-    if card.effect == "damage":
+    if card.effect in ("damage","damage_any"):
         return str(game.opponent(user))
-    if card.effect == "pump":
+    if card.effect == "draw_target":
+        return str(user)
+    if card.effect in ("pump","pump_blocking"):
         creatures = [
             (position, permanent)
             for position, permanent in enumerate(game.player(user).battlefield, 1)
             if game.card(permanent.uid).creature
         ]
-        if not creatures:
-            return None
+        if card.effect == "pump_blocking":
+            blocking=set(game.blocks.values()); creatures=[item for item in creatures if item[1].uid in blocking]
+        if not creatures: return None
         position, _ = max(creatures, key=lambda item: game.card(item[1].uid).power + item[1].bonus)
         return f"{user}:{position}"
     return None
@@ -36,16 +39,16 @@ def _play_one(game, user, difficulty):
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
         target = _target(game, user, card)
-        if card.effect == "pump" and target is None:
+        if card.effect in ("pump","pump_blocking") and target is None:
             continue
         score = 0
         if card.creature:
             score = card.power + card.toughness
-        elif card.effect == "damage":
-            score = 12 + card.amount
-        elif card.effect == "draw":
+        elif card.effect in ("damage","damage_any"):
+            score = 12 + card.amount - card.self_damage
+        elif card.effect in ("draw","draw_target"):
             score = 10 + card.amount
-        elif card.effect == "pump":
+        elif card.effect in ("pump","pump_blocking"):
             score = 7 + card.amount
         elif card.effect == "life":
             score = 4 + card.amount

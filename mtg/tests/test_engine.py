@@ -241,6 +241,87 @@ class StaticKeywordCombatTests(unittest.TestCase):
         self.assertIn(giant,game.players[10].battlefield)
 
 
+class AlphaTargetedSpellTests(unittest.TestCase):
+    def put_in_hand(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        game.players[user].hand.insert(0,uid); return uid
+
+    def permanent(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        result=Permanent(uid,key,sick=False); game.players[user].battlefield.append(result); return result
+
+    def lands(self,game,user,*keys):
+        return [self.permanent(game,user,key) for key in keys]
+
+    def resolve(self,game,opponent=20,owner=10):
+        game.pass_priority(opponent); game.pass_priority(owner)
+
+    def test_lightning_bolt_targets_player_or_creature(self):
+        player_game=ready(); self.put_in_hand(player_game,10,"lea:161"); self.lands(player_game,10,"mountain")
+        player_game.play(10,1,"20"); self.resolve(player_game)
+        self.assertEqual(player_game.players[20].life,17)
+
+        creature_game=ready(); self.put_in_hand(creature_game,10,"lea:161"); self.lands(creature_game,10,"mountain")
+        bear=self.permanent(creature_game,20,"bear")
+        creature_game.play(10,1,"20:1"); self.resolve(creature_game)
+        self.assertNotIn(bear,creature_game.players[20].battlefield)
+        self.assertIn(bear.uid,creature_game.players[20].graveyard)
+
+    def test_psionic_blast_deals_target_and_self_damage(self):
+        game=ready(); spell=self.put_in_hand(game,10,"lea:74"); self.lands(game,10,"island","island","island")
+        target=self.permanent(game,20,"giant")
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertNotIn(target,game.players[20].battlefield)
+        self.assertEqual(game.players[10].life,18)
+        self.assertIn(spell,game.players[10].graveyard)
+
+    def test_psionic_blast_simultaneous_zero_life_is_draw(self):
+        game=ready(); self.put_in_hand(game,10,"lea:74"); self.lands(game,10,"island","island","island")
+        game.players[10].life=2; game.players[20].life=4
+        game.play(10,1,"20"); self.resolve(game)
+        self.assertTrue(game.finished); self.assertIsNone(game.winner)
+        self.assertEqual(game.finished_reason,"both players reached zero life")
+
+    def test_illegal_any_target_preserves_card_and_mana(self):
+        game=ready(); spell=self.put_in_hand(game,10,"lea:161"); land=self.lands(game,10,"mountain")[0]
+        with self.assertRaisesRegex(GameError,"player ID or USER_ID:POSITION"):
+            game.play(10,1,"missing")
+        self.assertEqual(game.players[10].hand[0],spell); self.assertFalse(land.tapped)
+
+    def test_ancestral_recall_target_and_stack_survive_round_trip(self):
+        game=ready(); spell=self.put_in_hand(game,10,"lea:47"); self.lands(game,10,"island")
+        before=len(game.players[20].hand); game.play(10,1,"20")
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.stack[-1].target,"20")
+        self.resolve(restored)
+        self.assertEqual(len(restored.players[20].hand),before+3)
+        self.assertIn(spell,restored.players[10].graveyard)
+
+    def test_giant_growth_is_temporary_and_can_save_creature(self):
+        game=ready(); self.put_in_hand(game,10,"lea:197"); self.lands(game,10,"forest")
+        bear=self.permanent(game,10,"bear")
+        game.play(10,1,"10:2"); self.resolve(game)
+        self.assertEqual(bear.bonus,3)
+        game._cleanup(); self.assertEqual(bear.bonus,0)
+
+    def test_righteousness_requires_a_blocking_creature(self):
+        game=ready(); spell=self.put_in_hand(game,10,"lea:36"); self.lands(game,10,"plains")
+        blocker=self.permanent(game,10,"bear")
+        with self.assertRaisesRegex(GameError,"blocking creature"):
+            game.play(10,1,"10:2")
+        self.assertEqual(game.players[10].hand[0],spell)
+        game.blocks={999:blocker.uid}
+        game.play(10,1,"10:2"); self.resolve(game,opponent=20,owner=10)
+        self.assertEqual(blocker.bonus,7)
+
+    def test_fizzled_psionic_blast_does_not_hurt_caster(self):
+        game=ready(); self.put_in_hand(game,10,"lea:74"); self.lands(game,10,"island","island","island")
+        target=self.permanent(game,20,"giant"); game.play(10,1,"20:1")
+        game.players[20].battlefield.remove(target); game.players[20].graveyard.append(target.uid)
+        self.resolve(game)
+        self.assertEqual(game.players[10].life,20)
+
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

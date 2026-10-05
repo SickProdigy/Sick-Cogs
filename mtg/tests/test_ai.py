@@ -1,6 +1,6 @@
 import unittest
 
-from mtg.ai import advance_solo
+from mtg.ai import _target, advance_solo
 from mtg.engine import Game, Permanent
 
 
@@ -135,6 +135,15 @@ class SoloAITests(unittest.TestCase):
                 game.attackers=[attacker]; game.phase="blockers"; game.priority_user=None
                 advance_solo(game)
                 self.assertEqual(game.blocks,{})
+
+    def test_ai_targets_alpha_spells_without_hidden_information(self):
+        game=solo(); advance_solo(game)
+        creature_uid=game.next_uid; game.next_uid+=1; game.cards[creature_uid]="bear"
+        creature=Permanent(creature_uid,"bear",sick=False); game.player(AI).battlefield=[creature]
+        self.assertEqual(_target(game,AI,__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:161"]),str(HUMAN))
+        self.assertEqual(_target(game,AI,__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:47"]),str(AI))
+        game.blocks={123:creature_uid}
+        self.assertEqual(_target(game,AI,__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:36"]),f"{AI}:1")
 
 
 if __name__ == "__main__":

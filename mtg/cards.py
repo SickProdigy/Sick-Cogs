@@ -24,6 +24,7 @@ class Card:
     text: str = ""
     effect: Optional[str] = None
     amount: int = 0
+    self_damage: int = 0
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -71,6 +72,14 @@ BASE_CARDS = {
 
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
 
+ALPHA_SPELLS = {
+    "lea:36": {"effect":"pump_blocking", "amount":7},
+    "lea:47": {"effect":"draw_target", "amount":3},
+    "lea:74": {"effect":"damage_any", "amount":4, "self_damage":2},
+    "lea:161": {"effect":"damage_any", "amount":3},
+    "lea:197": {"effect":"pump", "amount":3},
+}
+
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
@@ -94,7 +103,7 @@ for reference in PLAYABLE_ALPHA:
     CARDS[reference.key] = Card(
         key=reference.key,
         name=reference.name,
-        kind="Land" if reference.support_family == "land" else "Creature",
+        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family == "spell" else "Creature",
         type_line=reference.type_line,
         set_code="lea",
         scryfall_id=reference.scryfall_id,
@@ -108,6 +117,9 @@ for reference in PLAYABLE_ALPHA:
         power=int(reference.power) if reference.power is not None else 0,
         toughness=int(reference.toughness) if reference.toughness is not None else 0,
         text=reference.oracle_text,
+        effect=ALPHA_SPELLS.get(reference.key, {}).get("effect"),
+        amount=ALPHA_SPELLS.get(reference.key, {}).get("amount",0),
+        self_damage=ALPHA_SPELLS.get(reference.key, {}).get("self_damage",0),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
     )
@@ -130,3 +142,6 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_abil
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:
     raise RuntimeError("Playable Alpha lands do not match the validated land map.")
+
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
+    raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
