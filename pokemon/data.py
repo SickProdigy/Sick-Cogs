@@ -18,17 +18,21 @@ class Move:
     type: str
     power: int
     accuracy: int = 100
+    pp: int = 35
+    priority: int = 0
+    status: str = ""
+    status_chance: int = 0
 
 MOVES={
 "tackle":Move("Tackle","normal",40),
 "scratch":Move("Scratch","normal",40),
 "vine_whip":Move("Vine Whip","grass",45),
-"ember":Move("Ember","fire",40),
+"ember":Move("Ember","fire",40,status="burn",status_chance=10),
 "water_gun":Move("Water Gun","water",40),
-"thunder_shock":Move("Thunder Shock","electric",40),
+"thunder_shock":Move("Thunder Shock","electric",40,status="paralysis",status_chance=10),
 "gust":Move("Gust","flying",40),
-"quick_attack":Move("Quick Attack","normal",40),
-"poison_sting":Move("Poison Sting","poison",35),
+"quick_attack":Move("Quick Attack","normal",40,priority=1),
+"poison_sting":Move("Poison Sting","poison",35,status="poison",status_chance=30),
 "bite":Move("Bite","dark",60),
 }
 SPECIES={
@@ -56,3 +60,12 @@ def sprite(species_id,back=False,shiny=False):
     folder="back/" if back else ""
     if shiny: folder+="shiny/"
     return f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/{folder}{species_id}.png"
+
+GENERATION_MAX=(151,251,386,493,649,721,809,905,1025)
+def generation_for(species_id):
+    for index,maximum in enumerate(GENERATION_MAX,1):
+        if species_id<=maximum:return index
+    return 9
+
+NATURES=("Hardy","Lonely","Brave","Adamant","Naughty","Bold","Docile","Relaxed","Impish","Lax","Timid","Hasty","Serious","Jolly","Naive","Modest","Mild","Quiet","Bashful","Rash","Calm","Gentle","Sassy","Careful","Quirky")
+EVOLUTIONS={1:(2,16),2:(3,32),4:(5,16),5:(6,36),7:(8,16),8:(9,36),10:(11,7),11:(12,10),16:(17,18),17:(18,36),19:(20,20),23:(24,22),25:(26,100),29:(30,16),30:(31,100),32:(33,16),33:(34,100),41:(42,22),52:(53,28)}
