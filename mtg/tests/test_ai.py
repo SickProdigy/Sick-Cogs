@@ -199,5 +199,17 @@ class SoloAITests(unittest.TestCase):
         self.assertIsNone(_target(game,AI,cards["lea:130"]))
 
 
+    def test_ai_chooses_legal_bounce_and_graveyard_targets(self):
+        game=solo(); advance_solo(game)
+        weak=self.add(game,HUMAN,"bear"); strong=self.add(game,HUMAN,"giant")
+        creature=self.add(game,AI,"centaur","hand"); game.player(AI).hand.remove(creature); game.player(AI).graveyard.append(creature)
+        land=self.add(game,AI,"forest","hand"); game.player(AI).hand.remove(land); game.player(AI).graveyard.append(land)
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(_target(game,AI,cards["lea:86"]),f"{HUMAN}:2")
+        self.assertEqual(_target(game,AI,cards["lea:122"]),"G:1")
+        self.assertEqual(_target(game,AI,cards["lea:34"]),"G:1")
+        self.assertIn(_target(game,AI,cards["lea:214"]),{"G:1","G:2"})
+
+
 if __name__ == "__main__":
     unittest.main()

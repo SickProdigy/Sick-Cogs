@@ -126,6 +126,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Exile: 1",rendered); self.assertIn("Graveyard: 0",rendered)
 
+    async def test_graveyard_command_lists_public_stable_positions(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))
+        game=Game(1,[10,20],1); uid=game.players[10].library.pop(); game.players[10].graveyard.append(uid)
+        cog.games={1:game}; ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        await MTG.graveyard.callback(cog,ctx,member=None)
+        content=ctx.send.await_args.args[0]
+        self.assertIn("G:POSITION",content); self.assertIn(f"1. {game.card(uid).name}",content)
+        self.assertIn("everyone=False",repr(ctx.send.await_args.kwargs["allowed_mentions"]))
+
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
         expired, active = Game(1, [10, 20], 1), Game(2, [30, 40], 2)

@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 16 combat-ability creatures playable through 0.9.0; 61 remain |
-| Instants and sorceries | 70 | 16 spells playable through 0.15.0; 54 remain |
+| Instants and sorceries | 70 | 20 spells playable through 0.16.0; 50 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Seven mana artifacts playable through 0.14.0; 35 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -33,11 +33,13 @@ The 0.14.0 multi-mana promotion adds Black Lotus and Sol Ring. Their explicit ma
 
 The 0.15.0 removal-and-exile promotion adds Terror, Swords to Plowshares, and Wrath of God. Creature targets use stable identity and recheck type/color restrictions on resolution. Swords moves the target to a persisted exile zone and grants its controller nonnegative current power as life; public embeds and playmats display exile counts. Wrath destroys all creatures simultaneously while preserving other permanents. Its no-regeneration clause is exact in the current supported subset because no playable effect can regenerate.
 
+The 0.16.0 zone-movement promotion adds Unsummon, Raise Dead, Regrowth, and Resurrection. A public bounded graveyard listing supplies G:POSITION choices, while spells store stable UIDs and recheck zone/type legality at resolution. Unsummon removes a bounced attacker from combat but preserves an attacker’s blocked status when its blocker leaves. Resurrection returns a fresh summoning-sick permanent. Because no control-changing effect is playable yet, battlefield controller and card owner are identical; owner tracking must be added before any control-changing card is promoted.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, and Ironclaw Orcs’ block restriction are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
-3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, counterspells, discard, graveyard return, bounce, board-wide effects, modes, and X costs remain.
+3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, counterspells, discard, library search, control changes, board-wide effects, modes, and X costs remain.
 4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activations, activation payments, untap restrictions, and activation controls remain.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.
 6. **Complex Alpha behavior:** X costs, copying, control changes, extra turns, delayed effects, face-down state, card-specific choices, and remaining manual exceptions.

@@ -544,6 +544,60 @@ class AlphaCreatureRemovalTests(unittest.TestCase):
         self.assertIn(artifact,game.players[20].battlefield); self.assertIn(land,game.players[20].battlefield)
 
 
+class AlphaZoneMovementTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.players[user].hand.insert(0,uid); return uid
+        if zone=="graveyard": game.players[user].graveyard.append(uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.players[user].battlefield.append(permanent); return permanent
+
+    def resolve(self,game):
+        game.pass_priority(20); game.pass_priority(10)
+
+    def lands(self,game,key,count):
+        return [self.add(game,10,key) for _ in range(count)]
+
+    def test_raise_dead_and_regrowth_use_stable_own_graveyard_targets(self):
+        game=ready(); creature=self.add(game,10,"bear","graveyard"); land=self.add(game,10,"forest","graveyard")
+        raise_dead=self.add(game,10,"lea:122","hand"); self.lands(game,"swamp",1)
+        with self.assertRaisesRegex(GameError,"not a creature"): game.play(10,1,"G:2")
+        game.play(10,1,"G:1"); self.resolve(game)
+        self.assertIn(creature,game.players[10].hand); self.assertNotIn(creature,game.players[10].graveyard)
+        game.priority_user=10; regrowth=self.add(game,10,"lea:214","hand"); self.lands(game,"forest",2)
+        game.play(10,1,"G:1"); self.resolve(game)
+        self.assertIn(land,game.players[10].hand); self.assertIn(raise_dead,game.players[10].graveyard); self.assertIn(regrowth,game.players[10].graveyard)
+
+    def test_resurrection_returns_creature_sick_and_persists(self):
+        game=ready(); creature=self.add(game,10,"bear","graveyard"); spell=self.add(game,10,"lea:34","hand"); self.lands(game,"plains",4)
+        game.play(10,1,"G:1"); self.resolve(game)
+        permanent=next(x for x in game.players[10].battlefield if x.uid==creature)
+        self.assertTrue(permanent.sick); self.assertIn(spell,game.players[10].graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(next(x for x in restored.players[10].battlefield if x.uid==creature).sick)
+
+    def test_graveyard_target_fizzles_if_card_moves(self):
+        game=ready(); target=self.add(game,10,"bear","graveyard"); self.add(game,10,"lea:122","hand"); self.lands(game,"swamp",1)
+        game.play(10,1,"G:1"); game.players[10].graveyard.remove(target); game.players[10].exile.append(target)
+        self.resolve(game)
+        self.assertNotIn(target,game.players[10].hand); self.assertIn("fizzled",game.log[-1])
+
+    def test_unsummon_returns_creature_and_removes_bounced_attacker(self):
+        game=ready(); target=self.add(game,10,"bear"); spell=self.add(game,20,"lea:86","hand")
+        island=self.add(game,20,"island"); game.attackers=[target.uid]; game.blocks={target.uid:999}; game.priority_user=20
+        game.play(20,1,"10:1"); game.pass_priority(10); game.pass_priority(20)
+        self.assertNotIn(target,game.players[10].battlefield); self.assertIn(target.uid,game.players[10].hand)
+        self.assertNotIn(target.uid,game.attackers); self.assertNotIn(target.uid,game.blocks); self.assertIn(spell,game.players[20].graveyard)
+        self.assertTrue(island.tapped)
+
+    def test_bounced_blocker_leaves_attacker_blocked(self):
+        game=ready(); attacker=self.add(game,10,"bear"); blocker=self.add(game,20,"bear")
+        self.add(game,10,"lea:86","hand"); self.lands(game,"island",1)
+        game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}
+        game.play(10,1,"20:1"); self.resolve(game)
+        self.assertEqual(game.blocks,{attacker.uid:blocker.uid}); self.assertIn(blocker.uid,game.players[20].hand)
+        before=game.players[20].life; game._combat_damage(False)
+        self.assertEqual(game.players[20].life,before)
+
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

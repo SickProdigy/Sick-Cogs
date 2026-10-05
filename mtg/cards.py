@@ -107,6 +107,10 @@ ALPHA_SPELLS = {
     "lea:40": {"effect":"exile_creature_life"},
     "lea:45": {"effect":"destroy_all_creatures"},
     "lea:130": {"effect":"destroy_creature", "target_nonartifact":True, "target_nonblack":True},
+    "lea:34": {"effect":"reanimate_creature"},
+    "lea:86": {"effect":"return_creature_hand"},
+    "lea:122": {"effect":"return_grave_creature_hand"},
+    "lea:214": {"effect":"return_grave_card_hand"},
 }
 
 ALPHA_KEYWORDS = {

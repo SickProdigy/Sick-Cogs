@@ -9,6 +9,16 @@ def _target(game, user, card):
         return str(game.opponent(user))
     if card.effect == "draw_target":
         return str(user)
+    if card.effect=="return_creature_hand":
+        creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).creature]
+        if not creatures: return None
+        position,_=max(creatures,key=lambda item:game.card(item[1].uid).power+item[1].bonus+game.card(item[1].uid).toughness)
+        return f"{game.opponent(user)}:{position}"
+    if card.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
+        choices=[(position,uid) for position,uid in enumerate(game.player(user).graveyard,1) if card.effect=="return_grave_card_hand" or game.card(uid).creature]
+        if not choices: return None
+        position,_=max(choices,key=lambda item:(game.card(item[1]).power+game.card(item[1]).toughness,game.card(item[1]).cost))
+        return f"G:{position}"
     if card.effect in ("destroy_creature","exile_creature_life"):
         creatures=[]
         for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1):
@@ -52,7 +62,7 @@ def _activate_helpful_mana(game, user):
         if card.land or game.can_pay(user,card): continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main","postcombat_main") or game.stack): continue
         target=_target(game,user,card)
-        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life") and target is None: continue
+        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature") and target is None: continue
         candidates.append(card)
     for position,permanent in enumerate(list(player.battlefield),1):
         source=game.card(permanent.uid)
@@ -87,7 +97,7 @@ def _play_one(game, user, difficulty):
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
         target = _target(game, user, card)
-        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life") and target is None:
+        if card.effect in ("pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature") and target is None:
             continue
         score = 0
         if card.creature:
@@ -108,6 +118,12 @@ def _play_one(game, user, difficulty):
             score = 10
         elif card.effect in ("destroy_creature","exile_creature_life"):
             score = 12
+        elif card.effect=="return_creature_hand":
+            score=9
+        elif card.effect in ("return_grave_creature_hand","return_grave_card_hand"):
+            score=8
+        elif card.effect=="reanimate_creature":
+            score=13
         elif card.effect == "destroy_all_creatures":
             enemy=sum(game.card(permanent.uid).creature for permanent in game.player(game.opponent(user)).battlefield)
             own=sum(game.card(permanent.uid).creature for permanent in player.battlefield)

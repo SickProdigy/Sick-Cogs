@@ -214,6 +214,16 @@ class Game:
         if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
         return target_user,permanent
 
+    def _target_graveyard(self,user,target,creature_only):
+        if not target or not target.upper().startswith("G:"): raise GameError("Graveyard target must be G:POSITION.")
+        try: position=int(target.split(":",1)[1])
+        except (TypeError,ValueError) as e: raise GameError("Graveyard target must be G:POSITION.") from e
+        graveyard=self.player(user).graveyard
+        if not 1<=position<=len(graveyard): raise GameError("No card at that graveyard position.")
+        uid=graveyard[position-1]
+        if creature_only and not self.card(uid).creature: raise GameError("Target graveyard card is not a creature.")
+        return str(uid)
+
     def _target_for_cast(self,c,user,target):
         if c.effect=="damage":
             try: target_user=int(target) if target is not None else self.opponent(user)
@@ -226,6 +236,13 @@ class Game:
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID or USER_ID:POSITION.") from e
             self.player(target_user); return str(target_user)
+        if c.effect=="return_creature_hand":
+            target_user,permanent=self._target_creature(target)
+            return f"{target_user}:{permanent.uid}"
+        if c.effect in ("return_grave_creature_hand","reanimate_creature"):
+            return self._target_graveyard(user,target,True)
+        if c.effect=="return_grave_card_hand":
+            return self._target_graveyard(user,target,False)
         if c.effect in ("destroy_creature","exile_creature_life"):
             target_user,permanent=self._target_creature(target)
             target_card=self.card(permanent.uid)
@@ -387,6 +404,23 @@ class Game:
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
             target.bonus+=c.amount; p.graveyard.append(s.uid)
+        elif c.effect=="return_creature_hand":
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            target=next((x for x in controller.battlefield if x.uid==uid),None)
+            if target is None or not self.card(target.uid).creature:
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            controller.battlefield.remove(target); controller.hand.append(target.uid)
+            if target.uid in self.attackers:
+                self.attackers.remove(target.uid); self.blocks.pop(target.uid,None)
+            p.graveyard.append(s.uid)
+        elif c.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
+            uid=int(s.target); creature_only=c.effect!="return_grave_card_hand"
+            if uid not in p.graveyard or (creature_only and not self.card(uid).creature):
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            p.graveyard.remove(uid)
+            if c.effect=="reanimate_creature": p.battlefield.append(Permanent(uid,self.cards[uid]))
+            else: p.hand.append(uid)
+            p.graveyard.append(s.uid)
         elif c.effect in ("destroy_creature","exile_creature_life"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
