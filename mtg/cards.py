@@ -60,6 +60,9 @@ class Card:
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
         return ", ".join(abilities)
 
+    def has_type(self,card_type):
+        return self.kind==card_type or card_type in self.type_line.split(" — ",1)[0].split()
+
     def has_land_type(self,land_type):
         return self.land and (self.key == land_type.casefold() or land_type.casefold() in self.type_line.casefold().split())
 
@@ -104,6 +107,12 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 }
 
 ALPHA_SPELLS = {
+    "lea:50": {"effect":"draw_target_x"},
+    "lea:111": {"effect":"pump_power_x"},
+    "lea:140": {"effect":"damage_x_exile"},
+    "lea:146": {"effect":"earthquake_x"},
+    "lea:200": {"effect":"hurricane_x"},
+    "lea:217": {"effect":"life_target_x"},
     "lea:49": {"effect":"elemental_blast", "target_color":"R"},
     "lea:54": {"effect":"counter_spell"},
     "lea:169": {"effect":"elemental_blast", "target_color":"U"},

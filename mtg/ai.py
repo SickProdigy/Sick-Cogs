@@ -2,7 +2,7 @@ from .engine import Game, GameError
 
 
 DIFFICULTIES = ("easy", "normal")
-TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast"}
+TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x"}
 
 
 def _target(game, user, card):
@@ -16,9 +16,9 @@ def _target(game, user, card):
                 position,_=max(targets,key=lambda item:(game.card(item[1].uid).cost,sum(game.current_stats(item[1])) if game.card(item[1].uid).creature else 0))
                 return f"{game.opponent(user)}:{position}"
         return None
-    if card.effect in ("damage","damage_any"):
+    if card.effect in ("damage","damage_any","damage_x_exile"):
         return str(game.opponent(user))
-    if card.effect == "draw_target":
+    if card.effect in ("draw_target","draw_target_x","life_target_x"):
         return str(user)
     if card.effect=="return_creature_hand":
         creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).creature]
@@ -42,7 +42,7 @@ def _target(game, user, card):
         position,_=max(creatures,key=lambda item:sum(game.current_stats(item[1])))
         return f"{game.opponent(user)}:{position}"
     if card.effect == "destroy_permanent":
-        targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).kind in card.target_types]
+        targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if any(game.card(permanent.uid).has_type(kind) for kind in card.target_types)]
         if not targets: return None
         position,_=max(targets,key=lambda item:(bool(game.card(item[1].uid).produces),game.card(item[1].uid).cost))
         return f"{game.opponent(user)}:{position}"
@@ -51,7 +51,7 @@ def _target(game, user, card):
         if not lands: return None
         position,_=max(lands,key=lambda item:len(game.card(item[1].uid).produces))
         return f"{game.opponent(user)}:{position}"
-    if card.effect in ("pump","pump_blocking"):
+    if card.effect in ("pump","pump_blocking","pump_power_x"):
         creatures = [
             (position, permanent)
             for position, permanent in enumerate(game.player(user).battlefield, 1)
@@ -103,7 +103,8 @@ def _play_one(game, user, difficulty):
     candidates = []
     for position, uid in enumerate(player.hand, 1):
         card = game.card(uid)
-        if card.land or not game.can_pay(user, card):
+        x_value=game.max_payable_x(user,card) if "{X}" in card.mana_cost else None
+        if card.land or (x_value is not None and x_value<1) or not game.can_pay(user,card,x_value or 0):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
@@ -117,12 +118,20 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
+        elif card.effect=="damage_x_exile":
+            score=12+(x_value or 0)
         elif card.effect in ("draw","draw_target"):
             score = 10 + card.amount
+        elif card.effect=="draw_target_x":
+            score=10+(x_value or 0)
         elif card.effect in ("pump","pump_blocking"):
             score = 7 + card.amount
+        elif card.effect=="pump_power_x":
+            score=7+(x_value or 0)
         elif card.effect == "life":
             score = 4 + card.amount
+        elif card.effect=="life_target_x":
+            score=4+(x_value or 0)
         elif card.effect == "destroy_land":
             score = 11
         elif card.effect == "destroy_permanent":
@@ -141,16 +150,18 @@ def _play_one(game, user, difficulty):
             enemy=sum(game.card(permanent.uid).creature for permanent in game.player(game.opponent(user)).battlefield)
             own=sum(game.card(permanent.uid).creature for permanent in player.battlefield)
             score=6+3*enemy-2*own
+        elif card.effect in ("earthquake_x","hurricane_x"):
+            score=8+(x_value or 0)
         elif card.effect in ("destroy_all_lands","destroy_land_type"):
             enemy=sum(1 for permanent in game.player(game.opponent(user)).battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
             own=sum(1 for permanent in player.battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
             score=6+2*enemy-2*own
-        candidates.append((score, -position, position, target))
+        candidates.append((score, -position, position, target, x_value))
     if not candidates:
         return None
     chosen = candidates[0] if difficulty == "easy" else max(candidates)
-    _, _, position, target = chosen
-    game.play(user, position, target)
+    _, _, position, target, x_value = chosen
+    game.play(user, position, target, x_value)
     return "cast"
 
 

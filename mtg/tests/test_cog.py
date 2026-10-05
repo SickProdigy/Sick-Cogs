@@ -2,7 +2,7 @@ import asyncio
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from mtg.engine import Game, GameError
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
@@ -141,9 +141,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         first=game.next_uid; game.next_uid+=1; game.cards[first]="shock"
         second=game.next_uid; game.next_uid+=1; game.cards[second]="lea:54"
-        game.stack=[spell_type(10,first,"shock","20"),spell_type(20,second,"lea:54",f"S:{first}")]
+        third=game.next_uid; game.next_uid+=1; game.cards[third]="lea:111"
+        game.stack=[spell_type(10,first,"shock","20"),spell_type(20,second,"lea:54",f"S:{first}"),spell_type(10,third,"lea:111","10:1",x_value=0)]
         field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
-        self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Counterspell","S:2. Shock"])
+        self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Howl from Beyond (X=0)","S:2. Counterspell","S:3. Shock"])
+
+    async def test_play_command_accepts_x_and_dash_for_no_target(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.play.callback(cog,ctx,position=2,target="-",x_value=3)
+        _,mutation,action=cog.mutate_ctx.await_args.args
+        game=SimpleNamespace(play=Mock()); mutation(game)
+        game.play.assert_called_once_with(10,2,None,3); self.assertEqual(action,"play")
 
     async def test_graveyard_command_lists_public_stable_positions(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))

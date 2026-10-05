@@ -15,6 +15,8 @@ class Permanent:
     sick: bool = True
     damage: int = 0
     bonus: int = 0
+    power_bonus: int = 0
+    exile_on_death: bool = False
 
 @dataclass
 class Player:
@@ -38,6 +40,7 @@ class Spell:
     key: str
     target: Optional[str] = None
     passes: int = 0
+    x_value: int = 0
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -102,7 +105,7 @@ class Game:
         owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
         if owner is None: raise GameError("Permanent is not on the battlefield.")
         power,toughness=self.characteristic_stats(owner,self.card(permanent.uid))
-        return power+permanent.bonus,toughness+permanent.bonus
+        return power+permanent.bonus+permanent.power_bonus,toughness+permanent.bonus
     def projected_stats(self,user,card):
         return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
 
@@ -134,17 +137,18 @@ class Game:
         self.log.append(f"Turn {self.turn}: {self.active_user}.")
 
     @staticmethod
-    def _mana_requirements(card):
+    def _mana_requirements(card,x_value=0):
         symbols=re.findall(r"\{([^}]+)\}",card.mana_cost or "")
         generic=0; colored=[]
         for symbol in symbols:
             if symbol.isdigit(): generic+=int(symbol)
+            elif symbol=="X": generic+=x_value
             elif symbol in {"W","U","B","R","G"}: colored.append(symbol)
             else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
         return generic,colored
 
-    def _mana_payment(self,player,card):
-        generic,colored=self._mana_requirements(card)
+    def _mana_payment(self,player,card,x_value=0):
+        generic,colored=self._mana_requirements(card,x_value)
         sources=[]
         for symbol,count in player.mana_pool.items():
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
@@ -176,8 +180,13 @@ class Game:
                 symbol=options[0]; pool[symbol]=pool.get(symbol,0)+1
         return lands,pool
 
-    def can_pay(self,user,card):
-        return self._mana_payment(self.player(user),card) is not None
+    def can_pay(self,user,card,x_value=0):
+        return self._mana_payment(self.player(user),card,x_value) is not None
+    def max_payable_x(self,user,card):
+        if "{X}" not in card.mana_cost: return 0
+        value=0
+        while self.can_pay(user,card,value+1): value+=1
+        return value
 
     def activate_mana(self,user,position,color=None):
         self._priority(user); player=self.player(user)
@@ -199,10 +208,18 @@ class Game:
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()
 
-    def play(self,user,index,target=None):
+    def play(self,user,index,target=None,x_value=None):
         self._priority(user); p=self.player(user)
         if not 1<=index<=len(p.hand): raise GameError("No card at that hand position.")
         uid=p.hand[index-1]; c=self.card(uid)
+        uses_x="{X}" in c.mana_cost
+        if uses_x:
+            if x_value is None: raise GameError(f"{c.name} requires a nonnegative X value.")
+            try: x_value=int(x_value)
+            except (TypeError,ValueError) as e: raise GameError(f"{c.name} requires a nonnegative X value.") from e
+            if x_value<0: raise GameError(f"{c.name} requires a nonnegative X value.")
+        elif x_value is not None: raise GameError(f"{c.name} has no X value.")
+        else: x_value=0
         if c.land:
             if user!=self.active_user: raise GameError("Only the active player can play a land.")
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
@@ -211,7 +228,7 @@ class Game:
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
-        payment=self._mana_payment(p,c)
+        payment=self._mana_payment(p,c,x_value)
         if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your available mana.")
         lands,pool=payment
         for permanent in lands: permanent.tapped=True
@@ -220,8 +237,9 @@ class Game:
             if not p.mana_pool[symbol]: p.mana_pool.pop(symbol)
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
-        self.log.append(f"{user} cast {c.name}.")
+        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self.priority_user=self.opponent(user)
+        suffix=f" with X={x_value}" if uses_x else ""
+        self.log.append(f"{user} cast {c.name}{suffix}.")
 
     def _target_creature(self,target,message="Target must be USER_ID:POSITION."):
         if not target or ":" not in target: raise GameError(message)
@@ -270,7 +288,7 @@ class Game:
             try: target_user=int(target) if target is not None else self.opponent(user)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
-        if c.effect=="damage_any":
+        if c.effect in ("damage_any","damage_x_exile"):
             if target and ":" in target:
                 target_user,permanent=self._target_creature(target,"Target must be a player ID or USER_ID:POSITION.")
                 return f"{target_user}:{permanent.uid}"
@@ -290,12 +308,12 @@ class Game:
             if c.target_nonartifact and "Artifact" in target_card.type_line: raise GameError("Target must be a nonartifact creature.")
             if c.target_nonblack and "B" in target_card.colors: raise GameError("Target must be a nonblack creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("pump","pump_blocking"):
+        if c.effect in ("pump","pump_blocking","pump_power_x"):
             target_user,permanent=self._target_creature(target)
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
                 raise GameError(f"{c.name} must target a blocking creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect=="draw_target":
+        if c.effect in ("draw_target","draw_target_x","life_target_x"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
@@ -305,8 +323,8 @@ class Game:
             except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
             battlefield=self.player(target_user).battlefield
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
-            permanent=battlefield[pos-1]; kind=self.card(permanent.uid).kind
-            if kind not in c.target_types: raise GameError("Target has an unsupported permanent type.")
+            permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
+            if not any(target_card.has_type(kind) for kind in c.target_types): raise GameError("Target has an unsupported permanent type.")
             return f"{target_user}:{permanent.uid}"
         if c.effect=="destroy_land":
             if not target or ":" not in target: raise GameError("Target must be USER_ID:POSITION.")
@@ -427,6 +445,10 @@ class Game:
     def _end_combat(self):
         self.attackers=[]; self.blocks={}
 
+    @staticmethod
+    def _dies(controller,permanent):
+        (controller.exile if permanent.exile_on_death else controller.graveyard).append(permanent.uid)
+
     def _resolve(self,s):
         p=self.players[s.owner]; c=CARDS[s.key]
         if c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
@@ -444,24 +466,29 @@ class Game:
                 target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
                 if target_card is None or c.target_color not in target_card.colors:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-                controller.battlefield.remove(target); controller.graveyard.append(target.uid)
+                controller.battlefield.remove(target); self._dies(controller,target)
             p.graveyard.append(s.uid)
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
-        elif c.effect=="draw_target": self._draw(self.player(int(s.target)),c.amount); p.graveyard.append(s.uid)
+        elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
+        elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
-        elif c.effect in ("damage","damage_any"):
+        elif c.effect in ("damage","damage_any","damage_x_exile"):
+            amount=s.x_value if c.effect=="damage_x_exile" else c.amount
             if ":" in (s.target or ""):
                 user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
                 if target is None:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-                target.damage+=c.amount
-            else: self.player(int(s.target or self.opponent(s.owner))).life-=c.amount
+                target.damage+=amount
+                if c.effect=="damage_x_exile": target.exile_on_death=True
+            else: self.player(int(s.target or self.opponent(s.owner))).life-=amount
             p.life-=c.self_damage; p.graveyard.append(s.uid)
-        elif c.effect in ("pump","pump_blocking"):
+        elif c.effect in ("pump","pump_blocking","pump_power_x"):
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            target.bonus+=c.amount; p.graveyard.append(s.uid)
+            if c.effect=="pump_power_x": target.power_bonus+=s.x_value
+            else: target.bonus+=c.amount
+            p.graveyard.append(s.uid)
         elif c.effect=="return_creature_hand":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
@@ -490,20 +517,28 @@ class Game:
             controller.battlefield.remove(target)
             if c.effect=="exile_creature_life":
                 controller.exile.append(target.uid); controller.life+=life_gain
-            else: controller.graveyard.append(target.uid)
+            else: self._dies(controller,target)
+            p.graveyard.append(s.uid)
+        elif c.effect in ("earthquake_x","hurricane_x"):
+            for controller in self.players.values():
+                controller.life-=s.x_value
+                for permanent in controller.battlefield:
+                    card=self.card(permanent.uid)
+                    affected=card.creature and ((c.effect=="earthquake_x" and "flying" not in card.keywords) or (c.effect=="hurricane_x" and "flying" in card.keywords))
+                    if affected: permanent.damage+=s.x_value
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_creatures":
             for controller in self.players.values():
                 destroyed=[x for x in controller.battlefield if self.card(x.uid).creature]
                 controller.battlefield=[x for x in controller.battlefield if x not in destroyed]
-                controller.graveyard.extend(x.uid for x in destroyed)
+                for permanent in destroyed: self._dies(controller,permanent)
             p.graveyard.append(s.uid)
         elif c.effect=="destroy_permanent":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
-            if target is None or self.card(target.uid).kind not in c.target_types:
+            if target is None or not any(self.card(target.uid).has_type(kind) for kind in c.target_types):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            controller.battlefield.remove(target); controller.graveyard.append(target.uid); p.graveyard.append(s.uid)
+            controller.battlefield.remove(target); self._dies(controller,target); p.graveyard.append(s.uid)
         elif c.effect=="destroy_land":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
@@ -527,10 +562,11 @@ class Game:
             for p in self.players.values():
                 deaths=doomed[p.user_id]
                 p.battlefield=[x for x in p.battlefield if x not in deaths]
-                p.graveyard.extend(x.uid for x in deaths)
+                p.exile.extend(x.uid for x in deaths if x.exile_on_death)
+                p.graveyard.extend(x.uid for x in deaths if not x.exile_on_death)
     def _cleanup(self):
         for p in self.players.values():
-            for x in p.battlefield: x.damage=x.bonus=0
+            for x in p.battlefield: x.damage=x.bonus=x.power_bonus=0; x.exile_on_death=False
     def _life(self):
         losers=[p.user_id for p in self.players.values() if p.life<=0]
         if len(losers)==2: self._finish(None,"both players reached zero life")

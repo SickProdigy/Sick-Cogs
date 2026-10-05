@@ -398,6 +398,81 @@ class AlphaCounterspellTests(unittest.TestCase):
         game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
         self.assertNotIn(target,game.player(20).battlefield); self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(blast,game.player(10).graveyard)
 
+class AlphaXSpellTests(unittest.TestCase):
+    def add(self,game,user,key,zone="hand"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+    def lands(self,game,user,keys):
+        return [self.add(game,user,key,"battlefield") for key in keys]
+    def resolve(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_legacy_permanent_and_spell_state_get_x_defaults(self):
+        game=ready(); permanent=self.add(game,10,"bear","battlefield"); spell=self.add(game,10,"lea:50")
+        game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(10,spell,"lea:50","10",x_value=2)]
+        raw=game.to_raw()
+        for player in raw["players"].values():
+            for saved in player["battlefield"]: saved.pop("power_bonus",None); saved.pop("exile_on_death",None)
+        raw["stack"][0].pop("x_value")
+        restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
+        self.assertEqual(restored_permanent.power_bonus,0); self.assertFalse(restored_permanent.exile_on_death); self.assertEqual(restored.stack[0].x_value,0)
+
+    def test_braingeyser_persists_x_and_draws_exact_amount(self):
+        game=ready(); spell=self.add(game,10,"lea:50"); self.lands(game,10,["island","island","mountain","mountain","mountain"])
+        before=len(game.player(10).hand); game.play(10,1,"10",3)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.stack[-1].x_value,3)
+        self.resolve(restored)
+        self.assertEqual(len(restored.player(10).hand),before-1+3); self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_x_is_required_and_unpayable_x_preserves_state(self):
+        game=ready(); spell=self.add(game,10,"lea:217"); lands=self.lands(game,10,["forest","mountain"])
+        with self.assertRaisesRegex(GameError,"requires a nonnegative X"):
+            game.play(10,1,"10")
+        with self.assertRaisesRegex(GameError,"cannot pay"):
+            game.play(10,1,"10",4)
+        self.assertEqual(game.player(10).hand[0],spell); self.assertTrue(all(not land.tapped for land in lands))
+
+    def test_howl_pumps_only_power_until_cleanup(self):
+        game=ready(); spell=self.add(game,10,"lea:111"); bear=self.add(game,10,"bear","battlefield"); self.lands(game,10,["swamp","mountain","mountain","mountain"])
+        game.play(10,1,"10:1",3); self.resolve(game)
+        self.assertEqual(game.current_stats(bear),(5,2)); self.assertEqual(bear.power_bonus,3)
+        game._cleanup(); self.assertEqual(game.current_stats(bear),(2,2)); self.assertEqual(bear.power_bonus,0)
+
+    def test_disintegrate_exiles_lethal_and_later_turn_death(self):
+        lethal=ready(); spell=self.add(lethal,10,"lea:140"); bear=self.add(lethal,20,"bear","battlefield"); self.lands(lethal,10,["mountain","mountain","mountain"])
+        lethal.play(10,1,"20:1",2); self.resolve(lethal)
+        self.assertIn(bear.uid,lethal.player(20).exile); self.assertNotIn(bear.uid,lethal.player(20).graveyard); self.assertIn(spell,lethal.player(10).graveyard)
+
+        delayed=ready(); self.add(delayed,10,"lea:140"); giant=self.add(delayed,20,"giant","battlefield"); self.lands(delayed,10,["mountain","mountain"])
+        delayed.play(10,1,"20:1",1); self.resolve(delayed)
+        self.assertTrue(giant.exile_on_death); giant.damage=3; delayed._sba()
+        self.assertIn(giant.uid,delayed.player(20).exile)
+
+        destroyed=ready(); self.add(destroyed,10,"lea:140"); bear=self.add(destroyed,20,"bear","battlefield"); self.lands(destroyed,10,["mountain","plains","plains","plains","plains"])
+        destroyed.play(10,1,"20:1",0); self.resolve(destroyed)
+        wrath=self.add(destroyed,10,"lea:45"); destroyed.play(10,1); self.resolve(destroyed)
+        self.assertIn(bear.uid,destroyed.player(20).exile); self.assertNotIn(bear.uid,destroyed.player(20).graveyard); self.assertIn(wrath,destroyed.player(10).graveyard)
+
+        artifact=ready(); shatter=self.add(artifact,10,"lea:173"); self.add(artifact,10,"lea:140"); golem=self.add(artifact,20,"lea:267","battlefield"); self.lands(artifact,10,["mountain","mountain","mountain"])
+        artifact.play(10,1,"20:1",0); self.resolve(artifact)
+        artifact.play(10,1,"20:1"); self.resolve(artifact)
+        self.assertIn(golem.uid,artifact.player(20).exile); self.assertNotIn(golem.uid,artifact.player(20).graveyard); self.assertIn(shatter,artifact.player(10).graveyard)
+
+    def test_earthquake_and_hurricane_filter_flying_and_hit_players(self):
+        earthquake=ready(); self.add(earthquake,10,"lea:146"); ground=self.add(earthquake,20,"bear","battlefield"); flyer=self.add(earthquake,20,"lea:46","battlefield"); self.lands(earthquake,10,["mountain","mountain","mountain"])
+        earthquake.play(10,1,None,2); self.resolve(earthquake)
+        self.assertIn(ground.uid,earthquake.player(20).graveyard); self.assertIn(flyer,earthquake.player(20).battlefield); self.assertEqual([earthquake.player(x).life for x in (10,20)],[18,18])
+
+        hurricane=ready(); self.add(hurricane,10,"lea:200"); ground=self.add(hurricane,20,"bear","battlefield"); flyer=self.add(hurricane,20,"lea:69","battlefield"); self.lands(hurricane,10,["forest","forest","forest","mountain"])
+        hurricane.play(10,1,None,3); self.resolve(hurricane)
+        self.assertIn(flyer.uid,hurricane.player(20).graveyard); self.assertIn(ground,hurricane.player(20).battlefield); self.assertEqual([hurricane.player(x).life for x in (10,20)],[17,17])
+
+    def test_stream_of_life_targets_either_player(self):
+        game=ready(); spell=self.add(game,10,"lea:217"); self.lands(game,10,["forest","mountain","mountain"])
+        game.play(10,1,"20",2); self.resolve(game)
+        self.assertEqual(game.player(20).life,22); self.assertIn(spell,game.player(10).graveyard)
+
 class AlphaTargetedSpellTests(unittest.TestCase):
     def put_in_hand(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

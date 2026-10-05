@@ -228,6 +228,14 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.stack[-1].uid,counter); self.assertEqual(game.stack[-1].target,f"S:{shock}")
         self.assertEqual(game.priority_user,HUMAN)
 
+    def test_ai_casts_x_spell_with_maximum_payable_value(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
+        game.player(AI).hand=[]; spell=self.add(game,AI,"lea:140","hand")
+        self.add(game,AI,"mountain"); self.add(game,AI,"mountain"); self.add(game,AI,"mountain")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.stack[-1].x_value,2); self.assertEqual(game.stack[-1].target,str(HUMAN))
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True
