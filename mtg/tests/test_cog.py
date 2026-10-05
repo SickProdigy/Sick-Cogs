@@ -138,6 +138,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Pending end-step trigger",rendered); self.assertIn("players may respond",rendered)
 
+    async def test_public_embed_shows_aura_attachment_and_derived_stats(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        bear=game.next_uid; game.next_uid+=1; game.cards[bear]="bear"; target=permanent_type(bear,"bear",sick=False)
+        aura=game.next_uid; game.next_uid+=1; game.cards[aura]="lea:24"; attached=permanent_type(aura,"lea:24",sick=False,attached_to=bear)
+        game.player(10).battlefield=[target,attached]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Bear Cub 3/4",rendered); self.assertIn("Attached to Bear Cub",rendered)
+
     async def test_public_embed_shows_live_characteristic_stats(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

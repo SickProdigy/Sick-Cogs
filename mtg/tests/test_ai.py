@@ -315,6 +315,31 @@ class SoloAITests(unittest.TestCase):
         attacker.damage=1; game.active_index=0; game.attackers=[wall.uid]; game.blocks={wall.uid:attacker.uid}; game.blocked_attackers=[wall.uid]; game.phase="after_blockers"
         self.assertEqual(_target(game,AI,cards["lea:17"]),f"{AI}:1")
 
+    def test_ai_targets_and_casts_auras_on_legal_sides(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        bear=self.add(game,AI,"bear"); wall=self.add(game,AI,"lea:225"); self.add(game,HUMAN,"giant")
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        self.assertEqual(_target(game,AI,cards["lea:24"]),f"{AI}:1")
+        self.assertEqual(_target(game,AI,cards["lea:134"]),f"{HUMAN}:1")
+        self.assertEqual(_target(game,AI,cards["lea:1"]),f"{AI}:2")
+        aura=self.add(game,AI,"lea:24","hand"); self.add(game,AI,"plains")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,aura); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+
+    def test_ai_activates_an_attached_combat_pump(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        bear=self.add(game,AI,"bear"); aura=self.add(game,AI,"lea:150"); aura.attached_to=bear.uid; self.add(game,AI,"mountain")
+        game.active_index=0; game.attackers=[bear.uid]; game.phase="after_blockers"; game.priority_user=AI
+        advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+        game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
+
+    def test_ai_activates_an_attached_regeneration_aura_for_lethal_combat(self):
+        game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        attacker=self.add(game,HUMAN,"giant"); bear=self.add(game,AI,"bear"); aura=self.add(game,AI,"lea:213"); aura.attached_to=bear.uid; self.add(game,AI,"forest")
+        game.active_index=0; game.attackers=[attacker.uid]; game.blocks={attacker.uid:bear.uid}; game.blocked_attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=AI
+        advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

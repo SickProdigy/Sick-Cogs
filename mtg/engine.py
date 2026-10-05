@@ -23,6 +23,7 @@ class Permanent:
     sacrifice_at_end_step: bool = False
     regeneration_shields: int = 0
     cant_regenerate: bool = False
+    attached_to: Optional[int] = None
 
 @dataclass
 class Player:
@@ -111,16 +112,34 @@ class Game:
         else:
             return card.power,card.toughness
         return value,value
+    def find_permanent(self,uid):
+        for player in self.players.values():
+            permanent=next((x for x in player.battlefield if x.uid==uid),None)
+            if permanent is not None: return player,permanent
+        return None,None
+    def attached_auras(self,permanent):
+        return [aura for player in self.players.values() for aura in player.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_target_types]
+    @staticmethod
+    def _has_subtype(card,subtype):
+        return subtype in card.type_line.split(" — ",1)[-1].split()
+    def _aura_legal(self,aura_card,target_card):
+        return any(target_card.has_type(kind) for kind in aura_card.aura_target_types) and all(self._has_subtype(target_card,subtype) for subtype in aura_card.aura_target_subtypes)
     def current_stats(self,permanent):
         owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
         if owner is None: raise GameError("Permanent is not on the battlefield.")
         card=self.card(permanent.uid); power,toughness=self.characteristic_stats(owner,card)
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
-        return power+swamp_bonus+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+permanent.bonus+permanent.toughness_bonus
+        auras=[self.card(aura.uid) for aura in self.attached_auras(permanent)]
+        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+permanent.bonus+permanent.toughness_bonus
     def projected_stats(self,user,card):
         return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
     def current_keywords(self,permanent):
-        return set(self.card(permanent.uid).keywords) | set(permanent.temporary_keywords)
+        aura_keywords={self.card(aura.uid).aura_keyword for aura in self.attached_auras(permanent) if self.card(aura.uid).aura_keyword}
+        return set(self.card(permanent.uid).keywords) | set(permanent.temporary_keywords) | aura_keywords
+    def can_attack_permanent(self,permanent):
+        card=self.card(permanent.uid); keywords=self.current_keywords(permanent)
+        defender_override=any(self.card(aura.uid).aura_attack_override for aura in self.attached_auras(permanent))
+        return card.creature and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override)
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -203,6 +222,10 @@ class Game:
         return value
 
     def _target_for_activation(self,card,user,target,source):
+        if card.activation_attached:
+            controller,attached=self.find_permanent(source.attached_to)
+            if attached is None or not self._aura_legal(card,self.card(attached.uid)): raise GameError(f"{card.name} is not attached to a legal permanent.")
+            return f"{controller.user_id}:{attached.uid}"
         if not card.activation_effect or card.activation_effect=="regenerate": return f"{user}:{source.uid}"
         if card.activation_effect=="damage_any" and target and ":" not in target:
             try: target_user=int(target)
@@ -344,6 +367,15 @@ class Game:
         return str(uid)
 
     def _target_for_cast(self,c,user,target):
+        if c.aura_target_types:
+            if not target or ":" not in target: raise GameError("Aura target must be USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as error: raise GameError("Aura target must be USER_ID:POSITION.") from error
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]
+            if not self._aura_legal(c,self.card(permanent.uid)): raise GameError(f"{c.name} cannot enchant that permanent.")
+            return f"{target_user}:{permanent.uid}"
         if c.effect in ("counter_spell","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
@@ -476,11 +508,11 @@ class Game:
         for pos in positions:
             if not 1<=pos<=len(p.battlefield): raise GameError("Bad attacker position.")
             x=p.battlefield[pos-1]; c=self.card(x.uid)
-            if not c.creature or x.tapped or (x.sick and not c.haste) or "defender" in c.keywords: raise GameError(f"{c.name} cannot attack.")
+            if not self.can_attack_permanent(x): raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
         for x in p.battlefield:
-            if x.uid in chosen and "vigilance" not in self.card(x.uid).keywords: x.tapped=True
+            if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
         self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.phase_passes=0
         self.phase="after_attackers" if chosen else "postcombat_main"
         self.priority_user=user
@@ -507,10 +539,12 @@ class Game:
         if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
         if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
+        if any(self.card(aura.uid).aura_blocked_except_wall for aura in self.attached_auras(attacker_perm)) and not self._has_subtype(blocker,"Wall"):
+            return False,f"{attacker.name} can only be blocked by Walls."
         if "flying" in attacker_keywords and not ({"flying","reach"} & blocker_keywords):
             return False,f"{blocker.name} cannot block a creature with flying."
         for land_type in ("plains","island","swamp","mountain","forest"):
-            if f"{land_type}walk" in attacker.keywords and any(self.card(x.uid).has_land_type(land_type) for x in defender.battlefield):
+            if f"{land_type}walk" in attacker_keywords and any(self.card(x.uid).has_land_type(land_type) for x in defender.battlefield):
                 return False,f"{attacker.name} can't be blocked while the defender controls a {land_type.title()}."
         power=self.current_stats(attacker_perm)[0]
         if blocker.max_block_power is not None and power>blocker.max_block_power:
@@ -606,7 +640,12 @@ class Game:
     def _resolve(self,s):
         if s.ability_effect: self._resolve_ability(s); return
         p=self.players[s.owner]; c=CARDS[s.key]
-        if c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
+        if c.aura_target_types:
+            user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
+            if target is None or not self._aura_legal(c,self.card(target.uid)):
+                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            p.battlefield.append(Permanent(s.uid,c.key,sick=False,attached_to=target.uid))
+        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
         elif c.effect in ("counter_spell","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
@@ -734,9 +773,15 @@ class Game:
     def _sba(self):
         while True:
             affected=False
+            all_permanents={permanent.uid:permanent for player in self.players.values() for permanent in player.battlefield}
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
                     card=self.card(permanent.uid)
+                    if card.aura_target_types:
+                        target=all_permanents.get(permanent.attached_to)
+                        if target is None or not self._aura_legal(card,self.card(target.uid)):
+                            controller.battlefield.remove(permanent); controller.graveyard.append(permanent.uid); affected=True
+                        continue
                     if not card.creature: continue
                     toughness=self.current_stats(permanent)[1]
                     if toughness<=0:

@@ -208,7 +208,12 @@ def render_battlefield(game, names, paths, background_path):
                 abilities="/".join(short.get(word,word[9:] if word.startswith("Produces ") else word[:3]) for word in card.ability_text.split(", "))
                 draw.rounded_rectangle((x+34,y_cards+4,x+92,y_cards+23),5,fill=(8,12,11,220))
                 draw.text((x+63,y_cards+13),abilities,fill=(255,244,207),font=_font(10),anchor="mm")
-            if permanent.tapped:
+            if permanent.attached_to:
+                _,target=game.find_permanent(permanent.attached_to)
+                label="→ "+(game.card(target.uid).name[:11] if target else "missing")
+                draw.rounded_rectangle((x+4,y_cards+108,x+92,y_cards+130),5,fill=(8,12,11,225))
+                draw.text((x+48,y_cards+119),label,fill=(255,224,150),font=_font(10),anchor="mm")
+            elif permanent.tapped:
                 draw.text((x + 48, y_cards + 116), "TAPPED", fill=(255, 220, 205), font=small_font, anchor="mm")
         if len(player.battlefield) > 8:
             draw.text((1068, y_cards + 60), f"+{len(player.battlefield)-8}", fill=(255, 244, 207), font=label_font, anchor="e")

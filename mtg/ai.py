@@ -6,6 +6,13 @@ TARGETED_EFFECTS = {"pump","pump_blocking","destroy_land","destroy_permanent","d
 
 
 def _target(game, user, card):
+    if card.aura_target_types:
+        target_user=game.opponent(user) if card.aura_hostile else user
+        choices=[]
+        for position,permanent in enumerate(game.player(target_user).battlefield,1):
+            target=game.card(permanent.uid)
+            if game._aura_legal(card,target): choices.append((sum(game.current_stats(permanent)) if target.creature else target.cost,position))
+        return f"{target_user}:{max(choices)[1]}" if choices else None
     if card.effect in ("counter_spell","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
@@ -90,7 +97,7 @@ def _activate_helpful_mana(game, user):
         if card.land or game.can_pay(user,card): continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main","postcombat_main") or game.stack): continue
         target=_target(game,user,card)
-        if card.effect in TARGETED_EFFECTS and target is None: continue
+        if (card.effect in TARGETED_EFFECTS or card.aura_target_types) and target is None: continue
         candidates.append(card)
     for position,permanent in enumerate(list(player.battlefield),1):
         source=game.card(permanent.uid)
@@ -133,6 +140,8 @@ def _play_one(game, user, difficulty):
             score = sum(game.projected_stats(user,card))
         elif card.kind == "Artifact" and card.produces:
             score = 5
+        elif card.aura_target_types:
+            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
         elif card.effect=="damage_x_exile":
@@ -196,7 +205,7 @@ def _attack_positions(game, user, difficulty):
     legal = []
     for position, permanent in enumerate(game.player(user).battlefield, 1):
         card = game.card(permanent.uid)
-        if card.creature and "defender" not in card.keywords and not permanent.tapped and (not permanent.sick or card.haste):
+        if game.can_attack_permanent(permanent):
             legal.append(position)
     if difficulty == "easy":
         return legal[::2]
@@ -280,12 +289,18 @@ def _regeneration_threatened(game,user,permanent):
             return attacker is not None and game.current_stats(attacker)[0]>=toughness
     return False
 
+def _activation_beneficiary(game,source):
+    card=game.card(source.uid)
+    if not card.activation_attached: return source
+    _,target=game.find_permanent(source.attached_to)
+    return target
+
 def _activate_regeneration(game,user):
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
-        card=game.card(permanent.uid)
-        if card.activation_effect=="regenerate" and not permanent.regeneration_shields and _regeneration_threatened(game,user,permanent) and game.can_activate(user,position):
-            candidates.append((card.cost,position))
+        card=game.card(permanent.uid); target=_activation_beneficiary(game,permanent)
+        if card.activation_effect=="regenerate" and target is not None and not target.regeneration_shields and _regeneration_threatened(game,next(player.user_id for player in game.players.values() if target in player.battlefield),target) and game.can_activate(user,position):
+            candidates.append((game.card(target.uid).cost,position))
     if not candidates: return None
     _,position=max(candidates); game.activate_ability(user,position); return "activate"
 
@@ -304,10 +319,11 @@ def _activate_combat_pump(game,user):
     combat=set(game.attackers if game.active_user==user else game.blocks.values())
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
-        card=game.card(permanent.uid)
-        keyword_helpful=card.activated_keyword and card.activated_keyword not in game.current_keywords(permanent) and game.active_user==user
-        if permanent.uid in combat and (card.activated_power or card.activated_toughness or keyword_helpful) and game.can_activate(user,position):
-            candidates.append((card.activated_power+card.activated_toughness+bool(keyword_helpful),sum(game.current_stats(permanent)),position))
+        card=game.card(permanent.uid); target=_activation_beneficiary(game,permanent)
+        if target is None: continue
+        keyword_helpful=card.activated_keyword and card.activated_keyword not in game.current_keywords(target) and game.active_user==user
+        if target.uid in combat and (card.activated_power or card.activated_toughness or keyword_helpful) and game.can_activate(user,position):
+            candidates.append((card.activated_power+card.activated_toughness+bool(keyword_helpful),sum(game.current_stats(target)),position))
     if not candidates: return None
     position=max(candidates)[2]; game.activate_ability(user,position); return "activate"
 

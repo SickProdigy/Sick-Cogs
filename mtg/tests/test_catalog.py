@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from mtg.art import ArtError
-from mtg.cards import ALPHA_ACTIVATED_CREATURES, ALPHA_ARTIFACTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_KEYWORDS, ALPHA_MANA_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
+from mtg.cards import ALPHA_ACTIVATED_CREATURES, ALPHA_ARTIFACTS, ALPHA_ENCHANTMENTS, ALPHA_CHARACTERISTIC_CREATURES, ALPHA_KEYWORDS, ALPHA_MANA_CREATURES, ALPHA_LAND_KEYS, ALPHA_SPELLS, BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
@@ -14,13 +14,13 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),178)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),178)
+        self.assertEqual(len(CARDS),190)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),190)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
         self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","earthquake_x","hurricane_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","add_mana","destroy_wall","destroy_all_enchantments"})
-        self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact"} for card in CARDS.values()))
+        self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact","Enchantment"} for card in CARDS.values()))
         self.assertTrue(all(card.power>=0 and card.toughness>=0 for card in CARDS.values()))
 
     def test_pack_pools_cover_catalog_without_duplicates(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),118)
-        self.assertEqual(len(REFERENCE_ALPHA),177)
+        self.assertEqual(len(PLAYABLE_ALPHA),130)
+        self.assertEqual(len(REFERENCE_ALPHA),165)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -80,6 +80,14 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(promoted_lands,ALPHA_LAND_KEYS)
         promoted_spells={card.key for card in PLAYABLE_ALPHA if card.support_family=="spell"}
         self.assertEqual(promoted_spells,set(ALPHA_SPELLS))
+        promoted_enchantments={card.key for card in PLAYABLE_ALPHA if card.support_family=="enchantment"}
+        self.assertEqual(promoted_enchantments,set(ALPHA_ENCHANTMENTS))
+        self.assertEqual(CARDS["lea:1"].aura_target_subtypes,("Wall",))
+        self.assertTrue(CARDS["lea:1"].aura_attack_override)
+        self.assertTrue(CARDS["lea:59"].aura_blocked_except_wall)
+        self.assertTrue(CARDS["lea:134"].aura_hostile)
+        self.assertEqual((CARDS["lea:24"].aura_power,CARDS["lea:24"].aura_toughness),(1,2))
+        self.assertTrue(CARDS["lea:23"].activation_attached); self.assertEqual(CARDS["lea:23"].ability_text,"{W}: Enchanted creature gets +0/+1 until end of turn, Enchanted creature gets +0/+2")
         promoted_artifacts={card.key for card in PLAYABLE_ALPHA if card.support_family=="artifact"}
         self.assertEqual(promoted_artifacts,set(ALPHA_ARTIFACTS))
         self.assertTrue(all(CARDS[key].kind=="Artifact" and CARDS[key].produces for key in ALPHA_ARTIFACTS))
@@ -93,7 +101,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:60"].temporary_keyword,"flying")
         self.assertEqual(CARDS["lea:85"].target_types,("Artifact","Creature","Land"))
         self.assertEqual((CARDS["lea:98"].mana_color,CARDS["lea:98"].mana_amount),("B",3))
-        self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery","Artifact")) for card in PLAYABLE_ALPHA))
+        self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery","Artifact","Enchantment")) for card in PLAYABLE_ALPHA))
         self.assertTrue(all(CARDS[key].land and CARDS[key].produces for key in ALPHA_LAND_KEYS))
 
     def test_alpha_search_handles_names_printing_keys_and_basic_art(self):
@@ -125,7 +133,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("178 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("190 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

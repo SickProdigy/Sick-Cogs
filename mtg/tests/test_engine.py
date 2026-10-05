@@ -647,12 +647,12 @@ class AlphaXSpellTests(unittest.TestCase):
             for saved in player["battlefield"]:
                 saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
                 saved.pop("temporary_keywords",None); saved.pop("activations_this_turn",None); saved.pop("sacrifice_at_end_step",None)
-                saved.pop("regeneration_shields",None); saved.pop("cant_regenerate",None)
+                saved.pop("regeneration_shields",None); saved.pop("cant_regenerate",None); saved.pop("attached_to",None)
         raw["stack"][0].pop("x_value"); raw["stack"][0].pop("ability_effect"); raw["stack"][0].pop("source_uid")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
         self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death)
         self.assertEqual(restored_permanent.temporary_keywords,[]); self.assertEqual(restored_permanent.activations_this_turn,0); self.assertFalse(restored_permanent.sacrifice_at_end_step)
-        self.assertEqual(restored_permanent.regeneration_shields,0); self.assertFalse(restored_permanent.cant_regenerate)
+        self.assertEqual(restored_permanent.regeneration_shields,0); self.assertFalse(restored_permanent.cant_regenerate); self.assertIsNone(restored_permanent.attached_to)
         self.assertEqual(restored.stack[0].x_value,0); self.assertEqual(restored.stack[0].ability_effect,""); self.assertIsNone(restored.stack[0].source_uid)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
@@ -1035,6 +1035,88 @@ class AlphaZoneMovementTests(unittest.TestCase):
         self.assertEqual(game.blocks,{}); self.assertEqual(game.blocked_attackers,[attacker.uid]); self.assertIn(blocker.uid,game.players[20].hand)
         before=game.players[20].life; game._combat_damage(False)
         self.assertEqual(game.players[20].life,before)
+
+
+class AlphaAuraTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_aura_cast_uses_stable_target_persists_and_derives_stats(self):
+        game=ready(); bear=self.add(game,20,"bear"); aura=self.add(game,10,"lea:24","hand"); self.add(game,10,"plains")
+        game.play(10,1,"20:1"); self.assertEqual(game.stack[-1].target,f"20:{bear.uid}")
+        game=Game.from_raw(game.to_raw()); self.resolve_top(game)
+        bear=game.player(20).battlefield[0]; attached=next(x for x in game.player(10).battlefield if x.uid==aura)
+        self.assertEqual(attached.attached_to,bear.uid); self.assertEqual(game.current_stats(bear),(3,4))
+        self.assertEqual(Game.from_raw(game.to_raw()).find_permanent(aura)[1].attached_to,bear.uid)
+
+    def test_aura_fizzles_if_stable_target_leaves(self):
+        game=ready(); target=self.add(game,20,"bear"); aura=self.add(game,10,"lea:58","hand"); self.add(game,10,"island")
+        game.play(10,1,"20:1"); game.player(20).battlefield.remove(target); game.player(20).graveyard.append(target.uid)
+        self.resolve_top(game)
+        self.assertIn(aura,game.player(10).graveyard); self.assertNotIn(aura,[x.uid for x in game.player(10).battlefield]); self.assertIn("fizzled",game.log[-1])
+
+    def test_static_auras_stack_across_controllers_and_weakness_cleans_up(self):
+        game=ready(); bear=self.add(game,20,"bear")
+        self.add(game,10,"lea:24",attached_to=bear.uid); self.add(game,20,"lea:131",attached_to=bear.uid); self.add(game,10,"lea:134",attached_to=bear.uid)
+        self.assertEqual(game.current_stats(bear),(3,4))
+        victim=self.add(game,20,"goblin"); weakness=self.add(game,10,"lea:134",attached_to=victim.uid)
+        game._sba()
+        self.assertIn(victim.uid,game.player(20).graveyard); self.assertIn(weakness.uid,game.player(10).graveyard)
+        self.assertNotIn(weakness,game.player(10).battlefield)
+
+    def test_aura_keywords_affect_flying_first_strike_reach_and_landwalk(self):
+        game=ready(); attacker=self.add(game,10,"bear"); blocker=self.add(game,20,"bear")
+        flight=self.add(game,10,"lea:58",attached_to=attacker.uid); lance=self.add(game,10,"lea:27",attached_to=attacker.uid)
+        self.assertEqual(game.current_keywords(attacker),{"flying","first_strike"})
+        game.active_index=0; self.assertFalse(game.can_block(attacker.uid,blocker.uid)[0])
+        web=self.add(game,20,"lea:228",attached_to=blocker.uid)
+        self.assertTrue(game.can_block(attacker.uid,blocker.uid)[0])
+        game.player(10).battlefield.remove(flight); game.player(10).graveyard.append(flight.uid)
+        burrowing=self.add(game,10,"lea:138",attached_to=attacker.uid); self.add(game,20,"mountain")
+        legal,reason=game.can_block(attacker.uid,blocker.uid); self.assertFalse(legal); self.assertIn("Mountain",reason)
+
+    def test_animate_wall_allows_only_an_enchanted_wall_to_attack(self):
+        game=ready(); wall=self.add(game,10,"lea:225")
+        game.phase="attackers"; game.priority_user=None
+        with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(10,[1])
+        game.phase="precombat_main"; game.priority_user=10; aura=self.add(game,10,"lea:1","hand"); self.add(game,10,"plains")
+        with self.assertRaisesRegex(GameError,"cannot enchant"):
+            other=ready(); self.add(other,20,"bear"); held=self.add(other,10,"lea:1","hand"); land=self.add(other,10,"plains"); other.play(10,1,"20:1")
+        self.assertIn(held,other.player(10).hand); self.assertFalse(land.tapped)
+        game.play(10,1,"10:1"); self.resolve_top(game)
+        game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[1])
+        self.assertEqual(game.attackers,[wall.uid]); self.assertIn(aura,[x.uid for x in game.player(10).battlefield])
+
+    def test_invisibility_allows_only_walls_to_block(self):
+        game=ready(); attacker=self.add(game,10,"bear"); ordinary=self.add(game,20,"bear"); wall=self.add(game,20,"lea:225")
+        self.add(game,10,"lea:59",attached_to=attacker.uid); game.active_index=0
+        self.assertFalse(game.can_block(attacker.uid,ordinary.uid)[0]); self.assertTrue(game.can_block(attacker.uid,wall.uid)[0])
+
+    def test_attached_pump_and_regeneration_abilities_use_enchanted_creature(self):
+        game=ready(); bear=self.add(game,10,"bear"); armor=self.add(game,10,"lea:23",attached_to=bear.uid); self.add(game,10,"plains")
+        game.activate_ability(10,2); self.assertEqual(game.stack[-1].target,f"10:{bear.uid}")
+        game=Game.from_raw(game.to_raw()); self.resolve_top(game); bear=game.find_permanent(bear.uid)[1]
+        self.assertEqual(game.current_stats(bear),(2,5))
+        game.priority_user=10; fire=self.add(game,10,"lea:150",attached_to=bear.uid); self.add(game,10,"mountain")
+        game.activate_ability(10,4); self.resolve_top(game); self.assertEqual(game.current_stats(bear),(3,5))
+        game.priority_user=10; regen=self.add(game,10,"lea:213",attached_to=bear.uid); self.add(game,10,"forest")
+        game.activate_ability(10,6); self.resolve_top(game); self.assertEqual(bear.regeneration_shields,1)
+
+    def test_aura_goes_to_its_owners_graveyard_when_target_leaves(self):
+        game=ready(); target=self.add(game,20,"bear"); aura=self.add(game,10,"lea:134",attached_to=target.uid)
+        game._destroy(game.player(20),target); game._sba()
+        self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(aura.uid,game.player(10).graveyard)
+
+    def test_destroying_aura_immediately_removes_its_derived_effect(self):
+        game=ready(); target=self.add(game,20,"bear"); aura=self.add(game,10,"lea:24",attached_to=target.uid)
+        self.assertEqual(game.current_stats(target),(3,4))
+        game._destroy(game.player(10),aura); game._sba()
+        self.assertEqual(game.current_stats(target),(2,2)); self.assertIn(target,game.player(20).battlefield); self.assertIn(aura.uid,game.player(10).graveyard)
 
 
 class AlphaUtilitySpellTests(unittest.TestCase):

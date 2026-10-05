@@ -34,6 +34,15 @@ class Card:
     target_color: str = ""
     temporary_keyword: str = ""
     mana_color: str = ""
+    aura_target_types: Tuple[str, ...] = ()
+    aura_target_subtypes: Tuple[str, ...] = ()
+    aura_power: int = 0
+    aura_toughness: int = 0
+    aura_keyword: str = ""
+    aura_attack_override: bool = False
+    aura_blocked_except_wall: bool = False
+    aura_hostile: bool = False
+    activation_attached: bool = False
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -70,7 +79,7 @@ class Card:
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
         if self.activation_cost or self.activation_effect:
             effects=[]
-            if self.activated_power or self.activated_toughness:
+            if (self.activated_power or self.activated_toughness) and not self.activation_attached:
                 effects.append(f"{self.activated_power:+d}/{self.activated_toughness:+d} until end of turn")
             if self.activated_keyword:
                 effects.append(f"Gains {self.activated_keyword.title()} until end of turn")
@@ -80,6 +89,12 @@ class Card:
             costs=[self.activation_cost] if self.activation_cost else []
             if self.activation_tap: costs.append("{T}")
             abilities.append(", ".join(costs)+": "+"; ".join(effects))
+        aura=[]
+        if self.aura_power or self.aura_toughness: aura.append(f"Enchanted creature gets {self.aura_power:+d}/{self.aura_toughness:+d}")
+        if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
+        if self.aura_attack_override: aura.append("Enchanted Wall can attack")
+        if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
+        abilities.extend(aura)
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -109,6 +124,21 @@ BASE_CARDS = {
 }
 
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
+
+ALPHA_ENCHANTMENTS = {
+    "lea:1": {"aura_target_types":("Creature",), "aura_target_subtypes":("Wall",), "aura_attack_override":True},
+    "lea:23": {"aura_target_types":("Creature",), "aura_toughness":2, "activation_cost":"{W}", "activated_toughness":1, "activation_attached":True, "activation_text":"Enchanted creature gets +0/+1 until end of turn"},
+    "lea:24": {"aura_target_types":("Creature",), "aura_power":1, "aura_toughness":2},
+    "lea:27": {"aura_target_types":("Creature",), "aura_keyword":"first_strike"},
+    "lea:58": {"aura_target_types":("Creature",), "aura_keyword":"flying"},
+    "lea:59": {"aura_target_types":("Creature",), "aura_blocked_except_wall":True},
+    "lea:131": {"aura_target_types":("Creature",), "aura_power":2, "aura_toughness":1},
+    "lea:134": {"aura_target_types":("Creature",), "aura_power":-2, "aura_toughness":-1, "aura_hostile":True},
+    "lea:138": {"aura_target_types":("Creature",), "aura_keyword":"mountainwalk"},
+    "lea:150": {"aura_target_types":("Creature",), "activation_cost":"{R}", "activated_power":1, "activation_attached":True, "activation_text":"Enchanted creature gets +1/+0 until end of turn"},
+    "lea:213": {"aura_target_types":("Creature",), "activation_cost":"{G}", "activation_effect":"regenerate", "activation_attached":True, "activation_text":"Regenerate enchanted creature"},
+    "lea:228": {"aura_target_types":("Creature",), "aura_toughness":2, "aura_keyword":"reach"},
+}
 
 ALPHA_ARTIFACTS = {
     "lea:232": {"produces":("W","U","B","R","G"), "mana_amount":3, "sacrifice_for_mana":True},
@@ -227,7 +257,7 @@ for reference in PLAYABLE_ALPHA:
     CARDS[reference.key] = Card(
         key=reference.key,
         name=reference.name,
-        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family in {"spell","artifact"} else "Creature",
+        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family in {"spell","artifact","enchantment"} else "Creature",
         type_line=reference.type_line,
         set_code="lea",
         scryfall_id=reference.scryfall_id,
@@ -253,20 +283,29 @@ for reference in PLAYABLE_ALPHA:
         target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",""),
         temporary_keyword=ALPHA_SPELLS.get(reference.key, {}).get("temporary_keyword",""),
         mana_color=ALPHA_SPELLS.get(reference.key, {}).get("mana_color",""),
+        aura_target_types=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_types",()),
+        aura_target_subtypes=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_subtypes",()),
+        aura_power=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_power",0),
+        aura_toughness=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_toughness",0),
+        aura_keyword=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_keyword",""),
+        aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
+        aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
+        aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_hostile",False),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),
-        activation_cost=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_cost",""),
-        activated_power=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_power",0),
-        activated_toughness=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0),
+        activation_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_cost",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_cost","")),
+        activated_power=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_power",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_power",0)),
+        activated_toughness=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_toughness",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0)),
         activated_keyword=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_keyword",""),
         sacrifice_after_activations=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("sacrifice_after_activations",0),
-        activation_effect=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_effect",""),
+        activation_effect=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_effect",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_effect","")),
         activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_tap",False),
-        activation_text=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text",""),
+        activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text","")),
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",0),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
+        activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
 PACK_POOLS = {
@@ -290,6 +329,9 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALP
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
     raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
+
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS):
+    raise RuntimeError("Playable Alpha enchantments do not match the validated enchantment map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):
     raise RuntimeError("Playable Alpha artifacts do not match the validated artifact map.")
