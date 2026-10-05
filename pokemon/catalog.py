@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.2 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.3 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
@@ -18,20 +18,24 @@ class CatalogError(RuntimeError):
 
 
 class PokemonCatalog:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, bundled_path: Path = None):
         self.path = path
+        self.bundled_path = bundled_path
 
     def load(self) -> int:
-        if not self.path.exists():
-            return 0
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            parsed = [self.parse_cached(item) for item in raw.get("species", [])]
-        except (OSError, ValueError, TypeError, KeyError) as exc:
-            raise CatalogError("The Pokémon catalog cache is invalid.") from exc
-        for item in parsed:
-            SPECIES[item.id] = item
-        return len(parsed)
+        loaded = 0
+        for path in (self.bundled_path, self.path):
+            if path is None or not path.exists():
+                continue
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                parsed = [self.parse_cached(item) for item in raw.get("species", [])]
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                raise CatalogError("The Pokémon catalog cache is invalid.") from exc
+            for item in parsed:
+                SPECIES[item.id] = item
+            loaded = max(loaded, len(parsed))
+        return loaded
 
     async def sync_generation(self, generation: int) -> int:
         if not 1 <= generation <= 9:
@@ -99,7 +103,14 @@ class PokemonCatalog:
             for item in sorted(pokemon["types"], key=lambda value: value["slot"])
         )
         available = {
-            str(item["move"]["name"]).replace("-", "_") for item in pokemon["moves"]
+            str(item["move"]["name"]).replace("-", "_")
+            for item in pokemon["moves"]
+            if not item.get("version_group_details")
+            or any(
+                detail.get("move_learn_method", {}).get("name") == "level-up"
+                and detail.get("version_group", {}).get("name") in {"red-blue", "yellow"}
+                for detail in item["version_group_details"]
+            )
         }
         moves = tuple(key for key in MOVES if key in available)[:2]
         if not moves:

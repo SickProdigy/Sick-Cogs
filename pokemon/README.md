@@ -7,7 +7,7 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 - One global collection per Discord user across every guild served by the same bot.
 - Bulbasaur, Charmander, or Squirtle starter; immutable owned-Pokémon IDs; six-member parties; paginated boxes and profiles.
 - Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, generation filters, rarity weighting, expiry, and administrator recovery.
-- Cached, validated PokéAPI generation sync with a bundled 12-species fallback catalog.
+- All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
 - Persistent exclusive wild battles with PP, accuracy, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic RNG recovery, experience, leveling, and supported evolutions.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Modern encounter art plus a generated Game Boy-inspired battle scene with bounded sprite/render caches and accessible embed text.
@@ -24,7 +24,7 @@ Collections are global only within one bot installation. Separate bots do not sh
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
 
-Player commands include `[p]pokemon collection`, `party`, `party add`, `party remove`, `profile`, and `heal`. The bot owner can populate a generation cache with `[p]pokemon set catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `party`, `party add`, `party remove`, `profile`, and `heal`. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
 
 ## Boundaries
 
