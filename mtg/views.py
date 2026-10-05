@@ -23,6 +23,8 @@ class GameView(discord.ui.View):
         for item in self.children: item.custom_id=f"mtg:{game_id}:{item.custom_id}"
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
+        if game and game.finished:
+            await i.response.send_message("This match is over.",ephemeral=True); return False
         if game and i.user.id in game.order: return True
         await i.response.send_message("You are not a player in this match.",ephemeral=True); return False
     @discord.ui.button(label="View hand",emoji="🂠",style=discord.ButtonStyle.primary,custom_id="hand")
@@ -31,10 +33,10 @@ class GameView(discord.ui.View):
         lines=[f"**{n}. {c.name}** — {c.kind}, cost {c.cost}\n{c.text or 'No rules text.'}" for n,c in enumerate(cards,1)]
         await i.response.send_message("\n\n".join(lines) or "Your hand is empty.",ephemeral=True)
     @discord.ui.button(label="Keep hand",style=discord.ButtonStyle.success,custom_id="keep")
-    async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True))
+    async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
-    async def mulligan(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,False))
+    async def mulligan(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,False),"mulligan")
     @discord.ui.button(label="Pass / next",style=discord.ButtonStyle.primary,custom_id="pass")
-    async def pass_turn(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.pass_priority(i.user.id))
+    async def pass_turn(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.pass_priority(i.user.id),"pass")
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
-    async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id))
+    async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")

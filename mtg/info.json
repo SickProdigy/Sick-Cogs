@@ -13,5 +13,5 @@
   "short": "Persistent two-player MTG rules prototype",
   "tags": ["games", "cards", "mtg", "multiplayer"],
   "type": "COG",
-  "version": "0.1.1"
+  "version": "0.1.2"
 }

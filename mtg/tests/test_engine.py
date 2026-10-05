@@ -30,6 +30,23 @@ class TurnTests(unittest.TestCase):
         g=ready(); restored=Game.from_raw(g.to_raw())
         self.assertEqual(restored.to_raw(),g.to_raw())
 
+    def test_action_history_and_timeout_round_trip(self):
+        g=ready(); g.record(10,"pass")
+        raw=g.to_raw(); restored=Game.from_raw(raw)
+        self.assertEqual(restored.history[-1]["action"],"pass")
+        restored.updated_at=100
+        self.assertTrue(restored.is_expired(200,100)); self.assertTrue(restored.expire())
+        self.assertTrue(restored.finished); self.assertIsNone(restored.winner)
+        self.assertEqual(restored.history[-1]["action"],"match_expired")
+        with self.assertRaises(GameError): restored.concede(10)
+
+    def test_legacy_state_gets_activity_defaults(self):
+        raw=ready().to_raw()
+        raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
+        restored=Game.from_raw(raw)
+        self.assertEqual(restored.history,[])
+        self.assertGreater(restored.updated_at,0)
+
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
         g=ready(); p=g.players[10]

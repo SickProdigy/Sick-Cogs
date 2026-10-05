@@ -1,4 +1,5 @@
 import random
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 from .cards import CARDS, starter
@@ -45,7 +46,8 @@ class Game:
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
         self.priority_user = self.winner = self.finished_reason = None
-        self.log = []
+        self.log, self.history = [], []
+        self.created_at = self.updated_at = int(time.time())
         rng = random.Random(seed)
         for user, color in zip(self.order, ("red","green")):
             p=self.players[user]
@@ -53,9 +55,22 @@ class Game:
                 self.cards[self.next_uid]=key; p.library.append(self.next_uid); self.next_uid+=1
             rng.shuffle(p.library); self._draw(p,7)
         self.log.append("Both players drew seven cards.")
+        self.record(None,"game_created","Both players drew seven cards.")
 
     @property
     def active_user(self): return self.order[self.active_index]
+    @property
+    def finished(self): return self.phase=="finished"
+    def record(self,user,action,detail=""):
+        self.updated_at=int(time.time())
+        event={"seq":len(self.history)+1,"at":self.updated_at,"user":user,"action":action}
+        if detail: event["detail"]=detail
+        self.history.append(event)
+    def is_expired(self,now,timeout): return not self.finished and int(now)-self.updated_at>=timeout
+    def expire(self):
+        if self.finished: return False
+        self.winner=None; self.finished_reason="inactivity timeout"; self.phase="finished"; self.priority_user=None
+        self.record(None,"match_expired"); return True
     def opponent(self,user): self.player(user); return self.order[1] if user==self.order[0] else self.order[0]
     def player(self,user):
         try: return self.players[int(user)]
@@ -132,7 +147,7 @@ class Game:
             if s.passes==2:
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
-                if not self.winner: self.priority_user=self.active_user
+                if not self.finished: self.priority_user=self.active_user
             else: self.priority_user=self.opponent(user)
         elif user==self.active_user: self._advance()
         else: self.priority_user=self.active_user
@@ -212,23 +227,23 @@ class Game:
             if p.life<=0: self._finish(self.opponent(p.user_id),"zero life"); break
     def concede(self,user):
         self.player(user)
-        if self.winner: raise GameError("Game is over.")
+        if self.finished: raise GameError("Game is over.")
         self._finish(self.opponent(user),"concession")
     def _finish(self,winner,reason): self.winner=winner; self.finished_reason=reason; self.phase="finished"; self.priority_user=None
     def _priority(self,user):
-        if self.winner: raise GameError("Game is over.")
+        if self.finished: raise GameError("Game is over.")
         if self.priority_user!=user: raise GameError("You do not have priority.")
     def _active(self,user):
-        if self.winner: raise GameError("Game is over.")
+        if self.finished: raise GameError("Game is over.")
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"log":self.log[-100:]}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.log=list(r["log"])
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g
