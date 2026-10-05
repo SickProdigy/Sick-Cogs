@@ -12,6 +12,7 @@ from .data import SPECIES, sprite
 
 SPRITE_HOST = "raw.githubusercontent.com"
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
+MAX_RENDER_BYTES = 8 * 1024 * 1024
 RETRO = [
     (15, 56, 15),
     (48, 98, 48),
@@ -127,6 +128,8 @@ class BattleRenderer:
     def _save(image):
         output = io.BytesIO()
         image.save(output, "PNG", optimize=True)
+        if output.tell() > MAX_RENDER_BYTES:
+            raise RenderError("Rendered image exceeds Discord's upload limit.")
         output.seek(0)
         return output
 

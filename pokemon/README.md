@@ -5,10 +5,10 @@ Persistent cross-guild Pokémon catching and wild battles for Red.
 ## Included
 
 - One global collection per Discord user across every guild served by the same bot.
-- Bulbasaur, Charmander, or Squirtle starter; immutable owned-Pokémon IDs; six-member parties; paginated boxes and profiles.
+- Bulbasaur, Charmander, or Squirtle starter; immutable owned-Pokémon IDs; six-member parties; ten 30-slot boxes; Pokédex tracking; and profiles.
 - Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, generation filters, rarity weighting, expiry, and administrator recovery.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
-- Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, PP, accuracy, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic RNG recovery, XP, supported move learning, and every Gen 1 level-based evolution.
+- Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Modern encounter art plus a generated Game Boy-inspired battle scene with bounded sprite/render caches and accessible embed text.
 - Red user-data deletion releases affected encounters.
@@ -24,10 +24,10 @@ Collections are global only within one bot installation. Separate bots do not sh
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
 
-Player commands include `[p]pokemon collection`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `party`, `party add`, `party remove`, `profile`, and `heal`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
 
 ## Boundaries
 
-This remains a deliberately bounded first playable milestone. PvP, trading, boxes with hard capacity limits, abilities, EVs, gender mechanics, full move/category coverage, stone and trade evolutions, biome/weather tables, and cross-bot ownership are deferred.
+This remains a deliberately bounded first playable milestone. PvP, trading, active ability/EV/gender battle mechanics, full move coverage, stone and trade evolutions, biome/weather tables, and cross-bot ownership are deferred. Owned records already preserve ability, EV, gender, nature, origin, and catch provenance for future mechanics.
 
 This is an unofficial, noncommercial fan project. It uses replaceable PokéAPI data/sprite providers; operators are responsible for reviewing provider terms and Pokémon-related intellectual-property requirements before public distribution.

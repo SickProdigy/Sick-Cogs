@@ -25,6 +25,9 @@ class OwnedPokemon:
     moves: tuple = ()
     move_pp: dict = field(default_factory=dict)
     ivs: dict = field(default_factory=dict)
+    evs: dict = field(default_factory=dict)
+    gender: str = "unknown"
+    origin: str = "wild"
     caught_at: Optional[str] = None
 
     def __post_init__(self):
@@ -32,6 +35,9 @@ class OwnedPokemon:
             self.moves = moves_for_level(self.species_id, self.level)
         if not self.move_pp:
             self.move_pp = {key: MOVES[key].pp for key in self.moves}
+        for key in ("hp", "attack", "defense", "special_attack", "special_defense", "speed"):
+            self.evs.setdefault(key, 0)
+            self.ivs.setdefault(key, 0)
 
     @classmethod
     def create(
@@ -45,6 +51,11 @@ class OwnedPokemon:
         guild_id: Optional[int] = None,
     ):
         rng = random.Random(seed)
+        species=SPECIES[species_id]
+        if species.gender_rate<0:
+            gender="genderless"
+        else:
+            gender="female" if rng.randrange(8)<species.gender_rate else "male"
         return cls(
             instance_id,
             species_id,
@@ -54,13 +65,16 @@ class OwnedPokemon:
             None,
             guild_id,
             rng.choice(NATURES),
-            "",
+            rng.choice(species.abilities) if species.abilities else "",
             moves_for_level(species_id, level),
             {key: MOVES[key].pp for key in moves_for_level(species_id, level)},
             {
                 key: rng.randrange(32)
-                for key in ("hp", "attack", "defense", "speed")
+                for key in ("hp", "attack", "defense", "special_attack", "special_defense", "speed")
             },
+            {key:0 for key in ("hp","attack","defense","special_attack","special_defense","speed")},
+            gender,
+            "wild" if guild_id is not None else "starter",
             datetime.now(timezone.utc).isoformat(),
         )
 
@@ -76,6 +90,9 @@ class OwnedPokemon:
         data["moves"] = tuple(data.get("moves") or moves_for_level(int(data["species_id"]), int(data.get("level",5))))
         data.setdefault("move_pp", {key: MOVES[key].pp for key in data["moves"]})
         data.setdefault("ivs", {})
+        data.setdefault("evs",{})
+        data.setdefault("gender","unknown")
+        data.setdefault("origin","wild" if data.get("caught_guild_id") is not None else "starter")
         return cls(**data)
 
     def gain_experience(self, amount: int):
@@ -126,6 +143,8 @@ class Battle:
     party: list = field(default_factory=list)
     party_hp: dict = field(default_factory=dict)
     party_status: dict = field(default_factory=dict)
+    action_history: list = field(default_factory=list)
+    action_count: int = 0
 
     def __post_init__(self):
         if not self.party:
@@ -167,6 +186,7 @@ class Battle:
         self.player_status=self.party_status.get(candidate.instance_id,"")
         self.last_action=f"Go, {SPECIES[candidate.species_id].name}!"
         self.result=None
+        self._record("switch")
 
     def switch_next(self):
         if self.state != "active":
@@ -192,7 +212,10 @@ class Battle:
 
     @staticmethod
     def stat(pokemon: OwnedPokemon, name: str):
-        base = getattr(SPECIES[pokemon.species_id], name)
+        species=SPECIES[pokemon.species_id]
+        base = getattr(species, name)
+        if not base and name=="special_attack":base=species.attack
+        if not base and name=="special_defense":base=species.defense
         iv = int(pokemon.ivs.get(name, 0))
         if name == "hp":
             return ((2 * base + iv) * pokemon.level) // 100 + pokemon.level + 10
@@ -255,6 +278,7 @@ class Battle:
         self._end_turn_status()
         self.last_action = " ".join(lines)
         self._finish_if_needed()
+        self._record(f"move:{player_key}")
 
     def _player_attack(self, move):
         if self.player_status == "paralysis" and self.rng().randrange(100) < 25:
@@ -263,8 +287,9 @@ class Battle:
         if rng.randrange(100) >= move.accuracy:
             return f"{move.name} missed."
         critical = rng.randrange(24) == 0
+        attack_stat = "special_attack" if move.category == "special" else "attack"
         damage = self._damage(
-            self.stat(self.player, "attack"),
+            self.stat(self.player, attack_stat),
             self.wild_species_id,
             self.player.level,
             move,
@@ -283,8 +308,10 @@ class Battle:
         if rng.randrange(100) >= move.accuracy:
             return f"Wild {move.name} missed."
         critical = rng.randrange(24) == 0
+        wild=SPECIES[self.wild_species_id]
+        attack = (wild.special_attack or wild.attack) if move.category == "special" else wild.attack
         damage = self._damage(
-            SPECIES[self.wild_species_id].attack,
+            attack,
             self.player.species_id,
             self.wild_level,
             move,
@@ -326,7 +353,8 @@ class Battle:
                 self.result = "Your party has no conscious Pokémon."
 
     def _damage(self, attack, target_id, level, move, rng, critical=False):
-        defense = SPECIES[target_id].defense
+        target=SPECIES[target_id]
+        defense = (target.special_defense or target.defense) if move.category=="special" else target.defense
         base = max(
             1,
             (((2 * level // 5 + 2) * move.power * attack // max(1, defense)) // 50)
@@ -371,8 +399,10 @@ class Battle:
         if self.rng().randrange(100) < chance:
             self.state = "caught"
             self.result = f"Caught {SPECIES[self.wild_species_id].name}! Catching does not award battle XP."
+            self._record("ball:caught")
             return True
         self._wild_response()
+        self._record("ball:failed")
         return False
 
     def run(self):
@@ -380,6 +410,7 @@ class Battle:
             raise BattleError("This encounter is over.")
         self.state = "ran"
         self.result = "You got away safely."
+        self._record("run")
 
     def caught(self, instance_id=None):
         if self.state != "caught":
@@ -394,6 +425,19 @@ class Battle:
             shiny=shiny,
             guild_id=self.guild_id,
         )
+
+    def _record(self, action):
+        self.action_count += 1
+        self.action_history.append({
+            "sequence": self.action_count,
+            "turn": self.turn,
+            "action": str(action)[:80],
+            "rolls": self.rolls,
+            "player_hp": self.player_hp,
+            "wild_hp": self.wild_hp,
+            "state": self.state,
+        })
+        self.action_history = self.action_history[-100:]
 
     def raw(self):
         result = asdict(self)
@@ -416,6 +460,9 @@ class Battle:
                 break
         data.setdefault("party_hp", {})
         data.setdefault("party_status", {})
+        data.setdefault("action_history", [])
+        data.setdefault("action_count", len(data["action_history"]))
+        data["action_history"]=list(data["action_history"])[-100:]
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle
