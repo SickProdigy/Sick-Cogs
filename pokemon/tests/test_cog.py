@@ -1,4 +1,5 @@
 import asyncio
+import discord
 import json
 import tempfile
 import unittest
@@ -9,6 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
+from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
+from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_is_expired, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
@@ -68,6 +71,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertFalse(encounter_is_expired({"state": "caught", "expires_at": expired}, now))
         self.assertFalse(encounter_is_expired({"state": "open", "expires_at": "bad"}, now))
         self.assertTrue(encounter_returns_after_timeout({"state":"battle","battle":{}}))
+        self.assertFalse(encounter_returns_after_timeout({"kind":"gym","state":"battle","battle":{}}))
         self.assertFalse(encounter_returns_after_timeout({"state":"battle","battle":{"action_count":1}}))
 
     def test_bundled_generation_one_catalog_is_complete(self):
@@ -100,8 +104,32 @@ class CogPolicyTests(unittest.TestCase):
         names = {command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertIn("pokemon heal", names)
         self.assertIn("pokemon pokedex", names)
+        self.assertIn("pokemon gym challenge", names)
         self.assertIn("pokemon party add", names)
         self.assertIn("pokemon set catalogsync", names)
+
+
+class GymProgressionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+
+    def test_kanto_gyms_are_ordered_and_complete(self):
+        self.assertEqual([gym.key for gym in KANTO_GYMS],["boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth"])
+        self.assertEqual(next_gym([]).leader,"Brock")
+        self.assertEqual(next_gym(["boulder"]).leader,"Misty")
+        self.assertIsNone(next_gym([gym.key for gym in KANTO_GYMS]))
+
+    def test_badge_case_and_profile_show_journey(self):
+        user=SimpleNamespace(display_name="SickProdigy",display_avatar=SimpleNamespace(url="https://example.com/avatar.png"))
+        conf={"badges":["boulder"],"collection":[],"party":[],"balls":10,"pokedex_seen":[],"pokedex_caught":[]}
+        profile=trainer_profile_embed(user,conf,300)
+        self.assertIn("SickProdigy",profile.title)
+        self.assertIn("1/8",profile.fields[0].name)
+        self.assertIn("Misty",profile.footer.text)
+        self.assertEqual(badge_case(["boulder"]).count("◻️"),7)
+        status=gym_status_embed(user,conf)
+        self.assertIn("Misty",status.fields[1].value)
 
 
 class PokedexTests(unittest.TestCase):
@@ -146,6 +174,61 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gym_challenge_starts_next_restart_safe_battle(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        player=OwnedPokemon.create("starter",7,14,seed=4)
+        conf={"collection":[player.raw()],"party":["starter"],"badges":[]}
+        active=StoredValue(None);timeout=StoredValue(1800);next_encounter_value=StoredValue(12)
+        cog=Pokemon.__new__(Pokemon)
+        cog.battles={};cog.locks={}
+        cog.config=SimpleNamespace(
+            user=lambda user:SimpleNamespace(all=AsyncMock(return_value=conf)),
+            guild=lambda guild:SimpleNamespace(active_encounter=active,battle_timeout=timeout),
+            next_encounter=next_encounter_value,
+        )
+        cog.rendered_battle=AsyncMock(return_value=(discord.Embed(title="Gym"),[]))
+        cog.put_encounter=AsyncMock()
+        message=SimpleNamespace(id=99)
+        ctx=SimpleNamespace(
+            author=SimpleNamespace(id=42),
+            guild=SimpleNamespace(id=1),
+            channel=SimpleNamespace(id=2),
+            send=AsyncMock(return_value=message),
+        )
+        await Pokemon.gym_challenge.callback(cog,ctx)
+        battle=cog.battles[12]
+        self.assertEqual((battle.battle_kind,battle.gym_key,battle.message_id),("gym","boulder",99))
+        self.assertEqual(next_encounter_value.value,13)
+        self.assertEqual(active.value,12)
+        raw=cog.put_encounter.await_args.args[1]
+        self.assertEqual((raw["kind"],raw["gym_key"],raw["battle"]["battle_kind"]),("gym","boulder","gym"))
+
+    async def test_gym_badge_settlement_is_idempotent(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        player=OwnedPokemon.create("gym-player",7,20,seed=4)
+        battle=Battle(9,42,1,2,3,player,95,12,50,1,battle_kind="gym",gym_key="boulder")
+        battle.state="won";battle.result="Victory."
+        stored={"collection":[player.raw()],"badges":[]}
+        section=SimpleNamespace(
+            all=AsyncMock(side_effect=lambda:dict(stored)),
+            set=AsyncMock(side_effect=lambda value:stored.update(value)),
+        )
+        cog=Pokemon.__new__(Pokemon)
+        cog.config=SimpleNamespace(user_from_id=lambda user_id:section)
+        await cog.sync_battle_player(battle)
+        await cog.sync_battle_player(battle)
+        self.assertEqual(stored["badges"],["boulder"])
+        self.assertEqual(battle.result.count("Boulder Badge"),1)
+
+    async def test_gym_view_removes_bag_and_rejects_poke_balls(self):
+        current=battle();current.battle_kind="gym";current.gym_key="boulder"
+        cog=Pokemon.__new__(Pokemon);cog.battles={1:current};cog.locks={}
+        view=BattleView(cog,1)
+        self.assertEqual([item.label for item in view.children],["Fight","Pokémon","Run"])
+        interaction=SimpleNamespace(user=SimpleNamespace(id=current.user_id),response=SimpleNamespace(send_message=AsyncMock()))
+        await cog.throw_ball(interaction,1)
+        interaction.response.send_message.assert_awaited_once_with("Poké Balls cannot be used in a Gym battle.",ephemeral=True)
+
     async def test_pokedex_style_preference_follows_default_and_persists_override(self):
         preference=StoredValue("default")
         default=StoredValue("compact")

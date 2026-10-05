@@ -85,6 +85,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(b.action_history[-1]["action"],"move:scratch")
         self.assertEqual(b.action_count,1)
 
+    def test_gym_battle_metadata_round_trip(self):
+        b=battle();b.battle_kind="gym";b.gym_key="boulder"
+        restored=Battle.from_raw(b.raw())
+        self.assertEqual((restored.battle_kind,restored.gym_key),("gym","boulder"))
+
     def test_action_history_is_monotonic_and_bounded(self):
         b=battle()
         for index in range(125):b._record(f"test:{index}")

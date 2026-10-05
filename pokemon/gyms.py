@@ -1,0 +1,92 @@
+from dataclasses import dataclass
+
+import discord
+
+from .data import SPECIES
+
+
+@dataclass(frozen=True)
+class Gym:
+    key: str
+    badge: str
+    symbol: str
+    leader: str
+    city: str
+    species_id: int
+    level: int
+
+
+KANTO_GYMS=(
+    Gym("boulder","Boulder Badge","🪨","Brock","Pewter City",95,14),
+    Gym("cascade","Cascade Badge","💧","Misty","Cerulean City",121,21),
+    Gym("thunder","Thunder Badge","⚡","Lt. Surge","Vermilion City",26,24),
+    Gym("rainbow","Rainbow Badge","🌈","Erika","Celadon City",45,29),
+    Gym("soul","Soul Badge","☠️","Koga","Fuchsia City",110,43),
+    Gym("marsh","Marsh Badge","🔮","Sabrina","Saffron City",65,43),
+    Gym("volcano","Volcano Badge","🔥","Blaine","Cinnabar Island",59,47),
+    Gym("earth","Earth Badge","🌍","Giovanni","Viridian City",112,50),
+)
+GYMS={gym.key:gym for gym in KANTO_GYMS}
+
+
+def earned_badges(raw):
+    known=set(GYMS)
+    return [key for key in dict.fromkeys(raw or []) if key in known]
+
+
+def next_gym(raw):
+    badges=set(earned_badges(raw))
+    return next((gym for gym in KANTO_GYMS if gym.key not in badges),None)
+
+
+def gym_by_key(value):
+    key=(value or "").casefold().replace(" badge","").replace(" ","")
+    for gym in KANTO_GYMS:
+        if key in {gym.key,gym.leader.casefold().replace(" ","").replace(".","")}:
+            return gym
+    return None
+
+
+def badge_case(raw):
+    badges=set(earned_badges(raw))
+    return " ".join(gym.symbol if gym.key in badges else "◻️" for gym in KANTO_GYMS)
+
+
+def gym_status_embed(user,conf):
+    badges=earned_badges(conf.get("badges",[]));upcoming=next_gym(badges)
+    embed=discord.Embed(title="Kanto Gym Challenge",color=discord.Color.gold())
+    names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
+    embed.description=badge_case(badges)+"\n"+names
+    embed.add_field(name="Badges",value=f"{len(badges)}/{len(KANTO_GYMS)}",inline=True)
+    if upcoming:
+        ace=SPECIES[upcoming.species_id]
+        embed.add_field(name="Next challenge",value=f"{upcoming.leader} · {upcoming.city}\n{ace.name} · Lv. {upcoming.level}",inline=True)
+        embed.set_footer(text="Use the Pokémon gym challenge command when your party is ready.")
+    else:
+        embed.add_field(name="Journey",value="All eight Kanto badges earned.",inline=True)
+        embed.set_footer(text="You completed the Kanto Gym challenge.")
+    return embed
+
+
+def trainer_profile_embed(user,conf,max_collection):
+    badges=earned_badges(conf.get("badges",[]))
+    owned={item["instance_id"]:item for item in conf.get("collection",[])}
+    lead=owned.get(conf.get("party",[None])[0]) if conf.get("party") else None
+    name=getattr(user,"display_name",getattr(user,"name","Trainer"))
+    embed=discord.Embed(title=f"{name}'s Trainer Profile",color=discord.Color.red())
+    avatar=getattr(getattr(user,"display_avatar",None),"url",None)
+    if avatar:embed.set_thumbnail(url=avatar)
+    badge_names=", ".join(GYMS[key].badge for key in badges) or "No badges earned yet."
+    embed.add_field(name=f"Badge Case · {len(badges)}/8",value=badge_case(badges)+"\n"+badge_names,inline=False)
+    embed.add_field(name="Pokédex",value=f"{len(conf.get('pokedex_seen',[]))} seen\n{len(conf.get('pokedex_caught',[]))} caught",inline=True)
+    embed.add_field(name="Collection",value=f"{len(conf.get('collection',[]))}/{max_collection} Pokémon\n{len(conf.get('party',[]))}/6 in party",inline=True)
+    embed.add_field(name="Bag",value=f"{conf.get('balls',0)} Poké Balls",inline=True)
+    if lead:
+        needed=lead["level"]*lead["level"]*10 if lead["level"]<100 else 0
+        progress="MAX" if not needed else f"{lead.get('experience',0)}/{needed} XP"
+        embed.add_field(name="Partner",value=f"{SPECIES[lead['species_id']].name} · Lv. {lead['level']}\n{progress}",inline=False)
+    else:
+        embed.add_field(name="Partner",value="Choose a starter to begin your journey.",inline=False)
+    upcoming=next_gym(badges)
+    embed.set_footer(text=(f"Next: {upcoming.leader} in {upcoming.city}" if upcoming else "Kanto Gym challenge complete"))
+    return embed
