@@ -20,7 +20,13 @@ class ChallengeView(discord.ui.View):
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
-        for item in self.children: item.custom_id=f"mtg:{game_id}:{item.custom_id}"
+        game=cog.games.get(game_id)
+        for item in self.children:
+            item.custom_id=f"mtg:{game_id}:{item.custom_id}"
+            action=item.custom_id.rsplit(":",1)[-1]
+            if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished
+            if game and action=="concede": item.disabled=game.finished
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
         if game and game.finished:

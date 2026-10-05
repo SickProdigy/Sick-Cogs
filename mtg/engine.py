@@ -45,6 +45,7 @@ class Game:
         self.cards, self.next_uid = {}, 1
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
+        self.phase_passes = 0
         self.priority_user = self.winner = self.finished_reason = None
         self.log, self.history = [], []
         self.created_at = self.updated_at = int(time.time())
@@ -99,8 +100,10 @@ class Game:
         self.turn+=1; p=self.players[self.active_user]; p.land_played=False
         for x in p.battlefield: x.tapped=False; x.sick=False
         self._cleanup()
-        if not(first and self.turn==1): self._draw(p)
-        self.phase="precombat_main"; self.priority_user=self.active_user
+        if not(first and self.turn==1):
+            self._draw(p)
+            if self.finished: return
+        self.phase_passes=0; self.phase="precombat_main"; self.priority_user=self.active_user
         self.log.append(f"Turn {self.turn}: {self.active_user}.")
 
     def play(self,user,index,target=None):
@@ -111,14 +114,14 @@ class Game:
             if user!=self.active_user: raise GameError("Only the active player can play a land.")
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
             if p.land_played: raise GameError("You already played a land.")
-            p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True
+            p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True; self.phase_passes=0
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
         lands=[x for x in p.battlefield if self.card(x.uid).land and not x.tapped]
         if len(lands)<c.cost: raise GameError(f"You need {c.cost} untapped lands.")
         for x in lands[:c.cost]: x.tapped=True
-        p.hand.pop(index-1)
+        p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
         self.stack.append(Spell(user,uid,c.key,target)); self.priority_user=self.opponent(user)
         self.log.append(f"{user} cast {c.name}.")
@@ -149,20 +152,28 @@ class Game:
                 if self.stack: self.stack[-1].passes=0
                 if not self.finished: self.priority_user=self.active_user
             else: self.priority_user=self.opponent(user)
-        elif user==self.active_user: self._advance()
-        else: self.priority_user=self.active_user
+        else:
+            if self.phase in ("attackers","blockers"): raise GameError("Complete the required combat declaration.")
+            self.phase_passes+=1
+            if self.phase_passes<2: self.priority_user=self.opponent(user)
+            else: self.phase_passes=0; self._advance()
 
     def _advance(self):
-        if self.phase=="precombat_main": self.phase="attackers"
-        elif self.phase=="attackers": self.phase="postcombat_main"
+        if self.phase=="precombat_main": self.phase="attackers"; self.priority_user=None; return
+        elif self.phase=="after_attackers": self.phase="blockers"; self.priority_user=None; return
+        elif self.phase=="after_blockers":
+            self._combat()
+            if self.finished: return
+            self.phase="postcombat_main"
         elif self.phase=="postcombat_main": self.phase="ending"
         elif self.phase=="ending": self.active_index=1-self.active_index; self._start_turn(); return
         else: raise GameError("Complete combat first.")
         self.priority_user=self.active_user
 
     def declare_attackers(self,user,positions):
-        self._active(user)
-        if self.phase!="attackers": raise GameError("Not the attack step.")
+        self.player(user)
+        if self.finished: raise GameError("Game is over.")
+        if self.phase!="attackers" or user!=self.active_user: raise GameError("Not your attack declaration.")
         p=self.player(user); chosen=[]
         for pos in positions:
             if not 1<=pos<=len(p.battlefield): raise GameError("Bad attacker position.")
@@ -172,9 +183,9 @@ class Game:
             chosen.append(x.uid)
         for x in p.battlefield:
             if x.uid in chosen: x.tapped=True
-        self.attackers=chosen; self.blocks={}
-        self.phase="blockers" if chosen else "postcombat_main"
-        self.priority_user=self.opponent(user) if chosen else user
+        self.attackers=chosen; self.blocks={}; self.phase_passes=0
+        self.phase="after_attackers" if chosen else "postcombat_main"
+        self.priority_user=user
 
     def declare_blockers(self,user,assignments):
         if self.phase!="blockers" or user!=self.opponent(self.active_user): raise GameError("You cannot block now.")
@@ -184,7 +195,7 @@ class Game:
             x=p.battlefield[b-1]
             if not self.card(x.uid).creature or x.tapped or x.uid in used: raise GameError("Invalid blocker.")
             used.add(x.uid); self.blocks[self.attackers[a-1]]=x.uid
-        self._combat(); self.phase="postcombat_main"; self.priority_user=self.active_user
+        self.phase="after_blockers"; self.phase_passes=0; self.priority_user=self.active_user
 
     def _combat(self):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
@@ -238,12 +249,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"attackers":self.attackers,"blocks":self.blocks,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

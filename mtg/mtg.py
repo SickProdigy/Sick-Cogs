@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import secrets
 from typing import Dict
 import discord
 from redbot.core import Config, commands
@@ -14,7 +15,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.1.2"
+    __version__="0.1.3"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -38,7 +39,8 @@ class MTG(commands.Cog):
             for game in self.games.values():
                 if not game.finished and (a in game.order or b in game.order): raise GameError("One player already has an active game.")
             gid=await self.config.next_game_id(); await self.config.next_game_id.set(gid+1)
-            game=Game(gid,[a,b]); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
+            users=[a,b]; secrets.SystemRandom().shuffle(users)
+            game=Game(gid,users); game.message_id=0; self.games[gid]=game; self.channels[gid]=channel
             await self._save_unlocked(game)
         return game
     async def _save_unlocked(self,game):
@@ -66,7 +68,13 @@ class MTG(commands.Cog):
     def game_embed(self,g):
         names={u:(self.bot.get_user(u).display_name if self.bot.get_user(u) else str(u)) for u in g.order}
         e=discord.Embed(title=f"MTG prototype · Game {g.game_id}",color=discord.Color.dark_green())
-        e.description="Opening hands" if g.phase=="opening" else f"Turn **{g.turn}** · **{g.phase.replace('_',' ').title()}**\nActive: **{names[g.active_user]}**"
+        if g.phase=="opening":
+            e.description=f"Opening hands - **{names[g.active_user]}** will play first."
+        else:
+            e.description=f"Turn **{g.turn}** - **{g.phase.replace('_',' ').title()}**\nActive: **{names[g.active_user]}**"
+            if g.priority_user: e.description+=f"\nPriority: **{names[g.priority_user]}**"
+            elif g.phase=="attackers": e.description+=f"\nWaiting for **{names[g.active_user]}** to declare attackers."
+            elif g.phase=="blockers": e.description+=f"\nWaiting for **{names[g.opponent(g.active_user)]}** to declare blockers."
         for user in g.order:
             p=g.players[user]; field=[]
             for n,x in enumerate(p.battlefield,1):

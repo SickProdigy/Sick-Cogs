@@ -23,8 +23,11 @@ class TurnTests(unittest.TestCase):
         uid=next(x for x in p.hand if g.card(x).land); p.hand.remove(uid); p.hand.insert(0,uid)
         g.play(10,1); self.assertTrue(g.card(p.battlefield[0].uid).land)
         with self.assertRaises(GameError): g.play(10,next((i+1 for i,x in enumerate(p.hand) if g.card(x).land),1))
-        g.pass_priority(10); self.assertEqual(g.phase,"attackers")
-        g.declare_attackers(10,[]); g.pass_priority(10); g.pass_priority(10)
+        g.pass_priority(10); self.assertEqual(g.phase,"precombat_main")
+        g.pass_priority(20); self.assertEqual(g.phase,"attackers")
+        g.declare_attackers(10,[])
+        g.pass_priority(10); g.pass_priority(20)
+        g.pass_priority(10); g.pass_priority(20)
         self.assertEqual(g.active_user,20); self.assertEqual(g.turn,2)
     def test_round_trip_preserves_hidden_state(self):
         g=ready(); restored=Game.from_raw(g.to_raw())
@@ -46,6 +49,22 @@ class TurnTests(unittest.TestCase):
         restored=Game.from_raw(raw)
         self.assertEqual(restored.history,[])
         self.assertGreater(restored.updated_at,0)
+
+    def test_declaration_steps_do_not_grant_spell_priority(self):
+        g=ready(); p=g.players[10]
+        instant=next(uid for uid,key in g.cards.items() if key=="shock")
+        if instant in p.library: p.library.remove(instant)
+        if instant in p.hand: p.hand.remove(instant)
+        p.hand.insert(0,instant)
+        g.phase="attackers"; g.priority_user=None
+        with self.assertRaises(GameError): g.play(10,1,"20")
+
+    def test_empty_library_draw_finishes_without_reopening_turn(self):
+        g=ready(); g.active_index=1; g.players[20].library=[]
+        g._start_turn()
+        self.assertTrue(g.finished)
+        self.assertEqual(g.finished_reason,"empty library")
+        self.assertIsNone(g.priority_user)
 
 class SpellTests(unittest.TestCase):
     def test_spell_uses_stack_and_resolves_after_two_passes(self):
@@ -117,8 +136,30 @@ class CombatTests(unittest.TestCase):
         buid=next(uid for uid,key in g.cards.items() if key=="bear")
         a.battlefield=[Permanent(auid,"giant",sick=False)]
         d.battlefield=[Permanent(buid,"bear",sick=False)]
-        g.phase="attackers"; g.priority_user=10; g.declare_attackers(10,[1]); g.declare_blockers(20,{1:1})
+        g.phase="attackers"; g.priority_user=10; g.declare_attackers(10,[1])
+        g.pass_priority(10); g.pass_priority(20); g.declare_blockers(20,{1:1})
+        self.assertEqual(len(d.battlefield),1)
+        g.pass_priority(10); g.pass_priority(20)
         self.assertFalse(d.battlefield); self.assertEqual(len(a.battlefield),1)
+    def test_players_can_respond_after_blockers_before_damage(self):
+        g=ready(); attacker=g.players[10]; defender=g.players[20]
+        giant=next(uid for uid,key in g.cards.items() if key=="giant")
+        bear=next(uid for uid,key in g.cards.items() if key=="bear")
+        forest=next(uid for uid,key in g.cards.items() if key=="forest")
+        growth=next(uid for uid,key in g.cards.items() if key=="growth")
+        attacker.battlefield=[Permanent(giant,"giant",sick=False)]
+        defender.battlefield=[Permanent(bear,"bear",sick=False),Permanent(forest,"forest",sick=False)]
+        for zone in (defender.library,defender.hand):
+            if growth in zone: zone.remove(growth)
+        defender.hand.insert(0,growth)
+        g.phase="attackers"; g.priority_user=10; g.declare_attackers(10,[1])
+        g.pass_priority(10); g.pass_priority(20); g.declare_blockers(20,{1:1})
+        g.pass_priority(10); g.play(20,1,"20:1")
+        g.pass_priority(10); g.pass_priority(20)
+        g.pass_priority(10); g.pass_priority(20)
+        self.assertFalse(attacker.battlefield)
+        self.assertEqual(g.card(defender.battlefield[0].uid).key,"bear")
+
     def test_concession(self):
         g=ready(); g.concede(10); self.assertEqual(g.winner,20)
         with self.assertRaises(GameError): g.concede(20)

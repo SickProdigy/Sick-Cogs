@@ -2,10 +2,11 @@ import asyncio
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 from mtg.engine import Game, GameError
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
+from mtg.views import GameView
 
 
 class ConfigValue:
@@ -54,6 +55,32 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         cog.channels = {1: 100, 2: 200}
         await asyncio.gather(cog.save(first), cog.save(second))
         self.assertEqual(set(cog.config.games.value), {"1", "2"})
+
+    async def test_starting_player_is_selected_before_game_creation(self):
+        cog = cog_fixture()
+        chooser = SimpleNamespace(shuffle=lambda users: users.reverse())
+        with patch("mtg.mtg.secrets.SystemRandom", return_value=chooser):
+            game = await cog.create_game(10, 20, 100)
+        self.assertEqual(game.order, [20, 10])
+        self.assertEqual(game.players[20].deck, "red")
+
+    async def test_finished_view_rejects_stale_player_interaction(self):
+        cog = cog_fixture()
+        game = Game(1, [10, 20], 1)
+        game.expire(); cog.games = {1: game}
+        interaction = SimpleNamespace(user=SimpleNamespace(id=10), response=SimpleNamespace(send_message=AsyncMock()))
+        allowed = await GameView(cog,1).interaction_check(interaction)
+        self.assertFalse(allowed)
+        interaction.response.send_message.assert_awaited_once_with("This match is over.",ephemeral=True)
+
+    async def test_public_embed_does_not_include_private_hand_cards(self):
+        cog = cog_fixture()
+        cog.bot = SimpleNamespace(get_user=lambda user_id: SimpleNamespace(display_name=str(user_id)))
+        game = Game(1, [10, 20], 1)
+        private_names = {game.card(uid).name for player in game.players.values() for uid in player.hand}
+        rendered = str(cog.game_embed(game).to_dict())
+        self.assertTrue(private_names)
+        self.assertTrue(all(name not in rendered for name in private_names))
 
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
