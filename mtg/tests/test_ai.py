@@ -211,5 +211,15 @@ class SoloAITests(unittest.TestCase):
         self.assertIn(_target(game,AI,cards["lea:214"]),{"G:1","G:2"})
 
 
+    def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
+        game=solo(order=(AI,HUMAN)); advance_solo(game)
+        game.player(HUMAN).kept=True; game.player(AI).kept=True
+        forest=self.add(game,AI,"forest"); birds=self.add(game,AI,"lea:186","hand")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
+        self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
+
+
 if __name__ == "__main__":
     unittest.main()

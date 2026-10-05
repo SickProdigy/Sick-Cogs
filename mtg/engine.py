@@ -132,7 +132,7 @@ class Game:
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
-            if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped:
+            if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
                 sources.append(("permanent",str(permanent.uid),source.produces,permanent))
 
         def assign(symbols,remaining,selected):
@@ -167,6 +167,7 @@ class Game:
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
         if not card.produces: raise GameError("That permanent has no supported mana ability.")
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
+        if card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
         permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+card.mana_amount

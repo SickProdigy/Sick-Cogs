@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 16 combat-ability creatures playable through 0.9.0; 61 remain |
+| Creatures with abilities | 77 | 18 creatures playable through 0.17.0; 59 remain |
 | Instants and sorceries | 70 | 20 spells playable through 0.16.0; 50 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Seven mana artifacts playable through 0.14.0; 35 remain |
@@ -35,10 +35,12 @@ The 0.15.0 removal-and-exile promotion adds Terror, Swords to Plowshares, and Wr
 
 The 0.16.0 zone-movement promotion adds Unsummon, Raise Dead, Regrowth, and Resurrection. A public bounded graveyard listing supplies G:POSITION choices, while spells store stable UIDs and recheck zone/type legality at resolution. Unsummon removes a bounced attacker from combat but preserves an attacker’s blocked status when its blocker leaves. Resurrection returns a fresh summoning-sick permanent. Because no control-changing effect is playable yet, battlefield controller and card owner are identical; owner tracking must be added before any control-changing card is promoted.
 
+The 0.17.0 creature-mana promotion adds Birds of Paradise and Llanowar Elves. Manual and automatic payment both reject summoning-sick creature sources, and persisted sickness clears normally at the controller’s next turn. Birds supplies an explicit five-color choice and retains flying; Llanowar Elves produces green. Solo play casts and later uses them through the same shared legality checks.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
-2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, and Ironclaw Orcs’ block restriction are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
+2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, Ironclaw Orcs’ block restriction, and summoning-sick creature mana activation are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
 3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, counterspells, discard, library search, control changes, board-wide effects, modes, and X costs remain.
 4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activations, activation payments, untap restrictions, and activation controls remain.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.

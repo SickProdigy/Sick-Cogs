@@ -90,6 +90,11 @@ ALPHA_ARTIFACTS = {
     "lea:269": {"produces":("C",), "mana_amount":2},
 }
 
+ALPHA_MANA_CREATURES = {
+    "lea:186": ("W","U","B","R","G"),
+    "lea:210": ("G",),
+}
+
 ALPHA_SPELLS = {
     "lea:36": {"effect":"pump_blocking", "amount":7},
     "lea:47": {"effect":"draw_target", "amount":3},
@@ -129,6 +134,7 @@ ALPHA_KEYWORDS = {
     "lea:216": ("forestwalk",),
     "lea:224": ("defender",),
     "lea:225": ("defender",),
+    "lea:186": ("flying",),
 }
 
 CARDS = dict(BASE_CARDS)
@@ -143,7 +149,7 @@ for reference in PLAYABLE_ALPHA:
         oracle_id=reference.oracle_id,
         mana_cost=reference.mana_cost,
         colors=reference.colors,
-        produces=ALPHA_ARTIFACTS.get(reference.key, {}).get("produces", reference.color_identity if reference.support_family == "land" else ()),
+        produces=ALPHA_ARTIFACTS.get(reference.key, {}).get("produces", ALPHA_MANA_CREATURES.get(reference.key, reference.color_identity if reference.support_family == "land" else ())),
         rarity=reference.rarity,
         pack_slot="alpha",
         cost=int(reference.mana_value),
@@ -176,7 +182,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_MANA_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

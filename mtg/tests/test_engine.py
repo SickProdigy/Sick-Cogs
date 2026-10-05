@@ -165,6 +165,43 @@ class ManaTests(unittest.TestCase):
 
 
 
+class AlphaCreatureManaTests(unittest.TestCase):
+    def permanent(self,game,user,key,sick=True):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=sick); game.players[user].battlefield.append(permanent); return permanent
+
+    def hand(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.players[user].hand.insert(0,uid); return uid
+
+    def test_summoning_sickness_blocks_manual_and_automatic_creature_mana(self):
+        game=ready(); birds=self.permanent(game,10,"lea:186",sick=True); spell=self.hand(game,10,"lea:38")
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_mana(10,1,"W")
+        self.assertFalse(game.can_pay(10,game.card(spell))); self.assertFalse(birds.tapped)
+        birds.sick=False
+        with self.assertRaisesRegex(GameError,"Choose one of"): game.activate_mana(10,1)
+        game.activate_mana(10,1,"u")
+        self.assertEqual(game.players[10].mana_pool,{"U":1}); self.assertTrue(birds.tapped)
+
+    def test_birds_and_llanowar_pay_spells_after_sickness_ends(self):
+        for source_key,spell_key in (("lea:186","lea:38"),("lea:210","lea:197")):
+            with self.subTest(source=source_key):
+                game=ready(); source=self.permanent(game,10,source_key,sick=False); spell=self.hand(game,10,spell_key)
+                target=None
+                if spell_key=="lea:197":
+                    creature=self.permanent(game,10,"bear",sick=False); target="10:2"
+                game.play(10,1,target)
+                self.assertTrue(source.tapped); self.assertEqual(game.stack[-1].uid,spell)
+
+    def test_creature_mana_sickness_survives_round_trip_and_clears_next_turn(self):
+        game=ready(); source=self.permanent(game,10,"lea:210",sick=True)
+        restored=Game.from_raw(game.to_raw())
+        self.assertTrue(restored.players[10].battlefield[-1].sick)
+        restored._start_turn(True)
+        self.assertFalse(restored.players[10].battlefield[-1].sick)
+        restored.activate_mana(10,len(restored.players[10].battlefield))
+        self.assertEqual(restored.players[10].mana_pool,{"G":1})
+
+
 class StaticKeywordCombatTests(unittest.TestCase):
     def permanent(self,game,user,key,sick=False):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
