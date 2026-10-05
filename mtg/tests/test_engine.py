@@ -356,6 +356,48 @@ class AlphaCharacteristicStatsTests(unittest.TestCase):
         game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
         self.assertIn(nightmare.uid,target_player.exile); self.assertEqual(target_player.life,22)
 
+class AlphaCounterspellTests(unittest.TestCase):
+    def add(self,game,user,key,zone="hand"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_counterspell_uses_stable_persisted_stack_target(self):
+        game=ready(); shock=self.add(game,10,"shock"); self.add(game,10,"mountain","battlefield")
+        counter=self.add(game,20,"lea:54"); self.add(game,20,"island","battlefield"); self.add(game,20,"island","battlefield")
+        game.play(10,1,"20"); game.play(20,1,"S:1")
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.stack[-1].target,f"S:{shock}")
+        restored.pass_priority(10); restored.pass_priority(20)
+        self.assertFalse(restored.stack)
+        self.assertIn(shock,restored.player(10).graveyard); self.assertIn(counter,restored.player(20).graveyard)
+        self.assertEqual(restored.player(20).life,20)
+
+    def test_counterspell_rejects_missing_target_before_payment(self):
+        game=ready(); counter=self.add(game,10,"lea:54"); first=self.add(game,10,"island","battlefield"); second=self.add(game,10,"island","battlefield")
+        with self.assertRaisesRegex(GameError,"No spell"):
+            game.play(10,1,"S:1")
+        self.assertEqual(game.player(10).hand[0],counter); self.assertFalse(first.tapped); self.assertFalse(second.tapped)
+
+    def test_elemental_blast_counters_matching_spell_and_rejects_wrong_color(self):
+        game=ready(); shock=self.add(game,10,"shock"); self.add(game,10,"mountain","battlefield")
+        blast=self.add(game,20,"lea:49"); island=self.add(game,20,"island","battlefield")
+        game.play(10,1,"20"); game.play(20,1,"S:1"); game.pass_priority(10); game.pass_priority(20)
+        self.assertFalse(game.stack); self.assertIn(shock,game.player(10).graveyard); self.assertIn(blast,game.player(20).graveyard); self.assertTrue(island.tapped)
+
+        wrong=ready(); self.add(wrong,10,"lea:47"); self.add(wrong,10,"island","battlefield")
+        self.add(wrong,20,"lea:49"); blue_land=self.add(wrong,20,"island","battlefield")
+        wrong.play(10,1,"10")
+        with self.assertRaisesRegex(GameError,"must be R"):
+            wrong.play(20,1,"S:1")
+        self.assertFalse(blue_land.tapped)
+
+    def test_elemental_blast_destroys_matching_colored_permanent(self):
+        game=ready(); target=self.add(game,20,"lea:46","battlefield")
+        blast=self.add(game,10,"lea:169"); self.add(game,10,"mountain","battlefield")
+        game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
+        self.assertNotIn(target,game.player(20).battlefield); self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(blast,game.player(10).graveyard)
+
 class AlphaTargetedSpellTests(unittest.TestCase):
     def put_in_hand(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

@@ -136,6 +136,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Nightmare 3/3",rendered)
 
+    async def test_public_embed_numbers_stack_targets_from_top(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        first=game.next_uid; game.next_uid+=1; game.cards[first]="shock"
+        second=game.next_uid; game.next_uid+=1; game.cards[second]="lea:54"
+        game.stack=[spell_type(10,first,"shock","20"),spell_type(20,second,"lea:54",f"S:{first}")]
+        field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
+        self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Counterspell","S:2. Shock"])
+
     async def test_graveyard_command_lists_public_stable_positions(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=f"Player {user_id}"))
         game=Game(1,[10,20],1); uid=game.players[10].library.pop(); game.players[10].graveyard.append(uid)

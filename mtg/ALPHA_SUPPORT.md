@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 21 creatures playable through 0.18.0; 56 remain |
-| Instants and sorceries | 70 | 20 spells playable through 0.16.0; 50 remain |
+| Instants and sorceries | 70 | 23 spells playable through 0.19.0; 47 remain |
 | Enchantments | 68 | Auras, continuous effects, triggers, and replacement effects |
 | Artifacts | 42 | Seven mana artifacts playable through 0.14.0; 35 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -39,11 +39,13 @@ The 0.17.0 creature-mana promotion adds Birds of Paradise and Llanowar Elves. Ma
 
 The 0.18.0 characteristic-stat promotion adds Nightmare, Plague Rats, and Keldon Warlord. Their power and toughness are derived from the live battlefield for combat, block restrictions, removal rewards, repeated state-based actions, public rendering, and solo-AI decisions. Nightmare counts its controller’s Swamps and retains flying; Plague Rats counts matching creatures across both battlefields; Keldon Warlord counts its controller’s non-Wall creatures. Persisted games recompute these values rather than storing stale derived stats.
 
+The 0.19.0 counterspell promotion adds Counterspell, Blue Elemental Blast, and Red Elemental Blast. Public stack entries expose top-first `S:POSITION` choices, while cast spells persist the target spell’s stable UID so later stack changes cannot retarget them. Counterspell counters any spell; each Elemental Blast implicitly locks its Oracle mode from whether the selected target is a matching-color spell or permanent, rechecking existence and color on resolution. Solo AI may now cast legal instants while the stack is nonempty and prefers opposing spells over permanent mode.
+
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
 2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, forestwalk/swampwalk, Ironclaw Orcs’ block restriction, summoning-sick creature mana activation, and live characteristic power/toughness are complete. Trample, other landwalk variants, protection, regeneration, and creature-specific rules remain.
-3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, counterspells, discard, library search, control changes, board-wide effects, modes, and X costs remain.
+3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, conditional/X counterspells, discard, library search, control changes, board-wide effects, modes, and X costs remain.
 4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activations, activation payments, untap restrictions, and activation controls remain.
 5. **Enchantments and continuous rules:** Auras, layer-aware stat changes, global effects, triggered abilities, replacement effects, and state-based cleanup.
 6. **Complex Alpha behavior:** X costs, copying, control changes, extra turns, delayed effects, face-down state, card-specific choices, and remaining manual exceptions.

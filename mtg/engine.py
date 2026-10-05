@@ -233,6 +233,14 @@ class Game:
         if not self.card(permanent.uid).creature: raise GameError("Target is not a creature.")
         return target_user,permanent
 
+    def _target_stack(self,target):
+        if not target or not target.upper().startswith("S:"): raise GameError("Stack target must be S:POSITION.")
+        try: position=int(target.split(":",1)[1])
+        except (TypeError,ValueError) as e: raise GameError("Stack target must be S:POSITION.") from e
+        visible=list(reversed(self.stack))
+        if not 1<=position<=len(visible): raise GameError("No spell at that stack position.")
+        return visible[position-1]
+
     def _target_graveyard(self,user,target,creature_only):
         if not target or not target.upper().startswith("G:"): raise GameError("Graveyard target must be G:POSITION.")
         try: position=int(target.split(":",1)[1])
@@ -244,6 +252,20 @@ class Game:
         return str(uid)
 
     def _target_for_cast(self,c,user,target):
+        if c.effect in ("counter_spell","elemental_blast"):
+            if target and target.upper().startswith("S:"):
+                spell=self._target_stack(target); target_card=self.card(spell.uid)
+                if c.target_color and c.target_color not in target_card.colors: raise GameError(f"Target spell must be {c.target_color}.")
+                return f"S:{spell.uid}"
+            if c.effect=="counter_spell": raise GameError("Counterspell requires an S:POSITION stack target.")
+            if not target or ":" not in target: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.")
+            try: target_user,pos=(int(x) for x in target.split(":"))
+            except (TypeError,ValueError) as e: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.") from e
+            battlefield=self.player(target_user).battlefield
+            if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+            permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
+            if c.target_color not in target_card.colors: raise GameError(f"Target permanent must be {c.target_color}.")
+            return f"{target_user}:{permanent.uid}"
         if c.effect=="damage":
             try: target_user=int(target) if target is not None else self.opponent(user)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
@@ -408,6 +430,22 @@ class Game:
     def _resolve(self,s):
         p=self.players[s.owner]; c=CARDS[s.key]
         if c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
+        elif c.effect in ("counter_spell","elemental_blast"):
+            if s.target.startswith("S:"):
+                target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
+                target_card=self.card(target.uid) if target is not None else None
+                legal=target_card is not None and (not c.target_color or c.target_color in target_card.colors)
+                if not legal:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)
+                self.log.append(f"{c.name} countered {target_card.name}.")
+            else:
+                user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+                target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
+                if target_card is None or c.target_color not in target_card.colors:
+                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                controller.battlefield.remove(target); controller.graveyard.append(target.uid)
+            p.graveyard.append(s.uid)
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect=="draw_target": self._draw(self.player(int(s.target)),c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)

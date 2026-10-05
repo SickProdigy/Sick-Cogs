@@ -14,12 +14,12 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),142)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),142)
+        self.assertEqual(len(CARDS),145)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),145)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
-        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature"})
+        self.assertEqual({card.effect for card in CARDS.values()},{None,"damage","damage_any","pump","pump_blocking","life","draw","draw_target","destroy_land","destroy_all_lands","destroy_land_type","destroy_permanent","destroy_creature","destroy_all_creatures","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast"})
         self.assertTrue(all(card.kind in {"Land","Creature","Instant","Sorcery","Artifact"} for card in CARDS.values()))
         self.assertTrue(all(card.power>=0 and card.toughness>=0 for card in CARDS.values()))
 
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),82)
-        self.assertEqual(len(REFERENCE_ALPHA),213)
+        self.assertEqual(len(PLAYABLE_ALPHA),85)
+        self.assertEqual(len(REFERENCE_ALPHA),210)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -65,6 +65,9 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:269"].ability_text,"Produces 2 × C")
         self.assertEqual(CARDS["lea:264"].ability_text,"Produces R")
         self.assertEqual(CARDS["lea:18"].target_types,("Artifact","Enchantment"))
+        self.assertEqual(CARDS["lea:49"].target_color,"R")
+        self.assertEqual(CARDS["lea:169"].target_color,"U")
+        self.assertEqual(CARDS["lea:54"].effect,"counter_spell")
         self.assertTrue(all(any(kind in card.type_line for kind in ("Creature","Land","Instant","Sorcery","Artifact")) for card in PLAYABLE_ALPHA))
         self.assertTrue(all(CARDS[key].land and CARDS[key].produces for key in ALPHA_LAND_KEYS))
 
@@ -97,7 +100,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("142 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("145 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

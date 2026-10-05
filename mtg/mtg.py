@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.18.0"
+    __version__="0.19.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -124,7 +124,7 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
-        if g.stack: e.add_field(name="Stack",value=" → ".join(g.card(x.uid).name for x in reversed(g.stack)),inline=False)
+        if g.stack: e.add_field(name="Stack · target with S:POSITION",value="\n".join(f"S:{position}. {g.card(spell.uid).name}" for position,spell in enumerate(reversed(g.stack),1)),inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e
@@ -361,7 +361,7 @@ class MTG(commands.Cog):
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None):
-        """Play/cast a hand position. Targets: USER_ID, USER_ID:FIELD_POSITION, or G:POSITION."""
+        """Play/cast a hand position. Targets include USER_ID, USER_ID:POSITION, G:POSITION, and S:POSITION."""
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,target),"play")
     @mtg.command(name="attack")
     async def attack(self,ctx,*positions:int):

@@ -31,6 +31,7 @@ class Card:
     sacrifice_for_mana: bool = False
     target_nonartifact: bool = False
     target_nonblack: bool = False
+    target_color: str = ""
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
@@ -103,6 +104,9 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 }
 
 ALPHA_SPELLS = {
+    "lea:49": {"effect":"elemental_blast", "target_color":"R"},
+    "lea:54": {"effect":"counter_spell"},
+    "lea:169": {"effect":"elemental_blast", "target_color":"U"},
     "lea:36": {"effect":"pump_blocking", "amount":7},
     "lea:47": {"effect":"draw_target", "amount":3},
     "lea:74": {"effect":"damage_any", "amount":4, "self_damage":2},
@@ -173,6 +177,7 @@ for reference in PLAYABLE_ALPHA:
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
         target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),
+        target_color=ALPHA_SPELLS.get(reference.key, {}).get("target_color",""),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),

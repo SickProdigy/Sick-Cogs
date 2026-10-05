@@ -219,6 +219,15 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.current_stats(nightmare),(4,4))
         self.assertEqual(_target(game,AI,cards["lea:86"]),f"{HUMAN}:2")
 
+    def test_ai_counters_opponent_spell_through_normal_actions(self):
+        game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True
+        shock=self.add(game,HUMAN,"shock","hand"); self.add(game,HUMAN,"mountain")
+        counter=self.add(game,AI,"lea:54","hand"); self.add(game,AI,"island"); self.add(game,AI,"island")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=HUMAN
+        game.play(HUMAN,1,str(AI)); advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,counter); self.assertEqual(game.stack[-1].target,f"S:{shock}")
+        self.assertEqual(game.priority_user,HUMAN)
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True
