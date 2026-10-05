@@ -701,6 +701,52 @@ class AlphaRegenerationTests(unittest.TestCase):
         restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]; self.assertEqual(restored.current_stats(saved),(3,3))
         restored.player(10).battlefield.remove(next(x for x in restored.player(10).battlefield if x.uid==swamp.uid)); self.assertEqual(restored.current_stats(saved),(2,2))
 
+class AlphaGlobalEnchantmentTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_castle_tracks_controller_and_untapped_state(self):
+        game=ready(); castle=self.add(game,10,"lea:9"); own=self.add(game,10,"bear"); enemy=self.add(game,20,"bear")
+        self.assertEqual(game.current_stats(own),(2,4)); self.assertEqual(game.current_stats(enemy),(2,2))
+        own.tapped=True; self.assertEqual(game.current_stats(own),(2,2))
+        own.tapped=False; self.assertEqual(game.current_stats(own),(2,4)); self.assertEqual(game.current_stats(castle),(0,0))
+
+    def test_castle_loss_runs_state_actions_during_attack_declaration(self):
+        game=ready(); self.add(game,10,"lea:9"); bear=self.add(game,10,"bear"); bear.damage=2
+        game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[2])
+        self.assertNotIn(bear,game.player(10).battlefield); self.assertIn(bear.uid,game.player(10).graveyard)
+        self.assertEqual(game.attackers,[]); self.assertEqual(game.phase,"postcombat_main")
+
+    def test_castle_loss_runs_state_actions_during_automatic_creature_mana_payment(self):
+        game=ready(); self.add(game,10,"lea:9"); elf=self.add(game,10,"lea:210"); target=self.add(game,10,"bear"); elf.damage=1
+        spell_uid=game.next_uid; game.next_uid+=1; game.cards[spell_uid]="growth"; game.player(10).hand.insert(0,spell_uid)
+        game.priority_user=10; game.play(10,1,"10:3")
+        self.assertNotIn(elf,game.player(10).battlefield); self.assertIn(elf.uid,game.player(10).graveyard); self.assertEqual(game.stack[-1].uid,spell_uid)
+        self.assertIn(target,game.player(10).battlefield)
+
+    def test_crusade_and_bad_moon_stack_and_use_live_colors_for_both_players(self):
+        game=ready(); self.add(game,10,"lea:16"); self.add(game,20,"lea:16")
+        own=self.add(game,10,"lea:43"); enemy=self.add(game,20,"lea:43")
+        self.assertEqual(game.current_stats(own),(4,4)); self.assertEqual(game.current_stats(enemy),(4,4))
+        own.color_override="B"; self.assertEqual(game.current_stats(own),(2,2))
+        self.add(game,20,"lea:93"); self.assertEqual(game.current_stats(own),(3,3))
+        black=self.add(game,10,"lea:125"); self.assertEqual(game.current_stats(black),(3,3))
+
+    def test_orcish_oriflamme_only_buffs_its_controllers_attackers(self):
+        game=ready(); self.add(game,10,"lea:166"); own=self.add(game,10,"bear"); enemy=self.add(game,20,"bear")
+        game.attackers=[own.uid]; self.assertEqual(game.current_stats(own),(3,2)); self.assertEqual(game.current_stats(enemy),(2,2))
+        game._end_combat(); self.assertEqual(game.current_stats(own),(2,2))
+        game.active_index=1; game.attackers=[enemy.uid]; self.assertEqual(game.current_stats(enemy),(2,2))
+
+    def test_global_effect_round_trip_and_source_removal_cleanup(self):
+        game=ready(); castle=self.add(game,10,"lea:9"); bear=self.add(game,10,"bear"); bear.damage=2
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[1]
+        self.assertEqual(restored.current_stats(saved),(2,4))
+        restored.player(10).battlefield.remove(restored.player(10).battlefield[0]); restored.player(10).graveyard.append(castle.uid); restored._sba()
+        self.assertNotIn(saved,restored.player(10).battlefield); self.assertIn(saved.uid,restored.player(10).graveyard)
+
+
 class AlphaColorChangeTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

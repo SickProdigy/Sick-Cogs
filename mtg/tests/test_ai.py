@@ -1,6 +1,6 @@
 import unittest
 
-from mtg.ai import _target, advance_solo
+from mtg.ai import _global_enchantment_score, _target, advance_solo
 from mtg.engine import Game, Permanent
 
 
@@ -393,6 +393,17 @@ class SoloAITests(unittest.TestCase):
         attacker=self.add(game,HUMAN,"giant"); bear=self.add(game,AI,"bear"); aura=self.add(game,AI,"lea:213"); aura.attached_to=bear.uid; self.add(game,AI,"forest")
         game.active_index=0; game.attackers=[attacker.uid]; game.blocks={attacker.uid:bear.uid}; game.blocked_attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=AI
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+
+    def test_ai_values_and_casts_a_helpful_global_enchantment(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        own=self.add(game,AI,"lea:43"); self.add(game,HUMAN,"lea:43")
+        crusade=__import__("mtg.cards",fromlist=["CARDS"]).CARDS["lea:16"]
+        self.assertEqual(_global_enchantment_score(game,AI,crusade),5)
+        game.player(HUMAN).battlefield=[]; spell=self.add(game,AI,"lea:16","hand"); self.add(game,AI,"plains"); self.add(game,AI,"plains")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.priority_user,HUMAN); self.assertEqual(game.current_stats(own),(2,2))
+        game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(own),(3,3))
 
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)

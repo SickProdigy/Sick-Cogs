@@ -67,6 +67,12 @@ class Card:
     lord_toughness: int = 0
     lord_keyword: str = ""
     lord_regeneration_cost: str = ""
+    global_buff_color: str = ""
+    global_power: int = 0
+    global_toughness: int = 0
+    global_controller_only: bool = False
+    global_requires_untapped: bool = False
+    global_requires_attacking: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -112,6 +118,13 @@ class Card:
             if self.lord_keyword: granted.append(self.lord_keyword.replace("_"," ").title())
             if self.lord_regeneration_cost: granted.append(f"{self.lord_regeneration_cost}: Regenerate")
             abilities.append(f"Other {self.lord_subtype} creatures have "+", ".join(granted))
+        if self.global_power or self.global_toughness:
+            color_name={"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}.get(self.global_buff_color,self.global_buff_color)
+            subject=(color_name+" creatures" if color_name else "Creatures")
+            if self.global_requires_untapped: subject="Untapped creatures"
+            elif self.global_requires_attacking: subject="Attacking creatures"
+            if self.global_controller_only: subject+=" you control"
+            abilities.append(f"{subject} get {self.global_power:+d}/{self.global_toughness:+d}")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -141,6 +154,13 @@ BASE_CARDS = {
 }
 
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
+
+ALPHA_GLOBAL_ENCHANTMENTS = {
+    "lea:9": {"global_toughness":2, "global_controller_only":True, "global_requires_untapped":True},
+    "lea:16": {"global_buff_color":"W", "global_power":1, "global_toughness":1},
+    "lea:93": {"global_buff_color":"B", "global_power":1, "global_toughness":1},
+    "lea:166": {"global_power":1, "global_controller_only":True, "global_requires_attacking":True},
+}
 
 ALPHA_ENCHANTMENTS = {
     "lea:5": {"aura_target_types":("Creature",), "aura_protection":"B", "protection_self_exception":True},
@@ -355,6 +375,12 @@ for reference in PLAYABLE_ALPHA:
         lord_toughness=ALPHA_LORDS.get(reference.key,{}).get("lord_toughness",0),
         lord_keyword=ALPHA_LORDS.get(reference.key,{}).get("lord_keyword",""),
         lord_regeneration_cost=ALPHA_LORDS.get(reference.key,{}).get("lord_regeneration_cost",""),
+        global_buff_color=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_buff_color",""),
+        global_power=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_power",0),
+        global_toughness=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_toughness",0),
+        global_controller_only=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_controller_only",False),
+        global_requires_untapped=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_untapped",False),
+        global_requires_attacking=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_attacking",False),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -380,7 +406,7 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALP
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
     raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS):
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS):
     raise RuntimeError("Playable Alpha enchantments do not match the validated enchantment map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):

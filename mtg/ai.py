@@ -120,6 +120,20 @@ def _activate_helpful_mana(game, user):
     return None
 
 
+def _global_enchantment_score(game,user,card):
+    value=card.global_power+card.global_toughness
+    def eligible(target_user,permanent):
+        if not game.card(permanent.uid).creature: return False
+        if card.global_controller_only and target_user!=user: return False
+        if card.global_buff_color and card.global_buff_color not in game.current_colors(permanent): return False
+        if card.global_requires_untapped and permanent.tapped: return False
+        if card.global_requires_attacking and not game.can_attack_permanent(permanent): return False
+        return True
+    own=sum(eligible(user,permanent) for permanent in game.player(user).battlefield)
+    enemy=0 if card.global_controller_only else sum(eligible(game.opponent(user),permanent) for permanent in game.player(game.opponent(user)).battlefield)
+    return 5+value*(own-enemy)
+
+
 def _play_one(game, user, difficulty):
     player = game.player(user)
     if game.active_user == user and game.phase in ("precombat_main", "postcombat_main") and not game.stack and not player.land_played:
@@ -147,6 +161,8 @@ def _play_one(game, user, difficulty):
             score = sum(game.projected_stats(user,card))
         elif card.kind == "Artifact" and card.produces:
             score = 5
+        elif card.global_power or card.global_toughness:
+            score=_global_enchantment_score(game,user,card)
         elif card.aura_target_types:
             score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
         elif card.effect in ("damage","damage_any"):

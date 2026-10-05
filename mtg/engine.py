@@ -170,7 +170,16 @@ class Game:
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
         auras=[self.card(aura.uid) for aura in self.attached_auras(permanent)]
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
-        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+sum(lord.lord_power for lord in lords)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+sum(lord.lord_toughness for lord in lords)+permanent.bonus+permanent.toughness_bonus
+        globals_=[source for source_user,player in self.players.items() for source in player.battlefield if self.global_buff_applies(source,source_user,permanent,owner)]
+        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+sum(lord.lord_power for lord in lords)+sum(self.card(source.uid).global_power for source in globals_)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+sum(lord.lord_toughness for lord in lords)+sum(self.card(source.uid).global_toughness for source in globals_)+permanent.bonus+permanent.toughness_bonus
+    def global_buff_applies(self,source,source_user,target,target_user):
+        effect=self.card(source.uid); target_card=self.card(target.uid)
+        if not target_card.creature or not (effect.global_power or effect.global_toughness): return False
+        if effect.global_controller_only and source_user!=target_user: return False
+        if effect.global_buff_color and effect.global_buff_color not in self.current_colors(target): return False
+        if effect.global_requires_untapped and target.tapped: return False
+        if effect.global_requires_attacking and target.uid not in self.attackers: return False
+        return True
     def projected_stats(self,user,card):
         return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
     def current_keywords(self,permanent):
@@ -326,6 +335,7 @@ class Game:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
         self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override))
+        self._sba(); self._life()
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
         self.priority_user=self.opponent(user)
@@ -344,6 +354,7 @@ class Game:
         permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+card.mana_amount
         if card.sacrifice_for_mana:
             player.battlefield.remove(permanent); player.graveyard.append(permanent.uid)
+        self._sba(); self._life()
         self.phase_passes=0
         for spell in self.stack: spell.passes=0
         amount=f" ×{card.mana_amount}" if card.mana_amount>1 else ""
@@ -383,7 +394,7 @@ class Game:
             if not p.mana_pool[symbol]: p.mana_pool.pop(symbol)
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self.priority_user=self.opponent(user)
+        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self._sba(); self._life(); self.priority_user=self.opponent(user)
         suffix=f" with X={x_value}" if uses_x else ""
         self.log.append(f"{user} cast {c.name}{suffix}.")
 
@@ -571,10 +582,11 @@ class Game:
             if not self.can_attack_permanent(x): raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
-        for x in p.battlefield:
-            if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
         self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}; self.phase_passes=0
-        self.phase="after_attackers" if chosen else "postcombat_main"
+        for x in list(p.battlefield):
+            if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
+        self._sba(); self._life()
+        self.phase="after_attackers" if self.attackers else "postcombat_main"
         self.priority_user=user
 
     def declare_blockers(self,user,assignments):

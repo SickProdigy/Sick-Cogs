@@ -147,6 +147,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Bear Cub 3/4",rendered); self.assertIn("Attached to Bear Cub",rendered)
 
+    async def test_public_embed_shows_global_enchantment_derived_stats(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        castle=game.next_uid; game.next_uid+=1; game.cards[castle]="lea:9"
+        bear=game.next_uid; game.next_uid+=1; game.cards[bear]="bear"
+        game.player(10).battlefield=[permanent_type(castle,"lea:9",sick=False),permanent_type(bear,"bear",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Castle",rendered); self.assertIn("Untapped creatures you control get +0/+2",rendered); self.assertIn("Bear Cub 2/4",rendered)
+
     async def test_public_embed_shows_printed_and_granted_protection(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
