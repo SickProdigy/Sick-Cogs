@@ -19,6 +19,17 @@ GUILD={"enabled":False,"channels":[],"activity":0,"threshold":20,"threshold_min"
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{}}
 GLOBAL={"schema":2,"next_encounter":1,"encounters":{}}
 
+def activity_weight(active_users):
+    return 1+min(2,max(0,active_users-1))
+
+def available_species(generations):
+    return [item for item in SPECIES.values() if item.id not in {1,4,7} and generation_for(item.id) in generations]
+
+def encounter_is_expired(raw,now):
+    try:due=datetime.fromisoformat(raw.get("expires_at",""))
+    except (TypeError,ValueError):return False
+    return raw.get("state") in {"open","battle"} and due<=now
+
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
     __version__="0.2.0";__author__="SickProdigy"
@@ -43,9 +54,7 @@ class Pokemon(commands.Cog):
         async with self.lock("encounters"):
             encounters=await self.config.encounters()
             for key,raw in encounters.items():
-                try:due=datetime.fromisoformat(raw.get("expires_at",""))
-                except (TypeError,ValueError):continue
-                if raw.get("state") in {"open","battle"} and due<=now:
+                if encounter_is_expired(raw,now):
                     raw["state"]="expired";expired.append((int(key),dict(raw)))
             if expired:await self.config.encounters.set(encounters)
         for eid,raw in expired:
@@ -84,7 +93,7 @@ class Pokemon(commands.Cog):
         users[message.author.id]=now
         for user_id,last_seen in list(users.items()):
             if now-last_seen>300:users.pop(user_id,None)
-        key=message.guild.id;weight=1+min(2,max(0,len(users)-1));count=self.activity.get(key,conf["activity"])+weight;self.activity[key]=count
+        key=message.guild.id;weight=activity_weight(len(users));count=self.activity.get(key,conf["activity"])+weight;self.activity[key]=count
         if conf["last_spawn_at"]:
             try:last=datetime.fromisoformat(conf["last_spawn_at"])
             except (TypeError,ValueError):last=None
@@ -98,7 +107,7 @@ class Pokemon(commands.Cog):
         async with self.lock("encounters"):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
         conf=await self.config.guild(channel.guild).all()
-        pool=[item for item in SPECIES.values() if item.id not in {1,4,7} and generation_for(item.id) in conf["generations"]]
+        pool=available_species(conf["generations"])
         if not pool:raise RuntimeError("No Pokémon are available for the configured generations.")
         chosen=random.SystemRandom().choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
         sid=chosen.id;level=random.SystemRandom().randrange(3,9)
