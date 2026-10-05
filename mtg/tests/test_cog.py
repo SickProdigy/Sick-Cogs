@@ -156,6 +156,18 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Protection From B",rendered); self.assertIn("Active protection: R",rendered); self.assertIn("Attached to White Knight",rendered)
 
+    async def test_public_embed_shows_lord_stats_keywords_and_granted_ability(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        merfolk=game.next_uid; game.next_uid+=1; game.cards[merfolk]="lea:66"
+        lord=game.next_uid; game.next_uid+=1; game.cards[lord]="lea:62"
+        zombie=game.next_uid; game.next_uid+=1; game.cards[zombie]="lea:125"
+        master=game.next_uid; game.next_uid+=1; game.cards[master]="lea:137"
+        game.player(10).battlefield=[permanent_type(merfolk,"lea:66",sick=False),permanent_type(lord,"lea:62",sick=False),permanent_type(zombie,"lea:125",sick=False),permanent_type(master,"lea:137",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Merfolk of the Pearl Trident 2/2",rendered); self.assertIn("Active: Islandwalk",rendered)
+        self.assertIn("Granted: {B}: Regenerate this creature",rendered)
+
     async def test_public_embed_shows_live_characteristic_stats(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -308,6 +308,51 @@ class StaticKeywordCombatTests(unittest.TestCase):
         self.assertIn(giant,game.players[10].battlefield)
 
 
+class AlphaLordTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_lords_grant_only_other_matching_creatures_and_stack(self):
+        game=ready(); merfolk=self.add(game,10,"lea:66"); first=self.add(game,10,"lea:62"); enemy=self.add(game,20,"lea:66")
+        self.assertEqual(game.current_stats(merfolk),(2,2)); self.assertEqual(game.current_keywords(merfolk),{"islandwalk"})
+        self.assertEqual(game.current_stats(first),(2,2)); self.assertNotIn("islandwalk",game.current_keywords(first))
+        self.assertEqual(game.current_stats(enemy),(1,1)); self.assertNotIn("islandwalk",game.current_keywords(enemy))
+        second=self.add(game,10,"lea:62")
+        self.assertEqual(game.current_stats(merfolk),(3,3)); self.assertEqual(game.current_stats(first),(3,3)); self.assertEqual(game.current_stats(second),(3,3))
+        restored=Game.from_raw(game.to_raw()); saved=next(x for x in restored.player(10).battlefield if x.uid==merfolk.uid)
+        self.assertEqual(restored.current_stats(saved),(3,3)); self.assertIn("islandwalk",restored.current_keywords(saved))
+
+    def test_granted_landwalk_uses_defending_players_land_types(self):
+        for lord_key,creature_key,land_key,keyword in (("lea:62","lea:66","island","islandwalk"),("lea:154","lea:164","mountain","mountainwalk"),("lea:137","lea:125","swamp","swampwalk")):
+            with self.subTest(keyword=keyword):
+                game=ready(); attacker=self.add(game,10,creature_key); self.add(game,10,lord_key); blocker=self.add(game,20,"bear"); self.add(game,20,land_key)
+                game.active_index=0
+                self.assertIn(keyword,game.current_keywords(attacker)); legal,reason=game.can_block(attacker.uid,blocker.uid)
+                self.assertFalse(legal); self.assertIn("can't be blocked",reason)
+
+    def test_zombie_master_grants_respondable_regeneration_to_other_zombies(self):
+        game=ready(); zombie=self.add(game,10,"lea:125"); master=self.add(game,10,"lea:137"); swamp=self.add(game,10,"swamp")
+        self.assertEqual(game.granted_regeneration_cost(zombie),"{B}"); self.assertEqual(game.granted_regeneration_cost(master),"")
+        self.assertTrue(game.can_activate(10,1)); self.assertFalse(game.can_activate(10,2))
+        game.activate_ability(10,1); self.assertTrue(swamp.tapped); self.assertEqual(game.stack[-1].ability_effect,"regenerate")
+        game.player(10).battlefield.remove(master); game.player(10).graveyard.append(master.uid)
+        restored=Game.from_raw(game.to_raw()); zombie=next(x for x in restored.player(10).battlefield if x.uid==zombie.uid)
+        self.resolve_top(restored); self.assertEqual(zombie.regeneration_shields,1)
+        restored._destroy(restored.player(10),zombie); self.assertIn(zombie,restored.player(10).battlefield); self.assertEqual(zombie.regeneration_shields,0)
+        restored.priority_user=10
+        with self.assertRaisesRegex(GameError,"no supported activated ability"): restored.activate_ability(10,1)
+
+    def test_lord_removal_immediately_removes_buff_and_can_cause_death(self):
+        game=ready(); goblin=self.add(game,10,"lea:164"); king=self.add(game,10,"lea:154")
+        goblin.damage=1; self.assertEqual(game.current_stats(goblin),(2,2)); self.assertIn(goblin,game.player(10).battlefield)
+        game._destroy(game.player(10),king); game._sba()
+        self.assertIn(goblin.uid,game.player(10).graveyard); self.assertNotIn(goblin,game.player(10).battlefield)
+
+
 class AlphaCharacteristicStatsTests(unittest.TestCase):
     def add(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

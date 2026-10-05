@@ -325,6 +325,20 @@ class SoloAITests(unittest.TestCase):
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertEqual(skeleton.regeneration_shields,1); self.assertEqual(game.priority_user,HUMAN)
 
+    def test_ai_uses_lord_granted_regeneration_and_landwalk_legality(self):
+        game=solo(); advance_solo(game)
+        attacker=self.add(game,HUMAN,"giant"); zombie=self.add(game,AI,"lea:125"); self.add(game,AI,"lea:137"); self.add(game,AI,"swamp")
+        game.active_index=0; game.attackers=[attacker.uid]; game.blocks={attacker.uid:zombie.uid}; game.blocked_attackers=[attacker.uid]
+        game.phase="after_blockers"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].ability_effect,"regenerate"); self.assertEqual(game.stack[-1].source_uid,zombie.uid)
+        game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(zombie.regeneration_shields,1)
+
+        blocking=solo(); advance_solo(blocking)
+        walker=self.add(blocking,HUMAN,"lea:66"); self.add(blocking,HUMAN,"lea:62"); self.add(blocking,AI,"bear"); self.add(blocking,AI,"island")
+        blocking.active_index=0; blocking.attackers=[walker.uid]; blocking.phase="blockers"; blocking.priority_user=None
+        advance_solo(blocking); self.assertEqual(blocking.blocks,{})
+
     def test_ai_targets_utility_spells_without_illegal_choices(self):
         game=solo(); advance_solo(game); cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
         attacker=self.add(game,AI,"bear"); wall=self.add(game,HUMAN,"lea:132"); self.add(game,HUMAN,"forest")

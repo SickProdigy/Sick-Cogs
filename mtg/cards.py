@@ -61,6 +61,11 @@ class Card:
     activation_amount: int = 0
     activation_self_damage: int = 0
     conditional_swamp_bonus: bool = False
+    lord_subtype: str = ""
+    lord_power: int = 0
+    lord_toughness: int = 0
+    lord_keyword: str = ""
+    lord_regeneration_cost: str = ""
     type_line: str = ""
     set_code: str = ""
 
@@ -100,6 +105,12 @@ class Card:
         if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
         abilities.extend(aura)
         if self.protection_colors: abilities.append("Protection From "+"/".join(self.protection_colors))
+        if self.lord_subtype:
+            granted=[]
+            if self.lord_power or self.lord_toughness: granted.append(f"{self.lord_power:+d}/{self.lord_toughness:+d}")
+            if self.lord_keyword: granted.append(self.lord_keyword.replace("_"," ").title())
+            if self.lord_regeneration_cost: granted.append(f"{self.lord_regeneration_cost}: Regenerate")
+            abilities.append(f"Other {self.lord_subtype} creatures have "+", ".join(granted))
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -192,6 +203,12 @@ ALPHA_ACTIVATED_CREATURES = {
 ALPHA_PROTECTIONS = {
     "lea:43": ("B",),
     "lea:94": ("W",),
+}
+
+ALPHA_LORDS = {
+    "lea:62": {"lord_subtype":"Merfolk", "lord_power":1, "lord_toughness":1, "lord_keyword":"islandwalk"},
+    "lea:137": {"lord_subtype":"Zombie", "lord_keyword":"swampwalk", "lord_regeneration_cost":"{B}"},
+    "lea:154": {"lord_subtype":"Goblin", "lord_power":1, "lord_toughness":1, "lord_keyword":"mountainwalk"},
 }
 
 ALPHA_CHARACTERISTIC_CREATURES = {
@@ -325,6 +342,11 @@ for reference in PLAYABLE_ALPHA:
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",0),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
+        lord_subtype=ALPHA_LORDS.get(reference.key,{}).get("lord_subtype",""),
+        lord_power=ALPHA_LORDS.get(reference.key,{}).get("lord_power",0),
+        lord_toughness=ALPHA_LORDS.get(reference.key,{}).get("lord_toughness",0),
+        lord_keyword=ALPHA_LORDS.get(reference.key,{}).get("lord_keyword",""),
+        lord_regeneration_cost=ALPHA_LORDS.get(reference.key,{}).get("lord_regeneration_cost",""),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -341,7 +363,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

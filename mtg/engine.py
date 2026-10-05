@@ -119,6 +119,18 @@ class Game:
         return None,None
     def attached_auras(self,permanent):
         return [aura for player in self.players.values() for aura in player.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_target_types]
+    def continuous_lords(self,permanent):
+        controller=next((player for player in self.players.values() if permanent in player.battlefield),None)
+        if controller is None: return []
+        target=self.card(permanent.uid)
+        return [source for source in controller.battlefield if source.uid!=permanent.uid and self.card(source.uid).lord_subtype and self._has_subtype(target,self.card(source.uid).lord_subtype)]
+    def granted_regeneration_cost(self,permanent):
+        return next((self.card(source.uid).lord_regeneration_cost for source in self.continuous_lords(permanent) if self.card(source.uid).lord_regeneration_cost),"")
+    def _activation_profile(self,permanent):
+        card=self.card(permanent.uid)
+        if card.activation_cost or card.activation_effect: return card.activation_cost,card.activation_effect,card.activation_tap,True
+        granted=self.granted_regeneration_cost(permanent)
+        return (granted,"regenerate",False,False) if granted else ("","",False,False)
     @staticmethod
     def _has_subtype(card,subtype):
         return subtype in card.type_line.split(" — ",1)[-1].split()
@@ -146,12 +158,14 @@ class Game:
         card=self.card(permanent.uid); power,toughness=self.characteristic_stats(owner,card)
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
         auras=[self.card(aura.uid) for aura in self.attached_auras(permanent)]
-        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+permanent.bonus+permanent.toughness_bonus
+        lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
+        return power+swamp_bonus+sum(aura.aura_power for aura in auras)+sum(lord.lord_power for lord in lords)+permanent.bonus+permanent.power_bonus,toughness+swamp_bonus+sum(aura.aura_toughness for aura in auras)+sum(lord.lord_toughness for lord in lords)+permanent.bonus+permanent.toughness_bonus
     def projected_stats(self,user,card):
         return self.characteristic_stats(user,card,entering=bool(card.characteristic_pt))
     def current_keywords(self,permanent):
         aura_keywords={self.card(aura.uid).aura_keyword for aura in self.attached_auras(permanent) if self.card(aura.uid).aura_keyword}
-        return set(self.card(permanent.uid).keywords) | set(permanent.temporary_keywords) | aura_keywords
+        lord_keywords={self.card(source.uid).lord_keyword for source in self.continuous_lords(permanent) if self.card(source.uid).lord_keyword}
+        return set(self.card(permanent.uid).keywords) | set(permanent.temporary_keywords) | aura_keywords | lord_keywords
     def can_attack_permanent(self,permanent):
         card=self.card(permanent.uid); keywords=self.current_keywords(permanent)
         defender_override=any(self.card(aura.uid).aura_attack_override for aura in self.attached_auras(permanent))
@@ -265,44 +279,47 @@ class Game:
         player=self.player(user)
         if not 1<=position<=len(player.battlefield): return False
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
-        if not (card.activation_cost or card.activation_effect): return False
-        if card.activation_tap and (permanent.tapped or (card.creature and permanent.sick and not card.haste)): return False
+        activation_cost,activation_effect,activation_tap,_=self._activation_profile(permanent)
+        if not (activation_cost or activation_effect): return False
+        if activation_tap and (permanent.tapped or (card.creature and permanent.sick and not card.haste)): return False
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
-            if protected is not None and not card.activation_attached and card.activation_effect not in ("","regenerate") and self._protected_from(protected,card): return False
+            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card): return False
         except GameError: return False
-        excluded=(permanent.uid,) if card.activation_tap else ()
-        return self._mana_payment(player,card,mana_cost=card.activation_cost,excluded_uids=excluded) is not None
+        excluded=(permanent.uid,) if activation_tap else ()
+        return self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded) is not None
 
     def activate_ability(self,user,position,target=None):
         self._priority(user); player=self.player(user)
         if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
-        if not (card.activation_cost or card.activation_effect): raise GameError("That permanent has no supported activated ability.")
-        if card.activation_tap and permanent.tapped: raise GameError(f"{card.name} is already tapped.")
-        if card.activation_tap and card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        activation_cost,activation_effect,activation_tap,native=self._activation_profile(permanent)
+        if not (activation_cost or activation_effect): raise GameError("That permanent has no supported activated ability.")
+        if activation_tap and permanent.tapped: raise GameError(f"{card.name} is already tapped.")
+        if activation_tap and card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
-        if protected is not None and not card.activation_attached and card.activation_effect not in ("","regenerate") and self._protected_from(protected,card): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
-        excluded=(permanent.uid,) if card.activation_tap else ()
-        payment=self._mana_payment(player,card,mana_cost=card.activation_cost,excluded_uids=excluded)
-        if payment is None: raise GameError(f"You cannot pay {card.activation_cost or 'that cost'} for {card.name}.")
+        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
+        excluded=(permanent.uid,) if activation_tap else ()
+        payment=self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded)
+        if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
         sources,pool=payment
         for source in sources: source.tapped=True
         for symbol,count in pool.items():
             player.mana_pool[symbol]-=count
             if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
-        if card.activation_tap: permanent.tapped=True
+        if activation_tap: permanent.tapped=True
         permanent.activations_this_turn+=1
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
-        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=card.activation_effect or "self",source_uid=permanent.uid))
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid))
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
         self.priority_user=self.opponent(user)
-        self.log.append(f"{user} activated {card.name}: {card.ability_text}.")
+        ability_text=card.ability_text if native else f"{activation_cost}: Regenerate this creature (granted)"
+        self.log.append(f"{user} activated {card.name}: {ability_text}.")
 
     def activate_mana(self,user,position,color=None):
         self._priority(user); player=self.player(user)
