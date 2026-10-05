@@ -51,7 +51,7 @@ class CodexAppServer:
                 "clientInfo": {
                     "name": "sick-cogs-codex",
                     "title": "Sick-Cogs Codex",
-                    "version": "0.3.1",
+                    "version": "1.0.0",
                 }
             },
         )

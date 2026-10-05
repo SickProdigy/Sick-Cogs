@@ -13,5 +13,5 @@
   "short": "Live Codex usage milestones and reset notifications.",
   "tags": ["codex", "openai", "reminders", "usage", "privacy"],
   "type": "COG",
-  "version": "0.3.1"
+  "version": "1.0.0"
 }
