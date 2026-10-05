@@ -132,6 +132,8 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:153"
         game.players[10].battlefield=[permanent_type(uid,"lea:153",sick=False,temporary_keywords=["flying"])]
         self.assertIn("Active: Flying",str(cog.game_embed(game).to_dict()))
+        game.players[10].battlefield[0].regeneration_shields=2
+        self.assertIn("Regeneration shield ×2",str(cog.game_embed(game).to_dict()))
         game.end_step_sacrifices=[uid]
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Pending end-step trigger",rendered); self.assertIn("players may respond",rendered)

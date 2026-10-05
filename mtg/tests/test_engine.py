@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("blocked_attackers")
         for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
@@ -514,6 +514,79 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"ability, not a spell"): game.play(20,1,"S:1")
         self.assertFalse(first.tapped); self.assertFalse(second.tapped); self.assertEqual(game.player(20).hand[0],counter)
 
+
+class AlphaRegenerationTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+    def activate_resolve(self,game,user,position):
+        game.activate_ability(user,position); self.resolve_top(game)
+
+    def test_regeneration_activation_persists_resolves_and_cleans_up(self):
+        game=ready(); skeleton=self.add(game,10,"lea:106"); self.add(game,10,"swamp")
+        game.activate_ability(10,1); self.assertEqual(skeleton.regeneration_shields,0)
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); saved=restored.player(10).battlefield[0]
+        self.assertEqual(saved.regeneration_shields,1); restored._cleanup(); self.assertEqual(saved.regeneration_shields,0)
+
+    def test_lethal_combat_consumes_shield_taps_heals_and_removes_from_combat(self):
+        game=ready(); skeleton=self.add(game,10,"lea:106"); attacker=self.add(game,20,"bear"); skeleton.regeneration_shields=1
+        game.active_index=1; game.attackers=[attacker.uid]; game.blocks={attacker.uid:skeleton.uid}; game.blocked_attackers=[attacker.uid]
+        game._combat_damage(False)
+        self.assertIn(skeleton,game.player(10).battlefield); self.assertTrue(skeleton.tapped); self.assertEqual(skeleton.damage,0); self.assertEqual(skeleton.regeneration_shields,0)
+        self.assertEqual(game.blocks,{}); self.assertEqual(game.blocked_attackers,[attacker.uid]); self.assertEqual(game.player(10).life,20)
+
+    def test_removed_regenerated_blocker_still_keeps_attacker_blocked(self):
+        game=ready(); skeleton=self.add(game,10,"lea:106"); attacker=self.add(game,20,"bear"); skeleton.regeneration_shields=1
+        game.active_index=1; game.attackers=[attacker.uid]; game.blocks={attacker.uid:skeleton.uid}; game.blocked_attackers=[attacker.uid]
+        self.assertFalse(game._destroy(game.player(10),skeleton)); game._combat_damage(False)
+        self.assertEqual(game.player(10).life,20); self.assertEqual(game.blocks,{})
+
+    def test_multiple_shields_replace_one_destruction_each(self):
+        game=ready(); skeleton=self.add(game,10,"lea:106"); skeleton.regeneration_shields=2
+        self.assertFalse(game._destroy(game.player(10),skeleton)); self.assertEqual(skeleton.regeneration_shields,1)
+        skeleton.tapped=False; self.assertFalse(game._destroy(game.player(10),skeleton)); self.assertEqual(skeleton.regeneration_shields,0)
+        self.assertTrue(game._destroy(game.player(10),skeleton)); self.assertIn(skeleton.uid,game.player(10).graveyard)
+
+    def test_terror_and_disintegrate_bypass_regeneration(self):
+        terror=ready(); spell=self.add(terror,10,"lea:130","hand"); self.add(terror,10,"swamp"); self.add(terror,10,"swamp"); wall=self.add(terror,20,"lea:223"); wall.regeneration_shields=1
+        terror.play(10,1,"20:1"); self.resolve_top(terror); self.assertIn(wall.uid,terror.player(20).graveyard)
+        disintegrate=ready(); spell2=self.add(disintegrate,10,"lea:140","hand"); self.add(disintegrate,10,"mountain"); self.add(disintegrate,10,"mountain"); skeleton=self.add(disintegrate,20,"lea:106"); skeleton.regeneration_shields=1
+        disintegrate.play(10,1,"20:1",1); self.resolve_top(disintegrate); self.assertIn(skeleton.uid,disintegrate.player(20).exile)
+
+    def test_wrath_bypasses_shields_but_disenchant_allows_living_wall_to_regenerate(self):
+        wrath=ready(); spell=self.add(wrath,10,"lea:45","hand")
+        for _ in range(2): self.add(wrath,10,"plains")
+        for _ in range(2): self.add(wrath,10,"mountain")
+        skeleton=self.add(wrath,20,"lea:106"); skeleton.regeneration_shields=1
+        wrath.play(10,1); self.resolve_top(wrath); self.assertIn(skeleton.uid,wrath.player(20).graveyard)
+        disenchant=ready(); spell2=self.add(disenchant,10,"lea:18","hand"); self.add(disenchant,10,"plains"); self.add(disenchant,10,"forest"); wall=self.add(disenchant,20,"lea:258"); wall.regeneration_shields=1
+        disenchant.play(10,1,"20:1"); self.resolve_top(disenchant)
+        self.assertIn(wall,disenchant.player(20).battlefield); self.assertTrue(wall.tapped); self.assertEqual(wall.regeneration_shields,0)
+
+    def test_zero_toughness_is_not_destruction_and_cannot_regenerate(self):
+        game=ready(); nightmare=self.add(game,10,"lea:118"); nightmare.regeneration_shields=1
+        game._sba(); self.assertIn(nightmare.uid,game.player(10).graveyard)
+
+    def test_exile_and_sacrifice_bypass_regeneration_shields(self):
+        swords=ready(); spell=self.add(swords,10,"lea:40","hand"); self.add(swords,10,"plains"); skeleton=self.add(swords,20,"lea:106"); skeleton.regeneration_shields=1
+        swords.play(10,1,"20:1"); self.resolve_top(swords); self.assertIn(skeleton.uid,swords.player(20).exile)
+        sacrifice=ready(); other=self.add(sacrifice,10,"lea:106"); other.regeneration_shields=1; sacrifice.end_step_sacrifices=[other.uid]
+        sacrifice._resolve_end_step_sacrifices(); self.assertIn(other.uid,sacrifice.player(10).graveyard)
+
+    def test_legacy_combat_state_reconstructs_blocked_attackers(self):
+        game=ready(); attacker=self.add(game,10,"bear"); blocker=self.add(game,20,"bear")
+        game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}; raw=game.to_raw(); raw.pop("blocked_attackers")
+        restored=Game.from_raw(raw); self.assertEqual(restored.blocked_attackers,[attacker.uid])
+
+    def test_sedge_troll_swamp_bonus_is_live_and_persisted(self):
+        game=ready(); troll=self.add(game,10,"lea:172"); self.assertEqual(game.current_stats(troll),(2,2))
+        swamp=self.add(game,10,"swamp"); self.assertEqual(game.current_stats(troll),(3,3))
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]; self.assertEqual(restored.current_stats(saved),(3,3))
+        restored.player(10).battlefield.remove(next(x for x in restored.player(10).battlefield if x.uid==swamp.uid)); self.assertEqual(restored.current_stats(saved),(2,2))
+
 class AlphaCounterspellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
@@ -574,10 +647,12 @@ class AlphaXSpellTests(unittest.TestCase):
             for saved in player["battlefield"]:
                 saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
                 saved.pop("temporary_keywords",None); saved.pop("activations_this_turn",None); saved.pop("sacrifice_at_end_step",None)
+                saved.pop("regeneration_shields",None); saved.pop("cant_regenerate",None)
         raw["stack"][0].pop("x_value"); raw["stack"][0].pop("ability_effect"); raw["stack"][0].pop("source_uid")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
         self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death)
         self.assertEqual(restored_permanent.temporary_keywords,[]); self.assertEqual(restored_permanent.activations_this_turn,0); self.assertFalse(restored_permanent.sacrifice_at_end_step)
+        self.assertEqual(restored_permanent.regeneration_shields,0); self.assertFalse(restored_permanent.cant_regenerate)
         self.assertEqual(restored.stack[0].x_value,0); self.assertEqual(restored.stack[0].ability_effect,""); self.assertIsNone(restored.stack[0].source_uid)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
@@ -955,9 +1030,9 @@ class AlphaZoneMovementTests(unittest.TestCase):
     def test_bounced_blocker_leaves_attacker_blocked(self):
         game=ready(); attacker=self.add(game,10,"bear"); blocker=self.add(game,20,"bear")
         self.add(game,10,"lea:86","hand"); self.lands(game,"island",1)
-        game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}
+        game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}; game.blocked_attackers=[attacker.uid]
         game.play(10,1,"20:1"); self.resolve(game)
-        self.assertEqual(game.blocks,{attacker.uid:blocker.uid}); self.assertIn(blocker.uid,game.players[20].hand)
+        self.assertEqual(game.blocks,{}); self.assertEqual(game.blocked_attackers,[attacker.uid]); self.assertIn(blocker.uid,game.players[20].hand)
         before=game.players[20].life; game._combat_damage(False)
         self.assertEqual(game.players[20].life,before)
 

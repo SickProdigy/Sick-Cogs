@@ -273,6 +273,15 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertTrue(warriors.tapped); self.assertFalse(bear.tapped); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
+    def test_ai_regenerates_a_lethally_blocking_creature(self):
+        game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        attacker=self.add(game,HUMAN,"bear"); skeleton=self.add(game,AI,"lea:106"); self.add(game,AI,"swamp")
+        game.active_index=0; game.attackers=[attacker.uid]; game.blocks={attacker.uid:skeleton.uid}; game.blocked_attackers=[attacker.uid]
+        game.phase="after_blockers"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"regenerate"); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(skeleton.regeneration_shields,1); self.assertEqual(game.priority_user,HUMAN)
+
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

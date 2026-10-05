@@ -46,6 +46,7 @@ class Card:
     activation_text: str = ""
     activation_amount: int = 0
     activation_self_damage: int = 0
+    conditional_swamp_bonus: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -123,6 +124,13 @@ ALPHA_MANA_CREATURES = {
 }
 
 ALPHA_ACTIVATED_CREATURES = {
+    "lea:106": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
+    "lea:132": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
+    "lea:135": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
+    "lea:172": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature", "conditional_swamp_bonus":True},
+    "lea:180": {"activation_cost":"{R}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
+    "lea:223": {"activation_cost":"{G}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
+    "lea:258": {"activation_cost":"{1}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
     "lea:29": {"activation_cost":"{W}{W}", "activation_tap":True, "activation_effect":"destroy_black_permanent", "activation_text":"Destroy target black permanent"},
     "lea:73": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
     "lea:123": {"activation_tap":True, "activation_effect":"destroy_tapped_creature", "activation_text":"Destroy target tapped creature"},
@@ -192,6 +200,10 @@ ALPHA_KEYWORDS = {
     "lea:170": ("flying",),
     "lea:174": ("flying",),
     "lea:181": ("defender",),
+    "lea:132": ("defender",),
+    "lea:135": ("flying",),
+    "lea:223": ("defender",),
+    "lea:258": ("defender",),
     "lea:182": ("defender",),
     "lea:191": ("first_strike",),
     "lea:198": ("reach",),
@@ -244,6 +256,7 @@ for reference in PLAYABLE_ALPHA:
         activation_text=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text",""),
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",0),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
+        conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
     )
 
 PACK_POOLS = {

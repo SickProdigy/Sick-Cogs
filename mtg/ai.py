@@ -228,6 +228,34 @@ def _activation_target(game,user,card,source_uid=None):
             if game.card(permanent.uid).land and permanent.tapped: return f"{user}:{position}"
     return None
 
+def _regeneration_threatened(game,user,permanent):
+    stable=f"{user}:{permanent.uid}"; toughness=game.current_stats(permanent)[1]-permanent.damage
+    for item in game.stack:
+        card=game.card(item.uid)
+        if item.target!=stable: continue
+        if item.ability_effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"): return True
+        if not item.ability_effect and card.effect in ("destroy_permanent","elemental_blast"): return True
+        if not item.ability_effect and card.effect in ("damage","damage_any") and card.amount>=toughness: return True
+    if game.phase not in ("after_blockers","after_first_strike"): return False
+    if permanent.uid in game.attackers:
+        blocker_uid=game.blocks.get(permanent.uid); opponent=game.player(game.opponent(user))
+        blocker=next((x for x in opponent.battlefield if x.uid==blocker_uid),None)
+        return blocker is not None and game.current_stats(blocker)[0]>=toughness
+    for attacker_uid,blocker_uid in game.blocks.items():
+        if blocker_uid==permanent.uid:
+            attacker=next((x for x in game.player(game.active_user).battlefield if x.uid==attacker_uid),None)
+            return attacker is not None and game.current_stats(attacker)[0]>=toughness
+    return False
+
+def _activate_regeneration(game,user):
+    candidates=[]
+    for position,permanent in enumerate(game.player(user).battlefield,1):
+        card=game.card(permanent.uid)
+        if card.activation_effect=="regenerate" and not permanent.regeneration_shields and _regeneration_threatened(game,user,permanent) and game.can_activate(user,position):
+            candidates.append((card.cost,position))
+    if not candidates: return None
+    _,position=max(candidates); game.activate_ability(user,position); return "activate"
+
 def _activate_targeted_ability(game,user):
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
@@ -285,7 +313,7 @@ def advance_solo(game: Game):
             continue
         if game.priority_user != user:
             return changed
-        action = _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

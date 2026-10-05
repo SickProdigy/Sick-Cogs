@@ -2447,7 +2447,7 @@
       "toughness": "1",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:107",
@@ -3045,7 +3045,7 @@
       "toughness": "4",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:133",
@@ -3114,7 +3114,7 @@
       "toughness": "1",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:136",
@@ -3966,7 +3966,7 @@
       "toughness": "2",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:173",
@@ -4150,7 +4150,7 @@
       "toughness": "2",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:181",
@@ -5139,7 +5139,7 @@
       "toughness": "3",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:224",
@@ -5830,7 +5830,7 @@
       "toughness": "6",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:259",
