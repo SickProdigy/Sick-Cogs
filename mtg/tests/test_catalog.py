@@ -8,6 +8,7 @@ from mtg.cards import BASE_CARDS, CARDS, PACK_POOLS, starter
 from mtg.catalog import ALPHA_BY_KEY, ALPHA_CARDS, ALPHA_SET, PLAYABLE_ALPHA, REFERENCE_ALPHA, search_alpha
 from mtg.engine import Game, Permanent
 from mtg.mtg import MTG
+from mtg.views import CatalogDetailView, CatalogView
 
 
 class CatalogTests(unittest.TestCase):
@@ -72,14 +73,18 @@ class CatalogTests(unittest.TestCase):
 
 class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
     async def test_catalog_defaults_to_paged_combined_summary(self):
-        cog=MTG.__new__(MTG); ctx=SimpleNamespace(send=AsyncMock())
+        cog=MTG.__new__(MTG); ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await MTG.catalog.callback(cog,ctx,query=None)
-        embed=ctx.send.await_args.kwargs["embed"]
+        sent=ctx.send.await_args.kwargs; embed=sent["embed"]; view=sent["view"]
         self.assertEqual(len(embed.description.splitlines()),15)
-        self.assertIn("75 playable definitions · 60 core + 295 Alpha printings (290 names)",embed.footer.text)
+        self.assertIn("75 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertEqual(view.user_id,42)
+        self.assertEqual(len(view.records),355)
+        select=next(child for child in view.children if hasattr(child,"options"))
+        self.assertEqual(len(select.options),15)
 
     async def test_catalog_supports_alpha_pages_and_search(self):
-        cog=MTG.__new__(MTG); ctx=SimpleNamespace(send=AsyncMock())
+        cog=MTG.__new__(MTG); ctx=SimpleNamespace(author=SimpleNamespace(id=42),send=AsyncMock())
         await MTG.catalog.callback(cog,ctx,query="alpha 20")
         embed=ctx.send.await_args.kwargs["embed"]
         self.assertEqual(len(embed.description.splitlines()),10)
@@ -87,6 +92,44 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.reset_mock()
         await MTG.catalog.callback(cog,ctx,query="alpha Black Lotus")
         self.assertIn("Black Lotus",ctx.send.await_args.kwargs["embed"].description)
+
+    async def test_catalog_navigation_preserves_origin_page_and_filter(self):
+        cog=MTG.__new__(MTG)
+        records=cog.catalog_records("alpha","")
+        view=CatalogView(cog,42,records,"alpha","",7)
+        self.assertEqual(view.page,7)
+        select=next(child for child in view.children if hasattr(child,"options"))
+        self.assertEqual(select.options[0].value,str(7*view.page_size))
+        detail=CatalogDetailView(view,110)
+        self.assertEqual(detail.browser.page,7)
+        interaction=SimpleNamespace(
+            response=SimpleNamespace(is_done=lambda:False,edit_message=AsyncMock()),
+            edit_original_response=AsyncMock(),
+        )
+        await cog.show_catalog_page(interaction,detail.browser,detail.browser.page)
+        kwargs=interaction.response.edit_message.await_args.kwargs
+        self.assertEqual(kwargs["view"].page,7)
+        self.assertEqual(kwargs["view"].scope,"alpha")
+        self.assertEqual(kwargs["attachments"],[])
+
+    async def test_catalog_is_alphabetical_and_requester_bound(self):
+        cog=MTG.__new__(MTG)
+        records=cog.catalog_records("alpha","")
+        names=[card.name.casefold() for _,card in records]
+        self.assertEqual(names,sorted(names))
+        view=CatalogView(cog,42,records,"alpha","",0)
+        response=SimpleNamespace(send_message=AsyncMock())
+        allowed=await view.interaction_check(SimpleNamespace(user=SimpleNamespace(id=99),response=response))
+        self.assertFalse(allowed)
+        response.send_message.assert_awaited_once_with("This catalog browser belongs to another member.",ephemeral=True)
+
+    async def test_detail_navigation_disables_only_real_boundaries(self):
+        cog=MTG.__new__(MTG); records=cog.catalog_records("alpha","")
+        browser=CatalogView(cog,42,records,"alpha","",3)
+        first=CatalogDetailView(browser,0); middle=CatalogDetailView(browser,45); last=CatalogDetailView(browser,len(records)-1)
+        self.assertTrue(first.previous_card.disabled); self.assertFalse(first.next_card.disabled)
+        self.assertFalse(middle.previous_card.disabled); self.assertFalse(middle.next_card.disabled)
+        self.assertFalse(last.previous_card.disabled); self.assertTrue(last.next_card.disabled)
 
     async def test_promoted_alpha_details_are_explicitly_playable(self):
         cog=MTG.__new__(MTG)

@@ -65,3 +65,72 @@ class HandPaginationView(discord.ui.View):
     async def next(self,i,b):
         await i.response.defer()
         await self.cog.send_hand(i,self.game_id,self.page+1,editing=True)
+
+
+class CatalogSelect(discord.ui.Select):
+    def __init__(self, browser):
+        self.browser=browser
+        start=browser.page*browser.page_size
+        options=[]
+        for index,(source,card) in enumerate(browser.records[start:start+browser.page_size],start):
+            if source=="alpha":
+                status="Playable" if card.engine_status=="playable" else "Reference only"
+                description=f"{card.type_line} · {status}"
+            else:
+                description=f"{card.kind} · Playable"
+            options.append(discord.SelectOption(label=(f"{card.name} · #{card.collector_number}" if source=="alpha" else card.name)[:100],description=description[:100],value=str(index)))
+        super().__init__(placeholder="Select a card for details",min_values=1,max_values=1,options=options,row=0)
+
+    async def callback(self,interaction):
+        await interaction.response.defer()
+        await self.browser.cog.show_catalog_detail(interaction,self.browser,int(self.values[0]))
+
+
+class CatalogView(discord.ui.View):
+    page_size=15
+    def __init__(self,cog,user_id,records,scope,search,page=0):
+        super().__init__(timeout=300)
+        self.cog,self.user_id,self.records,self.scope,self.search=cog,user_id,records,scope,search
+        self.pages=max(1,(len(records)+self.page_size-1)//self.page_size)
+        self.page=max(0,min(page,self.pages-1))
+        self.add_item(CatalogSelect(self))
+        self.previous_page.disabled=self.page<=0
+        self.next_page.disabled=self.page>=self.pages-1
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This catalog browser belongs to another member.",ephemeral=True); return False
+
+    @discord.ui.button(label="Previous page",emoji="◀️",style=discord.ButtonStyle.secondary,row=1)
+    async def previous_page(self,interaction,button):
+        await self.cog.show_catalog_page(interaction,self,self.page-1)
+
+    @discord.ui.button(label="Next page",emoji="▶️",style=discord.ButtonStyle.secondary,row=1)
+    async def next_page(self,interaction,button):
+        await self.cog.show_catalog_page(interaction,self,self.page+1)
+
+
+class CatalogDetailView(discord.ui.View):
+    def __init__(self,browser,index):
+        super().__init__(timeout=300)
+        self.browser,self.index=browser,index
+        self.previous_card.disabled=index<=0
+        self.next_card.disabled=index>=len(browser.records)-1
+
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.browser.user_id: return True
+        await interaction.response.send_message("This catalog browser belongs to another member.",ephemeral=True); return False
+
+    @discord.ui.button(label="Previous card",emoji="◀️",style=discord.ButtonStyle.secondary)
+    async def previous_card(self,interaction,button):
+        await interaction.response.defer()
+        await self.browser.cog.show_catalog_detail(interaction,self.browser,self.index-1)
+
+    @discord.ui.button(label="Up to catalog",emoji="⬆️",style=discord.ButtonStyle.primary)
+    async def up(self,interaction,button):
+        await self.browser.cog.show_catalog_page(interaction,self.browser,self.browser.page)
+
+    @discord.ui.button(label="Next card",emoji="▶️",style=discord.ButtonStyle.secondary)
+    async def next_card(self,interaction,button):
+        await interaction.response.defer()
+        await self.browser.cog.show_catalog_detail(interaction,self.browser,self.index+1)

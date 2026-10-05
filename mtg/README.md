@@ -2,7 +2,7 @@
 
 MTG is an experimental solo and two-player Magic: The Gathering rules prototype for Red.
 
-Version 0.7.0 supports the original 60-card gameplay pool plus the first 15 playable Limited Edition Alpha cards: every textless Alpha creature. The full Alpha catalog remains 295 printings representing 290 distinct names. Proper colored and generic mana payment now prevents lands of the wrong color from casting spells. The two fixed 60-card beginner decks remain unchanged while collection and deck-choice design is deferred. The cog is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
+Version 0.7.1 supports the original 60-card gameplay pool plus the first 15 playable Limited Edition Alpha cards: every textless Alpha creature. The full Alpha catalog remains 295 printings representing 290 distinct names. Proper colored and generic mana payment now prevents lands of the wrong color from casting spells. The two fixed 60-card beginner decks remain unchanged while collection and deck-choice design is deferred. The cog is not a complete Magic implementation and does not yet include collections, packs, trading, Commander, Standard rotation, or an economy.
 
 ## Play
 
@@ -29,7 +29,7 @@ This is a learning prototype. The versioned playable catalog in `data/cards.json
 
 ## Card data and artwork
 
-Use `[p]mtg catalog [all|playable|alpha] [page|search]` to browse paged records. For example, `[p]mtg catalog alpha 2` opens the second Alpha page and `[p]mtg catalog alpha lotus` searches Alpha. Use `[p]mtg card <key or name>` for details; `[p]mtg card alpha Black Lotus` forces an Alpha lookup, and exact Alpha printing keys use `lea:NUMBER`. Every detail view labels whether a card is playable or reference-only. Catalog entries store stable Scryfall printing and Oracle identifiers separately from active matches.
+Use `[p]mtg catalog [all|playable|alpha] [page|search]` to open the interactive catalog. Each page has a card selector plus previous/next page controls. Selecting a row opens its full details and artwork; previous/next then walks the filtered catalog alphabetically, while **Up to catalog** returns to the exact page and filter you left. For example, `[p]mtg catalog alpha 2` opens the second Alpha page and `[p]mtg catalog alpha lotus` searches Alpha. Only the member who opened a browser can operate it. Use `[p]mtg card <key or name>` for a direct lookup; `[p]mtg card alpha Black Lotus` forces an Alpha lookup, and exact Alpha printing keys use `lea:NUMBER`. Every detail view labels whether a card is playable or reference-only. Catalog entries store stable Scryfall printing and Oracle identifiers separately from active matches.
 
 Card metadata and images are provided at runtime by [Scryfall](https://scryfall.com). Requests identify this project, use HTTPS and explicit Accept headers, and remain below Scryfall's published API ceiling. Images are decoded and size-checked before entering a private least-recently-used cache limited to 192 files and 128 MiB. Card images are not committed to this repository.
 

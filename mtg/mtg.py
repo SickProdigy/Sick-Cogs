@@ -12,7 +12,7 @@ from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield,
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import ChallengeView, GameView, HandPaginationView
+from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.7.0"
+    __version__="0.7.1"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -226,23 +226,49 @@ class MTG(commands.Cog):
         embed,file=await self.game_message(game)
         if file: await ctx.send(embed=embed,file=file)
         else: await ctx.send(embed=embed)
-    @mtg.command(name="card")
-    async def card_detail(self,ctx,*,query:str):
-        """Show a supported card or an original Alpha printing."""
+    def catalog_records(self,scope,search=""):
+        records=[]
+        if scope=="all":
+            records.extend(("playable",card) for card in BASE_CARDS.values())
+            records.extend(("alpha",card) for card in ALPHA_CARDS)
+        elif scope=="playable":
+            records.extend(("alpha" if card.set_code=="lea" else "playable",card) for card in CARDS.values())
+        else: records.extend(("alpha",card) for card in ALPHA_CARDS)
+        if search:
+            folded=search.casefold()
+            records=[item for item in records if folded in item[1].name.casefold() or folded in item[1].key.casefold()]
+        return sorted(records,key=lambda item:(item[1].name.casefold(),item[1].key.casefold()))
+
+    def catalog_embed(self,browser):
+        start=browser.page*browser.page_size; visible=browser.records[start:start+browser.page_size]
+        lines=[]
+        for number,(source,card) in enumerate(visible,start+1):
+            if source=="alpha":
+                status="playable" if card.engine_status=="playable" else "reference only"
+                detail=f"{card.type_line}; {card.rarity}; {status}"
+            else: detail=f"{card.kind}; playable"
+            label=f"{card.name} · #{card.collector_number}" if source=="alpha" else card.name
+            lines.append(f"**{number}. {label}** — {detail}")
+        title={"all":"MTG card catalog","playable":"Supported playable catalog","alpha":"Limited Edition Alpha catalog"}[browser.scope]
+        embed=discord.Embed(title=title,description="\n".join(lines),color=discord.Color.dark_green())
+        summary=f"Page {browser.page+1}/{browser.pages} · {len(browser.records)} matching records"
+        if not browser.search and browser.scope=="all": summary+=f" · {len(CARDS)} playable definitions · {len(BASE_CARDS)} core + {ALPHA_SET['printing_count']} Alpha printings"
+        embed.set_footer(text=summary+" · Select a row for card details")
+        return embed
+
+    def find_catalog_card(self,query):
         raw=query.strip(); folded=raw.casefold(); alpha_only=folded.startswith("alpha " )
-        if alpha_only:
-            raw=raw[6:].strip(); folded=raw.casefold()
-        if not raw:
-            await ctx.send("Give me a card name, catalog key, or Alpha printing key."); return
+        if alpha_only: raw=raw[6:].strip(); folded=raw.casefold()
         matches=[] if alpha_only else [card for card in CARDS.values() if folded==card.key.casefold() or folded==card.name.casefold()]
         if not matches and not alpha_only: matches=[card for card in CARDS.values() if folded in card.name.casefold()]
         alpha_matches=search_alpha(raw) if alpha_only or not matches else []
-        if matches and matches[0].set_code=="lea":
-            alpha_matches=search_alpha(matches[0].key); matches=[]
-        if not matches and not alpha_matches:
-            await ctx.send("No catalog card matched that search."); return
-        alpha=bool(alpha_matches); card=(alpha_matches or matches)[0]
-        if alpha:
+        if matches and matches[0].set_code=="lea": alpha_matches=search_alpha(matches[0].key); matches=[]
+        if alpha_matches: return "alpha",alpha_matches[0],len(alpha_matches)
+        if matches: return "playable",matches[0],len(matches)
+        return None,None,0
+
+    async def card_presentation(self,source,card,match_count=1):
+        if source=="alpha":
             description=card.oracle_text or "No current Oracle rules text."
             color=discord.Color.dark_green() if card.engine_status=="playable" else discord.Color.dark_gold()
             embed=discord.Embed(title=card.name,description=description,color=color)
@@ -252,61 +278,58 @@ class MTG(commands.Cog):
             embed.add_field(name="Alpha printing",value=f"`{card.key}` · #{card.collector_number} · {card.rarity.title()}",inline=False)
             status=("Playable in the supported rules subset; not included in the fixed starters or pack pools." if card.engine_status=="playable" else "Reference only — its mechanics are not implemented yet.")
             embed.add_field(name="Engine status",value=status,inline=False)
-            if len(alpha_matches)>1: embed.add_field(name="Alternate Alpha art",value=f"{len(alpha_matches)} printings share this card name; use an exact `lea:NUMBER` key.",inline=False)
-            source=f"https://scryfall.com/card/lea/{card.collector_number}"
+            if match_count>1: embed.add_field(name="Alternate Alpha art",value=f"{match_count} printings share this card name; use an exact `lea:NUMBER` key.",inline=False)
+            source_url=f"https://scryfall.com/card/lea/{card.collector_number}"
         else:
             embed=discord.Embed(title=card.name,description=card.text or "No rules text.",color=discord.Color.dark_green())
-            embed.add_field(name="Type",value=card.kind)
-            embed.add_field(name="Mana",value=card.mana_cost or "None")
+            embed.add_field(name="Type",value=card.kind); embed.add_field(name="Mana",value=card.mana_cost or "None")
             if card.creature: embed.add_field(name="Power / toughness",value=f"{card.power} / {card.toughness}")
             embed.add_field(name="Catalog key",value=f"`{card.key}`")
             embed.add_field(name="Engine status",value="Playable in the supported rules subset.",inline=False)
-            source=f"https://scryfall.com/card/{card.scryfall_id}"
+            source_url=f"https://scryfall.com/card/{card.scryfall_id}"
         embed.add_field(name="Oracle ID",value=f"`{card.oracle_id}`",inline=False)
-        embed.add_field(name="Source",value=f"[Scryfall]({source})",inline=False)
+        embed.add_field(name="Source",value=f"[Scryfall]({source_url})",inline=False)
         embed.set_footer(text="Card data and images: Scryfall. Unofficial fan content; not approved by Wizards.")
         filename=card.key.replace(":","-")+".jpg"
         try:
-            path=await self.art_cache.get(card)
-            file=discord.File(path,filename=filename)
-            embed.set_image(url=f"attachment://{filename}")
-            await ctx.send(embed=embed,file=file,allowed_mentions=discord.AllowedMentions.none())
+            path=await self.art_cache.get(card); file=discord.File(path,filename=filename); embed.set_image(url=f"attachment://{filename}")
+            return embed,file
         except (ArtError,aiohttp.ClientError,asyncio.TimeoutError,OSError):
-            log.warning("Could not load card detail art for %s",card.key,exc_info=True)
-            await ctx.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
+            log.warning("Could not load card detail art for %s",card.key,exc_info=True); return embed,None
+
+    async def show_catalog_page(self,interaction,browser,page):
+        view=CatalogView(self,browser.user_id,browser.records,browser.scope,browser.search,page)
+        kwargs={"embed":self.catalog_embed(view),"attachments":[],"view":view}
+        if interaction.response.is_done(): await interaction.edit_original_response(**kwargs)
+        else: await interaction.response.edit_message(**kwargs)
+
+    async def show_catalog_detail(self,interaction,browser,index):
+        source,card=browser.records[index]
+        embed,file=await self.card_presentation(source,card)
+        await interaction.edit_original_response(embed=embed,attachments=[file] if file else [],view=CatalogDetailView(browser,index))
+
+    @mtg.command(name="card")
+    async def card_detail(self,ctx,*,query:str):
+        """Show a supported card or an original Alpha printing."""
+        if not query.strip(): await ctx.send("Give me a card name, catalog key, or Alpha printing key."); return
+        source,card,count=self.find_catalog_card(query)
+        if not card: await ctx.send("No catalog card matched that search."); return
+        embed,file=await self.card_presentation(source,card,count)
+        if file: await ctx.send(embed=embed,file=file,allowed_mentions=discord.AllowedMentions.none())
+        else: await ctx.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
+
     @mtg.command(name="catalog")
     async def catalog(self,ctx,*,query:str=None):
-        """Browse all cards. Syntax: catalog [all|playable|alpha] [page|search]."""
+        """Interactively browse cards. Syntax: catalog [all|playable|alpha] [page|search]."""
         tokens=(query or "").split(); scope="all"; page=1
-        if tokens and tokens[0].casefold() in ("all","playable","alpha"):
-            scope=tokens.pop(0).casefold()
+        if tokens and tokens[0].casefold() in ("all","playable","alpha"): scope=tokens.pop(0).casefold()
         if tokens and tokens[0].isdigit(): page=int(tokens.pop(0))
-        search=" ".join(tokens).casefold()
-        records=[]
-        if scope=="all":
-            records.extend(("playable",card) for card in BASE_CARDS.values())
-            records.extend(("alpha",card) for card in ALPHA_CARDS)
-        elif scope=="playable": records.extend(("playable",card) for card in CARDS.values())
-        else: records.extend(("alpha",card) for card in ALPHA_CARDS)
-        if search: records=[item for item in records if search in item[1].name.casefold() or search in item[1].key.casefold()]
-        if not records:
-            await ctx.send("No catalog cards matched that search."); return
-        page_size=15; pages=math.ceil(len(records)/page_size)
-        if page<1 or page>pages:
-            await ctx.send(f"Choose a page from 1 to {pages}."); return
-        visible=records[(page-1)*page_size:page*page_size]; lines=[]
-        for source,card in visible:
-            if source=="playable":
-                lines.append(f"`{card.key}` — **{card.name}** ({card.kind}; playable)")
-            else:
-                status="playable" if card.engine_status=="playable" else "reference only"
-                lines.append(f"`{card.key}` — **{card.name}** ({card.type_line}; {card.rarity}; {status})")
-        title={"all":"MTG card catalog","playable":"Supported playable catalog","alpha":"Limited Edition Alpha catalog"}[scope]
-        embed=discord.Embed(title=title,description="\n".join(lines),color=discord.Color.dark_green())
-        summary=f"Page {page}/{pages} · {len(records)} matching records"
-        if not search and scope=="all": summary+=f" · {len(CARDS)} playable definitions · {len(BASE_CARDS)} core + {ALPHA_SET['printing_count']} Alpha printings ({ALPHA_SET['distinct_card_count']} names)"
-        embed.set_footer(text=summary+" · Use mtg card <key or name> for details")
-        await ctx.send(embed=embed,allowed_mentions=discord.AllowedMentions.none())
+        search=" ".join(tokens); records=self.catalog_records(scope,search)
+        if not records: await ctx.send("No catalog cards matched that search."); return
+        pages=math.ceil(len(records)/CatalogView.page_size)
+        if page<1 or page>pages: await ctx.send(f"Choose a page from 1 to {pages}."); return
+        view=CatalogView(self,ctx.author.id,records,scope,search,page-1)
+        await ctx.send(embed=self.catalog_embed(view),view=view,allowed_mentions=discord.AllowedMentions.none())
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None):
         """Play/cast a hand position. Target: USER_ID or USER_ID:FIELD_POSITION."""
