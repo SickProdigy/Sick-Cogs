@@ -1279,6 +1279,72 @@ class AlphaZoneMovementTests(unittest.TestCase):
         self.assertEqual(game.players[20].life,before)
 
 
+class AlphaLandTapEnchantmentTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_wild_growth_pays_mixed_cost_and_preserves_extra_mana(self):
+        game=ready(); mountain=self.add(game,10,"mountain"); self.add(game,10,"lea:229",attached_to=mountain.uid)
+        test_card=Card(key="test_rg",name="Test RG",kind="Instant",scryfall_id="test",oracle_id="test",mana_cost="{R}{G}",effect="life")
+        with patch.dict(CARDS,{"test_rg":test_card}):
+            spell=game.next_uid; game.next_uid+=1; game.cards[spell]="test_rg"; game.player(10).hand.insert(0,spell)
+            game.play(10,1); self.assertTrue(mountain.tapped); self.assertEqual(game.player(10).mana_pool,{})
+            self.assertEqual(game.stack[-1].uid,spell)
+
+        surplus=ready(); land=self.add(surplus,10,"mountain"); self.add(surplus,10,"lea:229",attached_to=land.uid); self.add(surplus,10,"lea:229",attached_to=land.uid)
+        surplus.activate_mana(10,1); self.assertEqual(surplus.player(10).mana_pool,{"R":1,"G":2})
+
+    def test_mana_flare_stacks_for_both_players_and_automatic_payment(self):
+        game=ready(); self.add(game,10,"lea:162"); self.add(game,20,"lea:162"); land=self.add(game,20,"lea:277")
+        game.priority_user=20; game.activate_mana(20,2,"R"); self.assertEqual(game.player(20).mana_pool,{"R":3})
+
+        automatic=ready(); self.add(automatic,20,"lea:162"); mountain=self.add(automatic,10,"mountain"); shock=self.add(automatic,10,"shock","hand")
+        automatic.play(10,1,"20"); self.assertTrue(mountain.tapped); self.assertEqual(automatic.player(10).mana_pool,{"R":1}); self.assertEqual(automatic.stack[-1].uid,shock)
+
+    def test_manabarbs_and_psychic_venom_create_persisted_respondable_triggers(self):
+        game=ready(); barbs=self.add(game,10,"lea:163"); land=self.add(game,20,"forest"); venom=self.add(game,10,"lea:75",attached_to=land.uid)
+        game.priority_user=20; game.activate_mana(20,1)
+        self.assertEqual(game.player(20).life,20); self.assertEqual(game.player(20).mana_pool,{"G":1}); self.assertEqual(len(game.stack),2)
+        self.assertTrue(all(item.ability_effect=="tap_damage" and item.target=="20" for item in game.stack))
+        restored=Game.from_raw(game.to_raw())
+        for source in (barbs,venom):
+            controller,permanent=restored.find_permanent(source.uid); controller.battlefield.remove(permanent); controller.graveyard.append(source.uid)
+        self.resolve_top(restored); self.assertEqual(restored.player(20).life,18)
+        self.resolve_top(restored); self.assertEqual(restored.player(20).life,17); self.assertFalse(restored.stack)
+
+        twiddle=ready(); target=self.add(twiddle,20,"forest"); self.add(twiddle,10,"lea:75",attached_to=target.uid); spell=self.add(twiddle,10,"lea:85","hand"); self.add(twiddle,10,"island")
+        twiddle.play(10,1,"tap:20:1"); self.resolve_top(twiddle)
+        self.assertTrue(target.tapped); self.assertEqual(twiddle.player(20).life,20); self.assertEqual(twiddle.stack[-1].ability_effect,"tap_damage")
+        self.resolve_top(twiddle); self.assertEqual(twiddle.player(20).life,18)
+        target.tapped=True; before=len(twiddle.stack); twiddle._tap_permanent(20,target); self.assertEqual(len(twiddle.stack),before); self.assertIn(spell,twiddle.player(10).graveyard)
+
+    def test_lethal_manabarbs_trigger_resolves_above_the_paid_spell(self):
+        game=ready(); game.player(10).life=1; self.add(game,20,"lea:163"); land=self.add(game,10,"mountain"); spell=self.add(game,10,"shock","hand")
+        game.play(10,1,"20")
+        self.assertFalse(game.finished); self.assertTrue(land.tapped); self.assertEqual(game.stack[0].uid,spell); self.assertEqual(game.stack[-1].ability_effect,"tap_damage")
+        self.resolve_top(game); self.assertTrue(game.finished); self.assertEqual(game.winner,20); self.assertIsNone(game.priority_user); self.assertEqual(game.stack[-1].uid,spell)
+
+    def test_manabarbs_trigger_is_above_an_ability_it_paid_for(self):
+        game=ready(); self.add(game,20,"lea:163"); bear=self.add(game,10,"bear"); aura=self.add(game,10,"lea:7",attached_to=bear.uid); land=self.add(game,10,"plains")
+        game.priority_user=10; game.activate_ability(10,2)
+        self.assertTrue(land.tapped); self.assertEqual(len(game.stack),2); self.assertEqual(game.stack[0].source_uid,aura.uid)
+        self.assertEqual(game.stack[-1].ability_effect,"tap_damage"); self.assertEqual(game.player(10).life,20)
+        self.resolve_top(game); self.assertEqual(game.player(10).life,19); self.assertEqual(game.stack[-1].source_uid,aura.uid)
+
+    def test_land_tap_effects_recompute_after_round_trip_and_removal(self):
+        game=ready(); flare=self.add(game,10,"lea:162"); land=self.add(game,10,"forest"); growth=self.add(game,10,"lea:229",attached_to=land.uid)
+        restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[1]; restored.activate_mana(10,2)
+        self.assertEqual(restored.player(10).mana_pool,{"G":3})
+        restored.player(10).battlefield.remove(restored.find_permanent(flare.uid)[1]); restored.player(10).graveyard.append(flare.uid)
+        restored.player(10).battlefield.remove(restored.find_permanent(growth.uid)[1]); restored.player(10).graveyard.append(growth.uid); saved.tapped=False; restored.player(10).mana_pool={}
+        restored.activate_mana(10,1); self.assertEqual(restored.player(10).mana_pool,{"G":1})
+
+
 class AlphaAuraTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield",attached_to=None):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

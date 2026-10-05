@@ -236,39 +236,87 @@ class Game:
             else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
         return generic,colored
 
+    def _mana_output(self,permanent,symbol):
+        card=self.card(permanent.uid); output={symbol:card.mana_amount}
+        if card.land:
+            flares=sum(self.card(source.uid).mana_flare for player in self.players.values() for source in player.battlefield)
+            output[symbol]+=flares
+            for aura in self.attached_auras(permanent):
+                extra=self.card(aura.uid).aura_extra_mana
+                if extra: output[extra]=output.get(extra,0)+1
+        return output
+
+    def _tap_damage_triggers(self,user,permanent,mana_symbol):
+        if not self.card(permanent.uid).land: return []
+        sources=[]
+        if mana_symbol:
+            sources.extend((controller.user_id,source) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
+        sources.extend((controller.user_id,aura) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
+        triggers=[]
+        for owner,source in sources:
+            uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
+            triggers.append(Spell(owner,uid,card.key,str(user),ability_effect="tap_damage",source_uid=source.uid,color_override=source.color_override))
+        return triggers
+
+    def _tap_permanent(self,user,permanent,mana_symbol=None,add_mana=False,pending_triggers=None):
+        if permanent.tapped: return {}
+        permanent.tapped=True; player=self.player(user)
+        triggers=self._tap_damage_triggers(user,permanent,mana_symbol)
+        if pending_triggers is None: self.stack.extend(triggers)
+        else: pending_triggers.extend(triggers)
+        output=self._mana_output(permanent,mana_symbol) if mana_symbol else {}
+        if add_mana:
+            for symbol,count in output.items(): player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+count
+        return output
+
     def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=()):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
-        sources=[]
+        order=("W","U","B","R","G"); initial=tuple(colored.count(symbol) for symbol in order)+(generic,)
+        items=[]
         for symbol,count in player.mana_pool.items():
-            sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
+            for number in range(count): items.append(("pool",f"{symbol}:{number}",None,((symbol,{symbol:1}),)))
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids: continue
             if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
-                sources.append(("permanent",str(permanent.uid),source.produces,permanent))
+                options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in source.produces)
+                items.append(("permanent",str(permanent.uid),permanent,options))
 
-        def assign(symbols,remaining,selected):
-            if not symbols: return selected,remaining
-            symbol=min(symbols,key=lambda item:sum(item in source[2] for source in remaining))
-            rest_symbols=list(symbols); rest_symbols.remove(symbol)
-            choices=sorted((source for source in remaining if symbol in source[2]),key=lambda source:(len(source[2]),source[0]!="pool"))
-            for source in choices:
-                rest=[item for item in remaining if item[0:2]!=source[0:2]]
-                result=assign(rest_symbols,rest,selected+[source])
-                if result is not None: return result
-            return None
+        def reduce_requirements(requirements,output):
+            remaining=list(requirements); spare=0
+            for index,symbol in enumerate(order):
+                amount=output.get(symbol,0); used=min(remaining[index],amount); remaining[index]-=used; spare+=amount-used
+            spare+=output.get("C",0); remaining[5]=max(0,remaining[5]-spare)
+            return tuple(remaining)
+        def score(plan):
+            return sum(item[0]=="permanent" for item in plan),len(plan)
 
-        result=assign(colored,sources,[])
-        if result is None: return None
-        selected,remaining=result
-        if len(remaining)<generic: return None
-        selected+=sorted(remaining,key=lambda source:source[0]!="pool")[:generic]
-        lands=[]; pool={}
-        for kind,identifier,options,permanent in selected:
-            if kind=="permanent": lands.append(permanent)
-            else:
-                symbol=options[0]; pool[symbol]=pool.get(symbol,0)+1
-        return lands,pool
+        plans={initial:[]}
+        for kind,identifier,permanent,options in items:
+            updated=dict(plans)
+            for requirements,plan in plans.items():
+                for symbol,output in options:
+                    reduced=reduce_requirements(requirements,output)
+                    if reduced==requirements: continue
+                    candidate=plan+[(kind,identifier,permanent,symbol,output)]
+                    if reduced not in updated or score(candidate)<score(updated[reduced]): updated[reduced]=candidate
+            plans=updated
+        plan=plans.get((0,0,0,0,0,0))
+        if plan is None: return None
+        sources=[]; choices={}; remaining=dict(player.mana_pool)
+        for kind,identifier,permanent,symbol,output in plan:
+            if kind!="permanent": continue
+            sources.append(permanent); choices[permanent.uid]=symbol
+            for produced,count in output.items(): remaining[produced]=remaining.get(produced,0)+count
+        for symbol in colored:
+            remaining[symbol]-=1
+            if not remaining[symbol]: remaining.pop(symbol)
+        for _ in range(generic):
+            symbol=next((choice for choice in ("C","W","U","B","R","G") if remaining.get(choice,0)),None)
+            if symbol is None: return None
+            remaining[symbol]-=1
+            if not remaining[symbol]: remaining.pop(symbol)
+        return sources,remaining,choices
 
     def can_pay(self,user,card,x_value=0):
         return self._mana_payment(self.player(user),card,x_value) is not None
@@ -331,21 +379,19 @@ class Game:
         excluded=(permanent.uid,) if activation_tap else ()
         payment=self._mana_payment(player,card,mana_cost=activation_cost,excluded_uids=excluded)
         if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
-        sources,pool=payment
-        for source in sources: source.tapped=True
-        for symbol,count in pool.items():
-            player.mana_pool[symbol]-=count
-            if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
+        sources,remaining,choices=payment; pending_triggers=[]
+        for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending_triggers)
+        player.mana_pool=remaining
         if activation_tap: permanent.tapped=True
         permanent.activations_this_turn+=1
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
-        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override))
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override)); self.stack.extend(pending_triggers)
         self._sba(); self._life()
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
-        self.priority_user=self.opponent(user)
+        if not self.finished: self.priority_user=self.opponent(user)
         ability_text=card.ability_text if native else f"{activation_cost}: Regenerate this creature (granted)"
         self.log.append(f"{user} activated {card.name}: {ability_text}.")
 
@@ -358,14 +404,14 @@ class Game:
         if card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
-        permanent.tapped=True; player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+card.mana_amount
+        output=self._tap_permanent(user,permanent,symbol,add_mana=True)
         if card.sacrifice_for_mana:
             player.battlefield.remove(permanent); player.graveyard.append(permanent.uid)
         self._sba(); self._life()
         self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        amount=f" ×{card.mana_amount}" if card.mana_amount>1 else ""
-        self.log.append(f"{user} added {{{symbol}}}{amount}.")
+        produced=" ".join(f"{{{mana}}}"+(f"×{count}" if count>1 else "") for mana,count in output.items())
+        self.log.append(f"{user} added {produced}.")
 
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()
@@ -394,14 +440,13 @@ class Game:
         if protected is not None and self._protected_from(protected,c): raise GameError(f"{c.name} cannot target a permanent with protection from its color.")
         payment=self._mana_payment(p,c,x_value)
         if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your available mana.")
-        lands,pool=payment
-        for permanent in lands: permanent.tapped=True
-        for symbol,count in pool.items():
-            p.mana_pool[symbol]-=count
-            if not p.mana_pool[symbol]: p.mana_pool.pop(symbol)
+        sources,remaining,choices=payment; pending_triggers=[]
+        for permanent in sources: self._tap_permanent(user,permanent,choices[permanent.uid],pending_triggers=pending_triggers)
+        p.mana_pool=remaining
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self._sba(); self._life(); self.priority_user=self.opponent(user)
+        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self.stack.extend(pending_triggers); self._sba(); self._life()
+        if not self.finished: self.priority_user=self.opponent(user)
         suffix=f" with X={x_value}" if uses_x else ""
         self.log.append(f"{user} cast {c.name}{suffix}.")
 
@@ -722,6 +767,8 @@ class Game:
         elif effect=="regenerate":
             if target is None: fizzle("its source was gone"); return
             target.regeneration_shields+=1
+        elif effect=="tap_damage":
+            self.player(int(s.target)).life-=card.land_tap_damage or card.aura_tap_damage
         elif effect=="damage_any":
             if ":" in (s.target or ""):
                 if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
@@ -816,7 +863,9 @@ class Game:
             target=next((x for x in controller.battlefield if x.uid==int(uid_text)),None); target_card=self.card(target.uid) if target is not None else None
             if target_card is None or not any(target_card.has_type(kind) for kind in c.target_types):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            target.tapped=mode=="tap"; p.graveyard.append(s.uid)
+            if mode=="tap": self._tap_permanent(controller.user_id,target)
+            else: target.tapped=False
+            p.graveyard.append(s.uid)
         elif c.effect=="add_mana":
             p.mana_pool[c.mana_color]=p.mana_pool.get(c.mana_color,0)+c.mana_amount; p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_enchantments":

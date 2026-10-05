@@ -74,6 +74,10 @@ class Card:
     global_controller_only: bool = False
     global_requires_untapped: bool = False
     global_requires_attacking: bool = False
+    mana_flare: bool = False
+    land_tap_damage: int = 0
+    aura_extra_mana: str = ""
+    aura_tap_damage: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -127,6 +131,10 @@ class Card:
             elif self.global_requires_attacking: subject="Attacking creatures"
             if self.global_controller_only: subject+=" you control"
             abilities.append(f"{subject} get {self.global_power:+d}/{self.global_toughness:+d}")
+        if self.mana_flare: abilities.append("Tapped lands produce one additional mana of the produced type")
+        if self.land_tap_damage: abilities.append(f"Whenever a player taps a land for mana, deals {self.land_tap_damage} damage to that player")
+        if self.aura_extra_mana: abilities.append(f"Enchanted land produces an additional {self.aura_extra_mana}")
+        if self.aura_tap_damage: abilities.append(f"Whenever enchanted land becomes tapped, deals {self.aura_tap_damage} damage to its controller")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -162,6 +170,13 @@ ALPHA_GLOBAL_ENCHANTMENTS = {
     "lea:16": {"global_buff_color":"W", "global_power":1, "global_toughness":1},
     "lea:93": {"global_buff_color":"B", "global_power":1, "global_toughness":1},
     "lea:166": {"global_power":1, "global_controller_only":True, "global_requires_attacking":True},
+}
+
+ALPHA_TAP_ENCHANTMENTS = {
+    "lea:75": {"aura_target_types":("Land",), "aura_tap_damage":2, "aura_hostile":True},
+    "lea:162": {"mana_flare":True},
+    "lea:163": {"land_tap_damage":1},
+    "lea:229": {"aura_target_types":("Land",), "aura_extra_mana":"G"},
 }
 
 ALPHA_ENCHANTMENTS = {
@@ -350,7 +365,7 @@ for reference in PLAYABLE_ALPHA:
         temporary_keyword=ALPHA_SPELLS.get(reference.key, {}).get("temporary_keyword",""),
         mana_color=ALPHA_SPELLS.get(reference.key, {}).get("mana_color",""),
         color_change=ALPHA_SPELLS.get(reference.key, {}).get("color_change",""),
-        aura_target_types=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_types",()),
+        aura_target_types=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_target_types",()),
         aura_target_subtypes=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_target_subtypes",()),
         aura_power=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_power",0),
         aura_toughness=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_toughness",0),
@@ -358,7 +373,7 @@ for reference in PLAYABLE_ALPHA:
         aura_keyword=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_keyword",""),
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
-        aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_hostile",False),
+        aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
         aura_protection=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_protection",""),
         protection_self_exception=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("protection_self_exception",False),
         protection_colors=ALPHA_PROTECTIONS.get(reference.key,()),
@@ -387,6 +402,10 @@ for reference in PLAYABLE_ALPHA:
         global_controller_only=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_controller_only",False),
         global_requires_untapped=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_untapped",False),
         global_requires_attacking=ALPHA_GLOBAL_ENCHANTMENTS.get(reference.key,{}).get("global_requires_attacking",False),
+        mana_flare=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("mana_flare",False),
+        land_tap_damage=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("land_tap_damage",0),
+        aura_extra_mana=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("aura_extra_mana",""),
+        aura_tap_damage=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("aura_tap_damage",0),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -412,7 +431,7 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALP
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
     raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS):
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS) | set(ALPHA_TAP_ENCHANTMENTS):
     raise RuntimeError("Playable Alpha enchantments do not match the validated enchantment map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):

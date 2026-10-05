@@ -156,6 +156,19 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Castle",rendered); self.assertIn("Untapped creatures you control get +0/+2",rendered); self.assertIn("Bear Cub 2/4",rendered)
 
+    async def test_public_embed_shows_land_tap_enchantment_rules_and_attachment(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        land=game.next_uid; game.next_uid+=1; game.cards[land]="forest"; target=permanent_type(land,"forest",sick=False)
+        growth=game.next_uid; game.next_uid+=1; game.cards[growth]="lea:229"; aura=permanent_type(growth,"lea:229",sick=False,attached_to=land)
+        flare=game.next_uid; game.next_uid+=1; game.cards[flare]="lea:162"; global_effect=permanent_type(flare,"lea:162",sick=False)
+        venom=game.next_uid; game.next_uid+=1; game.cards[venom]="lea:75"; hostile=permanent_type(venom,"lea:75",sick=False,attached_to=land)
+        game.player(10).battlefield=[target,aura,global_effect,hostile]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Wild Growth",rendered); self.assertIn("Attached to Forest",rendered); self.assertIn("additional G",rendered); self.assertIn("Tapped lands produce one additional mana",rendered)
+        game._tap_permanent(10,target); field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
+        self.assertIn("Psychic Venom ability",field.value)
+
     async def test_public_embed_shows_forest_scaled_aura_stats_and_fear(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

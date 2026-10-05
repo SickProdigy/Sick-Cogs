@@ -381,6 +381,17 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game)
         self.assertEqual(game.stack[-1].uid,aura); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
+    def test_ai_casts_land_mana_and_hostile_tap_auras_on_correct_sides(self):
+        growth=solo(order=(AI,HUMAN)); growth.player(HUMAN).kept=True; growth.player(AI).kept=True; growth.player(AI).hand=[]
+        forest=self.add(growth,AI,"forest"); spell=self.add(growth,AI,"lea:229","hand")
+        growth.active_index=0; growth.phase="precombat_main"; growth.priority_user=AI; growth.player(AI).land_played=True
+        advance_solo(growth); self.assertEqual(growth.stack[-1].uid,spell); self.assertEqual(growth.stack[-1].target,f"{AI}:{forest.uid}")
+
+        venom=solo(order=(AI,HUMAN)); venom.player(HUMAN).kept=True; venom.player(AI).kept=True; venom.player(AI).hand=[]
+        target=self.add(venom,HUMAN,"forest"); spell=self.add(venom,AI,"lea:75","hand"); self.add(venom,AI,"island"); self.add(venom,AI,"island")
+        venom.active_index=0; venom.phase="precombat_main"; venom.priority_user=AI; venom.player(AI).land_played=True
+        advance_solo(venom); self.assertEqual(venom.stack[-1].uid,spell); self.assertEqual(venom.stack[-1].target,f"{HUMAN}:{target.uid}")
+
     def test_ai_casts_scaling_aura_and_activates_blessing_in_combat(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         bear=self.add(game,AI,"bear"); aspect=self.add(game,AI,"lea:184","hand"); self.add(game,AI,"forest"); self.add(game,AI,"forest")

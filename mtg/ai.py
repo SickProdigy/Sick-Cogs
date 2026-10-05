@@ -163,6 +163,14 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
+        elif card.mana_flare:
+            own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            score=5+own-enemy
+        elif card.land_tap_damage:
+            own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            score=5+enemy-own
         elif card.aura_target_types:
             scaling=sum(game.card(permanent.uid).has_land_type("forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
             score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
