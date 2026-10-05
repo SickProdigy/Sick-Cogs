@@ -156,12 +156,20 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
         self.assertIn("S:POSITION",field.name); self.assertEqual(field.value.splitlines(),["S:1. Howl from Beyond (X=0)","S:2. Counterspell","S:3. Shock"])
 
+    async def test_public_embed_labels_activated_abilities_on_stack(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:73"; game.player(10).battlefield=[permanent_type(uid,"lea:73",sick=False)]
+        game.phase="precombat_main"; game.priority_user=10; game.activate_ability(10,1,"20")
+        field=next(field for field in cog.game_embed(game).fields if field.name.startswith("Stack"))
+        self.assertIn("spells targetable",field.name); self.assertEqual(field.value,"S:1. Prodigal Sorcerer ability")
+
     async def test_activate_command_uses_shared_game_action(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
-        await MTG.activate.callback(cog,ctx,position=3)
+        await MTG.activate.callback(cog,ctx,position=3,target="20:2")
         _,mutation,action=cog.mutate_ctx.await_args.args
         game=SimpleNamespace(activate_ability=Mock()); mutation(game)
-        game.activate_ability.assert_called_once_with(10,3); self.assertEqual(action,"activate")
+        game.activate_ability.assert_called_once_with(10,3,"20:2"); self.assertEqual(action,"activate")
 
     async def test_play_command_accepts_x_and_dash_for_no_target(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))

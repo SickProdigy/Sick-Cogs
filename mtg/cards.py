@@ -41,6 +41,11 @@ class Card:
     activated_toughness: int = 0
     activated_keyword: str = ""
     sacrifice_after_activations: int = 0
+    activation_effect: str = ""
+    activation_tap: bool = False
+    activation_text: str = ""
+    activation_amount: int = 0
+    activation_self_damage: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -60,7 +65,7 @@ class Card:
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
-        if self.activation_cost:
+        if self.activation_cost or self.activation_effect:
             effects=[]
             if self.activated_power or self.activated_toughness:
                 effects.append(f"{self.activated_power:+d}/{self.activated_toughness:+d} until end of turn")
@@ -68,7 +73,10 @@ class Card:
                 effects.append(f"Gains {self.activated_keyword.title()} until end of turn")
             if self.sacrifice_after_activations:
                 effects.append(f"Sacrifice at the next end step after activation {self.sacrifice_after_activations}")
-            abilities.append(f"{self.activation_cost}: "+"; ".join(effects))
+            if self.activation_text: effects.append(self.activation_text)
+            costs=[self.activation_cost] if self.activation_cost else []
+            if self.activation_tap: costs.append("{T}")
+            abilities.append(", ".join(costs)+": "+"; ".join(effects))
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
             abilities.append(("Sacrifice → " if self.sacrifice_for_mana else "Produces ")+produced)
@@ -115,6 +123,13 @@ ALPHA_MANA_CREATURES = {
 }
 
 ALPHA_ACTIVATED_CREATURES = {
+    "lea:29": {"activation_cost":"{W}{W}", "activation_tap":True, "activation_effect":"destroy_black_permanent", "activation_text":"Destroy target black permanent"},
+    "lea:73": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
+    "lea:123": {"activation_tap":True, "activation_effect":"destroy_tapped_creature", "activation_text":"Destroy target tapped creature"},
+    "lea:142": {"activation_tap":True, "activation_effect":"destroy_wall", "activation_text":"Destroy target Wall"},
+    "lea:143": {"activation_tap":True, "activation_effect":"unblockable", "activation_text":"Target creature with power 2 or less can't be blocked this turn"},
+    "lea:165": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":2, "activation_self_damage":3, "activation_text":"Deals 2 damage to any target and 3 damage to you"},
+    "lea:205": {"activation_tap":True, "activation_effect":"untap_land", "activation_text":"Untap target land"},
     "lea:141": {"activation_cost":"{R}", "activated_power":1, "sacrifice_after_activations":4},
     "lea:153": {"activation_cost":"{R}", "activated_keyword":"flying"},
     "lea:90": {"activation_cost":"{U}", "activated_power":1},
@@ -224,6 +239,11 @@ for reference in PLAYABLE_ALPHA:
         activated_toughness=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_toughness",0),
         activated_keyword=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_keyword",""),
         sacrifice_after_activations=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("sacrifice_after_activations",0),
+        activation_effect=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_effect",""),
+        activation_tap=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_tap",False),
+        activation_text=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_text",""),
+        activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_amount",0),
+        activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
     )
 
 PACK_POOLS = {

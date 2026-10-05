@@ -360,10 +360,14 @@ class AlphaActivatedPumpTests(unittest.TestCase):
     def add(self,game,user,key,sick=False):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
         permanent=Permanent(uid,key,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+    def activate_resolve(self,game,user,position,target=None):
+        game.activate_ability(user,position,target); self.resolve_top(game)
 
     def test_pump_activations_pay_mana_and_ignore_summoning_sickness(self):
         game=ready(); shade=self.add(game,10,"lea:109",sick=True); first=self.add(game,10,"swamp"); second=self.add(game,10,"swamp")
-        game.activate_ability(10,1); game.activate_ability(10,1)
+        self.activate_resolve(game,10,1); self.activate_resolve(game,10,1)
         self.assertEqual(game.current_stats(shade),(2,3)); self.assertEqual((shade.power_bonus,shade.toughness_bonus),(2,2))
         self.assertTrue(first.tapped); self.assertTrue(second.tapped)
 
@@ -372,19 +376,21 @@ class AlphaActivatedPumpTests(unittest.TestCase):
             with self.subTest(key=key):
                 game=ready(); creature=self.add(game,10,key); self.add(game,10,land)
                 game.activate_ability(10,1); restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]
-                self.assertEqual(restored.current_stats(saved),expected)
+                self.assertEqual(restored.current_stats(saved),restored.characteristic_stats(10,restored.card(saved.uid)))
+                self.resolve_top(restored); self.assertEqual(restored.current_stats(saved),expected)
                 restored._cleanup(); self.assertEqual((saved.power_bonus,saved.toughness_bonus),(0,0))
 
     def test_toughness_activation_changes_combat_survival(self):
         game=ready(); attacker=self.add(game,20,"bear"); gargoyle=self.add(game,10,"lea:155"); self.add(game,10,"mountain")
         game.active_index=1; game.attackers=[attacker.uid]; game.blocks={attacker.uid:gargoyle.uid}; game.phase="after_blockers"; game.priority_user=10
-        game.activate_ability(10,1); game._combat_damage(False)
+        self.activate_resolve(game,10,1); game._combat_damage(False)
         self.assertIn(gargoyle,game.player(10).battlefield); self.assertEqual(gargoyle.damage,2); self.assertIn(attacker.uid,game.player(20).graveyard)
 
     def test_activation_spends_pool_before_sources_and_preserves_surplus(self):
         game=ready(); dragon=self.add(game,10,"lea:174"); game.player(10).mana_pool={"R":2}
         game.activate_ability(10,1)
-        self.assertEqual(game.player(10).mana_pool,{"R":1}); self.assertEqual(game.current_stats(dragon),(6,5))
+        self.assertEqual(game.player(10).mana_pool,{"R":1}); self.assertEqual(game.current_stats(dragon),(5,5))
+        self.resolve_top(game); self.assertEqual(game.current_stats(dragon),(6,5))
 
     def test_activation_rejects_missing_ability_or_mana_without_mutation(self):
         no_ability=ready(); bear=self.add(no_ability,10,"bear")
@@ -403,7 +409,8 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         game.stack=[spell_type(20,spell_uid,"shock","10",passes=1)]; game.phase_passes=1
         game.activate_ability(10,1)
-        self.assertEqual(game.phase_passes,0); self.assertEqual(game.stack[0].passes,0); self.assertEqual(game.current_stats(dragon),(6,5))
+        self.assertEqual(game.phase_passes,0); self.assertEqual(game.stack[0].passes,0); self.assertEqual(game.stack[-1].ability_effect,"self")
+        self.assertEqual(game.current_stats(dragon),(5,5)); self.resolve_top(game); self.assertEqual(game.current_stats(dragon),(6,5))
 
 
     def test_temporary_flying_persists_changes_blocking_and_cleans_up(self):
@@ -411,6 +418,7 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         game.active_index=0; game.attackers=[brigade.uid]; game.phase="after_attackers"
         game.activate_ability(10,1)
         restored=Game.from_raw(game.to_raw()); saved=restored.player(10).battlefield[0]
+        self.assertEqual(restored.stack[-1].source_uid,saved.uid); self.resolve_top(restored)
         self.assertIn("flying",restored.current_keywords(saved))
         self.assertFalse(restored.can_block(saved.uid,blocker.uid)[0])
         restored._cleanup()
@@ -418,7 +426,7 @@ class AlphaActivatedPumpTests(unittest.TestCase):
 
     def test_temporary_flying_changes_flying_mass_damage_filters(self):
         game=ready(); brigade=self.add(game,10,"lea:153"); self.add(game,10,"mountain")
-        game.activate_ability(10,1)
+        self.activate_resolve(game,10,1)
         spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:200"
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         game._resolve(spell_type(10,spell,"lea:200",x_value=1))
@@ -427,9 +435,9 @@ class AlphaActivatedPumpTests(unittest.TestCase):
     def test_dragon_whelp_fourth_activation_schedules_end_step_sacrifice(self):
         game=ready(); whelp=self.add(game,10,"lea:141")
         for _ in range(4): self.add(game,10,"mountain")
-        for _ in range(3): game.activate_ability(10,1)
+        for _ in range(3): self.activate_resolve(game,10,1)
         self.assertFalse(whelp.sacrifice_at_end_step)
-        game.activate_ability(10,1)
+        self.activate_resolve(game,10,1)
         self.assertEqual(game.current_stats(whelp),(6,3)); self.assertTrue(whelp.sacrifice_at_end_step)
         restored=Game.from_raw(game.to_raw()); restored.phase="postcombat_main"; restored._advance()
         self.assertIn(whelp.uid,restored.end_step_sacrifices)
@@ -442,7 +450,7 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         game=ready(); whelp=self.add(game,10,"lea:141")
         for _ in range(4): self.add(game,10,"mountain")
         game.phase="ending"
-        for _ in range(4): game.activate_ability(10,1)
+        for _ in range(4): self.activate_resolve(game,10,1)
         game._advance()
         self.assertIn(whelp.uid,[x.uid for x in game.player(10).battlefield])
         self.assertTrue(next(x for x in game.player(10).battlefield if x.uid==whelp.uid).sacrifice_at_end_step)
@@ -457,12 +465,54 @@ class AlphaActivatedPumpTests(unittest.TestCase):
         for _ in range(4): self.add(game,10,"mountain")
         island=self.add(game,20,"island")
         spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:86"; game.player(20).hand.insert(0,spell)
-        for _ in range(4): game.activate_ability(10,1)
+        for _ in range(4): self.activate_resolve(game,10,1)
         game.phase="postcombat_main"; game._advance(); game.pass_priority(10)
         game.play(20,1,"10:1"); game.pass_priority(10); game.pass_priority(20)
         self.assertIn(whelp.uid,game.player(10).hand); self.assertTrue(island.tapped)
         game.pass_priority(10); game.pass_priority(20)
         self.assertNotIn(whelp.uid,game.player(10).graveyard); self.assertFalse(game.end_step_sacrifices)
+
+
+    def test_tap_damage_ability_enforces_sickness_persists_and_resolves(self):
+        game=ready(); wizard=self.add(game,10,"lea:73",sick=True)
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_ability(10,1,"20")
+        wizard.sick=False; game.activate_ability(10,1,"20")
+        self.assertTrue(wizard.tapped); self.assertEqual(game.player(20).life,20); self.assertEqual(game.stack[-1].ability_effect,"damage_any")
+        ability_uid=game.stack[-1].uid; restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(restored.player(20).life,19); self.assertNotIn(ability_uid,restored.cards)
+
+    def test_target_restrictions_are_checked_before_cost_and_again_on_resolution(self):
+        game=ready(); assassin=self.add(game,10,"lea:123"); bear=self.add(game,20,"bear")
+        with self.assertRaisesRegex(GameError,"tapped creature"): game.activate_ability(10,1,"20:1")
+        self.assertFalse(assassin.tapped); bear.tapped=True; game.activate_ability(10,1,"20:1")
+        bear.tapped=False; self.resolve_top(game)
+        self.assertIn(bear,game.player(20).battlefield); self.assertIn("fizzled",game.log[-1])
+
+    def test_paid_and_wall_destruction_tap_abilities(self):
+        game=ready(); paladin=self.add(game,10,"lea:29"); first=self.add(game,10,"plains"); second=self.add(game,10,"plains"); black=self.add(game,20,"lea:125")
+        game.activate_ability(10,1,"20:1"); self.assertTrue(all(x.tapped for x in (paladin,first,second))); self.resolve_top(game)
+        self.assertIn(black.uid,game.player(20).graveyard)
+        other=ready(); dwarf=self.add(other,10,"lea:142"); wall=self.add(other,20,"lea:182")
+        self.activate_resolve(other,10,1,"20:1"); self.assertTrue(dwarf.tapped); self.assertIn(wall.uid,other.player(20).graveyard)
+
+    def test_dwarven_warriors_grants_temporary_unblockable(self):
+        game=ready(); warriors=self.add(game,10,"lea:143"); bear=self.add(game,10,"bear"); blocker=self.add(game,20,"bear")
+        self.activate_resolve(game,10,1,"10:2"); game.attackers=[bear.uid]
+        legal,reason=game.can_block(bear.uid,blocker.uid); self.assertFalse(legal); self.assertIn("can't be blocked",reason)
+        game._cleanup(); self.assertNotIn("unblockable",game.current_keywords(bear))
+
+    def test_orcish_artillery_damage_and_ley_druid_untap(self):
+        game=ready(); artillery=self.add(game,10,"lea:165"); bear=self.add(game,20,"bear")
+        self.activate_resolve(game,10,1,"20:1"); self.assertEqual(game.player(10).life,17); self.assertIn(bear.uid,game.player(20).graveyard)
+        other=ready(); druid=self.add(other,10,"lea:205"); forest=self.add(other,10,"forest"); forest.tapped=True
+        self.activate_resolve(other,10,1,"10:2"); self.assertTrue(druid.tapped); self.assertFalse(forest.tapped)
+
+    def test_counterspell_cannot_target_an_activated_ability(self):
+        game=ready(); wizard=self.add(game,10,"lea:73"); game.activate_ability(10,1,"20")
+        counter=game.next_uid; game.next_uid+=1; game.cards[counter]="lea:54"; game.player(20).hand.insert(0,counter)
+        first=self.add(game,20,"island"); second=self.add(game,20,"island")
+        with self.assertRaisesRegex(GameError,"ability, not a spell"): game.play(20,1,"S:1")
+        self.assertFalse(first.tapped); self.assertFalse(second.tapped); self.assertEqual(game.player(20).hand[0],counter)
 
 class AlphaCounterspellTests(unittest.TestCase):
     def add(self,game,user,key,zone="hand"):
@@ -524,11 +574,11 @@ class AlphaXSpellTests(unittest.TestCase):
             for saved in player["battlefield"]:
                 saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
                 saved.pop("temporary_keywords",None); saved.pop("activations_this_turn",None); saved.pop("sacrifice_at_end_step",None)
-        raw["stack"][0].pop("x_value")
+        raw["stack"][0].pop("x_value"); raw["stack"][0].pop("ability_effect"); raw["stack"][0].pop("source_uid")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
         self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death)
         self.assertEqual(restored_permanent.temporary_keywords,[]); self.assertEqual(restored_permanent.activations_this_turn,0); self.assertFalse(restored_permanent.sacrifice_at_end_step)
-        self.assertEqual(restored.stack[0].x_value,0)
+        self.assertEqual(restored.stack[0].x_value,0); self.assertEqual(restored.stack[0].ability_effect,""); self.assertIsNone(restored.stack[0].source_uid)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
         game=ready(); spell=self.add(game,10,"lea:50"); self.lands(game,10,["island","island","mountain","mountain","mountain"])

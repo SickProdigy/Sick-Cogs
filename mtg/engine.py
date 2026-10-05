@@ -45,6 +45,8 @@ class Spell:
     target: Optional[str] = None
     passes: int = 0
     x_value: int = 0
+    ability_effect: str = ""
+    source_uid: Optional[int] = None
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -154,13 +156,14 @@ class Game:
             else: raise GameError(f"{card.name} uses an unsupported mana symbol: {{{symbol}}}.")
         return generic,colored
 
-    def _mana_payment(self,player,card,x_value=0,mana_cost=None):
+    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=()):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
         sources=[]
         for symbol,count in player.mana_pool.items():
             sources.extend(("pool",f"{symbol}:{number}",(symbol,),None) for number in range(count))
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
+            if permanent.uid in excluded_uids: continue
             if source.produces and source.mana_amount==1 and not source.sacrifice_for_mana and not permanent.tapped and (not source.creature or not permanent.sick or source.haste):
                 sources.append(("permanent",str(permanent.uid),source.produces,permanent))
 
@@ -195,32 +198,62 @@ class Game:
         while self.can_pay(user,card,value+1): value+=1
         return value
 
-    def can_activate(self,user,position):
+    def _target_for_activation(self,card,user,target,source):
+        if not card.activation_effect: return f"{user}:{source.uid}"
+        if card.activation_effect=="damage_any" and target and ":" not in target:
+            try: target_user=int(target)
+            except (TypeError,ValueError) as e: raise GameError("Target must be a player ID or USER_ID:POSITION.") from e
+            self.player(target_user); return str(target_user)
+        if not target or ":" not in target: raise GameError("Target must be a player ID or USER_ID:POSITION." if card.activation_effect=="damage_any" else "Target must be USER_ID:POSITION.")
+        try: target_user,pos=(int(x) for x in target.split(":"))
+        except (TypeError,ValueError) as e: raise GameError("Target must be USER_ID:POSITION.") from e
+        battlefield=self.player(target_user).battlefield
+        if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=battlefield[pos-1]; target_card=self.card(permanent.uid)
+        if card.activation_effect=="damage_any" and not target_card.creature: raise GameError("Target permanent is not a creature.")
+        if card.activation_effect=="destroy_black_permanent" and "B" not in target_card.colors: raise GameError("Target permanent is not black.")
+        if card.activation_effect=="destroy_tapped_creature" and (not target_card.creature or not permanent.tapped): raise GameError("Target must be a tapped creature.")
+        if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
+        if card.activation_effect=="unblockable" and (not target_card.creature or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
+        if card.activation_effect=="untap_land" and not target_card.land: raise GameError("Target must be a land.")
+        return f"{target_user}:{permanent.uid}"
+
+    def can_activate(self,user,position,target=None):
         player=self.player(user)
         if not 1<=position<=len(player.battlefield): return False
-        card=self.card(player.battlefield[position-1].uid)
-        return bool(card.activation_cost and self._mana_payment(player,card,mana_cost=card.activation_cost) is not None)
+        permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
+        if not (card.activation_cost or card.activation_effect): return False
+        if card.activation_tap and (permanent.tapped or (card.creature and permanent.sick and not card.haste)): return False
+        try: self._target_for_activation(card,user,target,permanent)
+        except GameError: return False
+        excluded=(permanent.uid,) if card.activation_tap else ()
+        return self._mana_payment(player,card,mana_cost=card.activation_cost,excluded_uids=excluded) is not None
 
-    def activate_ability(self,user,position):
+    def activate_ability(self,user,position,target=None):
         self._priority(user); player=self.player(user)
         if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
-        if not card.activation_cost: raise GameError("That permanent has no supported activated ability.")
-        payment=self._mana_payment(player,card,mana_cost=card.activation_cost)
-        if payment is None: raise GameError(f"You cannot pay {card.activation_cost} for {card.name}.")
+        if not (card.activation_cost or card.activation_effect): raise GameError("That permanent has no supported activated ability.")
+        if card.activation_tap and permanent.tapped: raise GameError(f"{card.name} is already tapped.")
+        if card.activation_tap and card.creature and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        stable_target=self._target_for_activation(card,user,target,permanent)
+        excluded=(permanent.uid,) if card.activation_tap else ()
+        payment=self._mana_payment(player,card,mana_cost=card.activation_cost,excluded_uids=excluded)
+        if payment is None: raise GameError(f"You cannot pay {card.activation_cost or 'that cost'} for {card.name}.")
         sources,pool=payment
         for source in sources: source.tapped=True
         for symbol,count in pool.items():
             player.mana_pool[symbol]-=count
             if not player.mana_pool[symbol]: player.mana_pool.pop(symbol)
-        permanent.power_bonus+=card.activated_power; permanent.toughness_bonus+=card.activated_toughness
-        if card.activated_keyword and card.activated_keyword not in permanent.temporary_keywords:
-            permanent.temporary_keywords.append(card.activated_keyword)
+        if card.activation_tap: permanent.tapped=True
         permanent.activations_this_turn+=1
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
+        ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,ability_effect=card.activation_effect or "self",source_uid=permanent.uid))
         self.phase_passes=0
-        for spell in self.stack: spell.passes=0
+        for item in self.stack[:-1]: item.passes=0
+        self.priority_user=self.opponent(user)
         self.log.append(f"{user} activated {card.name}: {card.ability_text}.")
 
     def activate_mana(self,user,position,color=None):
@@ -292,7 +325,9 @@ class Game:
         except (TypeError,ValueError) as e: raise GameError("Stack target must be S:POSITION.") from e
         visible=list(reversed(self.stack))
         if not 1<=position<=len(visible): raise GameError("No spell at that stack position.")
-        return visible[position-1]
+        item=visible[position-1]
+        if item.ability_effect: raise GameError("That stack item is an ability, not a spell.")
+        return item
 
     def _target_graveyard(self,user,target,creature_only):
         if not target or not target.upper().startswith("G:"): raise GameError("Graveyard target must be G:POSITION.")
@@ -452,6 +487,7 @@ class Game:
         blocker=self.card(blocker_uid)
         if not blocker.creature or blocker_perm.tapped: return False,"Invalid blocker."
         attacker_keywords=self.current_keywords(attacker_perm); blocker_keywords=self.current_keywords(blocker_perm)
+        if "unblockable" in attacker_keywords: return False,f"{attacker.name} can't be blocked this turn."
         if "flying" in attacker_keywords and not ({"flying","reach"} & blocker_keywords):
             return False,f"{blocker.name} cannot block a creature with flying."
         for land_type in ("plains","island","swamp","mountain","forest"):
@@ -490,14 +526,53 @@ class Game:
     def _dies(controller,permanent):
         (controller.exile if permanent.exile_on_death else controller.graveyard).append(permanent.uid)
 
+    def _resolve_ability(self,s):
+        card=CARDS[s.key]; effect=s.ability_effect
+        def target_permanent():
+            if not s.target or ":" not in s.target: return None,None
+            user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
+            return controller,next((x for x in controller.battlefield if x.uid==uid),None)
+        def fizzle(reason):
+            self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
+        controller,target=target_permanent()
+        target_card=self.card(target.uid) if target is not None else None
+        if effect=="self":
+            if target is None: fizzle("its source was gone"); return
+            target.power_bonus+=card.activated_power; target.toughness_bonus+=card.activated_toughness
+            if card.activated_keyword and card.activated_keyword not in target.temporary_keywords: target.temporary_keywords.append(card.activated_keyword)
+        elif effect=="damage_any":
+            if ":" in (s.target or ""):
+                if target_card is None or not target_card.creature: fizzle("its target was gone or illegal"); return
+                target.damage+=card.activation_amount
+            else: self.player(int(s.target)).life-=card.activation_amount
+            self.player(s.owner).life-=card.activation_self_damage
+        elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"):
+            legal=target_card is not None
+            if effect=="destroy_black_permanent": legal=legal and "B" in target_card.colors
+            elif effect=="destroy_tapped_creature": legal=legal and target_card.creature and target.tapped
+            else: legal=legal and "Wall" in target_card.type_line.split(" — ",1)[-1].split()
+            if not legal: fizzle("its target was gone or illegal"); return
+            controller.battlefield.remove(target); self._dies(controller,target)
+        elif effect=="unblockable":
+            if target_card is None or not target_card.creature or self.current_stats(target)[0]>2: fizzle("its target was gone or illegal"); return
+            if "unblockable" not in target.temporary_keywords: target.temporary_keywords.append("unblockable")
+        elif effect=="untap_land":
+            if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
+            target.tapped=False
+        else:
+            fizzle("the effect is unsupported"); return
+        self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability resolved.")
+        self._sba(); self._life()
+
     def _resolve(self,s):
+        if s.ability_effect: self._resolve_ability(s); return
         p=self.players[s.owner]; c=CARDS[s.key]
         if c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key))
         elif c.effect in ("counter_spell","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
                 target_card=self.card(target.uid) if target is not None else None
-                legal=target_card is not None and (not c.target_color or c.target_color in target_card.colors)
+                legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in target_card.colors)
                 if not legal:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)

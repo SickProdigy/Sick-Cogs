@@ -9,7 +9,7 @@ def _target(game, user, card):
     if card.effect in ("counter_spell","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
-            if spell.owner!=user and (not card.target_color or card.target_color in target.colors): return f"S:{position}"
+            if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in target.colors): return f"S:{position}"
         if card.effect=="elemental_blast":
             targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if card.target_color in game.card(permanent.uid).colors]
             if targets:
@@ -202,6 +202,42 @@ def _blocks(game, user, difficulty):
     return assignments
 
 
+def _activation_target(game,user,card,source_uid=None):
+    opponent=game.opponent(user)
+    if card.activation_effect=="damage_any":
+        if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
+        return str(opponent)
+    candidates=[]
+    for position,permanent in enumerate(game.player(opponent).battlefield,1):
+        target=game.card(permanent.uid)
+        if card.activation_effect=="destroy_black_permanent" and "B" in target.colors: candidates.append((target.cost,position))
+        elif card.activation_effect=="destroy_tapped_creature" and target.creature and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
+        elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
+    if candidates: return f"{opponent}:{max(candidates)[1]}"
+    if card.activation_effect=="unblockable" and game.active_user==user and game.phase in ("precombat_main","after_attackers"):
+        attackers=set(game.attackers) if game.phase=="after_attackers" else None
+        choices=[]
+        for position,permanent in enumerate(game.player(user).battlefield,1):
+            target=game.card(permanent.uid)
+            can_attack=not permanent.tapped and (not permanent.sick or target.haste) and "defender" not in game.current_keywords(permanent)
+            if permanent.uid!=source_uid and target.creature and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
+                choices.append((game.current_stats(permanent)[0],position))
+        if choices: return f"{user}:{max(choices)[1]}"
+    if card.activation_effect=="untap_land":
+        for position,permanent in enumerate(game.player(user).battlefield,1):
+            if game.card(permanent.uid).land and permanent.tapped: return f"{user}:{position}"
+    return None
+
+def _activate_targeted_ability(game,user):
+    candidates=[]
+    for position,permanent in enumerate(game.player(user).battlefield,1):
+        card=game.card(permanent.uid)
+        if not card.activation_effect: continue
+        target=_activation_target(game,user,card,permanent.uid)
+        if target is not None and game.can_activate(user,position,target): candidates.append((card.cost,position,target))
+    if not candidates: return None
+    _,position,target=max(candidates); game.activate_ability(user,position,target); return "activate"
+
 def _activate_combat_pump(game,user):
     if game.phase not in ("after_attackers","after_blockers","after_first_strike"): return None
     combat=set(game.attackers if game.active_user==user else game.blocks.values())
@@ -249,7 +285,7 @@ def advance_solo(game: Game):
             continue
         if game.priority_user != user:
             return changed
-        action = _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

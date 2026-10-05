@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.22.0"
+    __version__="0.23.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -127,7 +127,13 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
-        if g.stack: e.add_field(name="Stack · target with S:POSITION",value="\n".join(f"S:{position}. {g.card(spell.uid).name}{f' (X={spell.x_value})' if '{X}' in g.card(spell.uid).mana_cost else ''}" for position,spell in enumerate(reversed(g.stack),1)),inline=False)
+        if g.stack:
+            stack_lines=[]
+            for position,item in enumerate(reversed(g.stack),1):
+                label=g.card(item.uid).name+(" ability" if item.ability_effect else "")
+                if not item.ability_effect and "{X}" in g.card(item.uid).mana_cost: label+=f" (X={item.x_value})"
+                stack_lines.append(f"S:{position}. {label}")
+            e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
         if g.end_step_sacrifices:
             e.add_field(name="Pending end-step trigger",value="Sacrifice "+", ".join(g.card(uid).name for uid in g.end_step_sacrifices)+" · players may respond",inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
@@ -365,9 +371,9 @@ class MTG(commands.Cog):
         """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
     @mtg.command(name="activate")
-    async def activate(self,ctx,position:int):
-        """Activate the supported non-mana ability of a battlefield permanent."""
-        await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position),"activate")
+    async def activate(self,ctx,position:int,target:str=None):
+        """Activate a supported non-mana ability, supplying PLAYER_ID or USER_ID:POSITION when targeted."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,target),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
         """Play/cast a hand position with optional target and X; use - for no target."""

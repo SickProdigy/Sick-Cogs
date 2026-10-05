@@ -240,17 +240,38 @@ class SoloAITests(unittest.TestCase):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
         dragon=self.add(game,AI,"lea:174"); self.add(game,AI,"mountain"); self.add(game,AI,"mountain")
         game.active_index=0; game.attackers=[dragon.uid]; game.blocks={}; game.phase="after_blockers"; game.priority_user=AI
-        advance_solo(game)
-        self.assertEqual(game.current_stats(dragon),(7,5)); self.assertEqual(game.priority_user,HUMAN)
+        advance_solo(game); self.assertEqual(game.current_stats(dragon),(5,5)); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.current_stats(dragon),(5,5)); self.assertEqual(len(game.stack),2); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.current_stats(dragon),(6,5)); self.assertEqual(len(game.stack),1); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.current_stats(dragon),(7,5)); self.assertFalse(game.stack); self.assertEqual(game.priority_user,HUMAN)
         self.assertEqual(sum(event["action"]=="ai_activate" for event in game.history),2)
 
     def test_ai_gives_attacking_balloon_brigade_flying_before_blockers(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True
         brigade=self.add(game,AI,"lea:153"); self.add(game,AI,"mountain")
         game.active_index=0; game.attackers=[brigade.uid]; game.phase="after_attackers"; game.priority_user=AI
-        advance_solo(game)
+        advance_solo(game); self.assertNotIn("flying",game.current_keywords(brigade)); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game)
         self.assertIn("flying",game.current_keywords(brigade)); self.assertEqual(game.priority_user,HUMAN)
         self.assertEqual(sum(event["action"]=="ai_activate" for event in game.history),1)
+
+    def test_ai_targets_player_with_tap_damage_ability(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        wizard=self.add(game,AI,"lea:73"); game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertTrue(wizard.tapped); self.assertEqual(game.stack[-1].ability_effect,"damage_any"); self.assertEqual(game.stack[-1].target,str(HUMAN))
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.player(HUMAN).life,19); self.assertEqual(game.priority_user,HUMAN)
+
+    def test_ai_uses_dwarven_warriors_on_an_attacker_not_itself(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        warriors=self.add(game,AI,"lea:143"); bear=self.add(game,AI,"bear")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game)
+        self.assertTrue(warriors.tapped); self.assertFalse(bear.tapped); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
 
     def test_ai_casts_alpha_mana_creature_through_normal_actions(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
