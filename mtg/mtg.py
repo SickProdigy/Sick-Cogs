@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.28.0"
+    __version__="0.29.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -135,6 +135,12 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
+        if g.trample_assignments:
+            choices=[]
+            for uid,amount in g.trample_assignments.items():
+                _,attacker=g.find_permanent(uid)
+                if attacker is not None: choices.append(f"{g.card(uid).name}: {amount} to blocker")
+            if choices: e.add_field(name="Trample assignments",value="\n".join(choices),inline=False)
         if g.stack:
             stack_lines=[]
             for position,item in enumerate(reversed(g.stack),1):
@@ -391,6 +397,10 @@ class MTG(commands.Cog):
     async def attack(self,ctx,*positions:int):
         """Declare battlefield positions as attackers; no positions skips combat."""
         await self.mutate_ctx(ctx,lambda g:g.declare_attackers(ctx.author.id,positions),"attack")
+    @mtg.command(name="trample")
+    async def trample(self,ctx,position:int,damage_to_blocker:int):
+        """Choose how much trample damage an attacker assigns to its blocker; defaults to lethal."""
+        await self.mutate_ctx(ctx,lambda g:g.assign_trample(ctx.author.id,position,damage_to_blocker),"trample")
     @mtg.command(name="block")
     async def block(self,ctx,*assignments:str):
         """Block as ATTACKER_POSITION:BLOCKER_POSITION; no values means no blocks."""

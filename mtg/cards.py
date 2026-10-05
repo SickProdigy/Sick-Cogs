@@ -283,6 +283,7 @@ ALPHA_KEYWORDS = {
     "lea:216": ("forestwalk",),
     "lea:224": ("defender",),
     "lea:225": ("defender",),
+    "lea:227": ("trample",),
     "lea:186": ("flying",),
 }
 

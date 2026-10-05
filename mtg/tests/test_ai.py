@@ -100,6 +100,15 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(block.blocks, {attacker: blocker})
         self.assertEqual(block.priority_user, HUMAN)
 
+    def test_ai_uses_shared_blocking_rules_against_trample(self):
+        game=solo(); advance_solo(game)
+        attacker=self.add(game,HUMAN,"lea:227"); attacker.power_bonus=2; blocker=self.add(game,AI,"bear")
+        game.active_index=0; game.attackers=[attacker.uid]; game.phase="blockers"; game.priority_user=None
+        advance_solo(game)
+        self.assertEqual(game.blocks,{attacker.uid:blocker.uid}); self.assertEqual(game.priority_user,HUMAN)
+        game._combat_damage(False)
+        self.assertEqual(game.player(AI).life,17); self.assertIn(blocker.uid,game.player(AI).graveyard)
+
     def test_ai_skips_defenders_when_attacking(self):
         game=solo(order=(AI,HUMAN)); advance_solo(game)
         game.player(HUMAN).kept=True; game.player(AI).kept=True

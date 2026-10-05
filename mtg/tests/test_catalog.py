@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),200)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),200)
+        self.assertEqual(len(CARDS),201)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),201)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),140)
-        self.assertEqual(len(REFERENCE_ALPHA),155)
+        self.assertEqual(len(PLAYABLE_ALPHA),141)
+        self.assertEqual(len(REFERENCE_ALPHA),154)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -53,6 +53,7 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(promoted_abilities,set(ALPHA_KEYWORDS)|set(ALPHA_PROTECTIONS)|set(ALPHA_LORDS)|set(ALPHA_MANA_CREATURES)|set(ALPHA_CHARACTERISTIC_CREATURES)|set(ALPHA_ACTIVATED_CREATURES)|{"lea:159"})
         self.assertEqual({key:CARDS[key].protection_colors for key in ALPHA_PROTECTIONS},ALPHA_PROTECTIONS)
         self.assertEqual(CARDS["lea:43"].keywords,("first_strike",))
+        self.assertEqual(CARDS["lea:227"].keywords,("trample",))
         self.assertEqual({key:CARDS[key].lord_subtype for key in ALPHA_LORDS},{"lea:62":"Merfolk","lea:137":"Zombie","lea:154":"Goblin"})
         self.assertIn("Other Merfolk creatures have +1/+1, Islandwalk",CARDS["lea:62"].ability_text)
         self.assertIn("{B}: Regenerate",CARDS["lea:137"].ability_text)
@@ -141,7 +142,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("200 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("201 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

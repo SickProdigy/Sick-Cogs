@@ -156,6 +156,22 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Protection From B",rendered); self.assertIn("Active protection: R",rendered); self.assertIn("Attached to White Knight",rendered)
 
+    async def test_public_embed_shows_trample_keyword(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        mammoth=game.next_uid; game.next_uid+=1; game.cards[mammoth]="lea:227"
+        game.player(10).battlefield=[permanent_type(mammoth,"lea:227",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("War Mammoth 3/3",rendered); self.assertIn("Trample",rendered)
+
+    async def test_public_embed_shows_trample_assignment_choice(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        mammoth=game.next_uid; game.next_uid+=1; game.cards[mammoth]="lea:227"
+        game.player(10).battlefield=[permanent_type(mammoth,"lea:227",sick=False)]; game.trample_assignments={mammoth:3}
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Trample assignments",rendered); self.assertIn("War Mammoth: 3 to blocker",rendered)
+
     async def test_public_embed_shows_lord_stats_keywords_and_granted_ability(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
@@ -202,6 +218,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         _,mutation,action=cog.mutate_ctx.await_args.args
         game=SimpleNamespace(activate_ability=Mock()); mutation(game)
         game.activate_ability.assert_called_once_with(10,3,"20:2"); self.assertEqual(action,"activate")
+
+    async def test_trample_command_uses_shared_game_action(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.trample.callback(cog,ctx,position=3,damage_to_blocker=4)
+        _,mutation,action=cog.mutate_ctx.await_args.args
+        game=SimpleNamespace(assign_trample=Mock()); mutation(game)
+        game.assign_trample.assert_called_once_with(10,3,4); self.assertEqual(action,"trample")
 
     async def test_play_command_accepts_x_and_dash_for_no_target(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))

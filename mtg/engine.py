@@ -67,6 +67,7 @@ class Game:
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
         self.blocked_attackers=[]
+        self.trample_assignments={}
         self.end_step_sacrifices=[]
         self.phase_passes = 0
         self.priority_user = self.winner = self.finished_reason = None
@@ -553,7 +554,7 @@ class Game:
             chosen.append(x.uid)
         for x in p.battlefield:
             if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
-        self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.phase_passes=0
+        self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}; self.phase_passes=0
         self.phase="after_attackers" if chosen else "postcombat_main"
         self.priority_user=user
 
@@ -568,6 +569,24 @@ class Game:
             if not legal: raise GameError(reason)
             used.add(x.uid); self.blocks[attacker_uid]=x.uid; self.blocked_attackers.append(attacker_uid)
         self.phase="after_blockers"; self.phase_passes=0; self.priority_user=self.active_user
+
+    def assign_trample(self,user,position,damage_to_blocker):
+        self._priority(user)
+        if user!=self.active_user or self.phase not in ("after_blockers","after_first_strike") or self.stack:
+            raise GameError("Set trample assignment after blockers with an empty stack.")
+        battlefield=self.player(user).battlefield
+        if not 1<=position<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+        attacker=battlefield[position-1]
+        if attacker.uid not in self.attackers or "trample" not in self.current_keywords(attacker): raise GameError("Choose an attacking creature with trample.")
+        blocker_uid=self.blocks.get(attacker.uid); _,blocker=self.find_permanent(blocker_uid)
+        if blocker is None: raise GameError("That attacker has no blocker to assign damage to.")
+        power=max(0,self.current_stats(attacker)[0]); lethal=max(0,self.current_stats(blocker)[1]-blocker.damage)
+        try: damage_to_blocker=int(damage_to_blocker)
+        except (TypeError,ValueError) as e: raise GameError("Damage to blocker must be a whole number.") from e
+        minimum=min(power,lethal)
+        if not minimum<=damage_to_blocker<=power: raise GameError(f"Assign between {minimum} and {power} damage to the blocker.")
+        self.trample_assignments[attacker.uid]=damage_to_blocker; self.phase_passes=0
+        self.log.append(f"{user} assigned {damage_to_blocker} damage from {self.card(attacker.uid).name} to its blocker.")
 
     def can_block(self,attacker_uid,blocker_uid):
         defender=self.players[self.opponent(self.active_user)]
@@ -608,13 +627,21 @@ class Game:
             attacker_strikes=("first_strike" in self.current_keywords(a))==first_strike
             blocker_strikes=b is not None and (("first_strike" in self.current_keywords(b))==first_strike)
             if attacker_strikes:
-                if block_uid is None and uid not in self.blocked_attackers: dfn.life-=self.current_stats(a)[0]
-                elif b is not None and not self._protected_from(b,self.card(a.uid)): b.damage+=self.current_stats(a)[0]
-            if blocker_strikes and not self._protected_from(a,self.card(b.uid)): a.damage+=self.current_stats(b)[0]
+                power=max(0,self.current_stats(a)[0])
+                trample="trample" in self.current_keywords(a)
+                if b is None:
+                    if uid not in self.blocked_attackers or trample: dfn.life-=power
+                else:
+                    lethal=max(0,self.current_stats(b)[1]-b.damage)
+                    chosen=self.trample_assignments.get(uid,lethal)
+                    assigned=min(power,max(lethal,chosen)) if trample else power
+                    if not self._protected_from(b,self.card(a.uid)): b.damage+=assigned
+                    if trample: dfn.life-=max(0,power-assigned)
+            if blocker_strikes and not self._protected_from(a,self.card(b.uid)): a.damage+=max(0,self.current_stats(b)[0])
         self._sba(); self._life()
 
     def _end_combat(self):
-        self.attackers=[]; self.blocks={}; self.blocked_attackers=[]
+        self.attackers=[]; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}
 
     @staticmethod
     def _dies(controller,permanent):
@@ -622,7 +649,7 @@ class Game:
 
     def _remove_from_combat(self,uid):
         if uid in self.attackers:
-            self.attackers.remove(uid); self.blocks.pop(uid,None)
+            self.attackers.remove(uid); self.blocks.pop(uid,None); self.trample_assignments.pop(uid,None)
             if uid in self.blocked_attackers: self.blocked_attackers.remove(uid)
         for attacker,blocker in list(self.blocks.items()):
             if blocker==uid: self.blocks.pop(attacker)
@@ -872,12 +899,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

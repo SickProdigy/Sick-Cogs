@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("blocked_attackers")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
@@ -306,6 +306,75 @@ class StaticKeywordCombatTests(unittest.TestCase):
         game.pass_priority(10); game.pass_priority(20)
         self.assertNotIn(archer,game.players[20].battlefield)
         self.assertIn(giant,game.players[10].battlefield)
+
+
+class AlphaTrampleTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def combat(self,attacker,blocker=None,blocked=True):
+        game=ready(); game.active_index=0; attack=self.add(game,10,attacker)
+        block=self.add(game,20,blocker) if blocker else None
+        game.attackers=[attack.uid]; game.blocks={attack.uid:block.uid} if block else {}; game.blocked_attackers=[attack.uid] if blocked else []
+        return game,attack,block
+
+    def test_war_mammoth_deals_only_excess_damage_through_blocker(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=2
+        game._combat_damage(False)
+        self.assertIn(blocker.uid,game.player(20).graveyard); self.assertEqual(game.player(20).life,17)
+        restored=Game.from_raw(game.to_raw()); self.assertIn("trample",restored.card(attacker.uid).keywords)
+
+    def test_attacker_can_persistently_assign_more_than_lethal_to_blocker(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=2
+        game.phase="after_blockers"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"between 2 and 5"): game.assign_trample(10,1,1)
+        game.assign_trample(10,1,5); self.assertEqual(game.trample_assignments,{attacker.uid:5})
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.trample_assignments,{attacker.uid:5})
+        restored._combat_damage(False)
+        self.assertEqual(restored.player(20).life,20); self.assertIn(blocker.uid,restored.player(20).graveyard)
+        restored._end_combat(); self.assertEqual(restored.trample_assignments,{})
+
+    def test_trample_assignment_rechecks_lethal_after_stats_change(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=2
+        game.phase="after_blockers"; game.priority_user=10; game.assign_trample(10,1,2)
+        blocker.toughness_bonus=2; game._combat_damage(False)
+        self.assertEqual(game.player(20).life,19); self.assertIn(blocker.uid,game.player(20).graveyard)
+
+    def test_trample_counts_existing_damage_as_part_of_lethal_assignment(self):
+        game=ready(); game.active_index=0; attacker=self.add(game,10,"lea:227"); blocker=self.add(game,20,"giant")
+        blocker.damage=2; game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}; game.blocked_attackers=[attacker.uid]
+        game._combat_damage(False)
+        self.assertEqual(game.player(20).life,18); self.assertIn(blocker.uid,game.player(20).graveyard)
+
+    def test_protection_prevents_assigned_blocker_damage_not_trample_excess(self):
+        game=ready(); game.active_index=0; attacker=self.add(game,10,"lea:227"); attacker.power_bonus=2
+        blocker=self.add(game,20,"bear"); ward=self.add(game,20,"lea:20"); ward.attached_to=blocker.uid
+        game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}; game.blocked_attackers=[attacker.uid]
+        game._combat_damage(False)
+        self.assertEqual(blocker.damage,0); self.assertIn(blocker,game.player(20).battlefield); self.assertEqual(game.player(20).life,17)
+
+    def test_trample_hits_player_if_declared_blocker_leaves_but_normal_attacker_does_not(self):
+        trample,attacker,blocker=self.combat("lea:227","bear"); trample.player(20).battlefield.remove(blocker)
+        trample._combat_damage(False); self.assertEqual(trample.player(20).life,17)
+        normal,attacker,blocker=self.combat("giant","bear"); normal.player(20).battlefield.remove(blocker)
+        normal._combat_damage(False); self.assertEqual(normal.player(20).life,20)
+
+    def test_trample_assigns_lethal_before_regeneration_replacement(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=2; blocker.regeneration_shields=1
+        game._combat_damage(False)
+        self.assertEqual(game.player(20).life,17); self.assertIn(blocker,game.player(20).battlefield)
+        self.assertEqual(blocker.damage,0); self.assertEqual(blocker.regeneration_shields,0); self.assertTrue(blocker.tapped)
+
+    def test_trample_works_in_first_strike_damage_without_dealing_twice(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=2; attacker.temporary_keywords.append("first_strike")
+        game._combat_damage(True); self.assertEqual(game.player(20).life,17); self.assertIn(blocker.uid,game.player(20).graveyard)
+        game._combat_damage(False); self.assertEqual(game.player(20).life,17)
+
+    def test_trample_and_blocker_damage_never_become_negative(self):
+        game,attacker,blocker=self.combat("lea:227","bear"); attacker.power_bonus=-10; blocker.power_bonus=-10
+        game._combat_damage(False)
+        self.assertEqual(game.player(20).life,20); self.assertEqual(attacker.damage,0); self.assertEqual(blocker.damage,0)
 
 
 class AlphaLordTests(unittest.TestCase):
