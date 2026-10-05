@@ -10,8 +10,8 @@ manual usage estimate is required. The bot makes outbound HTTPS connections only
 ## Bot-owner setup
 
 On first load, the cog automatically installs the official standalone Codex CLI into a
-shared Sick-Cogs data directory. Imagine and future Sick-Cogs integrations reuse the same
-executable while retaining separate authentication homes. The owner can manually install or
+shared Sick-Cogs data directory. Other Sick-Cogs integrations can reuse the same executable while retaining separate
+authentication homes. The owner can manually install or
 update it at any time:
 
     [p]codexset install
