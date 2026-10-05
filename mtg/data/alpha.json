@@ -1,0 +1,6301 @@
+{
+  "schema": 1,
+  "source": "Scryfall card search API",
+  "source_uri": "https://api.scryfall.com/cards/search?q=set%3Alea&unique=prints&order=set",
+  "retrieved": "2026-10-05",
+  "set": {
+    "code": "lea",
+    "name": "Limited Edition Alpha",
+    "released_at": "1993-08-05",
+    "printing_count": 295,
+    "distinct_card_count": 290
+  },
+  "cards": [
+    {
+      "key": "lea:1",
+      "name": "Animate Wall",
+      "scryfall_id": "d5c83259-9b90-47c2-b48e-c7d78519e792",
+      "oracle_id": "c7a6a165-b709-46e0-ae42-6f69a17c0621",
+      "collector_number": "1",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant Wall\nEnchanted Wall can attack as though it didn't have defender.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:2",
+      "name": "Armageddon",
+      "scryfall_id": "5b6ddce7-b9c5-431d-a0b0-46d4aa93cbcb",
+      "oracle_id": "c9ed8b01-959a-47d6-891e-0abbdccf6e4f",
+      "collector_number": "2",
+      "mana_cost": "{3}{W}",
+      "mana_value": 4.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Destroy all lands.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:3",
+      "name": "Balance",
+      "scryfall_id": "6f9ea46a-411f-40ce-a873-a905180093f4",
+      "oracle_id": "17fa98cd-ed8f-483f-9525-7e989a82ebb2",
+      "collector_number": "3",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Each player chooses a number of lands they control equal to the number of lands controlled by the player who controls the fewest, then sacrifices the rest. Players discard cards and sacrifice creatures the same way.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:4",
+      "name": "Benalish Hero",
+      "scryfall_id": "11600105-56c6-4073-a4a6-8469030b39c9",
+      "oracle_id": "4c81cfb7-8765-4e28-ae33-4287fa9a86cc",
+      "collector_number": "4",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Human Soldier",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Banding (Any creatures with banding, and up to one without, can attack in a band. Bands are blocked as a group. If any creatures with banding you control are blocking or being blocked by a creature, you divide that creature's combat damage, not its controller, among any of the creatures it's being blocked by or is blocking.)",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:5",
+      "name": "Black Ward",
+      "scryfall_id": "15967a39-303f-457d-bcde-51837c8d63e1",
+      "oracle_id": "7861ac9b-3024-4935-804c-2ca4c5a46bf4",
+      "collector_number": "5",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has protection from black. This effect doesn't remove this Aura.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:6",
+      "name": "Blaze of Glory",
+      "scryfall_id": "98fba951-c5bb-497c-9292-ce1b2a1e1247",
+      "oracle_id": "b330ac89-790e-4cc9-96a5-532c48252088",
+      "collector_number": "6",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Cast this spell only during combat before blockers are declared.\nTarget creature defending player controls can block any number of creatures this turn. It blocks each attacking creature this turn if able.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:7",
+      "name": "Blessing",
+      "scryfall_id": "f131fd27-18da-47ca-b59f-135bcac83abd",
+      "oracle_id": "5c84d8da-2bfb-4618-89a0-7d9ed604e854",
+      "collector_number": "7",
+      "mana_cost": "{W}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant creature\n{W}: Enchanted creature gets +1/+1 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:8",
+      "name": "Blue Ward",
+      "scryfall_id": "93f9f0f2-e1cc-4740-888c-1336c6de0a27",
+      "oracle_id": "fc0bf1d0-46a2-4305-ab2e-466d79d60ab2",
+      "collector_number": "8",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has protection from blue. This effect doesn't remove this Aura.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:9",
+      "name": "Castle",
+      "scryfall_id": "b0da8d56-3178-44c2-9344-95d2346d326f",
+      "oracle_id": "f3179c3c-7e53-44d2-b579-b9e677efe9d9",
+      "collector_number": "9",
+      "mana_cost": "{3}{W}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Untapped creatures you control get +0/+2.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:10",
+      "name": "Circle of Protection: Blue",
+      "scryfall_id": "848b1a7f-e8ba-40b5-92b7-af1e963a0319",
+      "oracle_id": "d7572f17-f85d-45c0-ac64-43aac760eafe",
+      "collector_number": "10",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "{1}: The next time a blue source of your choice would deal damage to you this turn, prevent that damage.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:11",
+      "name": "Circle of Protection: Green",
+      "scryfall_id": "1ae32d20-b438-4f43-b603-e8f706ecfb03",
+      "oracle_id": "41b0f347-1398-4778-bf3f-4007d8a77162",
+      "collector_number": "11",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "{1}: The next time a green source of your choice would deal damage to you this turn, prevent that damage.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:12",
+      "name": "Circle of Protection: Red",
+      "scryfall_id": "b3dd94c5-42f6-4148-be6e-2a3a4226cc0e",
+      "oracle_id": "df2738fe-9cd1-4347-8808-105fcfde1190",
+      "collector_number": "12",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "{1}: The next time a red source of your choice would deal damage to you this turn, prevent that damage.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:13",
+      "name": "Circle of Protection: White",
+      "scryfall_id": "92df19c9-e127-42d9-8dd2-7fa5a7095428",
+      "oracle_id": "5f46f86a-9779-4ed3-99cb-76a03d380598",
+      "collector_number": "13",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "{1}: The next time a white source of your choice would deal damage to you this turn, prevent that damage.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:14",
+      "name": "Consecrate Land",
+      "scryfall_id": "d2379f78-c03f-447f-b3c9-10a918d556e9",
+      "oracle_id": "4627691c-4ed4-4add-9cc3-2e019be2f9fd",
+      "collector_number": "14",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant land\nEnchanted land has indestructible and can't be enchanted by other Auras.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:15",
+      "name": "Conversion",
+      "scryfall_id": "13186bc9-8d9c-433b-ba15-121ef94dd68a",
+      "oracle_id": "a24e05fb-dffb-4400-b4ca-22fdde45e7a7",
+      "collector_number": "15",
+      "mana_cost": "{2}{W}{W}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "At the beginning of your upkeep, sacrifice this enchantment unless you pay {W}{W}.\nAll Mountains are Plains.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:16",
+      "name": "Crusade",
+      "scryfall_id": "057986c7-20c0-4157-b4df-beae4ef5c66d",
+      "oracle_id": "4692740f-be90-459f-8d90-c4ae71771595",
+      "collector_number": "16",
+      "mana_cost": "{W}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "White creatures get +1/+1.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:17",
+      "name": "Death Ward",
+      "scryfall_id": "fa5466cc-aa57-4a7f-8b21-d92b2fe02e13",
+      "oracle_id": "0544b707-ec67-43e3-a25d-fd7005ab673d",
+      "collector_number": "17",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Regenerate target creature.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:18",
+      "name": "Disenchant",
+      "scryfall_id": "2722d7e2-61c6-4934-9c21-875ee78fd06c",
+      "oracle_id": "a7e97fa9-4b72-4548-b854-5be5f18a6f1a",
+      "collector_number": "18",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy target artifact or enchantment.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:19",
+      "name": "Farmstead",
+      "scryfall_id": "3455b006-9ea5-4aef-8ad2-d0701eb0cacf",
+      "oracle_id": "0d71b157-09a0-4fd4-beb9-103117a784ad",
+      "collector_number": "19",
+      "mana_cost": "{W}{W}{W}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant land\nEnchanted land has \"At the beginning of your upkeep, you may pay {W}{W}. If you do, you gain 1 life.\"",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:20",
+      "name": "Green Ward",
+      "scryfall_id": "1f6118b2-fe01-425a-a2ed-6d7c42286c8e",
+      "oracle_id": "727ab7f2-741e-4442-b5cb-e3032549fa87",
+      "collector_number": "20",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has protection from green. This effect doesn't remove this Aura.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:21",
+      "name": "Guardian Angel",
+      "scryfall_id": "0f84d676-5327-454c-a033-b4498a9d28e2",
+      "oracle_id": "1a91ca69-e890-41dc-866b-3aabf10c9a9c",
+      "collector_number": "21",
+      "mana_cost": "{X}{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Prevent the next X damage that would be dealt to any target this turn. Until end of turn, you may pay {1} any time you could cast an instant. If you do, prevent the next 1 damage that would be dealt to that permanent or player this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:22",
+      "name": "Healing Salve",
+      "scryfall_id": "e28de37e-84d5-4dc7-b36c-e14da5924729",
+      "oracle_id": "8da8644c-75a1-4fe9-8e94-900d948d631c",
+      "collector_number": "22",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Choose one —\n• Target player gains 3 life.\n• Prevent the next 3 damage that would be dealt to any target this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:23",
+      "name": "Holy Armor",
+      "scryfall_id": "b01041d2-687e-4972-81c8-16690809275b",
+      "oracle_id": "912164c2-b4d4-42e3-a10e-903b8c7b2e6d",
+      "collector_number": "23",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature gets +0/+2.\n{W}: Enchanted creature gets +0/+1 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:24",
+      "name": "Holy Strength",
+      "scryfall_id": "e945a4cd-0eb1-4f54-898d-169ce2748a03",
+      "oracle_id": "9357de36-f8be-4f49-b2c8-9fe9eaf82b07",
+      "collector_number": "24",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature gets +1/+2.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:25",
+      "name": "Island Sanctuary",
+      "scryfall_id": "c15e8a42-89de-42bc-8d5f-33426d207c3a",
+      "oracle_id": "7d1769d0-d942-45b3-a31c-2bbe45e68661",
+      "collector_number": "25",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "If you would draw a card during your draw step, instead you may skip that draw. If you do, until your next turn, you can't be attacked except by creatures with flying and/or islandwalk.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:26",
+      "name": "Karma",
+      "scryfall_id": "6f30ad61-fcb7-4d55-ba86-94de1bf545e4",
+      "oracle_id": "fac4da47-f0b2-4b57-9703-e0ed100d3499",
+      "collector_number": "26",
+      "mana_cost": "{2}{W}{W}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "At the beginning of each player's upkeep, this enchantment deals damage to that player equal to the number of Swamps they control.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:27",
+      "name": "Lance",
+      "scryfall_id": "ddb633f5-cc4d-4157-8217-def90cb15e24",
+      "oracle_id": "5960dd01-6797-4c73-b48a-f637b9c288cc",
+      "collector_number": "27",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has first strike.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:28",
+      "name": "Mesa Pegasus",
+      "scryfall_id": "eaac88da-d19e-4771-944c-3709963d04e7",
+      "oracle_id": "8161f5b8-6aab-4133-ba2c-2e7b5774153e",
+      "collector_number": "28",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Pegasus",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "Flying; banding (Any creatures with banding, and up to one without, can attack in a band. Bands are blocked as a group. If any creatures with banding you control are blocking or being blocked by a creature, you divide that creature's combat damage, not its controller, among any of the creatures it's being blocked by or is blocking.)",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:29",
+      "name": "Northern Paladin",
+      "scryfall_id": "6303233b-35eb-49ca-b844-ba6b9fe1cbd2",
+      "oracle_id": "f5975294-508a-453e-893a-2fbea2487d17",
+      "collector_number": "29",
+      "mana_cost": "{2}{W}{W}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Human Knight",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{W}{W}, {T}: Destroy target black permanent.",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:30",
+      "name": "Pearled Unicorn",
+      "scryfall_id": "6daf1aab-1e58-4a5a-bc66-cb3f7c86e0e8",
+      "oracle_id": "c071be90-0531-40cc-af46-0cbe80c4ddd4",
+      "collector_number": "30",
+      "mana_cost": "{2}{W}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Unicorn",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:31",
+      "name": "Personal Incarnation",
+      "scryfall_id": "caf9cef4-0f2d-478a-b119-fe1967687f74",
+      "oracle_id": "6e49a5b8-6bc4-4c7b-82c1-957f1fb0ca5f",
+      "collector_number": "31",
+      "mana_cost": "{3}{W}{W}{W}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Avatar Incarnation",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{0}: The next 1 damage that would be dealt to this creature this turn is dealt to its owner instead. Only this creature's owner may activate this ability.\nWhen this creature dies, its owner loses half their life, rounded up.",
+      "power": "6",
+      "toughness": "6",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:32",
+      "name": "Purelace",
+      "scryfall_id": "2facf462-55cd-4da4-997f-2cf4add75628",
+      "oracle_id": "3773001a-8868-49ec-a406-298cf72359c2",
+      "collector_number": "32",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target spell or permanent becomes white. (Mana symbols on that permanent remain unchanged.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:33",
+      "name": "Red Ward",
+      "scryfall_id": "e0c64c01-c2aa-470b-88c6-3d3e4a969649",
+      "oracle_id": "73f84440-425f-4cf5-b01a-3ae89f1f6e37",
+      "collector_number": "33",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has protection from red. This effect doesn't remove this Aura.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:34",
+      "name": "Resurrection",
+      "scryfall_id": "4fff6e6f-4ebd-4ec8-9443-59efb22d376c",
+      "oracle_id": "837417d8-8260-486d-a3ed-3b5711eaf34a",
+      "collector_number": "34",
+      "mana_cost": "{2}{W}{W}",
+      "mana_value": 4.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Return target creature card from your graveyard to the battlefield.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:35",
+      "name": "Reverse Damage",
+      "scryfall_id": "943baea8-b173-4863-a3ab-dd217d483cd9",
+      "oracle_id": "eaaf7c30-f463-4115-a40e-7dc717063413",
+      "collector_number": "35",
+      "mana_cost": "{1}{W}{W}",
+      "mana_value": 3.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "The next time a source of your choice would deal damage to you this turn, prevent that damage. You gain life equal to the damage prevented this way.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:36",
+      "name": "Righteousness",
+      "scryfall_id": "d0ba7b76-f3d0-47d0-8a35-0c08e67200fb",
+      "oracle_id": "3f6b2f76-0364-415e-a6a2-e9e5bf31b745",
+      "collector_number": "36",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target blocking creature gets +7/+7 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:37",
+      "name": "Samite Healer",
+      "scryfall_id": "efba235e-04e5-449c-906c-0ac33f6d7929",
+      "oracle_id": "95a0ca48-d924-47f4-86ed-42c673ee778c",
+      "collector_number": "37",
+      "mana_cost": "{1}{W}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Human Cleric",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "{T}: Prevent the next 1 damage that would be dealt to any target this turn.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:38",
+      "name": "Savannah Lions",
+      "scryfall_id": "d05b92bd-797e-413f-a8b0-32e0937a1ee0",
+      "oracle_id": "60ba93eb-39e6-4af2-9c66-cd38f72daff2",
+      "collector_number": "38",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Cat",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:39",
+      "name": "Serra Angel",
+      "scryfall_id": "f8ac5006-91bd-4803-93da-f87cf196dd2f",
+      "oracle_id": "4b7ac066-e5c7-43e6-9e7e-2739b24a905d",
+      "collector_number": "39",
+      "mana_cost": "{3}{W}{W}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Angel",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying\nVigilance (Attacking doesn't cause this creature to tap.)",
+      "power": "4",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:40",
+      "name": "Swords to Plowshares",
+      "scryfall_id": "386ea9eb-abc1-4862-aa2d-8fb808d79490",
+      "oracle_id": "b1544f21-7e98-461b-aed5-e748b0168c52",
+      "collector_number": "40",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Exile target creature. Its controller gains life equal to its power.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:41",
+      "name": "Veteran Bodyguard",
+      "scryfall_id": "cbd9ab01-a833-4fa4-8dee-151bd9800835",
+      "oracle_id": "d29078c0-1fb8-437a-81d1-bb319f646941",
+      "collector_number": "41",
+      "mana_cost": "{3}{W}{W}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Human",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "As long as this creature is untapped, all damage that would be dealt to you by unblocked creatures is dealt to this creature instead.",
+      "power": "2",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:42",
+      "name": "Wall of Swords",
+      "scryfall_id": "99ec4723-b36c-4015-b361-736a6523e8f5",
+      "oracle_id": "eb098958-50d3-4476-ba74-382033703ff9",
+      "collector_number": "42",
+      "mana_cost": "{3}{W}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\nFlying",
+      "power": "3",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:43",
+      "name": "White Knight",
+      "scryfall_id": "50abfba8-c9f9-4ebf-965a-4b425fe83129",
+      "oracle_id": "ddb021df-ae4a-4ac1-8353-d0b375761714",
+      "collector_number": "43",
+      "mana_cost": "{W}{W}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Human Knight",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "First strike (This creature deals combat damage before creatures without first strike.)\nProtection from black (This creature can't be blocked, targeted, dealt damage, or enchanted by anything black.)",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:44",
+      "name": "White Ward",
+      "scryfall_id": "49b22665-1501-420a-82ad-f71f6768bcf8",
+      "oracle_id": "860468b3-625a-4663-a5ae-336ae10fc7d0",
+      "collector_number": "44",
+      "mana_cost": "{W}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has protection from white. This effect doesn't remove this Aura.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:45",
+      "name": "Wrath of God",
+      "scryfall_id": "a2788d69-6a3a-42f0-8736-cc6b57755ecd",
+      "oracle_id": "34515b16-c9a4-4f98-8c77-416a7a523407",
+      "collector_number": "45",
+      "mana_cost": "{2}{W}{W}",
+      "mana_value": 4.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "W"
+      ],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Destroy all creatures. They can't be regenerated.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:46",
+      "name": "Air Elemental",
+      "scryfall_id": "69c3b2a3-0daa-4d42-832d-fcdfda6555ea",
+      "oracle_id": "7744bae4-a8b7-44a5-9b4c-0048ad4cc448",
+      "collector_number": "46",
+      "mana_cost": "{3}{U}{U}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Elemental",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying",
+      "power": "4",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:47",
+      "name": "Ancestral Recall",
+      "scryfall_id": "70e7ddf2-5604-41e7-bb9d-ddd03d3e9d0b",
+      "oracle_id": "550c74d4-1fcb-406a-b02a-639a760a4380",
+      "collector_number": "47",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target player draws three cards.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:48",
+      "name": "Animate Artifact",
+      "scryfall_id": "664b46f5-0424-4f4e-9f26-6bd2cf5e0357",
+      "oracle_id": "2dd7a4dc-902a-4e85-8a3b-c96a898fba86",
+      "collector_number": "48",
+      "mana_cost": "{3}{U}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant artifact\nAs long as enchanted artifact isn't a creature, it's an artifact creature with power and toughness each equal to its mana value.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:49",
+      "name": "Blue Elemental Blast",
+      "scryfall_id": "20d666ef-39bf-4fbf-8201-5f1056539da2",
+      "oracle_id": "65e1558c-6b09-4ddc-b520-f19f4fb972af",
+      "collector_number": "49",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Choose one —\n• Counter target red spell.\n• Destroy target red permanent.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:50",
+      "name": "Braingeyser",
+      "scryfall_id": "62b19a12-6914-430e-81ce-dcfca47884df",
+      "oracle_id": "9908e597-9470-4c13-8387-39431b380138",
+      "collector_number": "50",
+      "mana_cost": "{X}{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target player draws X cards.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:51",
+      "name": "Clone",
+      "scryfall_id": "f00d33dd-4eb2-4446-9813-1923d8e2d2f3",
+      "oracle_id": "42226b87-0746-4ebf-9fd0-108d508462af",
+      "collector_number": "51",
+      "mana_cost": "{3}{U}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Shapeshifter",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "You may have this creature enter as a copy of any creature on the battlefield.",
+      "power": "0",
+      "toughness": "0",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:52",
+      "name": "Control Magic",
+      "scryfall_id": "7b52f459-c703-4a0b-9114-ff69eec61287",
+      "oracle_id": "cd0d7141-46d2-4aa3-bc77-6b3b4513803e",
+      "collector_number": "52",
+      "mana_cost": "{2}{U}{U}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nYou control enchanted creature.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:53",
+      "name": "Copy Artifact",
+      "scryfall_id": "fd5ed955-1193-4e6a-a3e2-f54c1f9bf063",
+      "oracle_id": "80bc56a9-40e0-48da-ae86-190e39c8a4a3",
+      "collector_number": "53",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "You may have this enchantment enter as a copy of any artifact on the battlefield, except it's an enchantment in addition to its other types.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:54",
+      "name": "Counterspell",
+      "scryfall_id": "0df55e3f-14de-46ef-b6b1-616618724d9e",
+      "oracle_id": "cc187110-1148-4090-bbb8-e205694a39f5",
+      "collector_number": "54",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Counter target spell.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:55",
+      "name": "Creature Bond",
+      "scryfall_id": "ee4bd7d1-77e5-46e5-a594-c24469e88c4c",
+      "oracle_id": "70492e32-ba4d-4314-b016-892fb15f7a23",
+      "collector_number": "55",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nWhen enchanted creature dies, this Aura deals damage equal to that creature's toughness to the creature's controller.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:56",
+      "name": "Drain Power",
+      "scryfall_id": "ea3830c5-cc66-453e-9e53-0636e00ee0ee",
+      "oracle_id": "0669172d-396b-4f5a-9703-129c5c849b55",
+      "collector_number": "56",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target player activates a mana ability of each land they control. Then that player loses all unspent mana and you add the mana lost this way.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:57",
+      "name": "Feedback",
+      "scryfall_id": "0eb8f591-d763-49bf-8ef9-86265aaa72f7",
+      "oracle_id": "2ff92886-5c17-47a4-a02b-a97432d9203e",
+      "collector_number": "57",
+      "mana_cost": "{2}{U}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant enchantment\nAt the beginning of the upkeep of enchanted enchantment's controller, this Aura deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:58",
+      "name": "Flight",
+      "scryfall_id": "67c7784b-6b79-4268-a714-895c82809aff",
+      "oracle_id": "6a4068b0-fb4f-429c-a94e-47849f3eb7ef",
+      "collector_number": "58",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature has flying.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:59",
+      "name": "Invisibility",
+      "scryfall_id": "1858ac51-e6a7-48d7-8759-166070ca13d8",
+      "oracle_id": "de26b0c6-dfb7-45a8-9d7f-f8d45522d675",
+      "collector_number": "59",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature can't be blocked except by Walls.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:60",
+      "name": "Jump",
+      "scryfall_id": "cb3f4b11-ad1b-48e2-a500-787d351b0174",
+      "oracle_id": "f7518456-45ed-41d4-bd3c-5aacea28eb35",
+      "collector_number": "60",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Target creature gains flying until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:61",
+      "name": "Lifetap",
+      "scryfall_id": "11add837-7ee4-4104-b031-c161bce459ae",
+      "oracle_id": "52ac09af-2aa7-4d80-be26-3e6a6efd5c23",
+      "collector_number": "61",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a Forest an opponent controls becomes tapped, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:62",
+      "name": "Lord of Atlantis",
+      "scryfall_id": "210c4a90-fc7a-4c76-aeaa-20a005e45386",
+      "oracle_id": "cc7f290f-ca00-4285-9bdb-4b4402444f30",
+      "collector_number": "62",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Merfolk",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Other Merfolk get +1/+1 and have islandwalk. (They can't be blocked as long as defending player controls an Island.)",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:63",
+      "name": "Magical Hack",
+      "scryfall_id": "2bd4202c-0477-45aa-82fd-83c85d6d4bef",
+      "oracle_id": "cba229fa-9035-405b-b091-3798898a37ee",
+      "collector_number": "63",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Change the text of target spell or permanent by replacing all instances of one basic land type with another. (For example, you may change \"swampwalk\" to \"plainswalk.\" This effect lasts indefinitely.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:64",
+      "name": "Mahamoti Djinn",
+      "scryfall_id": "36204ddd-ddf7-4b44-ae3c-b4a5a41ac9cb",
+      "oracle_id": "c39ea5f9-6ec0-4697-897b-779e326754a7",
+      "collector_number": "64",
+      "mana_cost": "{4}{U}{U}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Djinn",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying (This creature can't be blocked except by creatures with flying or reach.)",
+      "power": "5",
+      "toughness": "6",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:65",
+      "name": "Mana Short",
+      "scryfall_id": "73e3e0b3-5284-464f-8c62-0f7801c966f5",
+      "oracle_id": "48207d1c-448a-4e1b-974a-642dfea75933",
+      "collector_number": "65",
+      "mana_cost": "{2}{U}",
+      "mana_value": 3.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Tap all lands target player controls and that player loses all unspent mana.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:66",
+      "name": "Merfolk of the Pearl Trident",
+      "scryfall_id": "2b871039-6a66-4ac3-95e7-24759c1f2f92",
+      "oracle_id": "218d9277-c179-4de3-9c7f-79b5a6d4fa38",
+      "collector_number": "66",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Merfolk",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:67",
+      "name": "Phantasmal Forces",
+      "scryfall_id": "0631c7c8-9aa5-4333-8e20-20247fc47033",
+      "oracle_id": "06a158c6-7e36-49f8-a8e0-a7b7df5fd7ed",
+      "collector_number": "67",
+      "mana_cost": "{3}{U}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Illusion",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying\nAt the beginning of your upkeep, sacrifice this creature unless you pay {U}.",
+      "power": "4",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:68",
+      "name": "Phantasmal Terrain",
+      "scryfall_id": "1c371aa1-1619-41e3-8364-7bc9b8cf5d14",
+      "oracle_id": "7dcbce46-2973-4a9f-93df-95ac41ce668a",
+      "collector_number": "68",
+      "mana_cost": "{U}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant land\nAs this Aura enters, choose a basic land type.\nEnchanted land is the chosen type.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:69",
+      "name": "Phantom Monster",
+      "scryfall_id": "e46d2cf5-e8d0-4fb2-b950-252d52084b63",
+      "oracle_id": "bbd30183-524c-4b93-b953-90853ec3f39f",
+      "collector_number": "69",
+      "mana_cost": "{3}{U}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Illusion",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:70",
+      "name": "Pirate Ship",
+      "scryfall_id": "d0a7cb23-d229-43c5-addd-dcf423984b0c",
+      "oracle_id": "c6b3f924-806d-47d3-b044-72b48470196c",
+      "collector_number": "70",
+      "mana_cost": "{4}{U}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Human Pirate",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "This creature can't attack unless defending player controls an Island.\n{T}: This creature deals 1 damage to any target.\nWhen you control no Islands, sacrifice this creature.",
+      "power": "4",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:71",
+      "name": "Power Leak",
+      "scryfall_id": "ccc982b6-35b2-4e33-ace2-86cb79123e4f",
+      "oracle_id": "dc2f0000-870b-487f-9623-618fc8eb9765",
+      "collector_number": "71",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant enchantment\nAt the beginning of the upkeep of enchanted enchantment's controller, that player may pay any amount of mana. This Aura deals 2 damage to that player. Prevent X of that damage, where X is the amount of mana that player paid this way.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:72",
+      "name": "Power Sink",
+      "scryfall_id": "1b342dd3-09b9-4108-bf12-a65d4cef4eb9",
+      "oracle_id": "39412e6d-2837-4729-abf9-e64a5ba87e40",
+      "collector_number": "72",
+      "mana_cost": "{X}{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Counter target spell unless its controller pays {X}. If that player doesn't, they tap all lands with mana abilities they control and lose all unspent mana.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:73",
+      "name": "Prodigal Sorcerer",
+      "scryfall_id": "e4dc1103-7bf1-47f6-9006-d3ed9ccd7a6a",
+      "oracle_id": "5e961d15-5972-4e4b-9385-1cd7cd7c6bbe",
+      "collector_number": "73",
+      "mana_cost": "{2}{U}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Human Wizard Sorcerer",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "{T}: This creature deals 1 damage to any target.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:74",
+      "name": "Psionic Blast",
+      "scryfall_id": "a6a86e6e-bfff-46af-9d36-c912901fea92",
+      "oracle_id": "7f221ad6-7ec4-483d-a6b5-1456c95c1cad",
+      "collector_number": "74",
+      "mana_cost": "{2}{U}",
+      "mana_value": 3.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Psionic Blast deals 4 damage to any target and 2 damage to you.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:75",
+      "name": "Psychic Venom",
+      "scryfall_id": "f3f5b68a-6b0e-431e-89f0-ff60f17687a5",
+      "oracle_id": "a60422e8-f2f4-4c37-a0f4-eedad27eb08c",
+      "collector_number": "75",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant land\nWhenever enchanted land becomes tapped, this Aura deals 2 damage to that land's controller.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:76",
+      "name": "Sea Serpent",
+      "scryfall_id": "d0b333b7-db4d-4439-b0de-60414cbf8d7b",
+      "oracle_id": "c16495fc-784d-4bac-9a68-ed437008df73",
+      "collector_number": "76",
+      "mana_cost": "{5}{U}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Serpent",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "This creature can't attack unless defending player controls an Island.\nWhen you control no Islands, sacrifice this creature.",
+      "power": "5",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:77",
+      "name": "Siren's Call",
+      "scryfall_id": "d992b336-3b6e-43e1-8662-d85664349b44",
+      "oracle_id": "269fc857-a052-4f0a-9759-467ccf42bebb",
+      "collector_number": "77",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Cast this spell only during an opponent's turn, before attackers are declared.\nCreatures the active player controls attack this turn if able.\nAt the beginning of the next end step, destroy all non-Wall creatures that player controls that didn't attack this turn. Ignore this effect for each creature the player didn't control continuously since the beginning of the turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:78",
+      "name": "Sleight of Mind",
+      "scryfall_id": "d427790c-e322-446e-8d7d-a6b48ad41a42",
+      "oracle_id": "99dba614-40d3-41c1-a3b2-edc8777b010f",
+      "collector_number": "78",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Change the text of target spell or permanent by replacing all instances of one color word with another. (For example, you may change \"target black spell\" to \"target blue spell.\" This effect lasts indefinitely.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:79",
+      "name": "Spell Blast",
+      "scryfall_id": "845734da-ab03-4dbc-bb5f-96481d3b8e88",
+      "oracle_id": "04477339-7ed5-4770-9e5c-6e481ffcc858",
+      "collector_number": "79",
+      "mana_cost": "{X}{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Counter target spell with mana value X. (For example, if that spell's mana cost is {3}{U}{U}, X is 5.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:80",
+      "name": "Stasis",
+      "scryfall_id": "b6cef408-5b4b-49f6-9531-be544815b93f",
+      "oracle_id": "a8cf1379-0195-4e11-b994-481ef1284245",
+      "collector_number": "80",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Players skip their untap steps.\nAt the beginning of your upkeep, sacrifice this enchantment unless you pay {U}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:81",
+      "name": "Steal Artifact",
+      "scryfall_id": "83316930-d6ad-46ce-9b40-48eea856d95b",
+      "oracle_id": "cd8ae9f2-edac-473a-8846-c08219e617c3",
+      "collector_number": "81",
+      "mana_cost": "{2}{U}{U}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant artifact\nYou control enchanted artifact.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:82",
+      "name": "Thoughtlace",
+      "scryfall_id": "23749375-1416-47a4-9251-52f41fe2fae9",
+      "oracle_id": "6452b6a6-6235-46a3-a712-a26592450438",
+      "collector_number": "82",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target spell or permanent becomes blue. (Mana symbols on that permanent remain unchanged.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:83",
+      "name": "Time Walk",
+      "scryfall_id": "e0139f60-d48e-46fb-9f5a-1e3d7558c834",
+      "oracle_id": "d0209d3f-3f7e-4fd5-bce5-10bce6f29c86",
+      "collector_number": "83",
+      "mana_cost": "{1}{U}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Take an extra turn after this one.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:84",
+      "name": "Timetwister",
+      "scryfall_id": "9a49dc44-616e-4bdd-8220-0bb71eccc512",
+      "oracle_id": "c823e687-6311-4c99-974b-fd77d204141a",
+      "collector_number": "84",
+      "mana_cost": "{2}{U}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Each player shuffles their hand and graveyard into their library, then draws seven cards. (Then put Timetwister into its owner's graveyard.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:85",
+      "name": "Twiddle",
+      "scryfall_id": "576e811f-26a3-4a7c-bd13-3b1cc3e184eb",
+      "oracle_id": "773ad2ef-5acc-49ea-8d85-056330e87039",
+      "collector_number": "85",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "You may tap or untap target artifact, creature, or land.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:86",
+      "name": "Unsummon",
+      "scryfall_id": "8512f2c1-6361-4b79-843f-80b6bceeeb99",
+      "oracle_id": "837182db-1bf3-4a2c-bd01-1af9d9873561",
+      "collector_number": "86",
+      "mana_cost": "{U}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "Return target creature to its owner's hand.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:87",
+      "name": "Vesuvan Doppelganger",
+      "scryfall_id": "768f3a05-bd06-4a23-b9f2-94f6e618fd9f",
+      "oracle_id": "aeaccab9-3e2c-4a40-a483-52c4972b2014",
+      "collector_number": "87",
+      "mana_cost": "{3}{U}{U}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Shapeshifter",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "You may have this creature enter as a copy of any creature on the battlefield, except it doesn't copy that creature's color and it has \"At the beginning of your upkeep, you may have this creature become a copy of target creature, except it doesn't copy that creature's color and it has this ability.\"",
+      "power": "0",
+      "toughness": "0",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:88",
+      "name": "Volcanic Eruption",
+      "scryfall_id": "a80582b1-09db-45f8-b362-0e5207a5a8e6",
+      "oracle_id": "4c15889e-3172-413b-b805-a2b7ad05f636",
+      "collector_number": "88",
+      "mana_cost": "{X}{U}{U}{U}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Destroy X target Mountains. Volcanic Eruption deals damage to each creature and each player equal to the number of Mountains put into a graveyard this way.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:89",
+      "name": "Wall of Air",
+      "scryfall_id": "da56fdf3-6a8f-4833-a5c3-197650cc4889",
+      "oracle_id": "b2d3da40-e2f7-4480-9da9-33019d6f4071",
+      "collector_number": "89",
+      "mana_cost": "{1}{U}{U}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender, flying (This creature can't attack, and it can block creatures with flying.)",
+      "power": "1",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:90",
+      "name": "Wall of Water",
+      "scryfall_id": "41faed1a-ded8-49ee-8e2a-c60d377775d7",
+      "oracle_id": "608cc65c-f99a-4ca3-be24-190d2556b411",
+      "collector_number": "90",
+      "mana_cost": "{1}{U}{U}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\n{U}: This creature gets +1/+0 until end of turn.",
+      "power": "0",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:91",
+      "name": "Water Elemental",
+      "scryfall_id": "8de940d6-98c0-46a9-b5fd-e2b0899ea19e",
+      "oracle_id": "c470fbe1-0538-46ec-8741-3143f5e78af8",
+      "collector_number": "91",
+      "mana_cost": "{3}{U}{U}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Elemental",
+      "colors": [
+        "U"
+      ],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "",
+      "power": "5",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:92",
+      "name": "Animate Dead",
+      "scryfall_id": "8fd7861d-925f-4b4c-a4ab-60be6f43d50b",
+      "oracle_id": "c0d8fef4-65f4-4769-982d-b397d2b7e977",
+      "collector_number": "92",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature card in a graveyard\nWhen this Aura enters, if it's on the battlefield, it loses \"enchant creature card in a graveyard\" and gains \"enchant creature put onto the battlefield with this Aura.\" Return enchanted creature card to the battlefield under your control and attach this Aura to it. When this Aura leaves the battlefield, that creature's controller sacrifices it.\nEnchanted creature gets -1/-0.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:93",
+      "name": "Bad Moon",
+      "scryfall_id": "43572906-ea74-4411-a549-5dc401591d2a",
+      "oracle_id": "fc5d3341-cbce-49e5-93cc-8add92479dca",
+      "collector_number": "93",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Black creatures get +1/+1.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:94",
+      "name": "Black Knight",
+      "scryfall_id": "c1662949-0d69-49a3-8c69-daf10717ed4e",
+      "oracle_id": "9456c5b6-946d-403a-8ed0-dff9f921d98c",
+      "collector_number": "94",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Human Knight",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "First strike (This creature deals combat damage before creatures without first strike.)\nProtection from white (This creature can't be blocked, targeted, dealt damage, or enchanted by anything white.)",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:95",
+      "name": "Bog Wraith",
+      "scryfall_id": "6701874e-986e-4b81-9268-90b6171e6187",
+      "oracle_id": "508248d1-09a4-4e41-a4c9-286618e5061e",
+      "collector_number": "95",
+      "mana_cost": "{3}{B}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Wraith",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Swampwalk (This creature can't be blocked as long as defending player controls a Swamp.)",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:96",
+      "name": "Contract from Below",
+      "scryfall_id": "9853b0ce-4763-4877-9741-f9145a3659c6",
+      "oracle_id": "9e0ed4b0-28b5-44be-ab83-f1e8eb07138d",
+      "collector_number": "96",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Remove this card from your deck before playing if you're not playing for ante.\nDiscard your hand, ante the top card of your library, then draw seven cards.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:97",
+      "name": "Cursed Land",
+      "scryfall_id": "cf5f3c61-1e54-4eea-bf82-311cfa988e6a",
+      "oracle_id": "0d61239f-28e4-4adb-8f6e-b56e9c8699af",
+      "collector_number": "97",
+      "mana_cost": "{2}{B}{B}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant land\nAt the beginning of the upkeep of enchanted land's controller, this Aura deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:98",
+      "name": "Dark Ritual",
+      "scryfall_id": "ebb6664d-23ca-456e-9916-afcd6f26aa7f",
+      "oracle_id": "53f7c868-b03e-4fc2-8dcf-a75bbfa3272b",
+      "collector_number": "98",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Add {B}{B}{B}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:99",
+      "name": "Darkpact",
+      "scryfall_id": "e78db688-93a2-47f5-9aa5-9158a72cd973",
+      "oracle_id": "74f10b9a-a286-49b2-bfa1-a427ff041bd4",
+      "collector_number": "99",
+      "mana_cost": "{B}{B}{B}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Remove this card from your deck before playing if you're not playing for ante.\nYou own target card in the ante. Exchange that card with the top card of your library.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:100",
+      "name": "Deathgrip",
+      "scryfall_id": "2371c126-f19a-472a-ba5f-3b1366274ea0",
+      "oracle_id": "20ae75a7-14ca-4366-af0a-3f3f02159f3f",
+      "collector_number": "100",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{B}{B}: Counter target green spell.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:101",
+      "name": "Deathlace",
+      "scryfall_id": "6ff1cefc-62cb-4525-b0c5-2b09603b4314",
+      "oracle_id": "fb80aaba-352a-4b58-8db2-1e02d542819c",
+      "collector_number": "101",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target spell or permanent becomes black. (Mana symbols on that permanent remain unchanged.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:102",
+      "name": "Demonic Attorney",
+      "scryfall_id": "fd891fc6-d9d6-494e-ae65-8bea8f44b575",
+      "oracle_id": "65a9f643-063f-406a-8d5a-5ebbe0f04c3d",
+      "collector_number": "102",
+      "mana_cost": "{1}{B}{B}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Remove this card from your deck before playing if you're not playing for ante.\nEach player antes the top card of their library.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:103",
+      "name": "Demonic Hordes",
+      "scryfall_id": "6c9bb8b1-fb79-4b99-ba09-c6e6c860de50",
+      "oracle_id": "2847c8a0-f6aa-4e4a-a7b8-fc116436a264",
+      "collector_number": "103",
+      "mana_cost": "{3}{B}{B}{B}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Demon",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Destroy target land.\nAt the beginning of your upkeep, unless you pay {B}{B}{B}, tap this creature and sacrifice a land of an opponent's choice.",
+      "power": "5",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:104",
+      "name": "Demonic Tutor",
+      "scryfall_id": "711d4d54-5520-4de8-9b93-79902ed8e562",
+      "oracle_id": "82004860-e589-4e38-8d61-8c0210e4ea39",
+      "collector_number": "104",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Search your library for a card, put that card into your hand, then shuffle.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:105",
+      "name": "Drain Life",
+      "scryfall_id": "5d077a49-73d4-4958-b42a-31b814e110e8",
+      "oracle_id": "e75ba79f-4cc2-4ede-8641-559ab94e7e36",
+      "collector_number": "105",
+      "mana_cost": "{X}{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Spend only black mana on X.\nDrain Life deals X damage to any target. You gain life equal to the damage dealt, but not more life than the player's life total before the damage was dealt, the planeswalker's loyalty before the damage was dealt, or the creature's toughness.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:106",
+      "name": "Drudge Skeletons",
+      "scryfall_id": "23614289-0d73-4747-a849-5cb67cc97d6a",
+      "oracle_id": "c180ed02-07f4-4538-9bea-8c249234a8e2",
+      "collector_number": "106",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Skeleton",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "{B}: Regenerate this creature. (The next time this creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it.)",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:107",
+      "name": "Evil Presence",
+      "scryfall_id": "0551d66e-8cd4-48f0-aa17-15f26be9d85f",
+      "oracle_id": "3d8ac41c-0566-48b2-a744-39db2f72272c",
+      "collector_number": "107",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant land\nEnchanted land is a Swamp.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:108",
+      "name": "Fear",
+      "scryfall_id": "0cd927be-e63f-4371-a1d8-7a0489cb187e",
+      "oracle_id": "355bbe9b-59bf-470f-8600-410af4c7fe18",
+      "collector_number": "108",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature (Target a creature as you cast this. This card enters attached to that creature.)\nEnchanted creature has fear. (It can't be blocked except by artifact creatures and/or black creatures.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:109",
+      "name": "Frozen Shade",
+      "scryfall_id": "d0bd76c8-4cff-4c15-9686-7a299b589814",
+      "oracle_id": "f75f9006-217d-4ec8-9c35-ceefe1c5ae4e",
+      "collector_number": "109",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Shade",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "{B}: This creature gets +1/+1 until end of turn.",
+      "power": "0",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:110",
+      "name": "Gloom",
+      "scryfall_id": "a8d10bc7-daeb-4c0d-9e4a-8eae8d11699f",
+      "oracle_id": "4d022f53-b1fb-4071-afcc-0af3214fe604",
+      "collector_number": "110",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "White spells cost {3} more to cast.\nActivated abilities of white enchantments cost {3} more to activate.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:111",
+      "name": "Howl from Beyond",
+      "scryfall_id": "67ec17e1-174b-4d07-a27f-91a333c4b2fb",
+      "oracle_id": "403cf6ae-48a9-4ea9-894e-7135cfca4e1b",
+      "collector_number": "111",
+      "mana_cost": "{X}{B}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Target creature gets +X/+0 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:112",
+      "name": "Hypnotic Specter",
+      "scryfall_id": "b43b900f-2d9b-442b-9699-058483604ec9",
+      "oracle_id": "759af941-f6a3-4726-91f2-9b1e4e55ea71",
+      "collector_number": "112",
+      "mana_cost": "{1}{B}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Specter",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying\nWhenever this creature deals damage to an opponent, that player discards a card at random.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:113",
+      "name": "Lich",
+      "scryfall_id": "4250caec-0e37-41be-9ec4-8938deb5f0d0",
+      "oracle_id": "5b7515f2-7a5a-4e2a-9784-6cbacd768172",
+      "collector_number": "113",
+      "mana_cost": "{B}{B}{B}{B}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "As this enchantment enters, you lose life equal to your life total.\nYou don't lose the game for having 0 or less life.\nIf you would gain life, draw that many cards instead.\nWhenever you're dealt damage, sacrifice that many nontoken permanents. If you can't, you lose the game.\nWhen this enchantment is put into a graveyard from the battlefield, you lose the game.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:114",
+      "name": "Lord of the Pit",
+      "scryfall_id": "2926777a-4f6e-4965-ba83-22cf7df02602",
+      "oracle_id": "ea152809-85a2-4fde-8251-3b1f267e4443",
+      "collector_number": "114",
+      "mana_cost": "{4}{B}{B}{B}",
+      "mana_value": 7.0,
+      "type_line": "Creature — Demon",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying, trample\nAt the beginning of your upkeep, sacrifice a creature other than this creature. If you can't, this creature deals 7 damage to you.",
+      "power": "7",
+      "toughness": "7",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:115",
+      "name": "Mind Twist",
+      "scryfall_id": "eee9e106-a248-49d2-b8c8-6bbcd56ce739",
+      "oracle_id": "78f9c223-9982-4282-a496-a6f892f0a5bf",
+      "collector_number": "115",
+      "mana_cost": "{X}{B}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target player discards X cards at random.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:116",
+      "name": "Nether Shadow",
+      "scryfall_id": "f13ad58a-6f9b-420a-bac1-40929f5e616a",
+      "oracle_id": "c358b9e2-524c-434b-b3fa-74d2aa6d1df7",
+      "collector_number": "116",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Spirit",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Haste\nAt the beginning of your upkeep, if this card is in your graveyard with three or more creature cards above it, you may put this card onto the battlefield.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:117",
+      "name": "Nettling Imp",
+      "scryfall_id": "8105973c-a94d-444c-ba20-ab0fa978bee8",
+      "oracle_id": "c58dfcbf-49e6-4ef0-bd31-ebd81b0cfa41",
+      "collector_number": "117",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Imp",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Choose target non-Wall creature the active player has controlled continuously since the beginning of the turn. That creature attacks this turn if able. Destroy it at the beginning of the next end step if it didn't attack this turn. Activate only during an opponent's turn, before attackers are declared.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:118",
+      "name": "Nightmare",
+      "scryfall_id": "b8cdd6a7-f772-4ccb-914f-63f52ed54d6b",
+      "oracle_id": "375932e6-1b3e-48dc-8154-9b664c3add34",
+      "collector_number": "118",
+      "mana_cost": "{5}{B}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Nightmare Horse",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying (This creature can't be blocked except by creatures with flying or reach.)\nNightmare's power and toughness are each equal to the number of Swamps you control.",
+      "power": "*",
+      "toughness": "*",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:119",
+      "name": "Paralyze",
+      "scryfall_id": "be33a155-de26-43d1-88f1-c926f1b7cb7c",
+      "oracle_id": "e9b4e857-39e5-4a06-89ad-3dd94b3f252a",
+      "collector_number": "119",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nWhen this Aura enters, tap enchanted creature.\nEnchanted creature doesn't untap during its controller's untap step.\nAt the beginning of the upkeep of enchanted creature's controller, that player may pay {4}. If the player does, untap the creature.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:120",
+      "name": "Pestilence",
+      "scryfall_id": "d42a6350-b16b-4e10-a273-e6cbb55dcb7a",
+      "oracle_id": "dafe63ef-f3d6-45e7-877a-573da92ba85e",
+      "collector_number": "120",
+      "mana_cost": "{2}{B}{B}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "At the beginning of the end step, if no creatures are on the battlefield, sacrifice this enchantment.\n{B}: This enchantment deals 1 damage to each creature and each player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:121",
+      "name": "Plague Rats",
+      "scryfall_id": "b3724e40-0622-4aee-9334-6c9fff88bcd5",
+      "oracle_id": "16cf1cf9-6900-406c-a5b4-0e5750f530e0",
+      "collector_number": "121",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Rat",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Plague Rats's power and toughness are each equal to the number of creatures named Plague Rats on the battlefield.",
+      "power": "*",
+      "toughness": "*",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:122",
+      "name": "Raise Dead",
+      "scryfall_id": "ce07bede-2219-427c-a61a-56518751de42",
+      "oracle_id": "cbc9c731-181a-4f00-a7b0-eb7e56eac2ea",
+      "collector_number": "122",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Return target creature card from your graveyard to your hand.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:123",
+      "name": "Royal Assassin",
+      "scryfall_id": "59590768-fa96-4869-8763-9d5ab6ac22ad",
+      "oracle_id": "9ed6f28f-a3db-48c5-9ab0-b90a7fba5f57",
+      "collector_number": "123",
+      "mana_cost": "{1}{B}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Human Assassin",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Destroy target tapped creature.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:124",
+      "name": "Sacrifice",
+      "scryfall_id": "12164aee-6a27-4246-8d15-2d6dd20d92e9",
+      "oracle_id": "068b3692-411b-44d4-a7e9-005262760cfc",
+      "collector_number": "124",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "As an additional cost to cast this spell, sacrifice a creature.\nAdd an amount of {B} equal to the sacrificed creature's mana value.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:125",
+      "name": "Scathe Zombies",
+      "scryfall_id": "e9be6dcf-5e25-4b8c-9cd0-badf3771f81e",
+      "oracle_id": "e0fefaf0-da20-4d58-8db7-019dba16c780",
+      "collector_number": "125",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Zombie",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:126",
+      "name": "Scavenging Ghoul",
+      "scryfall_id": "426984e0-88e1-4a2d-9a1c-798b95864df3",
+      "oracle_id": "68c0c04e-b0d5-4721-83bf-bf18e8b7e680",
+      "collector_number": "126",
+      "mana_cost": "{3}{B}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Zombie",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "At the beginning of each end step, put a corpse counter on this creature for each creature that died this turn.\nRemove a corpse counter from this creature: Regenerate this creature.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:127",
+      "name": "Sengir Vampire",
+      "scryfall_id": "510840f4-7c0e-4b47-8ebf-23c20cac4bd9",
+      "oracle_id": "749141aa-f6c4-4ad8-b146-406e68ae9b0b",
+      "collector_number": "127",
+      "mana_cost": "{3}{B}{B}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Vampire",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying (This creature can't be blocked except by creatures with flying or reach.)\nWhenever a creature dealt damage by this creature this turn dies, put a +1/+1 counter on this creature.",
+      "power": "4",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:128",
+      "name": "Simulacrum",
+      "scryfall_id": "35c3a78d-cc79-4187-929a-8aa1d1469990",
+      "oracle_id": "20d69989-7250-40c7-a064-8ed78ccbe556",
+      "collector_number": "128",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "You gain life equal to the damage dealt to you this turn. Simulacrum deals damage to target creature you control equal to the damage dealt to you this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:129",
+      "name": "Sinkhole",
+      "scryfall_id": "04b31611-9053-4eaf-b392-21bb644fef5f",
+      "oracle_id": "5a46ad2a-35b1-4dd5-b7c3-fec36b7c67ab",
+      "collector_number": "129",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy target land.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:130",
+      "name": "Terror",
+      "scryfall_id": "21004958-2c7e-4a55-bc80-411c4d780106",
+      "oracle_id": "b81f041d-98db-4408-9472-c483e4a502bc",
+      "collector_number": "130",
+      "mana_cost": "{1}{B}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy target nonartifact, nonblack creature. It can't be regenerated.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:131",
+      "name": "Unholy Strength",
+      "scryfall_id": "90563f90-0127-4164-b43b-f0321dc63a1d",
+      "oracle_id": "090d88a9-7f2d-4bd1-a30a-7c48d05068be",
+      "collector_number": "131",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature gets +2/+1.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:132",
+      "name": "Wall of Bone",
+      "scryfall_id": "ae20d442-a544-4a03-9ebf-5ecb137c67dd",
+      "oracle_id": "8ffe4986-9e09-4421-ad26-296a4c0df9e4",
+      "collector_number": "132",
+      "mana_cost": "{2}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Skeleton Wall",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\n{B}: Regenerate this creature. (The next time this creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it.)",
+      "power": "1",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:133",
+      "name": "Warp Artifact",
+      "scryfall_id": "9e5e07a2-fbdf-4c4c-996a-fce40bab5de5",
+      "oracle_id": "f4b18451-1f40-48bd-8ca9-eec784ad5dd7",
+      "collector_number": "133",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant artifact\nAt the beginning of the upkeep of enchanted artifact's controller, this Aura deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:134",
+      "name": "Weakness",
+      "scryfall_id": "36ca06a1-9b9a-49a2-9c47-9b72228621bc",
+      "oracle_id": "f07a24c0-bf3c-4733-9473-c6be3b16950e",
+      "collector_number": "134",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nEnchanted creature gets -2/-1.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:135",
+      "name": "Will-o'-the-Wisp",
+      "scryfall_id": "a1a6f8e9-7bc1-4151-b55f-acf877b1a7a6",
+      "oracle_id": "8b60fcfe-fb90-4a00-a708-25b59bfc9b5a",
+      "collector_number": "135",
+      "mana_cost": "{B}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Spirit",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying (This creature can't be blocked except by creatures with flying or reach.)\n{B}: Regenerate this creature. (The next time this creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it.)",
+      "power": "0",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:136",
+      "name": "Word of Command",
+      "scryfall_id": "96c21429-98d3-416b-be00-6aa9c4c5a006",
+      "oracle_id": "e8ad3a77-b293-4d69-b080-27ca9f95d443",
+      "collector_number": "136",
+      "mana_cost": "{B}{B}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Look at target opponent's hand and choose a card from it. You control that player until Word of Command finishes resolving. The player plays that card if able. While doing so, the player can activate mana abilities only if they're from lands that player controls and only if mana they produce is spent to activate other mana abilities of lands the player controls and/or to play that card. If the chosen card is cast as a spell, you control the player while that spell is resolving.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:137",
+      "name": "Zombie Master",
+      "scryfall_id": "3d4255a0-d445-4c00-b936-bbf07851e1c8",
+      "oracle_id": "5446c92f-ff22-4e9b-a2f6-e64c8560c1e0",
+      "collector_number": "137",
+      "mana_cost": "{1}{B}{B}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Zombie",
+      "colors": [
+        "B"
+      ],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Other Zombie creatures have swampwalk. (They can't be blocked as long as defending player controls a Swamp.)\nOther Zombies have \"{B}: Regenerate this permanent.\"",
+      "power": "2",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:138",
+      "name": "Burrowing",
+      "scryfall_id": "a14c05e4-8df3-450b-8a98-5028e73b14c1",
+      "oracle_id": "d6b9b88b-e31b-4b88-9d53-3df5687804ba",
+      "collector_number": "138",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature has mountainwalk. (It can't be blocked as long as defending player controls a Mountain.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:139",
+      "name": "Chaoslace",
+      "scryfall_id": "72ea2048-57bc-43d5-8987-33ca727f1a97",
+      "oracle_id": "08842aa3-f923-46e9-a106-f542331e9cc1",
+      "collector_number": "139",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target spell or permanent becomes red. (Its mana symbols remain unchanged.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:140",
+      "name": "Disintegrate",
+      "scryfall_id": "8712c49e-f171-4669-bed9-87575a37af11",
+      "oracle_id": "92d6af2f-728e-4e41-87cb-5c90878a2f2f",
+      "collector_number": "140",
+      "mana_cost": "{X}{R}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Disintegrate deals X damage to any target. If it's a creature, it can't be regenerated this turn, and if it would die this turn, exile it instead.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:141",
+      "name": "Dragon Whelp",
+      "scryfall_id": "6bbf1eab-bc32-4835-b566-8634b1fe81b0",
+      "oracle_id": "705a1985-ed39-4a4b-812e-a677170b596e",
+      "collector_number": "141",
+      "mana_cost": "{2}{R}{R}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Dragon",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Flying\n{R}: This creature gets +1/+0 until end of turn. If this ability has been activated four or more times this turn, sacrifice this creature at the beginning of the next end step.",
+      "power": "2",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:142",
+      "name": "Dwarven Demolition Team",
+      "scryfall_id": "03482c9c-1f25-4d73-9243-17462ea37ac4",
+      "oracle_id": "caf3c6ec-d17e-497c-8fe7-6f818ce93f96",
+      "collector_number": "142",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Dwarf",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Destroy target Wall.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:143",
+      "name": "Dwarven Warriors",
+      "scryfall_id": "2d4d87a3-5f8b-4152-9a8b-538ab49d62e8",
+      "oracle_id": "cfc553cd-3b4c-47a9-bffb-e5790befb32c",
+      "collector_number": "143",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Dwarf Warrior",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "{T}: Target creature with power 2 or less can't be blocked this turn.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:144",
+      "name": "Earth Elemental",
+      "scryfall_id": "b24b5864-44c0-4bc8-8705-9504f83b2c03",
+      "oracle_id": "3c97c311-7ad5-47ec-b421-f6c3bfbda9fb",
+      "collector_number": "144",
+      "mana_cost": "{3}{R}{R}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Elemental",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "",
+      "power": "4",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:145",
+      "name": "Earthbind",
+      "scryfall_id": "a6d492b7-b0b3-420e-8d00-6dacb11de77e",
+      "oracle_id": "e8e35b49-8cfb-4fb5-89aa-8050f15b11bf",
+      "collector_number": "145",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\nWhen this Aura enters, if enchanted creature has flying, this Aura deals 2 damage to that creature and this Aura gains \"Enchanted creature loses flying.\"",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:146",
+      "name": "Earthquake",
+      "scryfall_id": "e68ac362-6cdc-48a6-bdd3-4f8ea32add64",
+      "oracle_id": "9a40614b-50a3-422c-849e-53c8b7d3d204",
+      "collector_number": "146",
+      "mana_cost": "{X}{R}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Earthquake deals X damage to each creature without flying and each player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:147",
+      "name": "False Orders",
+      "scryfall_id": "7eb71ac4-796d-4011-9002-1129bc09c284",
+      "oracle_id": "38c5c952-8153-4d98-89b5-a75260383345",
+      "collector_number": "147",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Cast this spell only during the declare blockers step.\nRemove target creature defending player controls from combat. Creatures it was blocking that had become blocked by only that creature this combat become unblocked. You may have it block an attacking creature of your choice.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:148",
+      "name": "Fire Elemental",
+      "scryfall_id": "da237992-2919-4e37-8f56-2164095f59b5",
+      "oracle_id": "3912d21e-1ebc-4a81-9dc9-f404248d564a",
+      "collector_number": "148",
+      "mana_cost": "{3}{R}{R}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Elemental",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "",
+      "power": "5",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:149",
+      "name": "Fireball",
+      "scryfall_id": "b7623c00-144b-4a8f-9c6c-f5e9e4f65ece",
+      "oracle_id": "aa7714b0-2bfb-458a-8ebf-37ec2c53383e",
+      "collector_number": "149",
+      "mana_cost": "{X}{R}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "This spell costs {1} more to cast for each target beyond the first.\nFireball deals X damage divided evenly, rounded down, among any number of targets.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:150",
+      "name": "Firebreathing",
+      "scryfall_id": "3eb27381-505d-4e47-bf66-9e7ba91a5075",
+      "oracle_id": "8603bf74-faab-4910-8e45-0f2e3b318efb",
+      "collector_number": "150",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature\n{R}: Enchanted creature gets +1/+0 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:151",
+      "name": "Flashfires",
+      "scryfall_id": "ee8a05a4-0ce3-4abe-bb60-08af53cf08e5",
+      "oracle_id": "c281f436-8c77-48f7-b31c-d40cd7f9ed6a",
+      "collector_number": "151",
+      "mana_cost": "{3}{R}",
+      "mana_value": 4.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Destroy all Plains.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:152",
+      "name": "Fork",
+      "scryfall_id": "e6b43916-fe2d-417a-a550-d7c795023297",
+      "oracle_id": "50c53ae0-51ba-4046-ac74-87c65e688032",
+      "collector_number": "152",
+      "mana_cost": "{R}{R}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Copy target instant or sorcery spell, except that the copy is red. You may choose new targets for the copy.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:153",
+      "name": "Goblin Balloon Brigade",
+      "scryfall_id": "5129b422-7a35-4bc5-b14b-c814012a0d8f",
+      "oracle_id": "10bc98b0-3fdc-46d1-8d3b-6d160e9dd62f",
+      "collector_number": "153",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Goblin Warrior",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{R}: This creature gains flying until end of turn.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:154",
+      "name": "Goblin King",
+      "scryfall_id": "5873672d-37ea-4c0f-97f3-12b74fde112d",
+      "oracle_id": "d236b3fc-0d3f-4d99-875d-e32a33fe5767",
+      "collector_number": "154",
+      "mana_cost": "{1}{R}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Goblin",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Other Goblins get +1/+1 and have mountainwalk.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:155",
+      "name": "Granite Gargoyle",
+      "scryfall_id": "f15bf2b2-6848-4fbd-b89a-8d8da8ae1cdc",
+      "oracle_id": "ef5248d4-4cd1-447c-bdcc-78a09a67d923",
+      "collector_number": "155",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Gargoyle",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying\n{R}: This creature gets +0/+1 until end of turn.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:156",
+      "name": "Gray Ogre",
+      "scryfall_id": "73ae5276-b607-4f23-a9d2-e8cc7b8e3693",
+      "oracle_id": "83c8a3a6-2e1a-4e26-8847-6d066f42d906",
+      "collector_number": "156",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Ogre",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:157",
+      "name": "Hill Giant",
+      "scryfall_id": "0ddb98e8-13fe-4786-83f7-b72c56db135a",
+      "oracle_id": "342199e0-15b6-4824-83da-25caef2592b3",
+      "collector_number": "157",
+      "mana_cost": "{3}{R}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Giant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:158",
+      "name": "Hurloon Minotaur",
+      "scryfall_id": "78a9088f-8755-47cb-aa93-51d992ccab90",
+      "oracle_id": "8f1dae40-b307-446e-bbd2-86aa35813871",
+      "collector_number": "158",
+      "mana_cost": "{1}{R}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Minotaur",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:159",
+      "name": "Ironclaw Orcs",
+      "scryfall_id": "d56421a8-34ae-4033-943f-c59a7bf2b6f9",
+      "oracle_id": "c645a616-0d7d-416c-b5f3-057b3a1666a0",
+      "collector_number": "159",
+      "mana_cost": "{1}{R}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Orc",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "This creature can't block creatures with power 2 or greater.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:160",
+      "name": "Keldon Warlord",
+      "scryfall_id": "8fe3fd83-969c-4add-888f-86f4306b067c",
+      "oracle_id": "acc869f8-dcbe-4d57-baa0-3eef4aceb251",
+      "collector_number": "160",
+      "mana_cost": "{2}{R}{R}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Human Barbarian",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Keldon Warlord's power and toughness are each equal to the number of non-Wall creatures you control.",
+      "power": "*",
+      "toughness": "*",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:161",
+      "name": "Lightning Bolt",
+      "scryfall_id": "d573ef03-4730-45aa-93dd-e45ac1dbaf4a",
+      "oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+      "collector_number": "161",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:162",
+      "name": "Mana Flare",
+      "scryfall_id": "7fb99a26-beeb-4aca-bb02-b2d2ce0595f9",
+      "oracle_id": "97159138-c34b-416e-b079-5c952383a243",
+      "collector_number": "162",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Whenever a player taps a land for mana, that player adds one mana of any type that land produced.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:163",
+      "name": "Manabarbs",
+      "scryfall_id": "6121f72f-680f-4bb4-ae4d-37ee4ebed4d8",
+      "oracle_id": "0f1afedd-c60f-454f-b84a-c8117aec0128",
+      "collector_number": "163",
+      "mana_cost": "{3}{R}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Whenever a player taps a land for mana, this enchantment deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:164",
+      "name": "Mons's Goblin Raiders",
+      "scryfall_id": "b4eb3db3-6a7c-488a-9433-d5d1d3133816",
+      "oracle_id": "a37159df-f6d7-4db6-85de-0ea77f425993",
+      "collector_number": "164",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Goblin",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:165",
+      "name": "Orcish Artillery",
+      "scryfall_id": "a97208b1-a91b-4129-8a00-2f97b418accc",
+      "oracle_id": "c000811e-bde7-4840-a3bb-9714d5c977eb",
+      "collector_number": "165",
+      "mana_cost": "{1}{R}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Orc Warrior",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: This creature deals 2 damage to any target and 3 damage to you.",
+      "power": "1",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:166",
+      "name": "Orcish Oriflamme",
+      "scryfall_id": "911538ea-322c-4c40-a9c3-35e47fe60fce",
+      "oracle_id": "0b16a650-68b0-44dc-a9e1-15b7966e0b18",
+      "collector_number": "166",
+      "mana_cost": "{3}{R}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Attacking creatures you control get +1/+0.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:167",
+      "name": "Power Surge",
+      "scryfall_id": "62858604-ca5a-4f69-a045-a7515ebfabf2",
+      "oracle_id": "156b2228-f7b2-4816-b894-c4953a32c05f",
+      "collector_number": "167",
+      "mana_cost": "{R}{R}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "At the beginning of each player's upkeep, this enchantment deals X damage to that player, where X is the number of untapped lands they controlled at the beginning of this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:168",
+      "name": "Raging River",
+      "scryfall_id": "61e4f56d-1f4f-49f2-8534-0d09196a3327",
+      "oracle_id": "a2310312-6e1e-4e34-a351-9aef499a810f",
+      "collector_number": "168",
+      "mana_cost": "{R}{R}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Whenever one or more creatures you control attack, each defending player divides all creatures without flying they control into a \"left\" pile and a \"right\" pile. Then, for each attacking creature you control, choose \"left\" or \"right.\" That creature can't be blocked this combat except by creatures with flying and creatures in a pile with the chosen label.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:169",
+      "name": "Red Elemental Blast",
+      "scryfall_id": "776ad9be-3309-4f1d-9f27-6219d9477662",
+      "oracle_id": "bb329a5c-b9f9-4973-a53f-090024146325",
+      "collector_number": "169",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Choose one —\n• Counter target blue spell.\n• Destroy target blue permanent.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:170",
+      "name": "Roc of Kher Ridges",
+      "scryfall_id": "731a4b86-c213-4d8e-bf01-0a0e8cff0ff1",
+      "oracle_id": "01f07ab9-3c3e-4fea-9cd6-543a5b7056b8",
+      "collector_number": "170",
+      "mana_cost": "{3}{R}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Bird",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:171",
+      "name": "Rock Hydra",
+      "scryfall_id": "410ac9e6-fbc1-4cc8-84db-84e2eb1bab97",
+      "oracle_id": "aff84707-f5f8-4f53-869e-feec78da8d8d",
+      "collector_number": "171",
+      "mana_cost": "{X}{R}{R}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Hydra",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "This creature enters with X +1/+1 counters on it.\nFor each 1 damage that would be dealt to this creature, if it has a +1/+1 counter on it, remove a +1/+1 counter from it and prevent that 1 damage.\n{R}: Prevent the next 1 damage that would be dealt to this creature this turn.\n{R}{R}{R}: Put a +1/+1 counter on this creature. Activate only during your upkeep.",
+      "power": "0",
+      "toughness": "0",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:172",
+      "name": "Sedge Troll",
+      "scryfall_id": "b13bf496-f3c0-4c13-8282-e7abfab6a198",
+      "oracle_id": "a6a43190-cca2-4f07-afe9-8af681d777da",
+      "collector_number": "172",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Troll",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "B",
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "This creature gets +1/+1 as long as you control a Swamp.\n{B}: Regenerate this creature.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:173",
+      "name": "Shatter",
+      "scryfall_id": "50dc7fc1-cb6a-4c68-b993-1a25cf16226e",
+      "oracle_id": "84d32e68-72b9-432d-a023-7bc6a26b8ad0",
+      "collector_number": "173",
+      "mana_cost": "{1}{R}",
+      "mana_value": 2.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy target artifact.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:174",
+      "name": "Shivan Dragon",
+      "scryfall_id": "fefbf149-f988-4f8b-9f53-56f5878116a6",
+      "oracle_id": "711eea87-0fa3-46e0-a42b-fa5a86455f04",
+      "collector_number": "174",
+      "mana_cost": "{4}{R}{R}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Dragon",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying\n{R}: This creature gets +1/+0 until end of turn.",
+      "power": "5",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:175",
+      "name": "Smoke",
+      "scryfall_id": "7c67788e-d713-47c3-ab9f-b8a6212ae24f",
+      "oracle_id": "8aa97d25-cd51-4ceb-b7eb-af64f0914a8c",
+      "collector_number": "175",
+      "mana_cost": "{R}{R}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Players can't untap more than one creature during their untap steps.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:176",
+      "name": "Stone Giant",
+      "scryfall_id": "7ffaedb9-25f8-4304-9085-e12505b93312",
+      "oracle_id": "0b8e3f9b-a4da-49a3-8545-ce7a265e5856",
+      "collector_number": "176",
+      "mana_cost": "{2}{R}{R}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Giant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Target creature you control with toughness less than this creature's power gains flying until end of turn. Destroy that creature at the beginning of the next end step.",
+      "power": "3",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:177",
+      "name": "Stone Rain",
+      "scryfall_id": "57ff74cb-a2ed-4123-ac42-f72f9820049e",
+      "oracle_id": "6e880df6-fc00-43d2-a9c8-f575f40b78c6",
+      "collector_number": "177",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy target land.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:178",
+      "name": "Tunnel",
+      "scryfall_id": "b21ebc9f-a93e-4d18-b3e8-8459e3abbf31",
+      "oracle_id": "80559618-9dd9-4987-b3bc-1a1b5537bbc5",
+      "collector_number": "178",
+      "mana_cost": "{R}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Destroy target Wall. It can't be regenerated.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:179",
+      "name": "Two-Headed Giant of Foriys",
+      "scryfall_id": "31c687dc-ee0c-4e54-a2b3-5d8e633b3245",
+      "oracle_id": "38aa31bd-7145-43b9-9409-463d9ad6cd69",
+      "collector_number": "179",
+      "mana_cost": "{4}{R}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Giant",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Trample\nThis creature can block an additional creature each combat.",
+      "power": "4",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:180",
+      "name": "Uthden Troll",
+      "scryfall_id": "2ff21a6f-83a7-4bf3-a078-294e303232cc",
+      "oracle_id": "d6329dcc-b450-482a-8ee3-45449f7a4b3d",
+      "collector_number": "180",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Troll",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{R}: Regenerate this creature.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:181",
+      "name": "Wall of Fire",
+      "scryfall_id": "efcf12cd-fb70-444e-9641-73ffa0e8f16e",
+      "oracle_id": "f38c8b47-e8e0-4d2f-b1da-d8d986805a48",
+      "collector_number": "181",
+      "mana_cost": "{1}{R}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\n{R}: This creature gets +1/+0 until end of turn.",
+      "power": "0",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:182",
+      "name": "Wall of Stone",
+      "scryfall_id": "140e567c-6e4a-42b0-8084-d6c9695ae802",
+      "oracle_id": "cd4cadb4-3156-49bd-b36e-12ba5c85938b",
+      "collector_number": "182",
+      "mana_cost": "{1}{R}{R}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)",
+      "power": "0",
+      "toughness": "8",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:183",
+      "name": "Wheel of Fortune",
+      "scryfall_id": "67b369c4-faa8-45c8-a1b9-98f228b69682",
+      "oracle_id": "a8abd966-de7b-46a3-8ac7-8747ab35653a",
+      "collector_number": "183",
+      "mana_cost": "{2}{R}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "R"
+      ],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Each player discards their hand, then draws seven cards.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:184",
+      "name": "Aspect of Wolf",
+      "scryfall_id": "fd9ac9e6-1395-4fbd-80e2-645f0d910c29",
+      "oracle_id": "77b7277d-90a1-4774-a998-8c35c3f94e4a",
+      "collector_number": "184",
+      "mana_cost": "{1}{G}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant creature\nEnchanted creature gets +X/+Y, where X is half the number of Forests you control, rounded down, and Y is half the number of Forests you control, rounded up.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:185",
+      "name": "Berserk",
+      "scryfall_id": "e173c8ce-2352-405e-ad00-e3bb94ced1ad",
+      "oracle_id": "8b67d192-9a05-4a47-82ae-5fc4b7834d88",
+      "collector_number": "185",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Cast this spell only before the combat damage step.\nTarget creature gains trample and gets +X/+0 until end of turn, where X is its power. At the beginning of the next end step, destroy that creature if it attacked this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:186",
+      "name": "Birds of Paradise",
+      "scryfall_id": "55fe6449-1f23-43dc-adee-d144cd505b5c",
+      "oracle_id": "d3a0b660-358c-41bd-9cd2-41fbf3491b1a",
+      "collector_number": "186",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Bird",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying\n{T}: Add one mana of any color.",
+      "power": "0",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:187",
+      "name": "Camouflage",
+      "scryfall_id": "3838c2a3-7fab-4976-9c1b-2891aee24e52",
+      "oracle_id": "9cf44db4-627a-4197-9588-6da72e41f03d",
+      "collector_number": "187",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Cast this spell only during your declare attackers step.\nThis turn, instead of declaring blockers, each defending player chooses any number of creatures they control and divides them into a number of piles equal to the number of attacking creatures for whom that player is the defending player. Creatures those players control that can block additional creatures may likewise be put into additional piles. Assign each pile to a different one of those attacking creatures at random. Each creature in a pile that can block the creature that pile is assigned to does so. (Piles can be empty.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:188",
+      "name": "Channel",
+      "scryfall_id": "c1862c47-71cc-45a3-8805-a5ddc62e55ea",
+      "oracle_id": "d1b815d1-2848-40d4-a555-66822d1becbc",
+      "collector_number": "188",
+      "mana_cost": "{G}{G}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Until end of turn, any time you could activate a mana ability, you may pay 1 life. If you do, add {C}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:189",
+      "name": "Cockatrice",
+      "scryfall_id": "9cd91814-6177-4a3d-a1c1-a3be7d7c7957",
+      "oracle_id": "af354337-424c-4c7e-8ca5-6149261368d2",
+      "collector_number": "189",
+      "mana_cost": "{3}{G}{G}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Cockatrice",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Flying\nWhenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat.",
+      "power": "2",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:190",
+      "name": "Craw Wurm",
+      "scryfall_id": "bfed1a95-bd67-4e16-a781-81866028af2f",
+      "oracle_id": "6a462a69-3e42-41de-a3aa-a488d9f38d69",
+      "collector_number": "190",
+      "mana_cost": "{4}{G}{G}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Wurm",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "6",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:191",
+      "name": "Elvish Archers",
+      "scryfall_id": "1cb9d405-f2b5-4e10-a405-feafd2a87d90",
+      "oracle_id": "534ce8e2-53a1-407c-9881-d3b5347d43c3",
+      "collector_number": "191",
+      "mana_cost": "{1}{G}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Elf Archer",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "First strike",
+      "power": "2",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:192",
+      "name": "Fastbond",
+      "scryfall_id": "a575a9af-e1de-4a1d-91d8-440585377e4f",
+      "oracle_id": "e27193b7-1a47-4555-865d-b1fd4c6d597f",
+      "collector_number": "192",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "You may play any number of lands on each of your turns.\nWhenever you play a land, if it wasn't the first land you played this turn, this enchantment deals 1 damage to you.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:193",
+      "name": "Fog",
+      "scryfall_id": "cfba606d-bb55-43ba-aa0c-299649958788",
+      "oracle_id": "27e9db49-7af7-4bef-ad4c-bf5dfb92030d",
+      "collector_number": "193",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Prevent all combat damage that would be dealt this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:194",
+      "name": "Force of Nature",
+      "scryfall_id": "21551cb6-3a53-42dd-9bbd-4bc56304d6d3",
+      "oracle_id": "e3c4c27d-f263-4c69-a4fe-2928136ff68b",
+      "collector_number": "194",
+      "mana_cost": "{2}{G}{G}{G}{G}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Elemental",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Trample (This creature can deal excess combat damage to the player or planeswalker it's attacking.)\nAt the beginning of your upkeep, this creature deals 8 damage to you unless you pay {G}{G}{G}{G}.",
+      "power": "8",
+      "toughness": "8",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:195",
+      "name": "Fungusaur",
+      "scryfall_id": "5ad89f0d-b09b-40a0-84d6-3ee60dec7e23",
+      "oracle_id": "3e771f5b-2de3-4a1b-8281-ab1f7491e5a1",
+      "collector_number": "195",
+      "mana_cost": "{3}{G}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Fungus Dinosaur",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Whenever this creature is dealt damage, put a +1/+1 counter on it.",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:196",
+      "name": "Gaea's Liege",
+      "scryfall_id": "e2b15221-c8b0-4861-9f8b-8a65834ad499",
+      "oracle_id": "8d134a60-e1e5-4163-8bdc-36af91567185",
+      "collector_number": "196",
+      "mana_cost": "{3}{G}{G}{G}",
+      "mana_value": 6.0,
+      "type_line": "Creature — Avatar",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "As long as Gaea's Liege isn't attacking, its power and toughness are each equal to the number of Forests you control. As long as Gaea's Liege is attacking, its power and toughness are each equal to the number of Forests defending player controls.\n{T}: Target land becomes a Forest until this creature leaves the battlefield.",
+      "power": "*",
+      "toughness": "*",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:197",
+      "name": "Giant Growth",
+      "scryfall_id": "367dbefe-3366-408e-9fcf-7dc00f8cc201",
+      "oracle_id": "5748ebf1-24e3-499d-ab7c-c2cebd462a24",
+      "collector_number": "197",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Target creature gets +3/+3 until end of turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:198",
+      "name": "Giant Spider",
+      "scryfall_id": "77636b4c-faea-4bf5-b88c-dd5bb88dc930",
+      "oracle_id": "e740ce2f-2134-473c-afa1-1b6d2d1e38ef",
+      "collector_number": "198",
+      "mana_cost": "{3}{G}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Spider",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Reach (This creature can block creatures with flying.)",
+      "power": "2",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:199",
+      "name": "Grizzly Bears",
+      "scryfall_id": "ce2d603a-3231-4a8c-bf39-1617586ea870",
+      "oracle_id": "14c8f55d-d177-4c25-a931-ebeb9e6062a0",
+      "collector_number": "199",
+      "mana_cost": "{1}{G}",
+      "mana_value": 2.0,
+      "type_line": "Creature — Bear",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "2",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:200",
+      "name": "Hurricane",
+      "scryfall_id": "52f5a19f-16e4-4d35-89e1-969ac8202f88",
+      "oracle_id": "9c021685-4017-49c7-9f58-2ae0243361a0",
+      "collector_number": "200",
+      "mana_cost": "{X}{G}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Hurricane deals X damage to each creature with flying and each player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:201",
+      "name": "Ice Storm",
+      "scryfall_id": "9914836e-2fa6-4390-94b2-431427848a54",
+      "oracle_id": "a0b97e33-2d0c-4800-a9f5-9cd9be651ea8",
+      "collector_number": "201",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Destroy target land.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:202",
+      "name": "Instill Energy",
+      "scryfall_id": "5bd38716-874c-4e3c-a315-837839a6258c",
+      "oracle_id": "8695c3c1-fb4b-4429-ae33-ec186f68796b",
+      "collector_number": "202",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nEnchanted creature can attack as though it had haste.\n{0}: Untap enchanted creature. Activate only during your turn and only once each turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:203",
+      "name": "Ironroot Treefolk",
+      "scryfall_id": "b93c5869-7777-44bb-967a-e9439b25ced4",
+      "oracle_id": "b7c0bb85-fb87-4c73-bc1b-7b4dc763c7e8",
+      "collector_number": "203",
+      "mana_cost": "{4}{G}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Treefolk",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "",
+      "power": "3",
+      "toughness": "5",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:204",
+      "name": "Kudzu",
+      "scryfall_id": "b2b72dcd-9ea1-4729-baae-ecd262fdff67",
+      "oracle_id": "51ca5965-ae39-4e51-8948-9a230a03f906",
+      "collector_number": "204",
+      "mana_cost": "{1}{G}{G}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant land\nWhen enchanted land becomes tapped, destroy it. That land's controller may attach this Aura to a land of their choice.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:205",
+      "name": "Ley Druid",
+      "scryfall_id": "f9232508-d363-4ef3-987a-741f6bff331f",
+      "oracle_id": "a4ae41c7-9631-407d-8fd3-04f403d940a8",
+      "collector_number": "205",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Human Druid",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Untap target land.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:206",
+      "name": "Lifeforce",
+      "scryfall_id": "e292577e-6232-44fa-a9c2-cc09949c6ed3",
+      "oracle_id": "07ae1fe5-5c3e-4d94-b809-8defd2ef44e3",
+      "collector_number": "206",
+      "mana_cost": "{G}{G}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "{G}{G}: Counter target black spell.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:207",
+      "name": "Lifelace",
+      "scryfall_id": "38cb601b-a35c-412e-b386-e77dad3daa54",
+      "oracle_id": "eec1de80-4b3d-481d-a235-c299e0381830",
+      "collector_number": "207",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Target spell or permanent becomes green. (Mana symbols on that permanent remain unchanged.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:208",
+      "name": "Living Artifact",
+      "scryfall_id": "c9e753a2-a7d0-4d37-ae65-b5a1b5039a6e",
+      "oracle_id": "4ff9af56-ac18-4966-9e48-183e1ca1c2d0",
+      "collector_number": "208",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant artifact\nWhenever you're dealt damage, put that many vitality counters on this Aura.\nAt the beginning of your upkeep, you may remove a vitality counter from this Aura. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:209",
+      "name": "Living Lands",
+      "scryfall_id": "80be0580-7948-4d8e-8c0f-5e2797ac411b",
+      "oracle_id": "8f0179fe-6d7d-49cc-ab06-d3b402c6fc8d",
+      "collector_number": "209",
+      "mana_cost": "{3}{G}",
+      "mana_value": 4.0,
+      "type_line": "Enchantment",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "All Forests are 1/1 creatures that are still lands.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:210",
+      "name": "Llanowar Elves",
+      "scryfall_id": "d4f1cc9e-4f99-4c26-ac1b-8ef069fa8ceb",
+      "oracle_id": "68954295-54e3-4303-a6bc-fc4547a4e3a3",
+      "collector_number": "210",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Elf Druid",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "{T}: Add {G}.",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:211",
+      "name": "Lure",
+      "scryfall_id": "2a87b26e-0431-42e9-b44f-94ba8546111a",
+      "oracle_id": "7a7425ba-4478-4bc4-855f-abf947ea4fa2",
+      "collector_number": "211",
+      "mana_cost": "{1}{G}{G}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nAll creatures able to block enchanted creature do so.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:212",
+      "name": "Natural Selection",
+      "scryfall_id": "a8917dc8-01c0-4e72-9310-c4d501775411",
+      "oracle_id": "57f90b30-bcb0-447e-8788-5c5ded187207",
+      "collector_number": "212",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Instant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Look at the top three cards of target player's library, then put them back in any order. You may have that player shuffle.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:213",
+      "name": "Regeneration",
+      "scryfall_id": "b7b7aa34-b4f8-41b4-82ce-ab2e204c3bf4",
+      "oracle_id": "89390a33-b289-4edd-a114-6616e49a49c2",
+      "collector_number": "213",
+      "mana_cost": "{1}{G}",
+      "mana_value": 2.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant creature (Target a creature as you cast this. This card enters attached to that creature.)\n{G}: Regenerate enchanted creature. (The next time that creature would be destroyed this turn, instead tap it, remove it from combat, and heal all damage on it.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:214",
+      "name": "Regrowth",
+      "scryfall_id": "badc73ec-3728-4246-90c7-5f4eb7051ed5",
+      "oracle_id": "e6e4a8bd-5c40-4654-8de1-0da9afed90fd",
+      "collector_number": "214",
+      "mana_cost": "{1}{G}",
+      "mana_value": 2.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Return target card from your graveyard to your hand.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:215",
+      "name": "Scryb Sprites",
+      "scryfall_id": "6d929c38-91e6-457c-937a-d1884f4bba44",
+      "oracle_id": "a1f20695-6f08-4d5c-9fba-b0018bee298e",
+      "collector_number": "215",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Faerie",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Flying",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:216",
+      "name": "Shanodin Dryads",
+      "scryfall_id": "814cf35c-f1ad-4bf4-8c10-a5592c3b1be8",
+      "oracle_id": "998484cc-fefc-4da5-9987-5d6e89599c34",
+      "collector_number": "216",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Nymph Dryad",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Forestwalk (This creature can't be blocked as long as defending player controls a Forest.)",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:217",
+      "name": "Stream of Life",
+      "scryfall_id": "aa1c4d4b-2645-4cd9-823e-3c9bb2eb48f9",
+      "oracle_id": "9eb2912d-2130-49f2-9529-b58fa5a97a15",
+      "collector_number": "217",
+      "mana_cost": "{X}{G}",
+      "mana_value": 1.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Target player gains X life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:218",
+      "name": "Thicket Basilisk",
+      "scryfall_id": "e92cce01-b3bd-4307-aae5-9a7c8fa386ab",
+      "oracle_id": "c4822813-cd81-465d-9fe8-3a4c2dcd31ef",
+      "collector_number": "218",
+      "mana_cost": "{3}{G}{G}",
+      "mana_value": 5.0,
+      "type_line": "Creature — Basilisk",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat.",
+      "power": "2",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:219",
+      "name": "Timber Wolves",
+      "scryfall_id": "bc2570a4-eef9-430d-b6c2-cd51d29b9d01",
+      "oracle_id": "35d07ac9-b184-4b5f-8192-34b1db042f69",
+      "collector_number": "219",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Wolf",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Banding (Any creatures with banding, and up to one without, can attack in a band. Bands are blocked as a group. If any creatures with banding you control are blocking or being blocked by a creature, you divide that creature's combat damage, not its controller, among any of the creatures it's being blocked by or is blocking.)",
+      "power": "1",
+      "toughness": "1",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:220",
+      "name": "Tranquility",
+      "scryfall_id": "774cc5a6-3a69-4812-add4-eb5eb6389238",
+      "oracle_id": "f671e3c3-cd59-4d06-a1af-5d04892cf74d",
+      "collector_number": "220",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Destroy all enchantments.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:221",
+      "name": "Tsunami",
+      "scryfall_id": "9ed67d61-cf47-446b-b454-eb404a8686b7",
+      "oracle_id": "ef2b1565-7b02-4cab-9031-beb1701ee929",
+      "collector_number": "221",
+      "mana_cost": "{3}{G}",
+      "mana_value": 4.0,
+      "type_line": "Sorcery",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Destroy all Islands.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:222",
+      "name": "Verduran Enchantress",
+      "scryfall_id": "9f87178b-1221-4d7a-a7a5-20d7f01b8089",
+      "oracle_id": "cd98a31b-cc7e-43f9-982e-109ad9850908",
+      "collector_number": "222",
+      "mana_cost": "{1}{G}{G}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Human Druid",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Whenever you cast an enchantment spell, you may draw a card.",
+      "power": "0",
+      "toughness": "2",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:223",
+      "name": "Wall of Brambles",
+      "scryfall_id": "af2a4558-db6e-41b2-aff6-b164d93282a0",
+      "oracle_id": "f8d82a00-c10e-4b9e-9642-d05706900a97",
+      "collector_number": "223",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Plant Wall",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\n{G}: Regenerate this creature.",
+      "power": "2",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:224",
+      "name": "Wall of Ice",
+      "scryfall_id": "cc743a03-867c-4bb0-8fb0-2bcaa0a8a756",
+      "oracle_id": "1945e165-7636-4727-89ba-3811251ef175",
+      "collector_number": "224",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)",
+      "power": "0",
+      "toughness": "7",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:225",
+      "name": "Wall of Wood",
+      "scryfall_id": "8df80424-3bd9-4982-ad79-e55d9ba3b43d",
+      "oracle_id": "aa5e6894-8c97-46f8-a0fd-07c6db51e9a7",
+      "collector_number": "225",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Creature — Wall",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Defender (This creature can't attack.)",
+      "power": "0",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:226",
+      "name": "Wanderlust",
+      "scryfall_id": "220a03ca-8c9b-4acb-821d-f6577fbb20fb",
+      "oracle_id": "73bddfdb-d1fb-4038-b676-201f6b82beb0",
+      "collector_number": "226",
+      "mana_cost": "{2}{G}",
+      "mana_value": 3.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "uncommon",
+      "oracle_text": "Enchant creature\nAt the beginning of the upkeep of enchanted creature's controller, this Aura deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:227",
+      "name": "War Mammoth",
+      "scryfall_id": "c8d6081e-f686-4263-a0a2-21c0d9af5fdb",
+      "oracle_id": "b2a8fcf9-2ec2-40a9-9955-90f8605b11a3",
+      "collector_number": "227",
+      "mana_cost": "{3}{G}",
+      "mana_value": 4.0,
+      "type_line": "Creature — Elephant",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Trample",
+      "power": "3",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:228",
+      "name": "Web",
+      "scryfall_id": "37c7890a-86dc-4a97-a7ce-1436fa22d0c0",
+      "oracle_id": "5aa12aff-db3c-4be5-822b-3afdf536b33e",
+      "collector_number": "228",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Enchant creature (Target a creature as you cast this. This card enters attached to that creature.)\nEnchanted creature gets +0/+2 and has reach. (It can block creatures with flying.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:229",
+      "name": "Wild Growth",
+      "scryfall_id": "fd896dfa-66c0-4327-8e5b-489bbe350c95",
+      "oracle_id": "706ae742-1807-44b7-a4fa-f2e26f61519a",
+      "collector_number": "229",
+      "mana_cost": "{G}",
+      "mana_value": 1.0,
+      "type_line": "Enchantment — Aura",
+      "colors": [
+        "G"
+      ],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "Enchant land\nWhenever enchanted land is tapped for mana, its controller adds an additional {G}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:230",
+      "name": "Ankh of Mishra",
+      "scryfall_id": "f594b7aa-d44e-47c4-989b-565f881e25f1",
+      "oracle_id": "63c1eda1-3e6f-4e9c-adf3-a43164df98bb",
+      "collector_number": "230",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "Whenever a land enters, this artifact deals 2 damage to that land's controller.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:231",
+      "name": "Basalt Monolith",
+      "scryfall_id": "66a74c89-6f86-4ec8-af17-391cd5026054",
+      "oracle_id": "6b8cf2a0-b045-4d91-9d91-c602d40c6237",
+      "collector_number": "231",
+      "mana_cost": "{3}",
+      "mana_value": 3.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "This artifact doesn't untap during your untap step.\n{T}: Add {C}{C}{C}.\n{3}: Untap this artifact.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:232",
+      "name": "Black Lotus",
+      "scryfall_id": "b0faa7f2-b547-42c4-a810-839da50dadfe",
+      "oracle_id": "5089ec1a-f881-4d55-af14-5d996171203b",
+      "collector_number": "232",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{T}, Sacrifice this artifact: Add three mana of any one color.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:233",
+      "name": "Black Vise",
+      "scryfall_id": "76ac72f8-5b1e-4d67-a796-ef69cde27424",
+      "oracle_id": "de7839fb-7040-48ab-a6d4-d1952972943d",
+      "collector_number": "233",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "As this artifact enters, choose an opponent.\nAt the beginning of the chosen player's upkeep, this artifact deals X damage to that player, where X is the number of cards in their hand minus 4.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:234",
+      "name": "Celestial Prism",
+      "scryfall_id": "a47417cb-1ea7-4f65-ba06-e27a99373114",
+      "oracle_id": "eb228a6c-bceb-45c3-a258-3f209682e1c6",
+      "collector_number": "234",
+      "mana_cost": "{3}",
+      "mana_value": 3.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{2}, {T}: Add one mana of any color.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:235",
+      "name": "Chaos Orb",
+      "scryfall_id": "92274971-7c4a-4326-b0fe-75e2d124f718",
+      "oracle_id": "edb455f4-8dc9-4b7c-b25c-cb51b7dfbb41",
+      "collector_number": "235",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{1}, {T}: If this artifact is on the battlefield, flip it onto the battlefield from a height of at least one foot. If this artifact turns over completely at least once during the flip, destroy all nontoken permanents it touches. Then destroy this artifact.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:236",
+      "name": "Clockwork Beast",
+      "scryfall_id": "27f916a2-0ace-44b5-99dc-72979af34db9",
+      "oracle_id": "eb97c8db-ac6c-476c-b14d-87785e9c82f0",
+      "collector_number": "236",
+      "mana_cost": "{6}",
+      "mana_value": 6.0,
+      "type_line": "Artifact Creature — Beast",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "This creature enters with seven +1/+0 counters on it.\nAt end of combat, if this creature attacked or blocked this combat, remove a +1/+0 counter from it.\n{X}, {T}: Put up to X +1/+0 counters on this creature. This ability can't cause the total number of +1/+0 counters on this creature to be greater than seven. Activate only during your upkeep.",
+      "power": "0",
+      "toughness": "4",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:237",
+      "name": "Conservator",
+      "scryfall_id": "c7824e2a-4eff-4f72-9216-0db30a4f4252",
+      "oracle_id": "1940e56d-0972-4ca4-946c-bbd42dde1dcb",
+      "collector_number": "237",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{3}, {T}: Prevent the next 2 damage that would be dealt to you this turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:238",
+      "name": "Copper Tablet",
+      "scryfall_id": "30935e4a-013e-4c46-ad05-304df8e5dfa4",
+      "oracle_id": "16d1023b-2162-4010-8bf4-218dbe7c99a0",
+      "collector_number": "238",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "At the beginning of each player's upkeep, this artifact deals 1 damage to that player.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:239",
+      "name": "Crystal Rod",
+      "scryfall_id": "76693233-7961-4b7e-80f2-ed90e494c4aa",
+      "oracle_id": "e68bc048-1009-46a5-97d6-ec77a18067da",
+      "collector_number": "239",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a player casts a blue spell, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:240",
+      "name": "Cyclopean Tomb",
+      "scryfall_id": "894c5cf2-8ae2-427a-bcbc-67df0bdfee9d",
+      "oracle_id": "1edee40f-d153-4d67-aee7-ef08e11e4a79",
+      "collector_number": "240",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{2}, {T}: Put a mire counter on target non-Swamp land. That land is a Swamp for as long as it has a mire counter on it. Activate only during your upkeep.\nWhen this artifact is put into a graveyard from the battlefield, at the beginning of each of your upkeeps for the rest of the game, remove all mire counters from a land that a mire counter was put onto with this artifact but that a mire counter has not been removed from with this artifact.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:241",
+      "name": "Dingus Egg",
+      "scryfall_id": "65eb6cda-e512-40a8-9c1f-335b713409ff",
+      "oracle_id": "1973f1e9-aa14-49dc-bafe-be17b30ba288",
+      "collector_number": "241",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "Whenever a land is put into a graveyard from the battlefield, this artifact deals 2 damage to that land's controller.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:242",
+      "name": "Disrupting Scepter",
+      "scryfall_id": "ca571ee8-07a2-43b8-9acf-89cbfd3cf7c9",
+      "oracle_id": "cd30a128-4b23-476e-8066-2272fdc395d9",
+      "collector_number": "242",
+      "mana_cost": "{3}",
+      "mana_value": 3.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{3}, {T}: Target player discards a card. Activate only during your turn.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:243",
+      "name": "Forcefield",
+      "scryfall_id": "3f2004c1-8efe-407f-bf48-27b807422eea",
+      "oracle_id": "bd6823fb-a696-4e6d-9c5e-3b55dfe03730",
+      "collector_number": "243",
+      "mana_cost": "{3}",
+      "mana_value": 3.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{1}: The next time an unblocked creature of your choice would deal combat damage to you this turn, prevent all but 1 of that damage.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:244",
+      "name": "Gauntlet of Might",
+      "scryfall_id": "da248001-ed75-4b68-9532-37d3cd5afc4c",
+      "oracle_id": "d38ad188-515e-4865-a0ed-5d0fd4c7b453",
+      "collector_number": "244",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "Red creatures get +1/+1.\nWhenever a Mountain is tapped for mana, its controller adds an additional {R}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:245",
+      "name": "Glasses of Urza",
+      "scryfall_id": "cafc2350-5d64-4379-9198-79a114654d45",
+      "oracle_id": "af7fabf4-8d55-4b06-9c21-472f4a5775b4",
+      "collector_number": "245",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Look at target player's hand.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:246",
+      "name": "Helm of Chatzuk",
+      "scryfall_id": "3792c6ef-c4e6-4923-9a51-7d28fbc5c393",
+      "oracle_id": "948e3bb7-8265-4e95-acd1-a0c4f22441df",
+      "collector_number": "246",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{1}, {T}: Target creature gains banding until end of turn. (Any creatures with banding, and up to one without, can attack in a band. Bands are blocked as a group. If any creatures with banding a player controls are blocking or being blocked by a creature, that player divides that creature's combat damage, not its controller, among any of the creatures it's being blocked by or is blocking.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:247",
+      "name": "Howling Mine",
+      "scryfall_id": "51f8f6e1-a451-4262-90d3-5107caf54175",
+      "oracle_id": "d26b27db-a567-4631-b4b6-7294222fbdd1",
+      "collector_number": "247",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "At the beginning of each player's draw step, if this artifact is untapped, that player draws an additional card.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:248",
+      "name": "Icy Manipulator",
+      "scryfall_id": "29dc1596-a2e7-4d60-9f99-89babaef8a06",
+      "oracle_id": "3608f1f7-8dc5-4dd1-ae91-c830e1de9529",
+      "collector_number": "248",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{1}, {T}: Tap target artifact, creature, or land.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:249",
+      "name": "Illusionary Mask",
+      "scryfall_id": "62ef2f37-b8ad-47ad-89ca-d6abcb7ff21b",
+      "oracle_id": "05ac866d-0405-4d25-986a-c10fcfc097e6",
+      "collector_number": "249",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{X}: You may choose a creature card in your hand whose mana cost could be paid by some amount of, or all of, the mana you spent on {X}. If you do, you may cast that card face down as a 2/2 creature spell without paying its mana cost. If the creature that spell becomes as it resolves has not been turned face up and would assign or deal damage, be dealt damage, or become tapped, instead it's turned face up and assigns or deals damage, is dealt damage, or becomes tapped. Activate only as a sorcery.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:250",
+      "name": "Iron Star",
+      "scryfall_id": "5786de12-cade-43c2-a6b0-0c5b294b9d0e",
+      "oracle_id": "e9ec67e1-7064-44d4-a1ed-04b7893ffb15",
+      "collector_number": "250",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a player casts a red spell, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:251",
+      "name": "Ivory Cup",
+      "scryfall_id": "9964d8d8-dc97-4e5f-9f52-173f7e2c37fd",
+      "oracle_id": "8e2017c3-057d-4e30-bd60-f486fddbc6ca",
+      "collector_number": "251",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a player casts a white spell, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:252",
+      "name": "Jade Monolith",
+      "scryfall_id": "4a77e0f1-449d-4a7d-9fa0-ba7598f7a73a",
+      "oracle_id": "1e105ab7-fb10-4cfd-ac2f-5e11488cf1b0",
+      "collector_number": "252",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{1}: The next time a source of your choice would deal damage to target creature this turn, that source deals that damage to you instead.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:253",
+      "name": "Jade Statue",
+      "scryfall_id": "8d82d94b-ceef-4533-a4f2-b6442a61b839",
+      "oracle_id": "96162b22-41e7-4559-aa1b-c18f42abcb52",
+      "collector_number": "253",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{2}: This artifact becomes a 3/6 Golem artifact creature until end of combat. Activate only during combat.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:254",
+      "name": "Jayemdae Tome",
+      "scryfall_id": "cac8c421-5b92-481d-b2de-560c0231ab58",
+      "oracle_id": "39ee576a-0803-4063-9c84-f2b537e4d44c",
+      "collector_number": "254",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact — Book",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{4}, {T}: Draw a card.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:255",
+      "name": "Juggernaut",
+      "scryfall_id": "dcd6a291-5282-4f49-8203-d9b416083c48",
+      "oracle_id": "4ac9116f-36bc-4d71-b696-d6ee064e1d58",
+      "collector_number": "255",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact Creature — Juggernaut",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "This creature attacks each combat if able.\nThis creature can't be blocked by Walls.",
+      "power": "5",
+      "toughness": "3",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:256",
+      "name": "Kormus Bell",
+      "scryfall_id": "3f4ef7a1-148d-44ac-89ed-0ef379cca0c6",
+      "oracle_id": "d2d477a5-f055-4d47-a852-26e8239f2a01",
+      "collector_number": "256",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "All Swamps are 1/1 black creatures that are still lands.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:257",
+      "name": "Library of Leng",
+      "scryfall_id": "2340edcb-8cd5-4ccd-99e2-b9a29f72c495",
+      "oracle_id": "867def48-4be8-4056-bcf1-d6b00450b9a3",
+      "collector_number": "257",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "You have no maximum hand size.\nIf an effect causes you to discard a card, discard it, but you may put it on top of your library instead of into your graveyard.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:258",
+      "name": "Living Wall",
+      "scryfall_id": "4a98ada6-923a-44a5-bdef-ea6a160b481e",
+      "oracle_id": "4844312c-3c9d-4ca1-986d-4ad35e68454e",
+      "collector_number": "258",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact Creature — Wall",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Defender (This creature can't attack.)\n{1}: Regenerate this creature.",
+      "power": "0",
+      "toughness": "6",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:259",
+      "name": "Mana Vault",
+      "scryfall_id": "19499cb7-eccb-4e69-af32-6002d447a160",
+      "oracle_id": "736892cb-a34b-4bb9-b56c-e26e3db207a2",
+      "collector_number": "259",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "This artifact doesn't untap during your untap step.\nAt the beginning of your upkeep, you may pay {4}. If you do, untap this artifact.\nAt the beginning of your draw step, if this artifact is tapped, it deals 1 damage to you.\n{T}: Add {C}{C}{C}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:260",
+      "name": "Meekstone",
+      "scryfall_id": "13a68a17-22ee-47c9-870a-83e911862b94",
+      "oracle_id": "5ba73182-30a7-4bad-9cb6-c0feecc2db33",
+      "collector_number": "260",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "Creatures with power 3 or greater don't untap during their controllers' untap steps.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:261",
+      "name": "Mox Emerald",
+      "scryfall_id": "b0e1427c-05cd-465b-be59-97ed6e39f7ba",
+      "oracle_id": "376ee366-e082-402f-b4db-6592fcfcacd2",
+      "collector_number": "261",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Add {G}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:262",
+      "name": "Mox Jet",
+      "scryfall_id": "92bcd1ce-19b1-4d78-8b09-95242ca08d76",
+      "oracle_id": "0677f49e-f8bf-4349-af52-2ccde9287c2e",
+      "collector_number": "262",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Add {B}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:263",
+      "name": "Mox Pearl",
+      "scryfall_id": "8ebe4be7-e12a-4596-a899-fbd5b152e879",
+      "oracle_id": "824597b8-c89a-47ec-8526-7efc6e24ef0e",
+      "collector_number": "263",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Add {W}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:264",
+      "name": "Mox Ruby",
+      "scryfall_id": "8945585f-4773-493d-a0fe-d707db910b38",
+      "oracle_id": "ed85fa82-e4fa-434b-92a8-36b6075708d1",
+      "collector_number": "264",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Add {R}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:265",
+      "name": "Mox Sapphire",
+      "scryfall_id": "82da0972-b17b-4600-9efd-e9430a0db04b",
+      "oracle_id": "d5ed1233-df87-4b90-8918-13922ec95249",
+      "collector_number": "265",
+      "mana_cost": "{0}",
+      "mana_value": 0.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "{T}: Add {U}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:266",
+      "name": "Nevinyrral's Disk",
+      "scryfall_id": "12926dc8-8e6f-4a47-a12b-4d674189615a",
+      "oracle_id": "96230edf-568a-47dd-b877-9d92aa58fac8",
+      "collector_number": "266",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "This artifact enters tapped.\n{1}, {T}: Destroy all artifacts, creatures, and enchantments.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:267",
+      "name": "Obsianus Golem",
+      "scryfall_id": "4c8e9f5c-deba-4443-bf9d-fb2be75c5418",
+      "oracle_id": "ac41171e-c454-49e9-9004-c082ae099630",
+      "collector_number": "267",
+      "mana_cost": "{6}",
+      "mana_value": 6.0,
+      "type_line": "Artifact Creature — Golem",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "",
+      "power": "4",
+      "toughness": "6",
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:268",
+      "name": "Rod of Ruin",
+      "scryfall_id": "af957200-c538-4f52-b105-6db7a7abb4dc",
+      "oracle_id": "c29a04ab-4e14-45d8-a993-3fffd0e2f6eb",
+      "collector_number": "268",
+      "mana_cost": "{4}",
+      "mana_value": 4.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{3}, {T}: This artifact deals 1 damage to any target.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:269",
+      "name": "Sol Ring",
+      "scryfall_id": "c4300d24-1cae-4dd5-be7e-38cc677cf5bd",
+      "oracle_id": "6ad8011d-3471-4369-9d68-b264cc027487",
+      "collector_number": "269",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "{T}: Add {C}{C}.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:270",
+      "name": "Soul Net",
+      "scryfall_id": "2b814198-814b-4619-a158-327af675f8f2",
+      "oracle_id": "6021c2d6-d098-4de2-9c7e-4c571f9238f6",
+      "collector_number": "270",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a creature dies, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:271",
+      "name": "Sunglasses of Urza",
+      "scryfall_id": "c0d433a4-76c0-4f27-836d-4c0c13a511fb",
+      "oracle_id": "eea64b1f-d6a9-4f72-8612-efab4b124b63",
+      "collector_number": "271",
+      "mana_cost": "{3}",
+      "mana_value": 3.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "You may spend white mana as though it were red mana.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:272",
+      "name": "The Hive",
+      "scryfall_id": "544a7138-eae8-4ff9-9e17-680bfa717183",
+      "oracle_id": "87a77482-f286-4fb1-b179-85b2095bb768",
+      "collector_number": "272",
+      "mana_cost": "{5}",
+      "mana_value": 5.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "{5}, {T}: Create a 1/1 colorless Insect artifact creature token with flying named Wasp. (It can't be blocked except by creatures with flying or reach.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:273",
+      "name": "Throne of Bone",
+      "scryfall_id": "a2931ae0-7836-4000-b9ec-f2029ebf5d96",
+      "oracle_id": "f73c7edf-ed2c-41e8-ac83-c83ddd543f14",
+      "collector_number": "273",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a player casts a black spell, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:274",
+      "name": "Time Vault",
+      "scryfall_id": "902441dc-c976-4c92-b897-6376eaa0fe38",
+      "oracle_id": "99d4d99d-cf56-45aa-aa39-a250695612f2",
+      "collector_number": "274",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "This artifact enters tapped.\nThis artifact doesn't untap during your untap step.\nIf you would begin your turn while this artifact is tapped, you may skip that turn instead. If you do, untap this artifact.\n{T}: Take an extra turn after this one.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:275",
+      "name": "Winter Orb",
+      "scryfall_id": "9359f60c-9a27-4e53-b35b-964a121a6fba",
+      "oracle_id": "1dcbd583-3388-4b34-a7cd-131648aa6abd",
+      "collector_number": "275",
+      "mana_cost": "{2}",
+      "mana_value": 2.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "rare",
+      "oracle_text": "As long as this artifact is untapped, players can't untap more than one land during their untap steps.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:276",
+      "name": "Wooden Sphere",
+      "scryfall_id": "bcae01a2-171b-47cd-87be-f1e4e5314326",
+      "oracle_id": "0bd8917c-bec4-4603-bc3f-8e0c2afae56a",
+      "collector_number": "276",
+      "mana_cost": "{1}",
+      "mana_value": 1.0,
+      "type_line": "Artifact",
+      "colors": [],
+      "color_identity": [],
+      "rarity": "uncommon",
+      "oracle_text": "Whenever a player casts a green spell, you may pay {1}. If you do, you gain 1 life.",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:277",
+      "name": "Badlands",
+      "scryfall_id": "717f6d10-9144-4ade-9ac6-a481cc66b875",
+      "oracle_id": "13ff3222-91cb-4796-a34e-899ed817694c",
+      "collector_number": "277",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Swamp Mountain",
+      "colors": [],
+      "color_identity": [
+        "B",
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {B} or {R}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:278",
+      "name": "Bayou",
+      "scryfall_id": "412ceddd-2b9a-4551-a6bf-ae2830a2010a",
+      "oracle_id": "b76d1ae6-ad1d-4bac-b4c3-2e03e0e84d9b",
+      "collector_number": "278",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Swamp Forest",
+      "colors": [],
+      "color_identity": [
+        "B",
+        "G"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {B} or {G}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:279",
+      "name": "Plateau",
+      "scryfall_id": "6eafa00b-c628-40f6-86eb-88e1361fc7a0",
+      "oracle_id": "c7a15ca4-085f-4d92-8387-c3711c04c8fa",
+      "collector_number": "279",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Mountain Plains",
+      "colors": [],
+      "color_identity": [
+        "R",
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {R} or {W}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:280",
+      "name": "Savannah",
+      "scryfall_id": "94f7e24c-2546-41b6-81ad-5e920b07e64e",
+      "oracle_id": "703243f0-8cb3-420f-958f-5fd4bde30293",
+      "collector_number": "280",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Forest Plains",
+      "colors": [],
+      "color_identity": [
+        "G",
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {G} or {W}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:281",
+      "name": "Scrubland",
+      "scryfall_id": "bebe39d4-21fb-46a4-a1ec-b97102e46c15",
+      "oracle_id": "c8d95ca8-7d12-4072-aeaf-e20f248c7e39",
+      "collector_number": "281",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Plains Swamp",
+      "colors": [],
+      "color_identity": [
+        "B",
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {W} or {B}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:282",
+      "name": "Taiga",
+      "scryfall_id": "60df6592-0b3b-4b87-aeb2-8fa94b4fb7be",
+      "oracle_id": "22e3cf1d-3559-4ce1-954c-8dc815342979",
+      "collector_number": "282",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Mountain Forest",
+      "colors": [],
+      "color_identity": [
+        "G",
+        "R"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {R} or {G}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:283",
+      "name": "Tropical Island",
+      "scryfall_id": "a9c6c759-aabf-44e7-ba8c-33c5df232b56",
+      "oracle_id": "74b7fe23-5d3a-4092-8d78-7c0eba8f6f73",
+      "collector_number": "283",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Forest Island",
+      "colors": [],
+      "color_identity": [
+        "G",
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {G} or {U}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:284",
+      "name": "Tundra",
+      "scryfall_id": "a03e8c5b-f4ed-4fd7-ba05-db813ccc05eb",
+      "oracle_id": "02418479-9455-417f-a6a1-004356faff37",
+      "collector_number": "284",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Plains Island",
+      "colors": [],
+      "color_identity": [
+        "U",
+        "W"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {W} or {U}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:285",
+      "name": "Underground Sea",
+      "scryfall_id": "ff76ac86-8a8a-47fe-9388-8950ca3e26c3",
+      "oracle_id": "4b22be3a-8ce1-47d1-b82e-6c3ccfb0548b",
+      "collector_number": "285",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Land — Island Swamp",
+      "colors": [],
+      "color_identity": [
+        "B",
+        "U"
+      ],
+      "rarity": "rare",
+      "oracle_text": "({T}: Add {U} or {B}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:286",
+      "name": "Plains",
+      "scryfall_id": "b1623d57-4729-4796-b3f7-f1837a05c6ed",
+      "oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+      "collector_number": "286",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Plains",
+      "colors": [],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {W}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:287",
+      "name": "Plains",
+      "scryfall_id": "51662253-789f-4a02-9937-688e36775024",
+      "oracle_id": "bc71ebf6-2056-41f7-be35-b2e5c34afa99",
+      "collector_number": "287",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Plains",
+      "colors": [],
+      "color_identity": [
+        "W"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {W}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:288",
+      "name": "Island",
+      "scryfall_id": "90a57c0e-fa61-45ef-955d-d296403967d5",
+      "oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+      "collector_number": "288",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Island",
+      "colors": [],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {U}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:289",
+      "name": "Island",
+      "scryfall_id": "bc6ea08d-7991-4a57-a1e3-abd508426970",
+      "oracle_id": "b2c6aa39-2d2a-459c-a555-fb48ba993373",
+      "collector_number": "289",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Island",
+      "colors": [],
+      "color_identity": [
+        "U"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {U}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:290",
+      "name": "Swamp",
+      "scryfall_id": "6176936d-72e2-4205-8871-4c5a4f1cb2d8",
+      "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+      "collector_number": "290",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Swamp",
+      "colors": [],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {B}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:291",
+      "name": "Swamp",
+      "scryfall_id": "edeba4e1-9012-4962-8797-3a1f6a660952",
+      "oracle_id": "56719f6a-1a6c-4c0a-8d21-18f7d7350b68",
+      "collector_number": "291",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Swamp",
+      "colors": [],
+      "color_identity": [
+        "B"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {B}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:292",
+      "name": "Mountain",
+      "scryfall_id": "eace2c85-976c-425e-9800-5a6ccbd91b56",
+      "oracle_id": "a3fb7228-e76b-4e96-a40e-20b5fed75685",
+      "collector_number": "292",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Mountain",
+      "colors": [],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {R}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:293",
+      "name": "Mountain",
+      "scryfall_id": "1a96315d-edc6-4d68-a260-d14f61281dc1",
+      "oracle_id": "a3fb7228-e76b-4e96-a40e-20b5fed75685",
+      "collector_number": "293",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Mountain",
+      "colors": [],
+      "color_identity": [
+        "R"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {R}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:294",
+      "name": "Forest",
+      "scryfall_id": "6f1c8cb0-38eb-408b-94e8-16db83999b3b",
+      "oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+      "collector_number": "294",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Forest",
+      "colors": [],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {G}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    },
+    {
+      "key": "lea:295",
+      "name": "Forest",
+      "scryfall_id": "f20c89d9-71c9-45f5-a9cb-6e253b0a7cca",
+      "oracle_id": "b34bb2dc-c1af-4d77-b0b3-a0fb342a5fc6",
+      "collector_number": "295",
+      "mana_cost": "",
+      "mana_value": 0.0,
+      "type_line": "Basic Land — Forest",
+      "colors": [],
+      "color_identity": [
+        "G"
+      ],
+      "rarity": "common",
+      "oracle_text": "({T}: Add {G}.)",
+      "power": null,
+      "toughness": null,
+      "layout": "normal",
+      "engine_status": "reference_only"
+    }
+  ]
+}

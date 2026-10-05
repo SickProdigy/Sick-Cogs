@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 API_ROOT = "https://api.scryfall.com/cards"
-USER_AGENT = "Sick-Cogs-MTG/0.2 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MTG/0.6 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 ACCEPT = "application/json;q=0.9,*/*;q=0.8"
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_CACHE_BYTES = 128 * 1024 * 1024
