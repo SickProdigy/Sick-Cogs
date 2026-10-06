@@ -86,6 +86,8 @@ class Card:
     land_enter_damage: int = 0
     land_grave_damage: int = 0
     upkeep_each_damage: int = 0
+    upkeep_land_type_damage: str = ""
+    aura_upkeep_damage: int = 0
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -175,6 +177,8 @@ class Card:
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
+        if self.upkeep_land_type_damage: abilities.append(f"At each player's upkeep, deals damage equal to that player's {self.upkeep_land_type_damage.title()}s")
+        if self.aura_upkeep_damage: abilities.append(f"At enchanted permanent controller's upkeep, deals {self.aura_upkeep_damage} damage to that player")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -249,6 +253,11 @@ ALPHA_ENCHANTMENTS = {
     "lea:150": {"aura_target_types":("Creature",), "activation_cost":"{R}", "activated_power":1, "activation_attached":True, "activation_text":"Enchanted creature gets +1/+0 until end of turn"},
     "lea:213": {"aura_target_types":("Creature",), "activation_cost":"{G}", "activation_effect":"regenerate", "activation_attached":True, "activation_text":"Regenerate enchanted creature"},
     "lea:228": {"aura_target_types":("Creature",), "aura_toughness":2, "aura_keyword":"reach"},
+    "lea:57": {"aura_target_types":("Enchantment",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:97": {"aura_target_types":("Land",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:133": {"aura_target_types":("Artifact",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:226": {"aura_target_types":("Creature",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:26": {"upkeep_land_type_damage":"swamp"},
 }
 
 ALPHA_ARTIFACTS = {
@@ -511,6 +520,8 @@ for reference in PLAYABLE_ALPHA:
         land_enter_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_enter_damage",0),
         land_grave_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_grave_damage",0),
         upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
+        upkeep_land_type_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_land_type_damage",""),
+        aura_upkeep_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_damage",0),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),

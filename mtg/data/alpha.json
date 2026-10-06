@@ -607,7 +607,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:27",
@@ -1320,7 +1320,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:58",
@@ -2240,7 +2240,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:98",
@@ -3068,7 +3068,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:134",
@@ -5208,7 +5208,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "enchantment",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:227",

@@ -368,6 +368,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         pay=next(item for item in GameView(cog,1).children if item.custom_id.endswith(":pay"))
         self.assertEqual(pay.label,"Pay {4}"); self.assertFalse(pay.disabled)
 
+    async def test_public_embed_shows_upkeep_damage_aura_and_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        target=game.next_uid; game.next_uid+=1; game.cards[target]="bear"
+        aura=game.next_uid; game.next_uid+=1; game.cards[aura]="lea:226"
+        game.player(20).battlefield=[permanent_type(target,"bear",sick=False)]
+        game.player(10).battlefield=[permanent_type(aura,"lea:226",sick=False,attached_to=target)]
+        game.active_index=1; game._start_turn()
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Wanderlust",rendered); self.assertIn("deals 1 damage",rendered); self.assertIn("Wanderlust ability",rendered)
+
     async def test_creature_upkeep_pending_choice_shows_colored_cost(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

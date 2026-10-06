@@ -198,6 +198,11 @@ def _play_one(game, user, difficulty):
         elif card.upkeep_each_damage:
             if player.life<=card.upkeep_each_damage: continue
             score=4+player.life-game.player(game.opponent(user)).life
+        elif card.upkeep_land_type_damage:
+            own=sum(game.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in game.player(game.opponent(user)).battlefield)
+            if own>=player.life or enemy<=own: continue
+            score=5+enemy-own
         elif card.draw_step_extra:
             score=5+card.draw_step_extra
         elif card.untap_power_limit:
@@ -335,7 +340,7 @@ def _blocks(game, user, difficulty):
 def _player_damage_threatened(game,user):
     for item in game.stack:
         card=game.card(item.uid)
-        if item.ability_effect in ("tap_damage","land_event_damage","upkeep_damage","upkeep_hand_damage","draw_tapped_damage","damage_any") and item.target==str(user): return True
+        if item.ability_effect in ("tap_damage","land_event_damage","upkeep_damage","upkeep_land_type_damage","aura_upkeep_damage","upkeep_hand_damage","draw_tapped_damage","damage_any") and item.target==str(user): return True
         if not item.ability_effect and card.effect in ("earthquake_x","hurricane_x"): return item.x_value>0
         if not item.ability_effect and card.effect in ("damage","damage_any","damage_x_exile") and (item.target or str(game.opponent(item.owner)))==str(user): return True
         if item.ability_effect=="damage_any" and item.owner==user and card.activation_self_damage: return True

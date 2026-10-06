@@ -606,6 +606,18 @@ class SoloAITests(unittest.TestCase):
         advance_solo(declined); declined.pass_priority(HUMAN); advance_solo(declined)
         self.assertTrue(vault.tapped); self.assertTrue(any(event["action"]=="ai_trigger_decline" for event in declined.history))
 
+    def test_ai_targets_upkeep_damage_auras_and_values_karma(self):
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True
+        for aura_key,target_key in (("lea:57","lea:131"),("lea:97","swamp"),("lea:133","lea:269"),("lea:226","bear")):
+            game.player(HUMAN).battlefield=[]; self.add(game,HUMAN,target_key)
+            self.assertEqual(_target(game,AI,cards[aura_key]),f"{HUMAN}:1")
+
+        karma=solo(order=(AI,HUMAN)); karma.player(AI).kept=True; karma.player(HUMAN).kept=True; karma.player(AI).hand=[]
+        spell=self.add(karma,AI,"lea:26","hand"); [self.add(karma,AI,"plains") for _ in range(4)]; [self.add(karma,HUMAN,"swamp") for _ in range(2)]
+        karma.active_index=0; karma.phase="precombat_main"; karma.priority_user=AI; karma.player(AI).land_played=True
+        advance_solo(karma); self.assertEqual(karma.stack[-1].uid,spell)
+
     def test_ai_pays_creature_upkeep_costs_including_source_independent_damage(self):
         sacrifice=solo(order=(AI,HUMAN)); sacrifice.player(AI).kept=True; sacrifice.player(HUMAN).kept=True; sacrifice.player(AI).hand=[]
         forces=self.add(sacrifice,AI,"lea:67"); self.add(sacrifice,AI,"island")

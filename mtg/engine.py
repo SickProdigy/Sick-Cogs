@@ -239,6 +239,10 @@ class Game:
                 if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
                 elif step=="upkeep" and card.upkeep_cost and active==controller.user_id: effect="upkeep_cost"
                 elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
+                elif step=="upkeep" and card.upkeep_land_type_damage: effect="upkeep_land_type_damage"
+                elif step=="upkeep" and card.aura_upkeep_damage:
+                    attached_controller,attached=self.find_permanent(source.attached_to)
+                    if attached is not None and active==attached_controller.user_id: effect="aura_upkeep_damage"
                 elif step=="upkeep" and card.upkeep_opponent_hand_damage and active==self.opponent(controller.user_id): effect="upkeep_hand_damage"
                 elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
                 elif step=="draw" and card.draw_tapped_damage and active==controller.user_id and source.tapped: effect="draw_tapped_damage"
@@ -1019,6 +1023,11 @@ class Game:
             self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage)
         elif effect=="upkeep_damage":
             self._damage_player(int(s.target),card.upkeep_each_damage)
+        elif effect=="upkeep_land_type_damage":
+            target_player=self.player(int(s.target)); amount=sum(self.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in target_player.battlefield)
+            self._damage_player(target_player.user_id,amount)
+        elif effect=="aura_upkeep_damage":
+            self._damage_player(int(s.target),card.aura_upkeep_damage)
         elif effect=="upkeep_hand_damage":
             target_player=self.player(int(s.target)); self._damage_player(target_player.user_id,max(0,len(target_player.hand)-4))
         elif effect=="draw_step_draw":

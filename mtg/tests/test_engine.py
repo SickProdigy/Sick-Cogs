@@ -1883,6 +1883,44 @@ class AlphaCastLifeArtifactTests(unittest.TestCase):
         self.assertTrue(game.stack[-1].decision_pending); game.choose_trigger(10,False)
 
 
+class AlphaUpkeepDamageEnchantmentTests(unittest.TestCase):
+    def add(self,game,user,key,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_damage_auras_trigger_for_enchanted_permanent_controller(self):
+        for aura_key,target_key in (("lea:57","lea:131"),("lea:97","swamp"),("lea:133","lea:269"),("lea:226","bear")):
+            with self.subTest(aura=aura_key):
+                game=ready(); target=self.add(game,20,target_key); aura=self.add(game,10,aura_key,target.uid)
+                game._start_turn(); self.assertFalse(any(item.key==aura_key for item in game.stack))
+                game.active_index=1; game._start_turn()
+                self.assertEqual(game.stack[-1].ability_effect,"aura_upkeep_damage"); self.assertEqual(game.stack[-1].target,"20")
+                restored=Game.from_raw(game.to_raw()); restored.player(10).battlefield.remove(next(x for x in restored.player(10).battlefield if x.uid==aura.uid))
+                before=restored.player(20).life; self.resolve_top(restored); self.assertEqual(restored.player(20).life,before-1)
+
+    def test_damage_aura_does_not_trigger_without_legal_attachment(self):
+        game=ready(); aura=self.add(game,10,"lea:97",9999); game._start_turn()
+        self.assertFalse(any(item.key=="lea:97" for item in game.stack))
+
+    def test_karma_counts_swamps_live_on_resolution_and_uses_prevention(self):
+        game=ready(); karma=self.add(game,20,"lea:26"); self.add(game,10,"swamp"); extra=self.add(game,10,"swamp")
+        game._start_turn(); self.assertEqual(game.stack[-1].ability_effect,"upkeep_land_type_damage")
+        restored=Game.from_raw(game.to_raw()); restored.player(20).battlefield.remove(next(x for x in restored.player(20).battlefield if x.uid==karma.uid))
+        restored.player(10).battlefield.remove(next(x for x in restored.player(10).battlefield if x.uid==extra.uid))
+        restored.player(10).damage_prevention=1; before=restored.player(10).life
+        self.resolve_top(restored)
+        self.assertEqual(restored.player(10).life,before); self.assertEqual(restored.player(10).damage_prevention,0)
+
+    def test_karma_triggers_for_each_players_upkeep(self):
+        game=ready(); self.add(game,10,"lea:26"); game._start_turn()
+        self.assertEqual(game.stack[-1].target,"10")
+        game=ready(); self.add(game,10,"lea:26"); game.active_index=1; game._start_turn()
+        self.assertEqual(game.stack[-1].target,"20")
+
+
 class AlphaManaVaultTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

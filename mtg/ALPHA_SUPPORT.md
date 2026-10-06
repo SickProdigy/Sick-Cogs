@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
 | Instants and sorceries | 70 | 45 spells playable through 0.53.0; 25 remain |
-| Enchantments | 68 | 31 enchantments playable through 0.37.0; 37 remain |
+| Enchantments | 68 | 36 enchantments playable through 0.56.0; 32 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -132,3 +132,5 @@ The 0.53.0 random-discard promotion adds Mind Twist and Hypnotic Specter. A shar
 The 0.54.0 delayed-combat-destruction promotion adds Cockatrice and Thicket Basilisk. Legal block declarations snapshot each non-Wall opposing creature into a persisted delayed trigger with APNAP ordering and source-removal independence. Damage-created triggers finish before the engine enters its explicit end-combat response window; the delayed destruction then appears on the public stack, fizzles safely if the combatant has left, and permits normal regeneration. Walls never create the delayed effect. Discord exposes pending destruction before end combat, and solo AI values a Basilisk blocker’s delayed kill while preferring Walls against an opposing Basilisk when legal.
 
 The 0.55.0 creature-upkeep promotion adds Phantasmal Forces and Force of Nature. Each controller receives a persisted, respondable upkeep trigger followed by an explicit payment decision using the printed colored cost. Declining Phantasmal Forces sacrifices it without allowing regeneration; declining Force of Nature deals eight preventable damage even if its source has left the battlefield. Discord displays the actual Pay {U} or Pay {G}{G}{G}{G} choice, and solo AI preserves a live Forces or avoids Force of Nature damage whenever legal mana is available.
+
+The 0.56.0 upkeep-damage-enchantment promotion adds Karma, Feedback, Cursed Land, Warp Artifact, and Wanderlust. The four Auras can enchant their complete printed permanent types and trigger only at the enchanted permanent controller's upkeep; their persisted damage remains independent after the Aura leaves. Karma triggers for each player and counts that player's current Swamps on resolution, including typed dual lands. All damage uses shared prevention and lethal handling, public Discord views expose attachments and pending triggers, and solo AI chooses legal hostile Aura targets and values Karma from both battlefields.
