@@ -399,6 +399,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
 
+    async def test_enchantress_draw_choice_renders_draw_button(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:222"; trigger=game.next_uid; game.next_uid+=1; game.cards[trigger]="lea:222"
+        game.player(10).battlefield=[permanent_type(source,"lea:222",sick=False)]; game.stack=[spell_type(10,trigger,"lea:222","10",ability_effect="cast_draw",source_uid=source,decision_pending=True)]
+        cog.games[1]=game; rendered=str(cog.game_embed(game).to_dict()); self.assertIn("may Draw a card or Decline",rendered)
+        accept=next(item for item in GameView(cog,1).children if item.custom_id.endswith(":pay")); self.assertEqual(accept.label,"Draw a card"); self.assertFalse(accept.disabled)
+
     async def test_public_embed_shows_juggernaut_combat_requirements(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -105,6 +105,7 @@ class Card:
     creates_token: str = ""
     opponent_damage_discard_random: bool = False
     combat_destroy_nonwall: bool = False
+    enchantment_cast_draw: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
@@ -178,6 +179,7 @@ class Card:
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
+        if self.enchantment_cast_draw: abilities.append("Whenever you cast an enchantment spell, you may draw a card")
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
         if self.attacks_each_combat: abilities.append("Attacks each combat if able")
@@ -334,6 +336,10 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:155": {"activation_cost":"{R}", "activated_toughness":1},
     "lea:174": {"activation_cost":"{R}", "activated_power":1},
     "lea:181": {"activation_cost":"{R}", "activated_power":1},
+}
+
+ALPHA_OPTIONAL_TRIGGERS = {
+    "lea:222": {"enchantment_cast_draw":True},
 }
 
 ALPHA_COMBAT_REQUIREMENTS = {
@@ -564,6 +570,7 @@ for reference in PLAYABLE_ALPHA:
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
+        enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),
@@ -588,7 +595,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

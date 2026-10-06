@@ -2010,6 +2010,38 @@ class AlphaLandEventArtifactTests(unittest.TestCase):
         self.assertFalse(any(mass.card(x.uid).land for p in mass.players.values() for x in p.battlefield)); self.assertEqual(Game.from_raw(mass.to_raw()).to_raw(),mass.to_raw())
 
 
+class AlphaEnchantressTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_own_enchantment_cast_creates_independent_persisted_draw_choices(self):
+        game=ready(); first=self.add(game,10,"lea:222"); second=self.add(game,10,"lea:222"); spell=self.add(game,10,"lea:192","hand"); self.add(game,10,"forest")
+        before=len(game.player(10).hand); game.play(10,1)
+        self.assertEqual([item.ability_effect for item in game.stack],["","cast_draw","cast_draw"])
+        controller,source=game.find_permanent(second.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertTrue(restored.stack[-1].decision_pending); self.assertEqual(restored.trigger_cost(restored.stack[-1]),""); self.assertEqual(restored.trigger_accept_label(restored.stack[-1]),"Draw a card")
+        restored.choose_trigger(10,True); self.assertEqual(len(restored.player(10).hand),before); self.assertIn("drew a card",restored.log[-1])
+        self.resolve_top(restored); restored.choose_trigger(10,False); self.assertEqual(len(restored.stack),1); self.assertEqual(restored.stack[-1].uid,spell)
+
+    def test_opponent_enchantment_and_enchantress_itself_do_not_trigger(self):
+        game=ready(); self.add(game,10,"lea:222"); self.add(game,20,"lea:192","hand"); self.add(game,20,"forest"); game.active_index=1; game.priority_user=20
+        game.play(20,1); self.assertFalse(any(item.ability_effect=="cast_draw" for item in game.stack))
+
+        fresh=ready(); spell=self.add(fresh,10,"lea:222","hand"); [self.add(fresh,10,"forest") for _ in range(3)]
+        fresh.play(10,1); self.assertEqual([item.uid for item in fresh.stack],[spell])
+
+    def test_accepting_draw_with_empty_library_loses_game(self):
+        game=ready(); self.add(game,10,"lea:222"); self.add(game,10,"lea:192","hand"); self.add(game,10,"forest"); game.play(10,1)
+        game.player(10).library=[]; self.resolve_top(game); game.choose_trigger(10,True)
+        self.assertTrue(game.finished); self.assertEqual(game.winner,20); self.assertEqual(game.finished_reason,"empty library")
+
+
 class AlphaCastLifeArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

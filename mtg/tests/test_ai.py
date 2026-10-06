@@ -585,6 +585,14 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_accepts_enchantress_draw_trigger_without_mana(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        self.add(game,AI,"lea:222"); spell=self.add(game,AI,"lea:192","hand"); self.add(game,AI,"forest")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"cast_draw")
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(len(game.player(AI).hand),1); self.assertTrue(any(event["action"]=="ai_trigger_accept" for event in game.history)); self.assertEqual(game.stack[-1].uid,spell)
+
     def test_easy_ai_includes_mandatory_attacker(self):
         game=solo(order=(AI,HUMAN),difficulty="easy"); game.player(AI).kept=True; game.player(HUMAN).kept=True
         optional=self.add(game,AI,"bear"); juggernaut=self.add(game,AI,"lea:255")

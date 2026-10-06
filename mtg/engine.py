@@ -354,13 +354,16 @@ class Game:
         return triggers
 
     def _spell_cast_triggers(self,spell):
-        colors=self.spell_colors(spell); triggers=[]
+        colors=self.spell_colors(spell); spell_card=self.card(spell.uid); triggers=[]
         for controller_id in (self.active_user,self.opponent(self.active_user)):
             for source in self.player(controller_id).battlefield:
                 card=self.card(source.uid)
-                if not card.cast_life_color or card.cast_life_color not in colors: continue
+                effect=""
+                if card.cast_life_color and card.cast_life_color in colors: effect="cast_life"
+                elif card.enchantment_cast_draw and controller_id==spell.owner and spell_card.has_type("Enchantment"): effect="cast_draw"
+                if not effect: continue
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
-                triggers.append(Spell(controller_id,uid,card.key,str(controller_id),ability_effect="cast_life",source_uid=source.uid,color_override=source.color_override))
+                triggers.append(Spell(controller_id,uid,card.key,str(controller_id),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
         return triggers
 
     def _tap_permanent(self,user,permanent,mana_symbol=None,add_mana=False,pending_triggers=None):
@@ -742,7 +745,7 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
-                if s.ability_effect in ("cast_life","death_life","upkeep_untap","upkeep_cost"):
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -761,9 +764,13 @@ class Game:
 
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
+        if trigger.ability_effect=="cast_draw": return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
         if trigger.ability_effect=="upkeep_cost": return card.upkeep_cost
         return "{1}"
+
+    def trigger_accept_label(self,trigger):
+        return "Draw a card" if trigger.ability_effect=="cast_draw" else f"Pay {self.trigger_cost(trigger)}"
 
     def choose_trigger(self,user,pay):
         if self.finished: raise GameError("Game is over.")
@@ -771,20 +778,25 @@ class Game:
             raise GameError("You do not have a trigger choice to make.")
         trigger=self.stack.pop(); card=self.card(trigger.uid); pending=[]; cost=self.trigger_cost(trigger)
         if pay:
-            player=self.player(user); payment=self._mana_payment(player,card,mana_cost=cost)
-            if payment is None:
-                self.stack.append(trigger); raise GameError(f"You cannot pay {cost} for this trigger.")
-            sources,remaining,choices=payment
-            for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
-            player.mana_pool=remaining
-            if trigger.ability_effect in ("cast_life","death_life"):
+            player=self.player(user)
+            if cost:
+                payment=self._mana_payment(player,card,mana_cost=cost)
+                if payment is None:
+                    self.stack.append(trigger); raise GameError(f"You cannot pay {cost} for this trigger.")
+                sources,remaining,choices=payment
+                for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
+                player.mana_pool=remaining
+            if trigger.ability_effect=="cast_draw":
+                self._draw(player,1); result=" and drew a card"
+            elif trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
             elif trigger.ability_effect=="upkeep_untap":
                 _,source=self.find_permanent(trigger.source_uid)
                 if source is not None: source.tapped=False
                 result=" and untapped it" if source is not None else ""
             else: result=""
-            self.log.append(f"{user} paid {cost} for {card.name}{result}.")
+            verb=f"paid {cost} for" if cost else "accepted"
+            self.log.append(f"{user} {verb} {card.name}{result}.")
         else:
             self.log.append(f"{user} declined {card.name}.")
             if trigger.ability_effect=="upkeep_cost":
