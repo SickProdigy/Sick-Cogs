@@ -94,7 +94,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.26.0";__author__="SickProdigy"
+    __version__="0.27.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -404,10 +404,12 @@ class Pokemon(commands.Cog):
     def apply_battle_party(conf,battle):
         battle.party_hp[battle.player.instance_id]=battle.player_hp
         battle.party_status[battle.player.instance_id]=battle.player_status
+        battle.party_status_turns[battle.player.instance_id]=battle.player_status_turns
         updates={}
         for item in battle.party:
             item.current_hp=max(0,min(pokemon_max_hp(item),int(battle.party_hp.get(item.instance_id,pokemon_max_hp(item)))))
             item.status=battle.party_status.get(item.instance_id,"")
+            item.status_turns=battle.party_status_turns.get(item.instance_id,0)
             updates[item.instance_id]=item.raw()
         updates[battle.player.instance_id]=battle.player.raw()
         conf["collection"]=[updates.get(raw["instance_id"],raw) for raw in conf["collection"]]
@@ -713,7 +715,7 @@ class Pokemon(commands.Cog):
             items=conf.get("items",{})
             if int(items.get("revive",0))<1:await ctx.send("You have no Revives.");return
             items["revive"]=int(items.get("revive",0))-1;conf["items"]=items
-            pokemon.current_hp=max(1,maximum//2);pokemon.status="";raw.update(pokemon.raw())
+            pokemon.current_hp=max(1,maximum//2);pokemon.status="";pokemon.status_turns=0;raw.update(pokemon.raw())
             await self.config.user(ctx.author).set(conf)
         await ctx.send(f"{SPECIES[pokemon.species_id].name} was revived with {pokemon.current_hp}/{maximum} HP.")
 
@@ -734,7 +736,7 @@ class Pokemon(commands.Cog):
             party=set(conf["party"]);healed=0
             for raw in conf["collection"]:
                 if raw["instance_id"] not in party:continue
-                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status=""
+                pokemon=OwnedPokemon.from_raw(raw);pokemon.current_hp=pokemon_max_hp(pokemon);pokemon.status="";pokemon.status_turns=0
                 pokemon.move_pp={key:MOVES[key].pp for key in pokemon.moves};raw.update(pokemon.raw());healed+=1
             conf["center_last_at"]=now.isoformat();await self.config.user(ctx.author).set(conf)
         await ctx.send(f"Your party is fully restored. ({healed} Pokémon)")
