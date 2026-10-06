@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from PIL import Image
-from pokemon.data import EVOLUTIONS,SPECIES,effectiveness
+from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
 from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RETRO
 
@@ -45,7 +45,7 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(current._damage(10,92,5,scratch,current.rng(),attacker_types=("normal",),defense=10),0)
 
     def test_classic_level_and_move_learning_narration(self):
-        player=OwnedPokemon.create("learner",4,8,seed=3);player.experience=8*8*10-1
+        player=OwnedPokemon.create("learner",4,8,seed=3);player.experience=experience_to_next(4,8)-1
         current=Battle(1,100,1,2,3,player,10,3,20,20,seed=4)
         detail=current._award_experience(1)
         self.assertIn("Charmander grew to Lv. 9!",detail)
@@ -127,8 +127,8 @@ class BattleTests(unittest.TestCase):
             candidate=battle(seed);candidate.wild_hp=1
             if candidate.throw_ball():caught=candidate;break
         self.assertIsNotNone(caught)
-        self.assertEqual(caught.experience_award,caught.wild_level*10)
-        self.assertIn(f"Gained {caught.experience_award} XP",caught.result)
+        self.assertEqual(caught.experience_award,caught.rules().experience_reward(SPECIES[caught.wild_species_id],caught.wild_level,caught=True))
+        self.assertIn(f"gained {caught.experience_award} XP",caught.result)
     def test_explicit_party_switch(self):
         first=OwnedPokemon.create("one",4,10,seed=1)
         second=OwnedPokemon.create("two",7,10,seed=2)
@@ -194,28 +194,45 @@ class BattleTests(unittest.TestCase):
         current.wild_status="paralysis"
         self.assertEqual(current.combat_speed(False),max(1,current.wild_stat("speed")//2))
 
+    def test_species_growth_curves_and_base_experience_are_bundled(self):
+        self.assertEqual((SPECIES[1].base_experience,SPECIES[1].growth_rate),(64,"medium-slow"))
+        self.assertEqual(total_experience(100,"fast"),800000)
+        self.assertEqual(total_experience(100,"medium"),1000000)
+        self.assertEqual(total_experience(100,"slow"),1250000)
+        self.assertNotEqual(experience_to_next(1,20),experience_to_next(10,20))
+
+    def test_experience_is_split_between_conscious_participants(self):
+        first=OwnedPokemon.create("first",4,10,seed=1);second=OwnedPokemon.create("second",7,10,seed=2)
+        current=Battle(1,100,1,2,3,first,10,10,30,0,seed=4);current.initialize_party([first,second]);current.switch_to(1)
+        before=(first.experience,second.experience);current._finish_if_needed()
+        reward=current.rules().experience_reward(SPECIES[10],10)
+        self.assertEqual(current.experience_award,reward)
+        self.assertEqual(first.experience-before[0],reward//2)
+        self.assertEqual(second.experience-before[1],reward//2)
+        self.assertEqual(set(current.experience_awards),{"first","second"})
+
     def test_experience_levels_up(self):
         pokemon=OwnedPokemon.create("xp",4,5,seed=7)
-        pokemon.experience=249
+        pokemon.experience=experience_to_next(4,5)-1
         levels,evolved,learned=pokemon.gain_experience(1)
         self.assertEqual((levels,evolved,learned,pokemon.level),(1,None,[],6))
     def test_supported_move_learning(self):
         pokemon=OwnedPokemon.create("learner",4,8,seed=4)
-        pokemon.experience=639
+        pokemon.experience=experience_to_next(4,8)-1
         levels,evolved,learned=pokemon.gain_experience(1)
         self.assertEqual((levels,evolved,pokemon.level),(1,None,9))
         self.assertIn("ember",learned)
         self.assertIn("ember",pokemon.moves)
     def test_level_evolution(self):
         pokemon=OwnedPokemon.create("evolve",10,6,seed=4)
-        pokemon.experience=359
+        pokemon.experience=experience_to_next(10,6)-1
         levels,evolved,learned=pokemon.gain_experience(1)
         self.assertEqual((levels,evolved,pokemon.species_id),(1,10,11))
 
     def test_fifth_move_waits_for_a_persisted_trainer_choice(self):
         pokemon=OwnedPokemon.create("full",25,25,seed=4)
         self.assertEqual(pokemon.moves,("thunder_wave","quick_attack","double_team","slam"))
-        pokemon.experience=25*25*10-1
+        pokemon.experience=experience_to_next(25,25)-1
         levels,evolved,learned=pokemon.gain_experience(1)
         self.assertEqual((levels,evolved,learned,pokemon.level),(1,None,[],26))
         self.assertEqual(pokemon.pending_moves,["thunderbolt","swift"])

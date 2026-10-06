@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.25.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.26.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
@@ -41,7 +41,7 @@ class PokemonCatalog:
                         item.id,item.name,item.types,item.hp,item.attack,item.defense,
                         item.speed,item.catch_rate,moves,learned,previous.abilities,
                         previous.gender_rate,previous.special_attack,
-                        previous.special_defense,
+                        previous.special_defense,previous.base_experience,previous.growth_rate,
                     )
                 SPECIES[item.id] = item
             loaded = max(loaded, len(parsed))
@@ -83,7 +83,7 @@ class PokemonCatalog:
         for record in records:
             existing[record.id] = self.to_cached(record)
             SPECIES[record.id] = record
-        payload = {"schema": 1, "species": [existing[key] for key in sorted(existing)]}
+        payload = {"schema": 2, "species": [existing[key] for key in sorted(existing)]}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
@@ -149,6 +149,8 @@ class PokemonCatalog:
             int(species.get("gender_rate", -1)),
             stats["special-attack"],
             stats["special-defense"],
+            int(pokemon.get("base_experience") or 50),
+            str(species.get("growth_rate",{}).get("name","medium")),
         )
 
     @staticmethod
@@ -168,6 +170,8 @@ class PokemonCatalog:
             "gender_rate": item.gender_rate,
             "special_attack": item.special_attack,
             "special_defense": item.special_defense,
+            "base_experience": item.base_experience,
+            "growth_rate": item.growth_rate,
         }
 
     @staticmethod
@@ -187,6 +191,8 @@ class PokemonCatalog:
             int(raw.get("gender_rate",-1)),
             int(raw.get("special_attack",raw["attack"])),
             int(raw.get("special_defense",raw["defense"])),
+            int(raw.get("base_experience",50)),
+            str(raw.get("growth_rate","medium")),
         )
         if not 1 <= item.id <= MAX_SPECIES or not item.types or not item.moves:
             raise CatalogError("Cached species data is out of bounds.")
