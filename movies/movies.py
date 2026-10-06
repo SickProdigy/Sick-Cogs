@@ -23,7 +23,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.2.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.2.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 CHECK_INTERVAL = datetime.timedelta(hours=1)
 CONFIG_SCHEMA_VERSION = 1
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
@@ -37,7 +37,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
 
     default_guild = {
         "enabled": False,
