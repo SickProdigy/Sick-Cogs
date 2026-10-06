@@ -51,12 +51,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("lands_played_this_turn"); player.pop("channel_active")
-            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
+            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("redirect_source_damage_to_player"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and player.source_damage_caps=={} and not player.guardian_angel_active and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.redirect_damage_to_owner==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and permanent.redirect_damage_to_owner==0 and permanent.redirect_source_damage_to_player=={} and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -3720,5 +3720,16 @@ class AlphaDamageReplacementPermanentTests(unittest.TestCase):
     def test_personal_incarnation_owner_can_activate_under_opponent_control(self):
         game=ready(); incarnation=Permanent(game.next_uid,"lea:31",owner=10,sick=False); game.cards[incarnation.uid]="lea:31"; game.next_uid+=1; game.player(20).battlefield=[incarnation]; game.phase="precombat_main"; game.priority_user=10
         game.activate_personal_incarnation(10,20,1); game.pass_priority(20); game.pass_priority(10); self.assertEqual(incarnation.redirect_damage_to_owner,1)
+
+class AlphaJadeMonolithTests(unittest.TestCase):
+    def test_source_to_creature_redirect_persists_consumes_and_keeps_source_identity(self):
+        game=ready(); monolith=Permanent(game.next_uid,"lea:252",owner=10,sick=False); game.cards[monolith.uid]="lea:252"; game.next_uid+=1; land=Permanent(game.next_uid,"plains",owner=10,sick=False); game.cards[land.uid]="plains"; game.next_uid+=1; target=Permanent(game.next_uid,"bear",owner=10,sick=False); game.cards[target.uid]="bear"; game.next_uid+=1; game.player(10).battlefield=[monolith,land,target]
+        source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:161"; game.stack=[Spell(20,source,"lea:161",f"10:{target.uid}")]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1,"S:1>10:3"); ability=game.stack.pop(); game._resolve_ability(ability); restored=Game.from_raw(game.to_raw()); target=restored.find_permanent(target.uid)[1]; before=restored.player(10).life
+        self.assertEqual(restored._damage_permanent(target,3,restored.card(source),restored.spell_colors(restored.stack[0]),source_uid=source),0); self.assertEqual(restored.player(10).life,before-3); self.assertFalse(target.redirect_source_damage_to_player)
+
+    def test_jade_monolith_target_removal_fizzles_without_redirect(self):
+        game=ready(); monolith=Permanent(game.next_uid,"lea:252",owner=10,sick=False); game.cards[monolith.uid]="lea:252"; game.next_uid+=1; land=Permanent(game.next_uid,"plains",owner=10,sick=False); game.cards[land.uid]="plains"; game.next_uid+=1; target=Permanent(game.next_uid,"bear",owner=10,sick=False); game.cards[target.uid]="bear"; game.next_uid+=1; game.player(10).battlefield=[monolith,land,target]; source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:161"; game.stack=[Spell(20,source,"lea:161",f"10:{target.uid}")]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1,"S:1>10:3"); ability=game.stack.pop(); game.player(10).battlefield.remove(target); game._resolve_ability(ability); self.assertNotIn(source,target.redirect_source_damage_to_player)
 
 if __name__=="__main__": unittest.main()

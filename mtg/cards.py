@@ -411,6 +411,7 @@ ALPHA_ARTIFACTS = {
     "lea:272": {"activation_cost":"{5}", "activation_tap":True, "activation_effect":"create_token", "activation_text":"Create a 1/1 colorless Insect artifact creature token with flying named Wasp", "creates_token":"token:wasp"},
     "lea:237": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"prevent_player_damage", "activation_amount":2, "activation_text":"Prevent the next 2 damage that would be dealt to you this turn"},
     "lea:243": {"activation_cost":"{1}", "activation_effect":"cap_unblocked_damage", "activation_text":"Prevent all but 1 combat damage from a chosen unblocked creature"},
+    "lea:252": {"activation_cost":"{1}", "activation_effect":"redirect_source_to_creature", "activation_text":"Choose a source and target creature; its next damage to that creature is dealt to you instead"},
     "lea:242": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"discard_choice", "activation_text":"Target player discards a card", "activation_controller_turn_only":True},
     "lea:245": {"activation_tap":True, "activation_effect":"look_hand", "activation_text":"Look at target player’s hand"},
 }

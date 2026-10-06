@@ -521,6 +521,18 @@ def _activation_target(game,user,card,source_uid=None):
     if card.activation_effect=="redirect_one_to_owner":
         _,source=game.find_permanent(source_uid)
         return f"{user}:{game.player(user).battlefield.index(source)+1}" if source is not None and source.owner==user and not source.redirect_damage_to_owner and _permanent_damage_threatened(game,user,source) else None
+    if card.activation_effect=="redirect_source_to_creature":
+        for target_position,permanent in enumerate(game.player(user).battlefield,1):
+            stable=f"{user}:{permanent.uid}"
+            if not game.is_creature(permanent) or permanent.redirect_source_damage_to_player: continue
+            for stack_position,item in enumerate(reversed(game.stack),1):
+                source=game.card(item.uid); amount=source.activation_amount if item.ability_effect=="damage_any" else (item.x_value if source.effect=="damage_x_exile" else source.amount)
+                if item.target==stable and amount>0: return f"S:{stack_position}>{user}:{target_position}"
+            attacker_uid=next((attacker for attacker,blocker in game.blocks.items() if blocker==permanent.uid),None)
+            if attacker_uid is not None:
+                attacker_player=game.player(game.active_user); attacker=game.find_permanent(attacker_uid)[1]
+                if attacker is not None and game.current_stats(attacker)[0]>0: return f"{game.active_user}:{attacker_player.battlefield.index(attacker)+1}>{user}:{target_position}"
+        return None
     if card.activation_effect=="counter_color":
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
