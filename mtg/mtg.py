@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.10"
+    __version__="0.120.11"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -359,6 +359,18 @@ class MTG(commands.Cog):
                 await interaction.response.send_message(str(error),ephemeral=True); return
         await interaction.response.defer()
         await self.send_hand(interaction,game_id,0,editing=True)
+        await self.refresh_message(game)
+
+    async def pass_hand_interaction(self,interaction,game_id):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                game.pass_priority(interaction.user.id); game.record(interaction.user.id,"pass"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(content="Priority passed. Return to the public game table for the next action.",attachments=[],view=None)
         await self.refresh_message(game)
 
     async def play_hand_interaction(self,interaction,game_id,position,target=None,x_value=None):

@@ -380,6 +380,13 @@ class OpeningHandButton(discord.ui.Button):
     async def callback(self,interaction):
         await self.browser.cog.opening_hand_interaction(interaction,self.browser.game_id,self.keep)
 
+class HandPassButton(discord.ui.Button):
+    def __init__(self,browser):
+        super().__init__(label="Pass priority",style=discord.ButtonStyle.primary,row=2)
+        self.browser=browser
+    async def callback(self,interaction):
+        await self.browser.cog.pass_hand_interaction(interaction,self.browser.game_id)
+
 class HandPaginationView(discord.ui.View):
     def __init__(self,cog,game_id,user_id,page,pages):
         super().__init__(timeout=180)
@@ -389,6 +396,8 @@ class HandPaginationView(discord.ui.View):
         if game and game.phase=="opening" and not game.player(user_id).kept:
             self.add_item(OpeningHandButton(self,True)); self.add_item(OpeningHandButton(self,False))
         elif entries: self.add_item(HandPlaySelect(self,entries))
+        if game and game.phase!="opening" and game.priority_user==user_id and game.phase not in ("untap","cleanup_discard","camouflage") and game.turn_start_pending_user is None and not game.sanctuary_draw_pending and not (game.stack and game.stack[-1].decision_pending):
+            self.add_item(HandPassButton(self))
         self.previous.disabled=page<=0
         self.next.disabled=page>=pages-1
     async def interaction_check(self,i):

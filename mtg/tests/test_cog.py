@@ -870,6 +870,14 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([option.label for option in response_selector.options],["2. Lightning Strike"])
         self.assertIn("1 mana of any type + 1 red mana",response_selector.options[0].description)
 
+    async def test_private_pass_clears_hand_panel_and_refreshes_table(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.player(10).kept=game.player(20).kept=True; game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock()))
+        view=HandPaginationView(cog,1,10,0,1); passing=next(item for item in view.children if getattr(item,"label",None)=="Pass priority")
+        await passing.callback(interaction)
+        interaction.response.edit_message.assert_awaited_once_with(content="Priority passed. Return to the public game table for the next action.",attachments=[],view=None)
+        cog.refresh_message.assert_awaited_once_with(game)
+
     def test_required_combat_steps_have_selectors_and_none_buttons(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.player(10).battlefield=[]; game.player(20).battlefield=[]
         attacker=Permanent(90,"bear",owner=10,sick=False); blocker=Permanent(91,"bear",owner=20,sick=False); game.cards.update({90:"bear",91:"bear"}); game.player(10).battlefield=[attacker]; game.player(20).battlefield=[blocker]; cog.games={1:game}
