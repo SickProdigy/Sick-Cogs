@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.7"
+    __version__="0.120.8"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -328,6 +328,11 @@ class MTG(commands.Cog):
         paths=[None]*start+visible_paths
         text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
         view=HandPaginationView(self,game_id,interaction.user.id,page,pages)
+        if game.phase=="opening": guidance="Choose **Keep hand** or **Mulligan** on the public game table before playing cards."
+        elif game.priority_user!=interaction.user.id: guidance="You do not currently have priority. Return to the public game table for the required action."
+        elif view.playable_count: guidance="Use the private menu below to play or cast a currently legal card."
+        else: guidance="You have no cards you can legally play right now. Return to the public table and use **Pass priority** or the required combat control."
+        text=f"{guidance}\n\n{text}"
         try:
             image=await asyncio.to_thread(render_hand,cards,paths,page)
             file=discord.File(image,filename=f"mtg-hand-{game_id}-{page+1}.png")

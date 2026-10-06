@@ -869,6 +869,13 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":declare_blockers") for item in block_view.children))
         self.assertTrue(any(getattr(item,"custom_id","").endswith(":no_blocks") for item in block_view.children))
 
+    async def test_private_hand_explains_when_no_card_is_playable(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.active_index=1; game.priority_user=10; cog.games={1:game}
+        cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg")); interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
+        with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()): await cog.send_hand(interaction,1,0)
+        self.assertIn("no cards you can legally play",interaction.followup.send.await_args.args[0])
+        self.assertEqual(next(item for item in GameView(cog,1).children if item.custom_id.endswith(":hand")).label,"View / play hand")
+
     async def test_hand_land_selection_uses_play_action_and_refreshes_table(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}; cog.channels={1:1}
         position=next(index for index,card in enumerate(game.hand(10),1) if card.land)

@@ -280,7 +280,7 @@ class GameView(discord.ui.View):
             await i.response.send_message("This match is over.",ephemeral=True); return False
         if game and i.user.id in game.order: return True
         await i.response.send_message("You are not a player in this match.",ephemeral=True); return False
-    @discord.ui.button(label="View hand",style=discord.ButtonStyle.primary,custom_id="hand")
+    @discord.ui.button(label="View / play hand",style=discord.ButtonStyle.primary,custom_id="hand")
     async def hand(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
         await self.cog.send_hand(i,self.game_id,0,editing=False)
@@ -378,6 +378,7 @@ class HandPaginationView(discord.ui.View):
         super().__init__(timeout=180)
         self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
         game=cog.games.get(game_id); entries=_playable_hand_entries(game,user_id,page) if game and game.priority_user==user_id and game.phase!="opening" else []
+        self.playable_count=len(entries)
         if entries: self.add_item(HandPlaySelect(self,entries))
         self.previous.disabled=page<=0
         self.next.disabled=page>=pages-1
