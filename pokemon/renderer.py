@@ -10,7 +10,7 @@ import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
 from .data import MOVES, SPECIES, sprite
-from .models import pokemon_max_hp
+from .models import OwnedPokemon,pokemon_max_hp
 
 SPRITE_HOST = "raw.githubusercontent.com"
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
@@ -142,6 +142,19 @@ class BattleRenderer:
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
+
+    async def pokedex_registration(self,pokemon):
+        data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
+        try:return await self._render(self._pokedex_registration_sync,pokemon,data)
+        except (OSError,ValueError) as exc:raise RenderError("Pokédex registration rendering failed.") from exc
+
+    async def trainer_card(self,user_name,conf,style="retro"):
+        owned={item["instance_id"]:item for item in conf.get("collection",[])}
+        lead=owned.get(conf.get("party",[None])[0]) if conf.get("party") else None
+        pokemon=OwnedPokemon.from_raw(lead) if lead else None
+        data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny) if pokemon else None
+        try:return await self._render(self._trainer_card_sync,user_name,conf,pokemon,data,style)
+        except (OSError,ValueError) as exc:raise RenderError("Trainer card rendering failed.") from exc
 
     async def progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
         current=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
@@ -404,6 +417,36 @@ class BattleRenderer:
         draw.ellipse((255,267,630,352),fill=RETRO[2],outline=RETRO[0],width=4)
         draw.ellipse((275,280,612,341),fill=(183,205,112),outline=RETRO[1],width=2)
         for x in range(280,615,28):draw.line((x,289,x+7,275),fill=RETRO[0],width=3)
+
+    def _pokedex_registration_sync(self,pokemon,data):
+        species=SPECIES[pokemon.species_id];canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
+        draw.rectangle((28,25,772,340),fill=RETRO[7],outline=RETRO[0],width=6)
+        draw.rectangle((48,48,330,315),fill=RETRO[4],outline=RETRO[1],width=4)
+        image=self._retro(self._open(data,(245,225),trim=True,upscale=True));canvas.paste(image,(189-image.width//2,285-image.height),image)
+        draw.text((370,62),"POKEDEX REGISTRATION",fill=RETRO[0],font=ImageFont.load_default(size=27))
+        draw.text((370,120),f"No. {species.id:03d}  {species.name}",fill=RETRO[1],font=ImageFont.load_default(size=25))
+        draw.text((370,175),"New Pokemon data",fill=RETRO[0],font=ImageFont.load_default(size=22))
+        draw.text((370,205),"was added to the Pokedex!",fill=RETRO[0],font=ImageFont.load_default(size=22))
+        draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in your Pokedex.",(25,382),width=84,size=19)
+        return self._save(canvas)
+
+    def _trainer_card_sync(self,user_name,conf,pokemon,data,style):
+        gold=style=="gold";paper=(247,225,153) if gold else RETRO[4];panel=(255,241,190) if gold else RETRO[5];ink=(91,60,27) if gold else RETRO[0]
+        canvas=Image.new("RGB",(800,450),paper);draw=ImageDraw.Draw(canvas)
+        draw.rounded_rectangle((24,24,776,426),22,fill=panel,outline=ink,width=7)
+        draw.text((55,48),"TRAINER CARD",fill=ink,font=ImageFont.load_default(size=32));draw.text((55,100),user_name[:28],fill=ink,font=ImageFont.load_default(size=27))
+        draw.text((55,158),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
+        badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
+        for index,key in enumerate(badge_keys):
+            x=62+index*65;color=(214,165,52) if key in conf.get("badges",[]) else (170,174,151)
+            draw.ellipse((x,195,x+40,235),fill=color,outline=ink,width=3)
+        draw.text((55,270),f"POKEDEX  {len(conf.get('pokedex_caught',[]))} caught / {len(conf.get('pokedex_seen',[]))} seen",fill=ink,font=ImageFont.load_default(size=19))
+        draw.text((55,308),f"COLLECTION  {len(conf.get('collection',[]))}    PARTY  {len(conf.get('party',[]))}/6",fill=ink,font=ImageFont.load_default(size=19))
+        if pokemon and data:
+            image=self._retro(self._open(data,(230,220),trim=True,upscale=True));canvas.paste(image,(650-image.width//2,330-image.height),image)
+            draw.text((530,350),f"PARTNER  {SPECIES[pokemon.species_id].name}",fill=ink,font=ImageFont.load_default(size=18));draw.text((530,380),f"Lv. {pokemon.level}",fill=ink,font=ImageFont.load_default(size=18))
+        else:draw.text((530,350),"NO PARTNER",fill=ink,font=ImageFont.load_default(size=18))
+        return self._save(canvas)
 
     def _progression_sync(self,pokemon,current_data,previous_data,evolved_from,move_key,pending):
         canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)

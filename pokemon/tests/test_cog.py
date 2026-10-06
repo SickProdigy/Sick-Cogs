@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -63,6 +63,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertLess(PACE["active"][2],PACE["relaxed"][2])
         self.assertEqual(pace_for_settings(*PACE["normal"]),"normal")
         self.assertEqual(pace_for_settings(7,13,90),"custom")
+
+    def test_first_catch_only_requires_pokedex_registration_once(self):
+        self.assertTrue(first_pokedex_registration({"pokedex_caught":[]},25))
+        self.assertFalse(first_pokedex_registration({"pokedex_caught":[25]},25))
 
     def test_activity_weight_is_bounded(self):
         self.assertEqual([activity_weight(n) for n in (0, 1, 2, 8)], [1, 1, 2, 3])
@@ -183,6 +187,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon gym challenge",player_names)
         self.assertIn("pokemon party add",player_names)
         self.assertIn("pokemon moves",player_names)
+        self.assertIn("pokemon profilestyle",player_names)
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
@@ -343,6 +348,16 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved.move_pp["focus_energy"],30)
         response.edit_message.assert_awaited_once()
         self.assertIsNone(response.edit_message.await_args.kwargs["view"])
+
+    async def test_profile_can_show_another_members_selected_card(self):
+        section=StoredSection({"trainer_card_style":"gold","collection":[],"party":[],"badges":[],"pokedex_seen":[],"pokedex_caught":[]})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        cog.rendered_trainer_card=AsyncMock(return_value=(discord.Embed(title="Other Trainer"),[]))
+        author=SimpleNamespace(id=42,display_name="Trainer");other=SimpleNamespace(id=7,display_name="Other")
+        ctx=SimpleNamespace(author=author,send=AsyncMock())
+        await Pokemon.profile.callback(cog,ctx,other)
+        cog.rendered_trainer_card.assert_awaited_once_with(other,section.value)
+        self.assertEqual(ctx.send.await_args.kwargs["embed"].title,"Other Trainer")
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})

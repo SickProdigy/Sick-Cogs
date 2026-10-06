@@ -226,7 +226,7 @@ class BattleTests(unittest.TestCase):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data);trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},starter_pokemon,data,"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         with Image.open(encounter) as image,Image.open(alternate) as other:
             self.assertEqual(image.size,(800,450))
@@ -239,6 +239,8 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(image.getpixel((400,298)),(40,120,220))
         with Image.open(party_card) as image:self.assertEqual(image.size,(1200,360))
         with Image.open(collection_card) as image:self.assertEqual(image.size,(900,720))
+        with Image.open(registration) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,450))
         with Image.open(evolution) as image:self.assertEqual(image.size,(800,450))
         with Image.open(move_card) as image:self.assertEqual(image.size,(800,450))
         with Image.open(starter) as image:
