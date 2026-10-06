@@ -468,7 +468,7 @@ def _activation_target(game,user,card,source_uid=None):
         choices=[]
         for position,permanent in enumerate(game.player(user).battlefield,1):
             target=game.card(permanent.uid)
-            can_attack=not permanent.tapped and (not permanent.sick or target.haste or "haste" in game.current_keywords(permanent)) and "defender" not in game.current_keywords(permanent)
+            can_attack=game.can_attack_permanent(permanent)
             if permanent.uid!=source_uid and game.is_creature(permanent) and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
                 choices.append((game.current_stats(permanent)[0],position))
         if choices: return f"{user}:{max(choices)[1]}"
@@ -548,6 +548,15 @@ def _activate_clockwork(game,user):
             game.activate_ability(user,position,x_value=x_value,choice_value=x_value); return "activate"
     return None
 
+def _activate_untap_aura(game,user):
+    for position,source in enumerate(game.player(user).battlefield,1):
+        card=game.card(source.uid)
+        if card.activation_effect!="untap_attached": continue
+        _,target=game.find_permanent(source.attached_to)
+        if target is not None and target.tapped and game.can_activate(user,position):
+            game.activate_ability(user,position); return "activate"
+    return None
+
 def _activate_targeted_ability(game,user):
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
@@ -621,6 +630,8 @@ def advance_solo(game: Game):
                 game.choose_trigger(user,True,position); game.record(user,"ai_trigger_sacrifice"); changed=True; continue
             if trigger.ability_effect=="upkeep_untap":
                 useful=source is not None and source.tapped
+            elif trigger.ability_effect=="aura_upkeep_untap":
+                target=game._stable_target_permanent(trigger.target); useful=target is not None and target.tapped
             elif trigger.ability_effect=="upkeep_cost":
                 useful=source is not None or game.card(trigger.uid).upkeep_unpaid_effect=="damage"
             else:
@@ -628,7 +639,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _activate_clockwork(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

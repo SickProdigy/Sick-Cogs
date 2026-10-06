@@ -45,6 +45,7 @@ class Card:
     aura_toughness: int = 0
     aura_forest_scaling: bool = False
     aura_keyword: str = ""
+    aura_attack_haste: bool = False
     aura_attack_override: bool = False
     aura_blocked_except_wall: bool = False
     aura_hostile: bool = False
@@ -71,6 +72,8 @@ class Card:
     enters_power_counters: int = 0
     end_combat_remove_power_counter: bool = False
     activation_upkeep_only: bool = False
+    activation_controller_turn_only: bool = False
+    activation_once_per_turn: bool = False
     activation_x_choice: bool = False
     prevent_source_color: str = ""
     conditional_swamp_bonus: bool = False
@@ -97,6 +100,9 @@ class Card:
     upkeep_each_damage: int = 0
     upkeep_land_type_damage: str = ""
     aura_upkeep_damage: int = 0
+    aura_enters_tapped: bool = False
+    aura_skip_untap: bool = False
+    aura_upkeep_untap_cost: str = ""
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -168,6 +174,7 @@ class Card:
         if self.aura_forest_scaling: aura.append("Enchanted creature gets +X/+Y for Forests you control")
         if self.aura_animate_mana_value: aura.append("Enchanted noncreature artifact is a creature with power and toughness equal to its mana value")
         if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
+        if self.aura_attack_haste: aura.append("Enchanted creature can attack as though it had haste")
         if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
         if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
@@ -221,6 +228,9 @@ class Card:
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
         if self.upkeep_land_type_damage: abilities.append(f"At each player's upkeep, deals damage equal to that player's {self.upkeep_land_type_damage.title()}s")
         if self.aura_upkeep_damage: abilities.append(f"At enchanted permanent controller's upkeep, deals {self.aura_upkeep_damage} damage to that player")
+        if self.aura_enters_tapped: abilities.append("When this Aura enters, tap enchanted creature")
+        if self.aura_skip_untap: abilities.append("Enchanted creature does not untap during its controller's untap step")
+        if self.aura_upkeep_untap_cost: abilities.append(f"At enchanted creature controller's upkeep, that player may pay {self.aura_upkeep_untap_cost} to untap it")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -312,6 +322,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:192": {"extra_land_damage":1},
     "lea:80": {"skip_all_untap":True, "upkeep_cost":"{U}", "upkeep_unpaid_effect":"sacrifice"},
     "lea:175": {"untap_creature_limit":1},
+    "lea:119": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_enters_tapped":True, "aura_skip_untap":True, "aura_upkeep_untap_cost":"{4}"},
+    "lea:202": {"aura_target_types":("Creature",), "aura_attack_haste":True, "activation_cost":"{0}", "activation_effect":"untap_attached", "activation_attached":True, "activation_controller_turn_only":True, "activation_once_per_turn":True, "activation_text":"Untap enchanted creature; activate only during your turn and only once each turn"},
 }
 
 ALPHA_ARTIFACTS = {
@@ -572,6 +584,7 @@ for reference in PLAYABLE_ALPHA:
         aura_toughness=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_toughness",0),
         aura_forest_scaling=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_forest_scaling",False),
         aura_keyword=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_keyword",""),
+        aura_attack_haste=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_haste",False),
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
@@ -596,6 +609,8 @@ for reference in PLAYABLE_ALPHA:
         enters_power_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_power_counters",0),
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
         activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
+        activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",False),
+        activation_once_per_turn=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_once_per_turn",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),
         enters_tapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("enters_tapped",False),
@@ -623,6 +638,9 @@ for reference in PLAYABLE_ALPHA:
         upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
         upkeep_land_type_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_land_type_damage",""),
         aura_upkeep_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_damage",0),
+        aura_enters_tapped=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_enters_tapped",False),
+        aura_skip_untap=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_skip_untap",False),
+        aura_upkeep_untap_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_untap_cost",""),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),

@@ -358,6 +358,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.active_index=1; game._start_turn(); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Upkeep",rendered); self.assertIn("opponent's upkeep",rendered); self.assertIn("Black Vise ability",rendered)
 
+    async def test_paralyze_upkeep_choice_renders_for_enchanted_controller(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        target=game.next_uid; game.next_uid+=1; game.cards[target]="bear"
+        aura=game.next_uid; game.next_uid+=1; game.cards[aura]="lea:119"
+        game.player(20).battlefield=[permanent_type(target,"bear",tapped=True,sick=False)]
+        game.player(10).battlefield=[permanent_type(aura,"lea:119",sick=False,attached_to=target)]
+        game.active_index=1; game._start_turn(); game.pass_priority(20); game.pass_priority(10); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Paralyze",rendered); self.assertIn("Pay {4} or Decline",rendered)
+        pay=next(item for item in GameView(cog,1).children if item.custom_id.endswith(":pay")); self.assertEqual(pay.label,"Pay {4}"); self.assertFalse(pay.disabled); self.assertEqual(game.priority_user,20)
+
     async def test_restricted_untap_renders_select_and_command(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

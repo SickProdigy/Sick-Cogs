@@ -1051,12 +1051,12 @@ class AlphaXSpellTests(unittest.TestCase):
                 saved.pop("power_bonus",None); saved.pop("toughness_bonus",None); saved.pop("exile_on_death",None)
                 saved.pop("temporary_keywords",None); saved.pop("activations_this_turn",None); saved.pop("sacrifice_at_end_step",None)
                 saved.pop("regeneration_shields",None); saved.pop("cant_regenerate",None); saved.pop("attached_to",None)
-        raw["stack"][0].pop("x_value"); raw["stack"][0].pop("ability_effect"); raw["stack"][0].pop("source_uid")
+        raw["stack"][0].pop("x_value"); raw["stack"][0].pop("ability_effect"); raw["stack"][0].pop("source_uid"); raw["stack"][0].pop("choice_owner")
         restored=Game.from_raw(raw); restored_permanent=next(x for x in restored.player(10).battlefield if x.uid==permanent.uid)
         self.assertEqual((restored_permanent.power_bonus,restored_permanent.toughness_bonus),(0,0)); self.assertFalse(restored_permanent.exile_on_death)
         self.assertEqual(restored_permanent.temporary_keywords,[]); self.assertEqual(restored_permanent.activations_this_turn,0); self.assertFalse(restored_permanent.sacrifice_at_end_step)
         self.assertEqual(restored_permanent.regeneration_shields,0); self.assertFalse(restored_permanent.cant_regenerate); self.assertIsNone(restored_permanent.attached_to)
-        self.assertEqual(restored.stack[0].x_value,0); self.assertEqual(restored.stack[0].ability_effect,""); self.assertIsNone(restored.stack[0].source_uid)
+        self.assertEqual(restored.stack[0].x_value,0); self.assertEqual(restored.stack[0].ability_effect,""); self.assertIsNone(restored.stack[0].source_uid); self.assertIsNone(restored.stack[0].choice_owner)
 
     def test_braingeyser_persists_x_and_draws_exact_amount(self):
         game=ready(); spell=self.add(game,10,"lea:50"); self.lands(game,10,["island","island","mountain","mountain","mountain"])
@@ -1655,6 +1655,28 @@ class AlphaAuraTests(unittest.TestCase):
         self.assertEqual(game.current_stats(target),(3,4))
         game._destroy(game.player(10),aura); game._sba()
         self.assertEqual(game.current_stats(target),(2,2)); self.assertIn(target,game.player(20).battlefield); self.assertIn(aura.uid,game.player(10).graveyard)
+
+    def test_paralyze_taps_skips_untap_and_gives_controller_upkeep_choice(self):
+        game=ready(); target=self.add(game,20,"bear"); aura=self.add(game,10,"lea:119","hand"); self.add(game,10,"swamp")
+        game.play(10,1,"20:1"); self.resolve_top(game); self.assertTrue(target.tapped)
+        for _ in range(4): self.add(game,20,"forest")
+        game.active_index=1; game._start_turn(); self.assertTrue(target.tapped); trigger=game.stack[-1]
+        self.assertEqual((trigger.ability_effect,trigger.owner,trigger.choice_owner,trigger.target),("aura_upkeep_untap",10,20,f"20:{target.uid}"))
+        self.resolve_top(game); restored=Game.from_raw(game.to_raw())
+        aura_controller,aura_permanent=restored.find_permanent(aura); aura_controller.battlefield.remove(aura_permanent); aura_controller.graveyard.append(aura)
+        with self.assertRaisesRegex(GameError,"trigger choice"): restored.choose_trigger(10,True)
+        restored.choose_trigger(20,True); self.assertFalse(restored.find_permanent(target.uid)[1].tapped); self.assertTrue(all(x.tapped for x in restored.player(20).battlefield[1:]))
+
+    def test_instill_energy_grants_haste_and_untaps_once_only_on_auras_turn(self):
+        game=ready(); target=self.add(game,10,"lea:210"); target.sick=True; target.tapped=True; aura=self.add(game,10,"lea:202",attached_to=target.uid)
+        self.assertNotIn("haste",game.current_keywords(target)); target.tapped=False; game.phase="attackers"; self.assertTrue(game.can_attack_permanent(target))
+        game.phase="precombat_main"; game.priority_user=10; target.tapped=True; game.activate_ability(10,2); self.assertEqual(game.stack[-1].target,f"10:{target.uid}")
+        self.resolve_top(game); self.assertFalse(target.tapped)
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_mana(10,1)
+        with self.assertRaisesRegex(GameError,"once each turn"): game.activate_ability(10,2)
+        game._cleanup(); target.tapped=True; game.active_index=1; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"only during your turn"): game.activate_ability(10,2)
+
 
 
 class AlphaProtectionTests(unittest.TestCase):

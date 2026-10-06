@@ -66,6 +66,7 @@ class Spell:
     batch_id: int = 0
     source_power: int = 0
     choice_value: int = 0
+    choice_owner: Optional[int] = None
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -239,11 +240,13 @@ class Game:
         return set(self.card(permanent.uid).keywords) | set(permanent.temporary_keywords) | aura_keywords | lord_keywords
     def can_attack_permanent(self,permanent):
         card=self.card(permanent.uid); keywords=self.current_keywords(permanent)
-        defender_override=any(self.card(aura.uid).aura_attack_override for aura in self.attached_auras(permanent))
+        auras=self.attached_auras(permanent)
+        defender_override=any(self.card(aura.uid).aura_attack_override for aura in auras)
+        attack_haste=any(self.card(aura.uid).aura_attack_haste for aura in auras)
         defender=self.player(self.opponent(self.active_user))
         required=card.attack_requires_defender_land_type
         has_required=not required or any(self.card(x.uid).has_land_type(required) for x in defender.battlefield)
-        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste or "haste" in keywords) and ("defender" not in keywords or defender_override) and has_required
+        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste or "haste" in keywords or attack_haste) and ("defender" not in keywords or defender_override) and has_required
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -283,7 +286,7 @@ class Game:
         for controller_id in (active,self.opponent(active)):
             controller=self.player(controller_id)
             for source in controller.battlefield:
-                card=self.card(source.uid); effect=""
+                card=self.card(source.uid); effect=""; trigger_owner=controller.user_id; trigger_target=str(active); choice_owner=None
                 if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
                 elif step=="upkeep" and card.upkeep_cost and active==controller.user_id: effect="upkeep_cost"
                 elif step=="upkeep" and card.upkeep_sacrifice_other and active==controller.user_id: effect="upkeep_sacrifice"
@@ -292,12 +295,16 @@ class Game:
                 elif step=="upkeep" and card.aura_upkeep_damage:
                     attached_controller,attached=self.find_permanent(source.attached_to)
                     if attached is not None and active==attached_controller.user_id: effect="aura_upkeep_damage"
+                elif step=="upkeep" and card.aura_upkeep_untap_cost:
+                    attached_controller,attached=self.find_permanent(source.attached_to)
+                    if attached is not None and active==attached_controller.user_id:
+                        effect="aura_upkeep_untap"; choice_owner=active; trigger_target=f"{active}:{attached.uid}"
                 elif step=="upkeep" and card.upkeep_opponent_hand_damage and active==self.opponent(controller.user_id): effect="upkeep_hand_damage"
                 elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
                 elif step=="draw" and card.draw_tapped_damage and active==controller.user_id and source.tapped: effect="draw_tapped_damage"
                 if not effect: continue
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
-                triggers.append(Spell(controller.user_id,uid,card.key,str(active),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
+                triggers.append(Spell(trigger_owner,uid,card.key,trigger_target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override,choice_owner=choice_owner))
             if step=="upkeep" and active==controller_id:
                 for source_uid in controller.graveyard:
                     if not self._graveyard_upkeep_return_eligible(controller_id,source_uid): continue
@@ -369,7 +376,8 @@ class Game:
             self._begin_upkeep(); return
         for x in p.battlefield:
             restricted_power=self.is_creature(x) and any(self.current_stats(x)[0]>=limit for limit in power_limits)
-            eligible=x.tapped and not self.card(x.uid).skip_untap and not restricted_power
+            aura_blocks_untap=any(self.card(aura.uid).aura_skip_untap for aura in self.attached_auras(x))
+            eligible=x.tapped and not self.card(x.uid).skip_untap and not aura_blocks_untap and not restricted_power
             constrained=(creature_limit is not None and self.is_creature(x)) or (land_limit is not None and self.card(x.uid).land)
             if eligible and constrained: self.untap_pending.append(x.uid)
             elif eligible: x.tapped=False
@@ -584,6 +592,8 @@ class Game:
         if not (activation_cost or activation_effect): return False
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: return False
         if card.activation_upkeep_only and (self.phase!="upkeep" or self.active_user!=user): return False
+        if card.activation_controller_turn_only and self.active_user!=user: return False
+        if card.activation_once_per_turn and permanent.activations_this_turn: return False
         if card.activation_x_choice:
             if not isinstance(x_value,int) or not isinstance(choice_value,int) or x_value<0 or choice_value<0 or choice_value>x_value or permanent.power_counters+choice_value>7: return False
         else: x_value=0
@@ -605,6 +615,8 @@ class Game:
         if not (activation_cost or activation_effect): raise GameError("That permanent has no supported activated ability.")
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: raise GameError(f"{card.name} has no corpse counters to remove.")
         if card.activation_upkeep_only and (self.phase!="upkeep" or self.active_user!=user): raise GameError(f"{card.name} can be activated only during your upkeep.")
+        if card.activation_controller_turn_only and self.active_user!=user: raise GameError(f"{card.name} can be activated only during your turn.")
+        if card.activation_once_per_turn and permanent.activations_this_turn: raise GameError(f"{card.name} can be activated only once each turn.")
         if card.activation_x_choice:
             if not isinstance(x_value,int) or x_value<0: raise GameError(f"Choose a nonnegative X value for {card.name}.")
             if not isinstance(choice_value,int) or choice_value<0 or choice_value>x_value: raise GameError(f"Choose counters from zero through X for {card.name}.")
@@ -872,8 +884,8 @@ class Game:
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
                     return
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost","graveyard_return","upkeep_sacrifice"):
-                    s.decision_pending=True; self.priority_user=s.owner; return
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","upkeep_cost","graveyard_return","upkeep_sacrifice"):
+                    s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
                 if not self.finished: self.priority_user=self.active_user
@@ -900,6 +912,7 @@ class Game:
         card=self.card(trigger.uid)
         if trigger.ability_effect in ("cast_draw","graveyard_return"): return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
+        if trigger.ability_effect=="aura_upkeep_untap": return card.aura_upkeep_untap_cost
         if trigger.ability_effect=="upkeep_cost": return card.upkeep_cost
         return "{1}"
 
@@ -912,7 +925,7 @@ class Game:
 
     def choose_trigger(self,user,pay,sacrifice_position=None):
         if self.finished: raise GameError("Game is over.")
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user:
+        if not self.stack or not self.stack[-1].decision_pending or (self.stack[-1].choice_owner if self.stack[-1].choice_owner is not None else self.stack[-1].owner)!=user:
             raise GameError("You do not have a trigger choice to make.")
         trigger=self.stack[-1]; card=self.card(trigger.uid)
         if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
@@ -950,6 +963,10 @@ class Game:
                 _,source=self.find_permanent(trigger.source_uid)
                 if source is not None: source.tapped=False
                 result=" and untapped it" if source is not None else ""
+            elif trigger.ability_effect=="aura_upkeep_untap":
+                target=self._stable_target_permanent(trigger.target)
+                if target is not None: target.tapped=False
+                result=" and untapped the enchanted creature" if target is not None else ""
             else: result=""
             verb=f"paid {cost} for" if cost else "accepted"
             self.log.append(f"{user} {verb} {card.name}{result}.")
@@ -1318,6 +1335,9 @@ class Game:
         elif effect=="untap_self":
             if target is None: fizzle("its source was gone"); return
             target.tapped=False
+        elif effect=="untap_attached":
+            if target is None: fizzle("its enchanted creature was gone"); return
+            target.tapped=False
         elif effect=="animate_self":
             if target is None: fizzle("its source was gone"); return
             target.animated_until_end_combat=True
@@ -1386,6 +1406,7 @@ class Game:
             if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             p.battlefield.append(self._make_permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override))
+            if c.aura_enters_tapped: self._tap_permanent(user,target)
         elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,tapped=c.enters_tapped,color_override=s.color_override))
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if s.target.startswith("S:"):
