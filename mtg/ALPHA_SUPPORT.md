@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
-| Instants and sorceries | 70 | 56 spells playable through 0.90.0; 14 remain |
+| Instants and sorceries | 70 | 58 spells playable through 0.91.0; 12 remain |
 | Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
 | Artifacts | 42 | Thirty-five artifacts playable through 0.89.0; 7 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -202,3 +202,5 @@ The 0.88.0 mana-control promotion adds Drain Power and Power Sink. Both wait unt
 The 0.89.0 private-hand promotion adds Disrupting Scepter and Glasses of Urza. Their targeted abilities use stable player targets and the normal response window, then persist a requester-bound resolution decision independent of the source artifact. Scepter is restricted to its controller’s turn and lets the targeted player choose a card through a paginated ephemeral hand browser before that card becomes public in the graveyard; empty hands resolve safely. Glasses lets only its controller inspect the targeted current hand and requires private completion without changing any cards. Public state and logs never expose looked-at cards, stale or foreign interactions are rejected atomically, reloads retain the decision, and solo AI uses the same flows.
 
 The 0.90.0 damage-history promotion adds Simulacrum and Living Artifact. Actual post-prevention player damage accumulates for the turn and survives reloads before resetting at cleanup. Simulacrum targets a creature its caster controls, gains life equal to that history, then deals the same amount to the stable target, with a full fizzle if that target becomes illegal. Living Artifact creates one persisted, respondable trigger per damage event that snapshots the amount and adds vitality counters only while the Aura remains; each upkeep offers its controller an optional one-counter exchange for one life. Trigger batches retain event order and use APNAP ordering within simultaneous batches, while public rendering and solo AI use the same rules.
+
+The 0.91.0 flexible-prevention promotion adds Guardian Angel and Reverse Damage. Guardian Angel applies its chosen X to a stable player or creature target, then grants its caster a persisted turn-scoped Discord action that atomically pays {1} for each additional point of next-damage prevention. Reverse Damage records a stable chosen spell, ability, or permanent source, consumes the replacement only on that source’s next damage event to its caster, prevents the damage, and gains exactly the prevented amount. Both effects survive reloads, clear at cleanup, render publicly without hidden information, and use the same legal paths in solo AI.

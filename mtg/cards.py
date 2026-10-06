@@ -506,6 +506,8 @@ ALPHA_SPELLS = {
     "lea:207": {"effect":"set_color", "color_change":"G"},
     "lea:17": {"effect":"regenerate_target"},
     "lea:22": {"effect":"healing_salve", "amount":3},
+    "lea:21": {"effect":"guardian_angel"},
+    "lea:35": {"effect":"reverse_damage"},
     "lea:60": {"effect":"grant_keyword", "temporary_keyword":"flying"},
     "lea:85": {"effect":"tap_or_untap", "target_types":("Artifact","Creature","Land")},
     "lea:65": {"effect":"mana_short"},

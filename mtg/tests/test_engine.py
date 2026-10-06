@@ -50,12 +50,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn"); player.pop("channel_active")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("guardian_angel_active"); player.pop("lands_played_this_turn"); player.pop("channel_active")
             for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
-        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
+        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and not player.guardian_angel_active and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
@@ -3680,5 +3680,24 @@ class AlphaPrivateHandArtifactTests(unittest.TestCase):
                 self.assertEqual(game.player(20).hand,[card]); self.assertEqual(len(game.stack),1)
         game.choose_private_hand(20,1)
         with self.assertRaises(GameError): game.choose_private_hand(20,1)
+
+class AlphaFlexiblePreventionTests(unittest.TestCase):
+    def test_guardian_angel_initial_and_repeatable_prevention_persist_and_cleanup(self):
+        game=ready(); player=game.player(10); spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:21"
+        game._resolve(Spell(10,spell,"lea:21","10",x_value=3)); self.assertEqual(player.damage_prevention,3); self.assertTrue(player.guardian_angel_active)
+        land=game.next_uid; game.next_uid+=1; game.cards[land]="plains"; player.battlefield=[Permanent(land,"plains",owner=10,sick=False)]; game.phase="precombat_main"; game.priority_user=10
+        game.activate_guardian_angel(10,"10"); self.assertEqual(player.damage_prevention,4); self.assertTrue(player.battlefield[0].tapped)
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.player(10).guardian_angel_active); restored._cleanup(); self.assertFalse(restored.player(10).guardian_angel_active)
+
+    def test_guardian_angel_creature_target_fizzles_and_repeat_action_validates_state(self):
+        game=ready(); target=Permanent(game.next_uid,"bear",owner=10,sick=False); game.cards[target.uid]="bear"; game.next_uid+=1; game.player(10).battlefield=[target]
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:21"; game.player(10).battlefield.remove(target); game._resolve(Spell(10,spell,"lea:21",f"10:{target.uid}",x_value=2))
+        self.assertFalse(game.player(10).guardian_angel_active)
+        with self.assertRaises(GameError): game.activate_guardian_angel(10,"10")
+
+    def test_reverse_damage_uses_stable_source_once_and_survives_reload(self):
+        game=ready(); player=game.player(10); source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:161"; reverse=game.next_uid; game.next_uid+=1; game.cards[reverse]="lea:35"
+        game._resolve(Spell(10,reverse,"lea:35",f"D:{source}")); restored=Game.from_raw(game.to_raw()); before=restored.player(10).life
+        self.assertEqual(restored._damage_player(10,3,source_uid=source),0); self.assertEqual(restored.player(10).life,before+3); self.assertEqual(restored._damage_player(10,2,source_uid=source),2)
 
 if __name__=="__main__": unittest.main()

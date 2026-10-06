@@ -4,10 +4,25 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
+    if card.effect=="guardian_angel":
+        if not game.player(user).damage_prevention and _player_damage_threatened(game,user): return str(user)
+        choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
+    if card.effect=="reverse_damage":
+        damaging={"damage","damage_any","damage_x_exile","drain_life_x","earthquake_x","hurricane_x"}
+        for position,item in enumerate(reversed(game.stack),1):
+            source=game.card(item.uid); player_target=(item.target or "")==str(user) or source.effect in ("earthquake_x","hurricane_x")
+            if not item.ability_effect and source.effect in damaging and player_target: return f"S:{position}"
+        if game.active_user!=user and game.phase in ("after_blockers","after_first_strike"):
+            attacker_player=game.player(game.active_user)
+            for uid in game.attackers:
+                permanent=game.find_permanent(uid)[1]
+                if uid not in game.blocks and permanent is not None: return f"{game.active_user}:{attacker_player.battlefield.index(permanent)+1}"
+        return None
     if card.effect=="healing_salve":
         if not game.player(user).damage_prevention and _player_damage_threatened(game,user): return f"prevent:{user}"
         choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]
@@ -171,6 +186,20 @@ def _fog_useful(game,user):
     if game.phase!="after_first_strike": return True
     combatants=set(game.attackers)|set(game.blocks.values())
     return any("first_strike" not in game.current_keywords(permanent) for player in game.players.values() for permanent in player.battlefield if permanent.uid in combatants)
+
+def _activate_guardian_angel(game,user):
+    player=game.player(user)
+    if not player.guardian_angel_active: return None
+    target=None
+    if not player.damage_prevention and _player_damage_threatened(game,user): target=str(user)
+    if target is None:
+        choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(player.battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]
+        if choices: target=f"{user}:{max(choices)[1]}"
+    if target is None: return None
+    try: game.activate_guardian_angel(user,target)
+    except GameError: return None
+    return "guardian_angel"
+
 
 def _play_one(game, user, difficulty):
     player = game.player(user)
@@ -727,7 +756,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

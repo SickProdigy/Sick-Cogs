@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.90.0"
+    __version__="0.91.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -152,9 +152,13 @@ class MTG(commands.Cog):
             if p.damage_prevention: value+=f"\nDamage prevention remaining: {p.damage_prevention}"
             if p.damage_taken_this_turn: value+=f"\nDamage taken this turn: {p.damage_taken_this_turn}"
             if p.channel_active: value+="\nChannel: pay life for {C} until end of turn"
+            if p.guardian_angel_active: value+="\nGuardian Angel: pay {1} to prevent the next 1 damage to any target this turn"
             if p.source_damage_prevention:
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_prevention]
                 value+="\nChosen-source prevention: "+", ".join(sources)
+            if p.source_damage_lifegain:
+                sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_lifegain]
+                value+="\nReverse Damage awaiting: "+", ".join(sources)
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.phase=="untap" and g.untap_pending:
             pending=set(g.untap_pending); player=g.player(g.active_user)
@@ -495,6 +499,10 @@ class MTG(commands.Cog):
     async def channel(self,ctx,amount:int=1):
         """While Channel is active, pay life to add that much colorless mana."""
         await self.mutate_ctx(ctx,lambda g:g.activate_channel(ctx.author.id,amount),"channel")
+    @mtg.command(name="angel")
+    async def angel(self,ctx,target:str):
+        """While Guardian Angel is active, pay {1} to prevent the next 1 damage to PLAYER_ID or USER_ID:POSITION."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_guardian_angel(ctx.author.id,target),"guardian_angel")
     @mtg.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
         """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`."""
@@ -502,7 +510,7 @@ class MTG(commands.Cog):
         await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
-        """Play/cast a hand position with optional target and X; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
+        """Play/cast a hand position with optional target and X; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, a source as S:POSITION or USER_ID:POSITION for Reverse Damage, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
     @mtg.command(name="attack")
