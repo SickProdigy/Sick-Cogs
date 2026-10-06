@@ -840,15 +840,34 @@ class RagingRiverRenderingTests(unittest.TestCase):
         blocker=Permanent(99,"bear",owner=20,sick=False); flyer=Permanent(100,"lea:46",owner=20,sick=False); game.cards.update({99:"bear",100:"lea:46",101:"lea:168"}); game.player(20).battlefield=[blocker,flyer]; game.stack=[spell_type(10,101,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
 
+class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_match_is_reported_instead_of_raising(self):
+        cog=cog_fixture(); ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
+        action=Mock()
+        await cog.mutate_ctx(ctx,action,"test")
+        ctx.send.assert_awaited_once_with("You do not have an active MTG game.")
+        action.assert_not_called()
+
+    async def test_single_page_hand_omits_none_view_from_followup(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); cog.games={1:game}
+        cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
+        with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()):
+            await cog.send_hand(interaction,1,0)
+        kwargs=interaction.followup.send.await_args.kwargs
+        self.assertNotIn("view",kwargs)
+        self.assertTrue(kwargs["ephemeral"])
+
 class CommandLayoutTests(unittest.TestCase):
-    def test_player_help_keeps_advanced_fallbacks_nested_and_concise(self):
-        public={"challenge","solo","status","card","catalog","graveyard","mana","action","play","attack","block","pass","concede"}
+    def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
+        public={"action","card","catalog","challenge","solo","status"}
+        match={"attack","block","concede","graveyard","mana","pass","play","special"}
         fallback={"vault","sanctuary","channel","angel","incarnation","hydra","hydraorder","mask","maskpick","activate","forktarget","bodyguard","trample","attackdamage","blockdamage","untap","trigger","wording","orders","kudzu","balance","leak","selection","copy","doppelganger"}
         self.assertEqual(set(MTG.mtg.all_commands),public)
-        self.assertEqual(set(MTG.action.all_commands),fallback)
-        self.assertFalse(fallback & set(MTG.mtg.all_commands))
-        self.assertTrue(all(command.qualified_name.startswith("mtg action ") for command in MTG.action.commands))
-        self.assertTrue(all(len(command.short_doc)<=58 for command in MTG.action.commands))
+        self.assertEqual(set(MTG.action.all_commands),match)
+        self.assertEqual(set(MTG.special.all_commands),fallback)
+        self.assertTrue(all(command.qualified_name.startswith("mtg action special ") for command in MTG.special.commands))
+        self.assertTrue(all(len(command.short_doc)<=58 for command in MTG.special.commands))
 
 if __name__ == "__main__":
     unittest.main()
