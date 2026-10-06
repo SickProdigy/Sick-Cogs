@@ -29,7 +29,7 @@ Collections are global only within one bot installation. Separate bots do not sh
 1. Load the cog.
 2. Grant Embed Links and Attach Files in spawn channels.
 3. Enable a spawn channel with `[p]pokemonset channel #channel` and designate any existing healing channel with `[p]pokemonset center #chat`.
-4. Review settings with `[p]pokemonset status`; choose `[p]pokemonset pace active|normal|relaxed`, or configure slower threshold, cooldown, battle expiry, and allowed-generation subsets individually.
+4. Review settings with `[p]pokemonset settings` (or `status`), including spawn channels and live activity progress; choose `[p]pokemonset pace active|normal|relaxed`, or configure slower threshold, cooldown, battle expiry, and allowed-generation subsets individually.
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemonset spawn` while testing.
 7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
@@ -55,7 +55,7 @@ The initial Gym milestone uses each leader's signature Pokémon as a restart-saf
 
 ## Pokédex styles
 
-The Retro style is the initial bot default. The bot owner can change that with `[p]pokemonset pokedexstyle retro|compact`. Members can select their own style with `[p]pokemon pokedexstyle retro|compact` or return to the owner-selected default with `[p]pokemon pokedexstyle default`. The style selector inside the interactive Pokédex also saves the member's choice.
+The Retro style is the initial bot default. The bot owner can change that with `[p]pokemonset pokedexstyle retro|compact`. Members can select their own style with `[p]pokemon pokedexstyle retro|compact` or return to the owner-selected default with `[p]pokemon pokedexstyle default`.
 
 Presentation is intentionally modular: a style implements list and detail embed rendering and is registered in `POKEDEX_STYLES`. Navigation, filtering, search, generation selection, ownership checks, and unseen/seen/caught disclosure rules remain shared. Community themes must preserve those disclosure rules, remain readable on mobile, avoid proprietary assets, and retain usable embed text independent of decorative imagery. Unknown or removed style keys safely fall back to Retro.
 
