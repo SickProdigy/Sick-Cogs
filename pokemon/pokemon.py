@@ -10,7 +10,7 @@ from redbot.core import Config,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
 from .catalog_versions import CATALOG_VERSIONS
-from .data import MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
+from .data import EVOLUTIONS,MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
@@ -42,7 +42,7 @@ def pace_for_settings(minimum,maximum,cooldown):
     return "custom"
 
 def scaled_wild_level(player_level,offset):
-    return max(1,min(30,player_level+offset))
+    return max(1,min(100,player_level+offset))
 
 def activity_weight(active_users):
     return 1+min(2,max(0,active_users-1))
@@ -71,8 +71,14 @@ def spawn_weight(species,profile="friendly"):
     weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
     return weights[rarity_tier(species)]
 
-def available_species(generations,allow_special=False):
-    return [item for item in SPECIES.values() if item.id not in {1,4,7} and (allow_special or item.id not in SPECIAL_SPECIES) and generation_for(item.id) in generations]
+EVOLUTION_LEVELS={evolved:level for evolved,level in EVOLUTIONS.values()}
+
+def minimum_spawn_level(species_id):
+    return EVOLUTION_LEVELS.get(int(species_id),1)
+
+def available_species(generations,allow_special=False,level=None):
+    maximum=max(1,int(level)) if level is not None else 100
+    return [item for item in SPECIES.values() if item.id not in {1,4,7} and (allow_special or item.id not in SPECIAL_SPECIES) and generation_for(item.id) in generations and minimum_spawn_level(item.id)<=maximum]
 
 def effective_generations(selected,allowed):
     effective=sorted(set(selected)&set(allowed))
@@ -117,7 +123,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.38.0";__author__="SickProdigy"
+    __version__="0.39.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -291,11 +297,11 @@ class Pokemon(commands.Cog):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
         conf=await self.config.guild(channel.guild).all();policy=await self.config.all()
         generations=effective_generations(conf["generations"],policy["allowed_generations"])
-        pool=available_species(generations,policy["allow_special_species"])
+        level=await self.spawn_level(channel.guild.id);pool=available_species(generations,policy["allow_special_species"],level)
         if not pool:raise RuntimeError("No Pokémon are available under the bot-wide encounter policy.")
         rng=random.SystemRandom()
         chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
-        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
+        sid=chosen.id;gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
         display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
             image=await self.renderer.encounter(sid,level,gender,backdrop,shiny=shiny);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
