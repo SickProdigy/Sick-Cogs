@@ -923,6 +923,18 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
         kwargs=interaction.followup.send.await_args.kwargs
         self.assertIsInstance(kwargs["view"],HandPaginationView)
         self.assertTrue(kwargs["ephemeral"])
+        content=interaction.followup.send.await_args.args[0]
+        self.assertNotIn(game.hand(10)[0].name,content)
+
+    async def test_hand_text_inventory_is_used_only_when_image_rendering_fails(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); cog.games={1:game}
+        cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
+        with patch("mtg.mtg.render_hand",side_effect=OSError("render failed")):
+            await cog.send_hand(interaction,1,0)
+        content=interaction.followup.send.await_args.args[0]
+        self.assertIn(game.hand(10)[0].name,content)
+        self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
 
 class CommandLayoutTests(unittest.TestCase):
     def test_root_help_explains_player_entry_points(self):
