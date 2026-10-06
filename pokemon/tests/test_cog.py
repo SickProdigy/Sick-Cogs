@@ -607,12 +607,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={7:SimpleNamespace()}
         cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel if channel_id==55 else None)
         cog.config=SimpleNamespace(guild=lambda guild:section,encounters=store)
+        expired_embed=discord.Embed(title="The wild Pikachu got away!");expired_files=[object()]
+        cog.rendered_expired_encounter=AsyncMock(return_value=(expired_embed,expired_files))
         ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
         await Pokemon.clear_encounter.callback(cog,ctx)
         self.assertIsNone(active.value)
         self.assertEqual(store.value,{})
         self.assertNotIn(7,cog.battles)
-        message.edit.assert_awaited_once_with(content="The wild Pikachu got away.",view=None)
+        cog.rendered_expired_encounter.assert_awaited_once()
+        message.edit.assert_awaited_once_with(content=None,embed=expired_embed,attachments=expired_files,view=None)
 
     async def test_encounter_writes_are_serialized_without_lost_updates(self):
         cog = Pokemon.__new__(Pokemon)
