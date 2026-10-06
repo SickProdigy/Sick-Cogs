@@ -51,7 +51,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.8.1";__author__="SickProdigy"
+    __version__="0.8.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -636,12 +636,26 @@ class Pokemon(commands.Cog):
         await ctx.send(f"Cached {count} generation {generation} species.")
     @pokemon_set.command(name="clear")
     async def clear_encounter(self,ctx):
-        eid=await self.config.guild(ctx.guild).active_encounter()
+        eid=await self.config.guild(ctx.guild).active_encounter();raw=None
         if eid:
-            async with self.lock(("battle",eid)), self.lock(("encounter",eid)), self.lock("encounters"):
-                encounters=await self.config.encounters();encounters.pop(str(eid),None);await self.config.encounters.set(encounters)
-                self.battles.pop(eid,None)
-        await self.config.guild(ctx.guild).active_encounter.set(None);await ctx.send("Active encounter cleared.")
+            async with self.lock(("battle",eid)),self.lock(("encounter",eid)),self.lock("encounters"):
+                encounters=await self.config.encounters();raw=encounters.pop(str(eid),None)
+                await self.config.encounters.set(encounters);self.battles.pop(eid,None)
+        await self.config.guild(ctx.guild).active_encounter.set(None)
+        if raw:
+            channel=self.bot.get_channel(int(raw.get("channel_id",0)))
+            if channel:
+                try:
+                    message=await channel.fetch_message(int(raw["message_id"]))
+                    if raw.get("kind")=="gym":
+                        content="This Gym challenge was ended by server staff."
+                    else:
+                        species=SPECIES.get(int(raw.get("species_id",0)))
+                        content=f"The wild {species.name} got away." if species else "The wild Pokémon got away."
+                    await message.edit(content=content,view=None)
+                except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):
+                    pass
+        await ctx.send("Active encounter cleared.")
     @pokemon_set.command(name="disable")
     async def disable(self,ctx):
         await self.config.guild(ctx.guild).enabled.set(False);await ctx.send("Wild encounters disabled.")

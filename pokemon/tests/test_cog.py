@@ -342,6 +342,22 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         denied.response.send_message.assert_awaited_once()
         self.assertEqual(len(view.children),8)
 
+    async def test_clear_encounter_disables_original_message(self):
+        active=StoredValue(7)
+        store=StoredEncounters();store.value={"7":{"channel_id":55,"message_id":99,"species_id":25,"state":"open"}}
+        section=SimpleNamespace(active_encounter=active)
+        message=SimpleNamespace(edit=AsyncMock())
+        channel=SimpleNamespace(fetch_message=AsyncMock(return_value=message))
+        cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={7:SimpleNamespace()}
+        cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel if channel_id==55 else None)
+        cog.config=SimpleNamespace(guild=lambda guild:section,encounters=store)
+        ctx=SimpleNamespace(guild=SimpleNamespace(id=1),send=AsyncMock())
+        await Pokemon.clear_encounter.callback(cog,ctx)
+        self.assertIsNone(active.value)
+        self.assertEqual(store.value,{})
+        self.assertNotIn(7,cog.battles)
+        message.edit.assert_awaited_once_with(content="The wild Pikachu got away.",view=None)
+
     async def test_encounter_writes_are_serialized_without_lost_updates(self):
         cog = Pokemon.__new__(Pokemon)
         cog.locks = {}
