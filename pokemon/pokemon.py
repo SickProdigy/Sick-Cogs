@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.15.0";__author__="SickProdigy"
+    __version__="0.15.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -813,6 +813,25 @@ class Pokemon(commands.Cog):
             try:count=await self.catalog.sync_generation(generation)
             except CatalogError as exc:await ctx.send(str(exc));return
         await ctx.send(f"Cached {count} generation {generation} species.")
+    @pokemon_set.command(name="resetplayer")
+    @commands.is_owner()
+    async def reset_player(self,ctx,user:discord.Member,confirmation:str):
+        """Reset one complete Pokémon profile.
+
+        This permanently clears the trainer starter, collection, party, Pokédex, badges, inventory, and active Pokémon battle. The final argument must be `confirm`.
+        """
+        if confirmation.casefold()!="confirm":
+            await ctx.send(f"This clears all Pokémon progress for {user.mention}. Run `{ctx.clean_prefix}pokemonset resetplayer {user.mention} confirm` to proceed.")
+            return
+        removed=await self.reset_player_data(user.id)
+        for raw in removed:
+            channel=self.bot.get_channel(int(raw.get("channel_id",0)))
+            if channel:
+                try:
+                    message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This battle ended because the trainer profile was reset.",view=None)
+                except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):pass
+        await ctx.send(f"Reset {user.mention}'s Pokémon profile. They can run `{ctx.clean_prefix}pokemon` to choose a new starter.")
+
     @pokemon_set.command(name="clear")
     async def clear_encounter(self,ctx):
         """End the active server encounter."""
@@ -840,12 +859,18 @@ class Pokemon(commands.Cog):
     async def disable(self,ctx):
         """Disable wild encounters in this server."""
         await self.config.guild(ctx.guild).enabled.set(False);await ctx.send("Wild encounters disabled.")
-    async def red_delete_data_for_user(self,*,requester,user_id):
-        await self.config.user_from_id(user_id).clear()
+    async def reset_player_data(self,user_id):
         removed=[]
-        async with self.lock("encounters"):
+        async with self.lock(("user",user_id)),self.lock("encounters"):
+            await self.config.user_from_id(user_id).clear()
             encounters=await self.config.encounters()
             for key in list(encounters):
-                if encounters[key].get("battle",{}).get("user_id")==user_id:removed.append((int(key),int(encounters[key]["guild_id"])));encounters.pop(key);self.battles.pop(int(key),None)
+                raw=encounters[key]
+                if int(raw.get("battle",{}).get("user_id",0))==user_id:
+                    removed.append(dict(raw));encounters.pop(key);self.battles.pop(int(key),None)
             await self.config.encounters.set(encounters)
-        for eid,guild_id in removed:await self.clear_guild(guild_id,eid)
+        for raw in removed:await self.clear_guild(int(raw["guild_id"]),int(raw.get("battle",{}).get("encounter_id",0)))
+        return removed
+
+    async def red_delete_data_for_user(self,*,requester,user_id):
+        await self.reset_player_data(user_id)
