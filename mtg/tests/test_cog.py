@@ -638,6 +638,12 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game=SimpleNamespace(assign_trample=Mock()); mutation(game)
         game.assign_trample.assert_called_once_with(10,3,4); self.assertEqual(action,"trample")
 
+    async def test_attackdamage_command_uses_shared_game_action(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.attackdamage.callback(cog,ctx,2,"1:2","3:1")
+        _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(assign_attacker_damage=Mock()); mutation(game)
+        game.assign_attacker_damage.assert_called_once_with(10,2,[(1,2),(3,1)]); self.assertEqual(action,"attacker_damage")
+
     async def test_play_command_accepts_x_and_dash_for_no_target(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
         await MTG.play.callback(cog,ctx,position=2,target="-",x_value=3)

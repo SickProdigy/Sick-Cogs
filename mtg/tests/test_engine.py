@@ -4033,4 +4033,24 @@ class AlphaMultiBlockTests(unittest.TestCase):
         raw=ready().to_raw(); raw.pop("blocker_damage_assignments"); [item.pop("temporary_max_blocks",None) or item.pop("must_block_all",None) for player in raw["players"].values() for item in player["battlefield"]]
         restored=Game.from_raw(raw); self.assertEqual(restored.blocker_damage_assignments,{})
 
+class AlphaLureTests(unittest.TestCase):
+    def add(self,game,user,key,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_lure_requires_every_able_blocker_and_persists_divided_damage(self):
+        game=ready(); attacker=self.add(game,10,"giant"); lure=self.add(game,10,"lea:211",attacker.uid); first=self.add(game,20,"bear"); second=self.add(game,20,"bear"); game.active_index=0; game.phase="attackers"; game.declare_attackers(10,(1,)); game.phase="blockers"
+        with self.assertRaisesRegex(GameError,"Lure"): game.declare_blockers(20,[(1,1)])
+        self.assertEqual(game.blocks,{})
+        game.declare_blockers(20,[(1,1),(1,2)]); self.assertEqual(game.blockers_for(attacker.uid),[first.uid,second.uid]); game.priority_user=10
+        with self.assertRaisesRegex(GameError,"lethal damage"): game.assign_attacker_damage(10,1,((1,1),(2,2)))
+        game.assign_attacker_damage(10,1,((1,2),(2,1))); restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.additional_blocks,{attacker.uid:[second.uid]}); self.assertEqual(restored.attacker_damage_assignments[attacker.uid][0]["damage"],2)
+        restored._combat_damage(False); self.assertIn(first.uid,restored.player(20).graveyard); self.assertEqual(restored.find_permanent(second.uid)[1].damage,1); self.assertIn(attacker.uid,restored.player(10).graveyard)
+
+    def test_competing_lures_require_maximum_possible_blocks(self):
+        game=ready(); first=self.add(game,10,"bear"); second=self.add(game,10,"bear"); self.add(game,10,"lea:211",first.uid); self.add(game,10,"lea:211",second.uid); blocker=self.add(game,20,"bear"); game.active_index=0; game.attackers=[first.uid,second.uid]; game.phase="blockers"
+        game.declare_blockers(20,[(2,1)]); self.assertEqual(game.blocks,{second.uid:blocker.uid})
+
+    def test_legacy_state_defaults_multiple_block_fields(self):
+        raw=ready().to_raw(); raw.pop("additional_blocks"); raw.pop("attacker_damage_assignments"); restored=Game.from_raw(raw); self.assertEqual(restored.additional_blocks,{}); self.assertEqual(restored.attacker_damage_assignments,{})
+
 if __name__=="__main__": unittest.main()

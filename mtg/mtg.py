@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.105.0"
+    __version__="0.106.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -198,14 +198,20 @@ class MTG(commands.Cog):
                 if attacker is not None: choices.append(f"{g.card(uid).name}: {amount} to blocker")
             if choices: e.add_field(name="Trample assignments",value="\n".join(choices),inline=False)
         multi=[]
-        for blocker_uid in set(g.blocks.values()):
-            _,blocker=g.find_permanent(blocker_uid); attackers=[uid for uid,value in g.blocks.items() if value==blocker_uid and g.find_permanent(uid)[1] is not None]
+        for blocker_uid in g.all_blocker_uids():
+            _,blocker=g.find_permanent(blocker_uid); attackers=[uid for uid in g.attackers_for(blocker_uid) if g.find_permanent(uid)[1] is not None]
             if blocker is None or len(attackers)<2: continue
             assignment=g.blocker_damage_assignments.get(blocker_uid,[])
             if assignment:
                 detail=", ".join(f"{g.card(item['attacker']).name}: {item['damage']}" for item in assignment)
             else: detail="damage assignment required before its damage step"
             multi.append(f"{g.card(blocker_uid).name} blocks {len(attackers)} attackers · {detail}")
+        for attacker_uid in g.attackers:
+            blockers=[uid for uid in g.blockers_for(attacker_uid) if g.find_permanent(uid)[1] is not None]
+            if len(blockers)<2: continue
+            assignment=g.attacker_damage_assignments.get(attacker_uid,[])
+            detail=", ".join(f"{g.card(item['blocker']).name}: {item['damage']}" for item in assignment) if assignment else "damage assignment required before its damage step"
+            multi.append(f"{g.card(attacker_uid).name} is blocked by {len(blockers)} creatures · {detail}")
         if multi: e.add_field(name="Multiple blocking",value="\n".join(multi),inline=False)
         if g.stack:
             stack_lines=[]
@@ -609,11 +615,20 @@ class MTG(commands.Cog):
     async def block(self,ctx,*assignments:str):
         """Block as ATTACKER_POSITION:BLOCKER_POSITION; no values means no blocks."""
         def run(g):
-            pairs={}
+            pairs=[]
             for item in assignments:
-                a,b=item.split(":",1); pairs[int(a)]=int(b)
+                a,b=item.split(":",1); pairs.append((int(a),int(b)))
             g.declare_blockers(ctx.author.id,pairs)
         await self.mutate_ctx(ctx,run,"block")
+    @mtg.command(name="attackdamage")
+    async def attackdamage(self,ctx,attacker_position:int,*assignments:str):
+        """Divide an attacker’s damage in order as BLOCKER_POSITION:DAMAGE."""
+        def run(g):
+            parsed=[]
+            for item in assignments:
+                blocker,damage=item.split(":",1); parsed.append((int(blocker),int(damage)))
+            g.assign_attacker_damage(ctx.author.id,attacker_position,parsed)
+        await self.mutate_ctx(ctx,run,"attacker_damage")
     @mtg.command(name="blockdamage")
     async def blockdamage(self,ctx,blocker_position:int,*assignments:str):
         """Divide a multi-blocker's damage in order as ATTACKER_POSITION:DAMAGE."""

@@ -950,6 +950,14 @@ class SoloAITests(unittest.TestCase):
         first=self.add(game,HUMAN,"bear"); second=self.add(game,HUMAN,"giant"); blocker=self.add(game,AI,"lea:179"); game.active_index=0; game.attackers=[first.uid,second.uid]; game.phase="blockers"; game.priority_user=None
         advance_solo(game); self.assertEqual(set(game.blocks.values()),{blocker.uid}); game.priority_user=AI; advance_solo(game); self.assertIn(blocker.uid,game.blocker_damage_assignments); self.assertTrue(any(event["action"]=="ai_blocker_damage" for event in game.history))
 
+    def test_ai_obeys_lure_and_assigns_attacker_damage(self):
+        defending=solo(order=(HUMAN,AI)); defending.player(HUMAN).kept=defending.player(AI).kept=True; defending.player(HUMAN).battlefield=[]; defending.player(AI).battlefield=[]
+        attacker=self.add(defending,HUMAN,"giant"); lure=self.add(defending,HUMAN,"lea:211"); lure.attached_to=attacker.uid; first=self.add(defending,AI,"bear"); second=self.add(defending,AI,"bear"); defending.active_index=0; defending.attackers=[attacker.uid]; defending.phase="blockers"; defending.priority_user=None
+        advance_solo(defending); self.assertEqual(defending.blockers_for(attacker.uid),[first.uid,second.uid])
+        attacking=solo(order=(AI,HUMAN)); attacking.player(HUMAN).kept=attacking.player(AI).kept=True; attacking.player(HUMAN).battlefield=[]; attacking.player(AI).battlefield=[]
+        source=self.add(attacking,AI,"giant"); one=self.add(attacking,HUMAN,"bear"); two=self.add(attacking,HUMAN,"bear"); attacking.active_index=0; attacking.attackers=[source.uid]; attacking.blocks={source.uid:one.uid}; attacking.additional_blocks={source.uid:[two.uid]}; attacking.blocked_attackers=[source.uid]; attacking.phase="after_blockers"; attacking.priority_user=AI
+        advance_solo(attacking); self.assertIn(source.uid,attacking.attacker_damage_assignments); self.assertTrue(any(event["action"]=="ai_attacker_damage" for event in attacking.history))
+
     def test_ai_targets_best_creature_in_either_graveyard_for_animate_dead(self):
         game=solo(); game.player(AI).graveyard=[]; game.player(HUMAN).graveyard=[]
         cheap=game.next_uid; game.next_uid+=1; game.cards[cheap]="bear"; game.player(AI).graveyard.append(cheap)
