@@ -345,10 +345,11 @@ class BattleRenderer:
     @staticmethod
     def battle_result_text(battle):
         wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
-        if battle.state=="caught":return f"Gotcha! {wild.name} was caught!"
-        if battle.state=="won":return (battle.result or f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP.").replace("Pokémon","Pokemon")
-        if battle.state=="lost":return f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
-        return f"{wild.name} escaped!"
+        trainer=" ".join(str(battle.trainer_name or "Trainer").split())[:24] or "Trainer"
+        if battle.state=="caught":return f"Gotcha! {wild.name} was caught by {trainer}!"
+        if battle.state=="won":return f"{trainer} defeated {wild.name}!"
+        if battle.state=="lost":return f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
+        return f"{wild.name} escaped from {trainer}!"
 
     def _battle_result_sync(self,battle,data):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)

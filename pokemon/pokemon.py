@@ -114,7 +114,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.34.0";__author__="SickProdigy"
+    __version__="0.34.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -339,7 +339,7 @@ class Pokemon(commands.Cog):
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
                 await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
-            wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version,trainer_name=str(getattr(i.user,"display_name",getattr(i.user,"name","Trainer")))[:24]);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
             embed,files=await self.rendered_battle(battle)
@@ -442,10 +442,11 @@ class Pokemon(commands.Cog):
         player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id]
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
         if b.state!="active":
-            if b.state=="caught":title=f"Gotcha! {wild.name} was caught!"
-            elif b.state=="won":title=f"Victory over {wild.name}!" if not gym else f"Gym Leader {gym.leader} was defeated!"
-            elif b.state=="lost":title=f"{wild.name} escaped!"
-            else:title=f"{wild.name} escaped!"
+            trainer=" ".join(str(b.trainer_name or "Trainer").split())[:24] or "Trainer"
+            if b.state=="caught":title=f"Gotcha! {wild.name} was caught by {trainer}!"
+            elif b.state=="won":title=f"{trainer} defeated {wild.name}!"
+            elif b.state=="lost":title=f"{wild.name} escaped from {trainer}!"
+            else:title=f"{wild.name} escaped from {trainer}!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
             e.set_thumbnail(url=sprite(wild.id))
             if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild.name} · Lv. {b.wild_level}",inline=True)
@@ -1003,7 +1004,7 @@ class Pokemon(commands.Cog):
             async with self.lock("encounters"):
                 eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
             lead=party[0]
-            battle=Battle(eid,ctx.author.id,ctx.guild.id,ctx.channel.id,0,lead,gym.species_id,gym.level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key)
+            battle=Battle(eid,ctx.author.id,ctx.guild.id,ctx.channel.id,0,lead,gym.species_id,gym.level,Battle.stat(lead,"hp"),1,seed=random.SystemRandom().randrange(1,2**31),battle_kind="gym",gym_key=gym.key,trainer_name=str(getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer")))[:24])
             battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             seen={int(value) for value in conf.get("pokedex_seen",[])};seen.add(gym.species_id);conf["pokedex_seen"]=sorted(seen);self.pokedex_stat(conf,gym.species_id)["seen"]+=1;await self.config.user(ctx.author).set(conf)
             self.battles[eid]=battle
