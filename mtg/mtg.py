@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.95.0"
+    __version__="0.96.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -136,6 +136,7 @@ class MTG(commands.Cog):
                 if granted_regeneration: ability_parts.append(f"Granted: {granted_regeneration}: Regenerate this creature")
                 if x.regeneration_shields: ability_parts.append(f"Regeneration shield ×{x.regeneration_shields}")
                 if x.damage_prevention: ability_parts.append(f"Damage prevention remaining: {x.damage_prevention}")
+                if c.hydra_damage_replacement: ability_parts.append("Hydra replacement order: "+("counters first" if x.hydra_counters_first else "shields/redirection first"))
                 if x.redirect_damage_to_owner: ability_parts.append(f"Next damage redirected to owner: {x.redirect_damage_to_owner}")
                 if x.redirect_source_damage_to_player:
                     sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in x.redirect_source_damage_to_player]
@@ -519,6 +520,14 @@ class MTG(commands.Cog):
     async def incarnation(self,ctx,controller_id:int,position:int):
         """Activate a Personal Incarnation you own while another player controls it."""
         await self.mutate_ctx(ctx,lambda g:g.activate_personal_incarnation(ctx.author.id,controller_id,position),"activate_owned_incarnation")
+    @mtg.command(name="hydra")
+    async def hydra(self,ctx,position:int,mode:str):
+        """Use Rock Hydra `prevent` or upkeep-only `counter`."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_hydra(ctx.author.id,position,mode),f"hydra_{mode.casefold()}")
+    @mtg.command(name="hydraorder")
+    async def hydraorder(self,ctx,position:int,order:str):
+        """Choose Rock Hydra replacement priority: `counters` or `shields`."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_hydra_order(ctx.author.id,position,order),"hydra_order")
     @mtg.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
         """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`; Jade Monolith uses `SOURCE>TARGET`."""

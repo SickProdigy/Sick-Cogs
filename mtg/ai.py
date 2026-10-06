@@ -694,6 +694,17 @@ def _choose_bodyguard(game,user):
     game.choose_bodyguard(user,position); return "choose_bodyguard"
 
 
+def _activate_hydra(game,user):
+    player=game.player(user)
+    for position,permanent in enumerate(player.battlefield,1):
+        card=game.card(permanent.uid)
+        if not card.hydra_damage_replacement: continue
+        if _permanent_damage_threatened(game,user,permanent) and not permanent.damage_prevention and game._mana_payment(player,card,mana_cost="{R}") is not None:
+            game.activate_hydra(user,position,"prevent"); return "hydra_prevent"
+        if game.active_user==user and game.phase=="upkeep" and game._mana_payment(player,card,mana_cost="{R}{R}{R}") is not None:
+            game.activate_hydra(user,position,"counter"); return "hydra_counter"
+    return None
+
 def _activate_owned_incarnation(game,user):
     for controller in game.players.values():
         if controller.user_id==user: continue
@@ -803,7 +814,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _choose_bodyguard(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _choose_bodyguard(game,user) or _activate_hydra(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

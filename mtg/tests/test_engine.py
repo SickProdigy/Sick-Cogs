@@ -51,12 +51,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("forced_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("bodyguard_choice"); player.pop("lands_played_this_turn"); player.pop("channel_active")
-            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("redirect_source_damage_to_player"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
+            for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("hydra_counters_first"); permanent.pop("redirect_damage_to_owner"); permanent.pop("redirect_source_damage_to_player"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and player.source_damage_caps=={} and not player.guardian_angel_active and player.bodyguard_choice==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
-        self.assertTrue(all(permanent.damage_prevention==0 and permanent.redirect_damage_to_owner==0 and permanent.redirect_source_damage_to_player=={} and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
+        self.assertTrue(all(permanent.damage_prevention==0 and not permanent.hydra_counters_first and permanent.redirect_damage_to_owner==0 and permanent.redirect_source_damage_to_player=={} and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
@@ -3778,5 +3778,33 @@ class AlphaForcedAttackTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"opponent.*before attackers"): game.play(20,1)
         game.active_index=0; game.phase="after_attackers"; game.priority_user=20
         with self.assertRaisesRegex(GameError,"opponent.*before attackers"): game.play(20,1)
+
+class AlphaRockHydraTests(unittest.TestCase):
+    def add(self,game,user,key="lea:171",**kwargs):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,**kwargs); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_x_entry_counters_persist_and_zero_x_dies_to_state_actions(self):
+        game=ready(); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:171"; game._resolve(Spell(10,uid,"lea:171",x_value=3)); hydra=game.find_permanent(uid)[1]
+        self.assertEqual((hydra.plus_one_counters,game.current_stats(hydra)),(3,(3,3))); restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.find_permanent(uid)[1].plus_one_counters,3)
+        zero=ready(); zero_uid=zero.next_uid; zero.next_uid+=1; zero.cards[zero_uid]="lea:171"; zero._resolve(Spell(10,zero_uid,"lea:171",x_value=0)); self.assertIsNone(zero.find_permanent(zero_uid)[1]); self.assertIn(zero_uid,zero.player(10).graveyard)
+
+    def test_counter_replacement_prevents_each_point_and_updates_live_toughness(self):
+        game=ready(); hydra=self.add(game,10,plus_one_counters=2); dealt=game._damage_permanent(hydra,3,source_uid=999)
+        self.assertEqual((dealt,hydra.plus_one_counters,hydra.damage),(1,0,1)); game._sba(); self.assertIsNone(game.find_permanent(hydra.uid)[1])
+
+    def test_replacement_order_selects_shield_or_counter_first_and_persists(self):
+        shields=ready(); hydra=self.add(shields,10,plus_one_counters=2,damage_prevention=1); shields.priority_user=10; shields.choose_hydra_order(10,1,"shields"); shields._damage_permanent(hydra,1,source_uid=999)
+        self.assertEqual((hydra.plus_one_counters,hydra.damage_prevention),(2,0))
+        counters=ready(); other=self.add(counters,10,plus_one_counters=2,damage_prevention=1); counters.priority_user=10; counters.choose_hydra_order(10,1,"counters"); restored=Game.from_raw(counters.to_raw()); other=restored.find_permanent(other.uid)[1]; restored._damage_permanent(other,1,source_uid=999)
+        self.assertEqual((other.plus_one_counters,other.damage_prevention),(1,1))
+
+    def test_paid_prevention_and_upkeep_growth_are_atomic_respondable_and_source_bound(self):
+        game=ready(); hydra=self.add(game,10,plus_one_counters=1); [self.add(game,10,"mountain") for _ in range(3)]; game.phase="upkeep"; game.priority_user=10
+        game.activate_hydra(10,1,"counter"); counter=game.stack.pop(); self.assertEqual(counter.ability_effect,"hydra_counter"); game._resolve_ability(counter); self.assertEqual(hydra.plus_one_counters,2)
+        for land in game.player(10).battlefield[1:]: land.tapped=False
+        game.activate_hydra(10,1,"prevent"); prevention=game.stack.pop(); restored=Game.from_raw(game.to_raw()); restored._resolve_ability(prevention); self.assertEqual(restored.find_permanent(hydra.uid)[1].damage_prevention,1)
+        wrong=ready(); self.add(wrong,10,plus_one_counters=1); [self.add(wrong,10,"mountain") for _ in range(3)]; wrong.phase="precombat_main"; wrong.priority_user=10
+        with self.assertRaisesRegex(GameError,"only during your upkeep"): wrong.activate_hydra(10,1,"counter")
 
 if __name__=="__main__": unittest.main()

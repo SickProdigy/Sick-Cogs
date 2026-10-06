@@ -154,6 +154,8 @@ class Card:
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
     redirects_unblocked_combat_damage: bool = False
+    enters_x_plus_counters: bool = False
+    hydra_damage_replacement: bool = False
     cant_be_blocked_by_subtype: str = ""
     type_line: str = ""
     set_code: str = ""
@@ -175,6 +177,8 @@ class Card:
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.enters_tapped: abilities.append("Enters tapped")
         if self.enters_power_counters: abilities.append(f"Enters with {self.enters_power_counters} +1/+0 counters")
+        if self.enters_x_plus_counters: abilities.append("Enters with X +1/+1 counters")
+        if self.hydra_damage_replacement: abilities.extend(("Remove a +1/+1 counter to prevent each 1 damage", "{R}: Prevent the next 1 damage", "{R}{R}{R}: Add a +1/+1 counter during your upkeep"))
         if self.end_combat_remove_power_counter: abilities.append("At end of combat, remove a +1/+0 counter if this creature attacked or blocked")
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
         if self.activation_cost or self.activation_effect:
@@ -426,6 +430,7 @@ ALPHA_MANA_CREATURES = {
 ALPHA_ACTIVATED_CREATURES = {
     "lea:41": {"redirects_unblocked_combat_damage":True},
     "lea:117": {"activation_tap":True, "activation_effect":"force_attack", "activation_text":"Target eligible non-Wall creature the active player controls attacks this turn if able; destroy it at the next end step if it did not attack"},
+    "lea:171": {"enters_x_plus_counters":True, "hydra_damage_replacement":True},
     "lea:31": {"activation_cost":"{0}", "activation_effect":"redirect_one_to_owner", "activation_owner_only":True, "death_owner_half_life":True, "activation_text":"The next 1 damage to this creature is dealt to its owner instead"},
     "lea:37": {"activation_tap":True, "activation_effect":"prevent_any_damage", "activation_amount":1, "activation_text":"Prevent the next 1 damage that would be dealt to any target this turn"},
     "lea:106": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
@@ -688,6 +693,8 @@ for reference in PLAYABLE_ALPHA:
         activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_controller_turn_only",False)),
         activation_owner_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_owner_only",False),
         redirects_unblocked_combat_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("redirects_unblocked_combat_damage",False),
+        enters_x_plus_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_x_plus_counters",False),
+        hydra_damage_replacement=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("hydra_damage_replacement",False),
         activation_once_per_turn=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_once_per_turn",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),

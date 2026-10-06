@@ -30,6 +30,7 @@ class Permanent:
     color_timestamp: int = 0
     animated_until_end_combat: bool = False
     damage_prevention: int = 0
+    hydra_counters_first: bool = False
     redirect_damage_to_owner: int = 0
     redirect_source_damage_to_player: Dict[int, int] = field(default_factory=dict)
     plus_one_counters: int = 0
@@ -736,7 +737,7 @@ class Game:
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
-            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(protected,card,self.current_colors(permanent)): return False
+            if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage","hydra_prevent","hydra_counter") and self._protected_from(protected,card,self.current_colors(permanent)): return False
         except GameError: return False
         excluded=(permanent.uid,) if activation_tap else ()
         return self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment")) is not None
@@ -763,7 +764,7 @@ class Game:
         if activation_tap and self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent): raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
-        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
+        if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate","add_power_counters","redirect_one_to_owner","cap_unblocked_damage","hydra_prevent","hydra_counter") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
         excluded=(permanent.uid,) if activation_tap else ()
         payment=self._mana_payment(player,card,x_value=x_value,mana_cost=activation_cost,excluded_uids=excluded,activation_colors=self.current_colors(permanent),activation_is_enchantment=card.has_type("Enchantment"))
         if payment is None: raise GameError(f"You cannot pay {activation_cost or 'that cost'} for {card.name}.")
@@ -856,6 +857,36 @@ class Game:
         self.stack.extend(pending); self.phase_passes=0
         for item in self.stack: item.passes=0
         self.log.append(f"{user} paid {{1}} through Guardian Angel to prevent the next 1 damage to {stable}.")
+
+    def activate_hydra(self,user,position,mode):
+        self._priority(user); player=self.player(user)
+        if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
+        if not card.hydra_damage_replacement: raise GameError("Choose a Rock Hydra you control.")
+        mode=str(mode).casefold(); cost="{R}" if mode=="prevent" else "{R}{R}{R}" if mode=="counter" else ""
+        if not cost: raise GameError("Choose `prevent` or `counter` for Rock Hydra.")
+        if mode=="counter" and (self.active_user!=user or self.phase!="upkeep"): raise GameError("Rock Hydra can add a counter only during your upkeep.")
+        payment=self._mana_payment(player,card,mana_cost=cost)
+        if payment is None: raise GameError(f"You cannot pay {cost} for Rock Hydra.")
+        sources,remaining,choices=payment; pending=[]
+        for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
+        player.mana_pool=remaining; uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
+        effect="hydra_prevent" if mode=="prevent" else "hydra_counter"
+        self.stack.append(Spell(user,uid,card.key,f"{user}:{permanent.uid}",ability_effect=effect,source_uid=permanent.uid,color_override=permanent.color_override))
+        self.stack.extend(pending); self.phase_passes=0
+        for item in self.stack: item.passes=0
+        self.log.append(f"{user} activated Rock Hydra to {'prevent 1 damage' if mode=='prevent' else 'add a +1/+1 counter'}.")
+
+    def choose_hydra_order(self,user,position,order):
+        self._priority(user); player=self.player(user)
+        if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
+        permanent=player.battlefield[position-1]
+        if not self.card(permanent.uid).hydra_damage_replacement: raise GameError("Choose a Rock Hydra you control.")
+        order=str(order).casefold()
+        if order not in ("counters","shields"): raise GameError("Choose `counters` or `shields` first.")
+        permanent.hydra_counters_first=order=="counters"; self.phase_passes=0
+        for item in self.stack: item.passes=0
+        self.log.append(f"{user} chose Rock Hydra {order} first for replacement effects.")
 
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()
@@ -1483,14 +1514,20 @@ class Game:
     def _damage_permanent(self,permanent,amount,source=None,colors=None,trigger_batch=None,source_uid=None):
         amount=max(0,int(amount))
         if source is not None and self._protected_from(permanent,source,colors): return 0
-        if source_uid is not None and source_uid in permanent.redirect_source_damage_to_player:
+        hydra=self.card(permanent.uid).hydra_damage_replacement
+        if hydra and permanent.hydra_counters_first:
+            prevented=min(amount,permanent.plus_one_counters); permanent.plus_one_counters-=prevented; amount-=prevented
+        if amount and source_uid is not None and source_uid in permanent.redirect_source_damage_to_player:
             recipient=permanent.redirect_source_damage_to_player.pop(source_uid); source_controller,source_permanent=self.find_permanent(source_uid)
             self._damage_player(recipient,amount,source_permanent,source_controller.user_id if source_controller is not None else None,source_uid); return 0
         redirected=min(amount,permanent.redirect_damage_to_owner)
         if redirected:
             permanent.redirect_damage_to_owner-=redirected; amount-=redirected; source_controller,source_permanent=self.find_permanent(source_uid) if source_uid is not None else (None,None)
             self._damage_player(self.permanent_owner(permanent).user_id,redirected,source_permanent,source_controller.user_id if source_controller is not None else None,source_uid)
-        prevented=min(amount,permanent.damage_prevention); permanent.damage_prevention-=prevented; dealt=amount-prevented; permanent.damage+=dealt
+        prevented=min(amount,permanent.damage_prevention); permanent.damage_prevention-=prevented; dealt=amount-prevented
+        if hydra and not permanent.hydra_counters_first:
+            counter_prevented=min(dealt,permanent.plus_one_counters); permanent.plus_one_counters-=counter_prevented; dealt-=counter_prevented
+        permanent.damage+=dealt
         if dealt and source_uid is not None and source_uid not in permanent.damage_source_uids: permanent.damage_source_uids.append(source_uid)
         if dealt and self.card(permanent.uid).dealt_damage_plus_counter:
             controller,_=self.find_permanent(permanent.uid); uid=self.next_uid; self.next_uid+=1; self.cards[uid]=self.card(permanent.uid).key; batch=self.next_uid if trigger_batch is None else trigger_batch
@@ -1662,8 +1699,14 @@ class Game:
             self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability fizzled because {reason}.")
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
-        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","forced_end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters","redirect_one_to_owner","cap_unblocked_damage") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
-        if effect=="prevent_source_damage":
+        if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","empty_battlefield_sacrifice","earthbind_enter","end_step_sacrifice","end_step_destroy","forced_end_step_destroy","berserk_end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters","redirect_one_to_owner","cap_unblocked_damage","hydra_prevent","hydra_counter") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
+        if effect=="hydra_prevent":
+            if target is None or target.uid!=s.source_uid or not self.card(target.uid).hydra_damage_replacement: fizzle("its source was gone"); return
+            target.damage_prevention+=1
+        elif effect=="hydra_counter":
+            if target is None or target.uid!=s.source_uid or not self.card(target.uid).hydra_damage_replacement: fizzle("its source was gone"); return
+            target.plus_one_counters+=1
+        elif effect=="prevent_source_damage":
             try: _,source_uid,_=s.target.split(":")
             except (AttributeError,ValueError): fizzle("its chosen source was invalid"); return
             self.player(s.owner).source_damage_prevention.append(int(source_uid))
@@ -1862,7 +1905,9 @@ class Game:
             if c.aura_enter_flying_damage and "flying" in self.current_keywords(target):
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
-        elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override))
+        elif c.kind in ("Creature","Artifact","Enchantment"):
+            counters=s.x_value if c.enters_x_plus_counters else 0
+            p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override,plus_one_counters=counters))
         elif c.effect=="power_sink":
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone.")
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
@@ -2176,6 +2221,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

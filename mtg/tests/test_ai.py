@@ -1,6 +1,6 @@
 import unittest
 
-from mtg.ai import _activate_clockwork, _activation_target, _attack_positions, _global_enchantment_score, _play_one, _target, advance_solo
+from mtg.ai import _activate_clockwork, _activate_hydra, _activation_target, _attack_positions, _global_enchantment_score, _play_one, _target, advance_solo
 from mtg.cards import CARDS
 from mtg.engine import Game, Permanent
 
@@ -896,6 +896,13 @@ class SoloAITests(unittest.TestCase):
 
         look=solo(order=(AI,HUMAN)); look.player(AI).kept=look.player(HUMAN).kept=True; uid=look.next_uid; look.next_uid+=1; look.cards[uid]="lea:245"; look.stack=[spell_type(AI,uid,"lea:245",str(HUMAN),ability_effect="look_hand",decision_pending=True,choice_owner=AI)]; look.priority_user=AI; look.phase="precombat_main"
         before=list(look.player(HUMAN).hand); advance_solo(look); self.assertEqual(look.player(HUMAN).hand,before); self.assertTrue(any(event["action"]=="ai_private_hand_view" for event in look.history))
+
+    def test_ai_grows_and_protects_rock_hydra_through_shared_actions(self):
+        upkeep=solo(order=(AI,HUMAN)); hydra=self.add(upkeep,AI,"lea:171"); hydra.plus_one_counters=2; [self.add(upkeep,AI,"mountain") for _ in range(3)]; upkeep.active_index=0; upkeep.phase="upkeep"; upkeep.priority_user=AI
+        self.assertEqual(_activate_hydra(upkeep,AI),"hydra_counter"); self.assertEqual(upkeep.stack[-1].ability_effect,"hydra_counter")
+
+        threatened=solo(); target=self.add(threatened,AI,"lea:171"); target.plus_one_counters=2; self.add(threatened,AI,"mountain"); uid=threatened.next_uid; threatened.next_uid+=1; threatened.cards[uid]="lea:161"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; threatened.stack=[spell_type(HUMAN,uid,"lea:161",f"{AI}:{target.uid}")]; threatened.phase="precombat_main"; threatened.priority_user=AI
+        self.assertEqual(_activate_hydra(threatened,AI),"hydra_prevent"); self.assertEqual(threatened.stack[-1].ability_effect,"hydra_prevent")
 
     def test_ai_uses_shared_forced_attack_actions(self):
         game=solo(); target=self.add(game,HUMAN,"giant"); imp=self.add(game,AI,"lea:117"); game.active_index=0; game.phase="precombat_main"; game.priority_user=AI

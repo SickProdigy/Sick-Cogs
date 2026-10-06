@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 70 creatures playable through 0.95.0; 7 remain |
+| Creatures with abilities | 77 | 71 creatures playable through 0.96.0; 6 remain |
 | Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
 | Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
 | Artifacts | 42 | Thirty-seven artifacts playable through 0.93.0; 5 remain |
@@ -212,3 +212,5 @@ The 0.93.0 source-redirection promotion adds Jade Monolith. Its activation accep
 The 0.94.0 unblocked-redirection promotion adds Veteran Bodyguard. During combat, actual unblocked-attacker damage is dealt to an eligible untapped Bodyguard instead of its controller, while creatures that became blocked remain blocked and trample excess is not redirected. A persisted requester action chooses among duplicate eligible Bodyguards before damage; a single eligible copy works automatically, and stale, tapped, or removed choices fall back only to another currently eligible copy. The choice, public rendering, cleanup, and solo AI share the same combat state.
 
 The 0.95.0 forced-attack promotion adds Nettling Imp and Siren’s Call. Both are restricted to an opponent’s turn before attackers, snapshot only non-Wall creatures the active player controlled continuously since the turn began, require those creatures to attack if able, and schedule persisted next-end-step destruction for each one that did not attack. The destruction permits regeneration, survives source removal and control changes, and cannot attach to a returned object with the same card identity. Public rendering and solo AI consume the shared forced-attacker state.
+
+The 0.96.0 Hydra promotion adds Rock Hydra. Its chosen casting X becomes persisted +1/+1 counters on entry; zero-X Hydras die through ordinary state actions. Each counter replaces one point of incoming damage, and a persisted Discord choice orders those counters before or after supported shields and redirection effects. Its {R} prevention and upkeep-only {R}{R}{R} growth abilities are paid atomically, use persisted respondable stack objects, remain source-bound, and share public rendering and threat-aware solo AI.

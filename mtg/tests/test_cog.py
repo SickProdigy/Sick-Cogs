@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from mtg.engine import Game, GameError
+from mtg.engine import Game, GameError, Permanent
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
 from mtg.views import GameView
 
@@ -710,6 +710,11 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.stack[-1]=spell_type(10,ability,"lea:245","20",ability_effect="look_hand",decision_pending=True,choice_owner=10); game.cards[ability]="lea:245"; game.priority_user=10
         interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock())); await cog.send_private_hand_decision(interaction,1,0); look=interaction.followup.send.await_args.kwargs["view"]
         self.assertFalse(next(item for item in look.children if getattr(item,"label",None)=="Done viewing").disabled); self.assertFalse(any(hasattr(item,"options") for item in look.children)); self.assertIn("controller is viewing the targeted hand privately",str(cog.game_embed(game).to_dict()))
+
+class RockHydraRenderingTests(unittest.TestCase):
+    def test_public_state_shows_counters_prevention_and_replacement_order(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:171"; game.player(10).battlefield=[Permanent(uid,"lea:171",owner=10,sick=False,plus_one_counters=3,damage_prevention=1,hydra_counters_first=True)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("+1/+1 counters: 3",rendered); self.assertIn("Damage prevention remaining: 1",rendered); self.assertIn("Hydra replacement order: counters first",rendered)
 
 if __name__ == "__main__":
     unittest.main()
