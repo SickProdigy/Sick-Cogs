@@ -7,10 +7,10 @@ from pathlib import Path
 import aiohttp
 
 from .catalog_versions import CATALOG_VERSIONS, CatalogVersionError
-from .data import MOVES, SPECIES, Species
+from .data import MOVES, SPECIES, Species, display_species_name
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.32.3 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.32.4 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 VERSION_GROUPS={1:{"red-blue","yellow"},2:{"gold-silver","crystal"},3:{"ruby-sapphire","emerald","firered-leafgreen"},4:{"diamond-pearl","platinum","heartgold-soulsilver"},5:{"black-white","black-2-white-2"},6:{"x-y","omega-ruby-alpha-sapphire"},7:{"sun-moon","ultra-sun-ultra-moon"},8:{"sword-shield","brilliant-diamond-and-shining-pearl"},9:{"scarlet-violet"}}
 
@@ -137,7 +137,7 @@ class PokemonCatalog:
             for item in sorted(pokemon.get("abilities", []), key=lambda value: value["slot"])
             if not item.get("is_hidden")
         )
-        display = str(species["name"]).replace("-", " ").title()
+        display = display_species_name(species_id,str(species["name"]).replace("-", " ").title())
         return Species(
             species_id,
             display,
@@ -182,7 +182,7 @@ class PokemonCatalog:
     def parse_cached(raw: dict) -> Species:
         item = Species(
             int(raw["id"]),
-            str(raw["name"])[:80],
+            display_species_name(raw["id"],str(raw["name"])[:80]),
             tuple(str(value) for value in raw["types"]),
             int(raw["hp"]),
             int(raw["attack"]),
