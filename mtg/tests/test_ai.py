@@ -988,5 +988,13 @@ class SoloAITests(unittest.TestCase):
         for _ in range(5): self.add(eruption,AI,"island")
         mountain=self.add(eruption,HUMAN,"mountain"); self.add(eruption,HUMAN,"bear"); eruption.active_index=0; eruption.phase="precombat_main"; eruption.priority_user=AI; advance_solo(eruption); self.assertEqual(eruption.card(eruption.stack[0].uid).effect,"volcanic_eruption"); self.assertEqual(eruption.stack[0].target,f"{HUMAN}:{mountain.uid}")
 
+    def test_ai_reattaches_kudzu_to_opponents_land(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        own=self.add(game,AI,"forest"); opposing=self.add(game,HUMAN,"mountain"); aura=self.add(game,HUMAN,"lea:204"); aura.attached_to=own.uid
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:204"
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game.stack=[spell_type(HUMAN,uid,"lea:204",f"{AI}:{own.uid}",ability_effect="kudzu_move",source_uid=aura.uid,choice_owner=AI,decision_pending=True)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        advance_solo(game); self.assertEqual(aura.attached_to,opposing.uid); self.assertTrue(any(event["action"]=="ai_kudzu_attach" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

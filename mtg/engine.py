@@ -643,12 +643,13 @@ class Game:
         if mana_symbol:
             sources.extend((controller.user_id,source,"tap_damage",str(user)) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
         sources.extend((controller.user_id,aura,"tap_damage",str(user)) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
+        sources.extend((controller.user_id,aura,"kudzu_destroy",f"{user}:{permanent.uid}") for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_kudzu)
         if self.has_current_land_type(permanent,"forest"):
             sources.extend((controller.user_id,source,"tap_life",str(controller.user_id)) for controller in self.players.values() if controller.user_id!=user for source in controller.battlefield if self.card(source.uid).opponent_forest_tap_life)
         triggers=[]
         for owner,source,effect,target in sources:
             uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
-            triggers.append(Spell(owner,uid,card.key,target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
+            triggers.append(Spell(owner,uid,card.key,target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override,choice_owner=user if effect=="kudzu_destroy" else None))
         return triggers
 
     def _spell_cast_triggers(self,spell):
@@ -1320,6 +1321,18 @@ class Game:
                         if not self.finished: self.priority_user=self.active_user
                         return
                     s.decision_pending=True; s.choice_value=2; self.priority_user=s.choice_owner; return
+                if s.ability_effect=="kudzu_destroy":
+                    target=self._stable_target_permanent(s.target); controller=self.find_permanent(target.uid)[0] if target is not None else None
+                    self.stack.pop(); before=len(self.stack)
+                    if target is not None and controller is not None and self.card(target.uid).land: self._destroy(controller,target)
+                    queued=self.stack[before:]; del self.stack[before:]
+                    _,aura=self.find_permanent(s.source_uid)
+                    if aura is not None and self.card(aura.uid).aura_kudzu and self.kudzu_choices(s):
+                        s.ability_effect="kudzu_move"; s.decision_pending=True; s.passes=0; self.stack.extend(queued); self.stack.append(s); self.priority_user=s.choice_owner; return
+                    self.cards.pop(s.uid,None); self.stack.extend(queued); self._sba(); self._life()
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
                 if not s.ability_effect and self.card(s.uid).enters_copy_types and self.copy_choices(s):
                     s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
@@ -1592,6 +1605,31 @@ class Game:
         permanent.land_type_effects=[effect for effect in permanent.land_type_effects if not (effect.get("kind")=="mire" and int(effect.get("source_uid",0))==trigger.source_uid and int(effect.get("source_timestamp",0))==trigger.choice_value)]
         removed=before-len(permanent.land_type_effects); self.stack.pop(); self.cards.pop(trigger.uid,None)
         self.log.append(f"{user} removed {removed} mire counter{'s' if removed!=1 else ''} from {self.card(permanent.uid).name}.")
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
+
+    def kudzu_choices(self,trigger):
+        _,aura=self.find_permanent(trigger.source_uid)
+        if aura is None or not self.card(aura.uid).aura_kudzu: return []
+        card=self.card(aura.uid); choices=[]
+        for controller in self.players.values():
+            for position,permanent in enumerate(controller.battlefield,1):
+                if self.card(permanent.uid).land and self._aura_can_attach(card,permanent,aura): choices.append((controller.user_id,position,permanent))
+        return choices
+
+    def choose_kudzu(self,user,controller_id=None,position=None):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="kudzu_move" or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Kudzu attachment choice to make.")
+        trigger=self.stack[-1]; _,aura=self.find_permanent(trigger.source_uid)
+        if controller_id is None and position is not None: raise GameError("Choose both a controller and battlefield position, or decline.")
+        if controller_id is not None:
+            choices={(owner,index):permanent for owner,index,permanent in self.kudzu_choices(trigger)}; target=choices.get((controller_id,position))
+            if target is None: raise GameError("Choose a land Kudzu can legally enchant.")
+            if aura is None: raise GameError("Kudzu is no longer on the battlefield.")
+            aura.attached_to=target.uid; result=f" attached Kudzu to {self.card(target.uid).name}."
+        else: result=" declined to reattach Kudzu."
+        self.stack.pop(); self.cards.pop(trigger.uid,None); self.log.append(f"{user}{result}")
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
 
@@ -2797,6 +2835,7 @@ class Game:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
             if self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
+            elif self.stack[-1].ability_effect=="kudzu_move": message="The destroyed lands controller must reattach Kudzu or decline first."
             elif not self.stack[-1].ability_effect and self.card(self.stack[-1].uid).effect=="false_orders": message="The resolving False Orders assignment must be chosen first."
             elif self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
             elif self.card(self.stack[-1].uid).enters_copy_types: message="The pending copy choice must be completed first."

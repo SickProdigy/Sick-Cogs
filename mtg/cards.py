@@ -51,6 +51,7 @@ class Card:
     aura_attack_override: bool = False
     aura_blocked_except_wall: bool = False
     aura_lure: bool = False
+    aura_kudzu: bool = False
     aura_hostile: bool = False
     aura_control: bool = False
     aura_reanimate: bool = False
@@ -217,6 +218,7 @@ class Card:
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
         if self.aura_blocked_except_wall: aura.append("Enchanted creature can be blocked only by Walls")
         if self.aura_lure: aura.append("All creatures able to block enchanted creature do so")
+        if self.aura_kudzu: aura.append("When enchanted land becomes tapped, destroy it; its controller may attach this Aura to a land")
         if self.aura_damage_vitality: aura.append("Damage dealt to you adds vitality counters; at your upkeep, you may remove one to gain 1 life")
         abilities.extend(aura)
         if self.protection_colors: abilities.append("Protection From "+"/".join(self.protection_colors))
@@ -379,6 +381,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:213": {"aura_target_types":("Creature",), "activation_cost":"{G}", "activation_effect":"regenerate", "activation_attached":True, "activation_text":"Regenerate enchanted creature"},
     "lea:228": {"aura_target_types":("Creature",), "aura_toughness":2, "aura_keyword":"reach"},
     "lea:211": {"aura_target_types":("Creature",), "aura_lure":True},
+    "lea:204": {"aura_target_types":("Land",), "aura_hostile":True, "aura_kudzu":True},
     "lea:57": {"aura_target_types":("Enchantment",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:71": {"aura_target_types":("Enchantment",), "aura_power_leak":2, "aura_hostile":True},
     "lea:97": {"aura_target_types":("Land",), "aura_upkeep_damage":1, "aura_hostile":True},
@@ -705,6 +708,7 @@ for reference in PLAYABLE_ALPHA:
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
         aura_lure=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_lure",False),
+        aura_kudzu=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_kudzu",False),
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
         aura_control=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_control",False),
         aura_reanimate=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_reanimate",False),

@@ -4130,4 +4130,27 @@ class AlphaMultiTargetXSpellTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"distinct"): game.play(10,1,"20:1,20:1",0)
         game.play(10,1,None,0); self.assertEqual(game.stack[-1].target,"")
 
+class AlphaKudzuTests(unittest.TestCase):
+    def add(self,game,user,key,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_kudzu_tap_destroy_persistence_and_reattachment_workflow(self):
+        game=ready(); doomed=self.add(game,20,"forest"); next_land=self.add(game,10,"mountain"); kudzu=self.add(game,10,"lea:204",doomed.uid)
+        game.phase="precombat_main"; game.priority_user=20; game.activate_mana(20,1)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.stack[-1].ability_effect,"kudzu_destroy")
+        restored.pass_priority(20); restored.pass_priority(10)
+        self.assertIn(doomed.uid,restored.player(20).graveyard); self.assertEqual(restored.stack[-1].ability_effect,"kudzu_move"); self.assertTrue(restored.stack[-1].decision_pending)
+        choice=Game.from_raw(restored.to_raw()); choice.choose_kudzu(20,10,1)
+        self.assertEqual(choice.find_permanent(kudzu.uid)[1].attached_to,next_land.uid); self.assertNotIn(kudzu.uid,choice.player(10).graveyard)
+
+    def test_kudzu_indestructible_decline_and_removed_source(self):
+        saved=ready(); land=self.add(saved,20,"forest"); kudzu=self.add(saved,10,"lea:204",land.uid); saved.is_indestructible=lambda permanent: permanent.uid==land.uid
+        saved.phase="precombat_main"; saved.priority_user=20; saved.activate_mana(20,1); saved.pass_priority(20); saved.pass_priority(10)
+        self.assertIsNotNone(saved.find_permanent(land.uid)[1]); saved.choose_kudzu(20); self.assertEqual(saved.find_permanent(kudzu.uid)[1].attached_to,land.uid)
+        gone=ready(); land=self.add(gone,20,"forest"); aura=self.add(gone,10,"lea:204",land.uid)
+        gone.phase="precombat_main"; gone.priority_user=20; gone.activate_mana(20,1); gone.player(10).battlefield.remove(aura); gone.player(10).graveyard.append(aura.uid)
+        gone.pass_priority(20); gone.pass_priority(10)
+        self.assertIn(land.uid,gone.player(20).graveyard); self.assertFalse(gone.stack)
+
 if __name__=="__main__": unittest.main()

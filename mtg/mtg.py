@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.107.0"
+    __version__="0.110.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -246,6 +246,7 @@ class MTG(commands.Cog):
                     elif item.ability_effect=="look_hand": label+=" (controller is viewing the targeted hand privately)"
                     elif item.ability_effect=="power_leak": label+=" (enchanted enchantment's controller must choose how much mana to pay)"
                     elif item.ability_effect=="vesuvan_copy": label+=(" (controller must choose its creature target before responses)" if item.choice_value==0 else " (controller must choose whether to become the targeted copy)")
+                    elif item.ability_effect=="kudzu_move": label+=" (the controller of the destroyed land may reattach Kudzu or decline)"
                     else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
@@ -676,6 +677,16 @@ class MTG(commands.Cog):
             try: position=int(choice)
             except ValueError: await ctx.send("Use `mtg orders ATTACKER_POSITION` or `mtg orders decline`."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_false_orders(ctx.author.id,position),"false_orders_choice")
+    @mtg.command(name="kudzu")
+    async def kudzu(self,ctx,choice:str,position:int=None):
+        """Reattach Kudzu with USER_ID POSITION, or `decline`."""
+        if choice.casefold()=="decline": controller=None
+        else:
+            try: controller=int(choice)
+            except ValueError: await ctx.send("Use `mtg kudzu USER_ID POSITION` or `mtg kudzu decline`."); return
+            if position is None: await ctx.send("Provide the target land battlefield position."); return
+        await self.mutate_ctx(ctx,lambda g:g.choose_kudzu(ctx.author.id,controller,position),"kudzu_choice")
+
     @mtg.command(name="leak")
     async def leak(self,ctx,amount:int):
         """Choose how much mana to pay for a resolving Power Leak trigger."""

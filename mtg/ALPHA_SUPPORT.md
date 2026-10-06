@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | All playable through 0.108.0 |
 | Instants and sorceries | 70 | 64 spells playable through 0.109.0; 6 remain |
-| Enchantments | 68 | 65 enchantments playable through 0.106.0; 3 remain |
+| Enchantments | 68 | 66 enchantments playable through 0.110.0; 2 remain |
 | Artifacts | 42 | 40 artifacts playable through 0.108.0; 2 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -239,6 +239,8 @@ The 0.107.0 combat-reassignment promotion adds False Orders. It targets any crea
 The 0.108.0 banding promotion adds Benalish Hero, Mesa Pegasus, Timber Wolves, and Helm of Chatzuk. Attack declarations can group battlefield positions with `+`; a legal band contains any number of creatures with banding and at most one without. Blocking any legally blockable member blocks the whole band, including mixed-evasion bands. The appropriate banding controller distributes combat damage without the ordinary lethal-order restriction. Persisted band state, member removal, Lure, False Orders, delayed combat triggers, temporary granted banding, public rendering, and solo AI use the shared combat path.
 
 The 0.109.0 multi-target X-spell promotion adds Fireball and Volcanic Eruption. Comma-separated player and battlefield choices are converted to stable persisted targets; Fireball pays one additional generic mana per target after the first and divides X among only its legal targets as it resolves, while Volcanic Eruption requires exactly X distinct Mountains and damages every creature and player according to how many targeted Mountains actually reach a graveyard. Zero-target X=0 casts, partial and total target illegality, protection, indestructibility, simultaneous state actions, public stack rendering, and solo AI share the same engine paths.
+
+The 0.110.0 Kudzu promotion adds one persisted trigger whenever its enchanted land becomes tapped. Resolution destroys that land, then pauses before state-based Aura cleanup so the controller of that land can reattach Kudzu to any legal land or decline. The trigger survives source removal; indestructibility, Consecrate Land attachment restrictions, queued land-death triggers, reloads, the Discord selector and fallback command, public rendering, and solo AI all use the shared engine paths.
 
 The 0.106.0 multiple-blocker promotion adds Lure and extends combat to many-to-many blocking. Every creature that can legally block a Lured attacker must satisfy the maximum possible number of blocking requirements, including competing Lures and multi-block capacity. Attackers blocked by multiple creatures use persisted ordered damage assignment with lethal-before-next validation across first-strike and normal steps; trample assigns any legal remainder to the defending player. Repeated Discord block pairs, the `mtg attackdamage` command, public rendering, battlefield removal, reload recovery, legacy defaults, and solo AI share the same model.
 

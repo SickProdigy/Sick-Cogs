@@ -869,6 +869,13 @@ def advance_solo(game: Game):
             if not trigger.ability_effect and game.card(trigger.uid).effect=="false_orders":
                 choices=game.false_orders_choices(user); position=max(choices,key=lambda item:game.current_stats(item[1])[0])[0] if choices and user!=game.active_user else None
                 game.choose_false_orders(user,position); game.record(user,"ai_false_orders_block" if position is not None else "ai_false_orders_decline"); changed=True; continue
+            if trigger.ability_effect=="kudzu_move":
+                choices=game.kudzu_choices(trigger)
+                opponents=[choice for choice in choices if choice[0]!=user]; pool=opponents or choices
+                if pool:
+                    owner,position,_=max(pool,key=lambda item:(len(game.current_mana_choices(item[2])),game.card(item[2].uid).cost,-item[1])); game.choose_kudzu(user,owner,position); action="ai_kudzu_attach"
+                else: game.choose_kudzu(user); action="ai_kudzu_decline"
+                game.record(user,action); changed=True; continue
             if trigger.ability_effect=="vesuvan_copy":
                 if trigger.choice_value==0:
                     owner,position,_=max(game.vesuvan_choices(trigger),key=lambda item:(sum(game.current_stats(item[2])),item[0]==user,-item[1])); game.choose_vesuvan_copy(user,owner,position); action="ai_vesuvan_target"
