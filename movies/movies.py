@@ -22,7 +22,7 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.1.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -34,7 +34,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
     default_guild = {
         "enabled": False,
@@ -122,7 +122,9 @@ class MovieReleases(commands.Cog):
             await self.config.guild(guild).last_checked.set(datetime.datetime.now(datetime.timezone.utc).isoformat())
             return 0
 
-        limit = 1 if force else remaining
+        # Publish at most one release per check so the hourly polling cadence also
+        # spaces automatic announcements. The daily cap remains a hard ceiling.
+        limit = 1
         sent = 0
         for movie in new_movies[:limit]:
             await self.send_movie(channel, movie, settings.get("role_id"))
@@ -517,7 +519,11 @@ class MovieReleases(commands.Cog):
             )
             return
         await self.config.guild(ctx.guild).enabled.set(True)
-        await ctx.send("Hourly automatic movie release posts are now **enabled**.")
+        settings = await self.config.guild(ctx.guild).all()
+        await ctx.send(
+            "Movie release checks are now **enabled**. I’ll check hourly and post "
+            f"at most one release per check, up to **{settings['max_per_day']} per UTC day**."
+        )
 
     @movieset.command(name="disable", aliases=["disabled"])
     async def movieset_disable(self, ctx: commands.Context):
@@ -610,6 +616,11 @@ class MovieReleases(commands.Cog):
         embed.add_field(name="Channel", value=channel.mention if channel else "Not set", inline=True)
         embed.add_field(name="Role", value=role.mention if role else "None", inline=True)
         embed.add_field(name="Max per day", value=str(settings["max_per_day"]), inline=True)
+        embed.add_field(
+            name="Check frequency",
+            value="Hourly (at most one post per check)",
+            inline=True,
+        )
         embed.add_field(name="Window", value=f"-{settings['days_back']} / +{settings['days_ahead']} days", inline=True)
         embed.add_field(name="Minimum votes", value=str(settings["min_vote_count"]), inline=True)
         embed.add_field(name="API key", value="Set" if api_key else "Not set", inline=True)

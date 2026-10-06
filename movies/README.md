@@ -15,7 +15,7 @@ runtime, genres, status, and TMDb rating.
 4. Optional: let users opt in to notifications by assigning them a role, then set `[p]movieset role @MovieNews`.
 5. Start scheduled checks with `[p]movieset enable`; stop them with `[p]movieset disable`.
 
-The cog checks hourly, posts only unposted movie IDs, and enforces a configurable per-day cap so the channel is not spammed.
+The cog checks hourly, posts at most one unposted movie per check, and enforces a configurable per-day cap so the channel is not spammed.
 
 ## Commands
 
@@ -24,7 +24,7 @@ The cog checks hourly, posts only unposted movie IDs, and enforces a configurabl
 - `[p]movieset channel [channel]` - set the announcement channel, defaulting to the current channel.
 - `[p]movieset role <role>` - set the optional role mentioned by automatic release posts.
 - `[p]movieset roleclear` - stop mentioning the notification role.
-- `[p]movieset enable` - start hourly automatic release posts.
+- `[p]movieset enable` - start hourly release checks, with at most one post per check.
 - `[p]movieset disable` - stop automatic posts; lookups remain available.
 - `[p]movieset maxperday <1-25>` - cap automatic posts per day.
 - `[p]movieset window <days_back> <days_ahead>` - configure the release-date window.
