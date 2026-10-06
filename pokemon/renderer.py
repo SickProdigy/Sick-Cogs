@@ -316,31 +316,48 @@ class BattleRenderer:
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
         return self._save(canvas)
 
+    @staticmethod
+    def battle_result_text(battle):
+        wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
+        if battle.state=="caught":return f"Gotcha! {wild.name} was caught!"
+        if battle.state=="won":return f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP."
+        if battle.state=="lost":return "Battle over! Your party has no conscious Pokémon."
+        return f"{wild.name} escaped!"
+
     def _battle_result_sync(self,battle,data):
+        wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
+        if battle.state in {"lost","ran"}:
+            canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
+            for y in range(0,360,12):draw.line((0,y,800,y),fill=RETRO[4])
+            draw.ellipse((465,190,750,255),fill=RETRO[2],outline=RETRO[0],width=4)
+            draw.ellipse((55,300,390,390),fill=RETRO[2],outline=RETRO[0],width=4)
+            image=self._retro(self._open(data,(210,185),trim=True,upscale=True))
+            canvas.paste(image,(595-image.width//2,220-image.height),image)
+            self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
+            if battle.state=="lost":
+                draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)
+                draw.text((458,298),"BATTLE OVER",fill=RETRO[0],font=ImageFont.load_default(size=24))
+            draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
+            draw.text((20,410),message[:105],fill=RETRO[0],font=ImageFont.load_default(size=18))
+            return self._save(canvas)
+
         canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
         for y in range(450):
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
-        wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
         if battle.state=="caught":
-            heading=f"{wild.name} was caught!";sub=f"Lv.{battle.wild_level} joined your collection."
-            draw.ellipse((245,225,555,330),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,260-image.height),image)
-            self._pokeball(draw,(400,310),43)
-            self._gender_mark(draw,(531,369),battle.wild_gender,RETRO[1])
-            draw.text((466,365),f"Lv.{battle.wild_level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
-        elif battle.state=="won":
-            heading="Victory!";sub=f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP."
+            draw.ellipse((245,205,555,310),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,240-image.height),image)
+            self._pokeball(draw,(400,290),43)
+            self._gender_mark(draw,(531,329),battle.wild_gender,RETRO[1])
+            draw.text((466,325),f"Lv.{battle.wild_level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        else:
+            heading="Victory!"
+            draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
             draw.ellipse((235,225,565,340),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,300-image.height),image)
-        elif battle.state=="lost":
-            heading="Battle over";sub="Your party has no conscious Pokémon."
-            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,285-image.height),image)
-        else:
-            heading="Encounter ended";sub=battle.result or "You got away safely."
-        draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
-        draw.text((70,370),sub[:78],fill=RETRO[0],font=ImageFont.load_default(size=20))
+        draw.text((70,370),message[:78],fill=RETRO[0],font=ImageFont.load_default(size=20))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):

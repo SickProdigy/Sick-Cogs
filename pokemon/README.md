@@ -13,7 +13,7 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 - A generated gold six-slot horizontal party lineup with no backend ownership IDs exposed.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
-- Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, dedicated catch/victory/defeat/escape result cards, bounded sprite/render caches, and accessible embed text.
+- Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, bottom-box catch messages, battle-relative defeat and escape scenes, bounded sprite/render caches, and accessible embed text.
 - An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
 - Ordered Kanto Gym Leader challenges, persistent badges, and a trainer-profile badge case without introducing a separate trainer XP level.
 - Persistent party HP/status, server-configured Pokémon Center channels, and atomic Potion/Revive recovery.

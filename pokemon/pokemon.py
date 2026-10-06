@@ -266,10 +266,10 @@ class Pokemon(commands.Cog):
         player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id]
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
         if b.state!="active":
-            if b.state=="caught":title=f"{wild.name} was caught!"
+            if b.state=="caught":title=f"Gotcha! {wild.name} was caught!"
             elif b.state=="won":title=f"Victory over {wild.name}!" if not gym else f"Gym Leader {gym.leader} was defeated!"
-            elif b.state=="lost":title="Battle over"
-            else:title="Encounter ended"
+            elif b.state=="lost":title="Battle over!"
+            else:title=f"{wild.name} escaped!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
             e.set_thumbnail(url=sprite(wild.id))
             if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild.name} · Lv. {b.wild_level}",inline=True)
