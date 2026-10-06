@@ -224,8 +224,8 @@ class BattleRenderer:
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
         draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
         draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
-        self._gender_mark(draw,(80,410),pokemon.gender,RETRO[1])
-        draw.text((100,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        self._gender_mark(draw,(84,410),pokemon.gender,RETRO[1])
+        draw.text((104,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
