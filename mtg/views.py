@@ -1,6 +1,7 @@
 import asyncio
 from itertools import permutations
 import discord
+from .art import HAND_PAGE_SIZE
 from .engine import GameError
 
 class ChallengeView(discord.ui.View):
@@ -172,6 +173,45 @@ class ForkTargetSelect(discord.ui.Select):
     async def callback(self,i):
         await self.cog.act(i,self.game_id,lambda g:g.choose_fork_target(i.user.id),"fork_keep_targets")
 
+class AttackSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        player=game.player(game.active_user)
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Declare as an attacker",value=str(position)) for position,permanent in enumerate(player.battlefield,1) if game.can_attack_permanent(permanent)][:25]
+        super().__init__(placeholder="Choose attackers",min_values=1,max_values=len(options),options=options,custom_id=f"mtg:{game_id}:declare_attackers")
+    async def callback(self,interaction):
+        await self.cog.act(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[int(value) for value in self.values]),"attack")
+
+class NoAttackButton(discord.ui.Button):
+    def __init__(self,cog,game_id):
+        super().__init__(label="No attacks",style=discord.ButtonStyle.secondary,custom_id=f"mtg:{game_id}:no_attacks")
+        self.cog,self.game_id=cog,game_id
+    async def callback(self,interaction):
+        await self.cog.act(interaction,self.game_id,lambda game:game.declare_attackers(interaction.user.id,[]),"attack_none")
+
+class BlockSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        defender=game.player(game.opponent(game.active_user)); options=[]
+        for attacker_position,attacker_uid in enumerate(game.attackers,1):
+            attacker=game.find_permanent(attacker_uid)[1]
+            if attacker is None: continue
+            for blocker_position,blocker in enumerate(defender.battlefield,1):
+                if game.can_block(attacker_uid,blocker.uid)[0]:
+                    label=f"{game.card(blocker.uid).name} blocks {game.card(attacker.uid).name}"
+                    options.append(discord.SelectOption(label=label[:100],description=f"Attacker {attacker_position} ← blocker {blocker_position}",value=f"{attacker_position}:{blocker_position}"))
+        super().__init__(placeholder="Choose blocker assignments",min_values=1,max_values=min(25,len(options)),options=options[:25],custom_id=f"mtg:{game_id}:declare_blockers")
+    async def callback(self,interaction):
+        pairs=[tuple(int(part) for part in value.split(":")) for value in self.values]
+        await self.cog.act(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,pairs),"block")
+
+class NoBlockButton(discord.ui.Button):
+    def __init__(self,cog,game_id):
+        super().__init__(label="No blocks",style=discord.ButtonStyle.secondary,custom_id=f"mtg:{game_id}:no_blocks")
+        self.cog,self.game_id=cog,game_id
+    async def callback(self,interaction):
+        await self.cog.act(interaction,self.game_id,lambda game:game.declare_blockers(interaction.user.id,[]),"block_none")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -224,6 +264,14 @@ class GameView(discord.ui.View):
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("balance_lands","balance_creatures"):
             choices=game.balance_choices(game.stack[-1],game.stack[-1].choice_owner); required=game._balance_required(game.stack[-1],game.stack[-1].choice_owner)
             if choices and len(choices)<=25 and 1<=required<=25: self.add_item(BalanceSelect(self.cog,self.game_id,game))
+        if game and game.phase=="attackers":
+            eligible=[permanent for permanent in game.player(game.active_user).battlefield if game.can_attack_permanent(permanent)]
+            if eligible: self.add_item(AttackSelect(self.cog,self.game_id,game))
+            self.add_item(NoAttackButton(self.cog,self.game_id))
+        if game and game.phase=="blockers":
+            defender=game.player(game.opponent(game.active_user)); pairs=sum(game.can_block(attacker_uid,blocker.uid)[0] for attacker_uid in game.attackers for blocker in defender.battlefield)
+            if 0<pairs<=25: self.add_item(BlockSelect(self.cog,self.game_id,game))
+            self.add_item(NoBlockButton(self.cog,self.game_id))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
@@ -251,7 +299,7 @@ class GameView(discord.ui.View):
     async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
     async def mulligan(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,False),"mulligan")
-    @discord.ui.button(label="Pass / next",style=discord.ButtonStyle.primary,custom_id="pass")
+    @discord.ui.button(label="Pass priority",style=discord.ButtonStyle.primary,custom_id="pass")
     async def pass_turn(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.pass_priority(i.user.id),"pass")
     @discord.ui.button(label="Pay {1}",style=discord.ButtonStyle.success,custom_id="pay")
     async def pay_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True),"trigger_pay")
@@ -266,20 +314,46 @@ class GameView(discord.ui.View):
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
     async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")
 
+class PlayCardModal(discord.ui.Modal,title="Play or cast card"):
+    target=discord.ui.TextInput(label="Target",placeholder="Optional: player ID, USER_ID:POSITION, S:POSITION, etc.",required=False,max_length=200)
+    x_value=discord.ui.TextInput(label="X value",placeholder="Only for cards with {X}",required=False,max_length=8)
+    def __init__(self,browser,position):
+        super().__init__(); self.browser,self.position=browser,position
+    async def on_submit(self,interaction):
+        target=str(self.target).strip() or None; raw_x=str(self.x_value).strip()
+        try: x_value=int(raw_x) if raw_x else None
+        except ValueError:
+            await interaction.response.send_message("X must be a whole number of zero or more.",ephemeral=True); return
+        await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,self.position,target,x_value)
+
+class HandPlaySelect(discord.ui.Select):
+    def __init__(self,browser,game):
+        self.browser=browser; start=browser.page*HAND_PAGE_SIZE; visible=game.hand(browser.user_id)[start:start+HAND_PAGE_SIZE]
+        options=[discord.SelectOption(label=f"{start+offset+1}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(start+offset+1)) for offset,card in enumerate(visible)]
+        super().__init__(placeholder="Choose a card to play or cast",min_values=1,max_values=1,options=options,row=0)
+    async def callback(self,interaction):
+        position=int(self.values[0]); game=self.browser.cog.games.get(self.browser.game_id)
+        if not game: await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
+        card=game.hand(self.browser.user_id)[position-1]
+        if card.land: await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,position,None,None)
+        else: await interaction.response.send_modal(PlayCardModal(self.browser,position))
+
 class HandPaginationView(discord.ui.View):
     def __init__(self,cog,game_id,user_id,page,pages):
         super().__init__(timeout=180)
         self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
+        game=cog.games.get(game_id)
+        if game and game.priority_user==user_id and game.phase!="opening" and game.hand(user_id): self.add_item(HandPlaySelect(self,game))
         self.previous.disabled=page<=0
         self.next.disabled=page>=pages-1
     async def interaction_check(self,i):
         if i.user.id==self.user_id: return True
         await i.response.send_message("This private hand belongs to another player.",ephemeral=True); return False
-    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
     async def previous(self,i,b):
         await i.response.defer()
         await self.cog.send_hand(i,self.game_id,self.page-1,editing=True)
-    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
     async def next(self,i,b):
         await i.response.defer()
         await self.cog.send_hand(i,self.game_id,self.page+1,editing=True)

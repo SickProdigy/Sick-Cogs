@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.5"
+    __version__="0.120.6"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -327,7 +327,7 @@ class MTG(commands.Cog):
                 log.warning("Could not cache art for %s",card.key,exc_info=True); visible_paths.append(None)
         paths=[None]*start+visible_paths
         text="\n".join(f"**{start+n}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for n,card in enumerate(visible,1)) or "Your hand is empty."
-        view=HandPaginationView(self,game_id,interaction.user.id,page,pages) if pages>1 else None
+        view=HandPaginationView(self,game_id,interaction.user.id,page,pages)
         try:
             image=await asyncio.to_thread(render_hand,cards,paths,page)
             file=discord.File(image,filename=f"mtg-hand-{game_id}-{page+1}.png")
@@ -343,6 +343,19 @@ class MTG(commands.Cog):
                 kwargs={"ephemeral":True}
                 if view is not None: kwargs["view"]=view
                 await interaction.followup.send(text,**kwargs)
+    async def play_hand_interaction(self,interaction,game_id,position,target=None,x_value=None):
+        game=self.games.get(game_id)
+        if not game or interaction.user.id not in game.order:
+            await interaction.response.send_message("This private hand is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try:
+                card=game.hand(interaction.user.id)[position-1]
+                game.play(interaction.user.id,position,target,x_value); game.record(interaction.user.id,"play"); advance_solo(game); await self.save(game)
+            except (GameError,IndexError,ValueError) as error:
+                await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(content=f"Played **{card.name}**.",attachments=[],view=None)
+        await self.refresh_message(game)
+
     async def send_library_search(self,interaction,game_id,page,editing=False):
         game=self.games.get(game_id); user=interaction.user.id
         pending=bool(game and user in game.order and game.stack and game.stack[-1].decision_pending and game._spell_decider(game.stack[-1])==user and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")

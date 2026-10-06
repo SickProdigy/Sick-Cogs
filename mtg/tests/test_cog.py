@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from mtg.engine import Game, GameError, Permanent
 from mtg.mtg import MATCH_TIMEOUT_SECONDS, MTG
-from mtg.views import GameView
+from mtg.views import GameView, HandPaginationView
 
 
 class ConfigValue:
@@ -840,6 +840,34 @@ class RagingRiverRenderingTests(unittest.TestCase):
         blocker=Permanent(99,"bear",owner=20,sick=False); flyer=Permanent(100,"lea:46",owner=20,sick=False); game.cards.update({99:"bear",100:"lea:46",101:"lea:168"}); game.player(20).battlefield=[blocker,flyer]; game.stack=[spell_type(10,101,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
 
+class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
+    def test_private_hand_has_play_selector_on_priority(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
+        view=HandPaginationView(cog,1,10,0,1)
+        selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose a card to play or cast")
+        self.assertEqual(len(selector.options),7)
+
+    def test_required_combat_steps_have_selectors_and_none_buttons(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.player(10).battlefield=[]; game.player(20).battlefield=[]
+        attacker=Permanent(90,"bear",owner=10,sick=False); blocker=Permanent(91,"bear",owner=20,sick=False); game.cards.update({90:"bear",91:"bear"}); game.player(10).battlefield=[attacker]; game.player(20).battlefield=[blocker]; cog.games={1:game}
+        game.phase="attackers"; game.priority_user=None
+        attack_view=GameView(cog,1)
+        self.assertTrue(any(getattr(item,"custom_id","").endswith(":declare_attackers") for item in attack_view.children))
+        self.assertTrue(any(getattr(item,"custom_id","").endswith(":no_attacks") for item in attack_view.children))
+        game.declare_attackers(10,[1]); game.phase="blockers"; game.priority_user=None
+        block_view=GameView(cog,1)
+        self.assertTrue(any(getattr(item,"custom_id","").endswith(":declare_blockers") for item in block_view.children))
+        self.assertTrue(any(getattr(item,"custom_id","").endswith(":no_blocks") for item in block_view.children))
+
+    async def test_hand_land_selection_uses_play_action_and_refreshes_table(self):
+        cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}; cog.channels={1:1}
+        position=next(index for index,card in enumerate(game.hand(10),1) if card.land)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock()))
+        await cog.play_hand_interaction(interaction,1,position)
+        self.assertTrue(game.player(10).land_played)
+        interaction.response.edit_message.assert_awaited_once()
+        cog.refresh_message.assert_awaited_once_with(game)
+
 class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_match_is_reported_instead_of_raising(self):
         cog=cog_fixture(); ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
@@ -848,14 +876,14 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
         ctx.send.assert_awaited_once_with("You do not have an active MTG game.")
         action.assert_not_called()
 
-    async def test_single_page_hand_omits_none_view_from_followup(self):
+    async def test_single_page_hand_includes_interactive_non_null_view(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); cog.games={1:game}
         cog.art_cache=SimpleNamespace(get=AsyncMock(return_value="unused.jpg"))
         interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock()))
         with patch("mtg.mtg.render_hand",return_value=Mock()), patch("mtg.mtg.discord.File",return_value=Mock()):
             await cog.send_hand(interaction,1,0)
         kwargs=interaction.followup.send.await_args.kwargs
-        self.assertNotIn("view",kwargs)
+        self.assertIsInstance(kwargs["view"],HandPaginationView)
         self.assertTrue(kwargs["ephemeral"])
 
 class CommandLayoutTests(unittest.TestCase):
