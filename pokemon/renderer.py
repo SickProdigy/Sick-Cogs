@@ -117,10 +117,10 @@ class BattleRenderer:
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
-    async def starter(self,pokemon):
+    async def starter(self,pokemon,trainer_name):
         data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
         try:
-            return await self._render(self._starter_sync,pokemon,data)
+            return await self._render(self._starter_sync,pokemon,data,trainer_name)
         except (OSError,ValueError) as exc:
             raise RenderError("Starter reveal rendering failed.") from exc
 
@@ -162,24 +162,52 @@ class BattleRenderer:
         output.seek(0)
         return output
 
-    def _starter_sync(self,pokemon,data):
+    @staticmethod
+    def _gender_mark(draw,origin,gender,fill=RETRO[0]):
+        x,y=origin
+        if gender=="male":
+            draw.ellipse((x,y+3,x+14,y+17),outline=fill,width=3);draw.line((x+12,y+5,x+24,y-7),fill=fill,width=3)
+            draw.line((x+17,y-7,x+24,y-7,x+24,y),fill=fill,width=3)
+        elif gender=="female":
+            draw.ellipse((x,y,x+14,y+14),outline=fill,width=3);draw.line((x+7,y+14,x+7,y+27),fill=fill,width=3);draw.line((x+1,y+21,x+13,y+21),fill=fill,width=3)
+        else:draw.line((x,y+10,x+18,y+10),fill=fill,width=3)
+
+    def _starter_sync(self,pokemon,data,trainer_name):
         canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
-        for y in range(330):
-            ratio=y/329;color=tuple(round(a+(b-a)*ratio) for a,b in zip((151,205,224),(229,238,207)))
+        # Original retro laboratory: paneled walls, equipment, tiled floor, and center table.
+        for y in range(235):
+            ratio=y/234;color=tuple(round(a+(b-a)*ratio) for a,b in zip((177,211,218),(225,232,211)))
             draw.line((0,y,800,y),fill=color)
-        draw.rectangle((0,270,800,360),fill=(111,157,91))
-        draw.ellipse((285,245,650,345),fill=RETRO[2],outline=RETRO[0],width=4)
-        # An original, simple opened-ball symbol marks this as receiving a partner.
-        draw.pieslice((105,230,245,370),180,360,fill=(205,63,58),outline=RETRO[0],width=5)
-        draw.pieslice((105,250,245,390),0,180,fill=RETRO[7],outline=RETRO[0],width=5)
-        draw.line((107,300,243,300),fill=RETRO[0],width=7);draw.ellipse((157,282,193,318),fill=RETRO[7],outline=RETRO[0],width=5)
-        for end in ((125,205),(175,190),(225,205),(260,235)):draw.line((175,245,*end),fill=RETRO[3],width=5)
+        draw.rectangle((0,205,800,235),fill=(83,112,103),outline=RETRO[0],width=4)
+        for left in (35,565):
+            draw.rectangle((left,35,left+200,165),fill=(111,174,197),outline=RETRO[0],width=5)
+            draw.line((left+100,38,left+100,162),fill=RETRO[5],width=4);draw.line((left+3,100,left+197,100),fill=RETRO[5],width=4)
+        draw.rectangle((270,40,530,180),fill=(205,218,195),outline=RETRO[0],width=5)
+        for y in (75,115,155):draw.line((275,y,525,y),fill=RETRO[1],width=3)
+        for x,color in ((292,(205,63,58)),(330,(91,158,202)),(368,RETRO[2]),(406,(205,63,58)),(444,(91,158,202)),(482,RETRO[2])):
+            draw.rectangle((x,50,x+22,73),fill=color,outline=RETRO[0],width=2)
+        draw.rectangle((0,235,800,350),fill=(190,199,181))
+        for x in range(-100,901,100):draw.line((400,235,x,350),fill=(137,151,137),width=2)
+        for y in (270,310):draw.line((0,y,800,y),fill=(137,151,137),width=2)
+        draw.polygon(((260,270),(620,270),(680,350),(200,350)),fill=(139,166,158),outline=RETRO[0])
+        draw.line((270,285,610,285),fill=RETRO[5],width=5)
+        # A complete ball sits on the lab table beneath the emerging partner.
+        for end in ((385,165),(440,145),(495,165),(530,205),(350,205)):draw.line((440,235,*end),fill=RETRO[3],width=5)
+        ball=(385,240,495,350)
+        draw.ellipse(ball,fill=RETRO[7],outline=RETRO[0],width=6)
+        draw.pieslice(ball,180,360,fill=(205,63,58),outline=RETRO[0],width=5)
+        draw.rectangle((388,288,492,302),fill=RETRO[0])
+        draw.ellipse((421,272,459,310),fill=RETRO[7],outline=RETRO[0],width=6)
+        draw.ellipse((432,283,448,299),fill=RETRO[5],outline=RETRO[1],width=2)
         image=self._open(data,(250,220),trim=True,upscale=True)
-        canvas.paste(image,(465-image.width//2,290-image.height),image)
-        species=SPECIES[pokemon.species_id];symbol={"female":"♀","male":"♂","genderless":"—"}.get(pokemon.gender,"?")
+        canvas.paste(image,(440-image.width//2,255-image.height),image)
+        species=SPECIES[pokemon.species_id]
+        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
-        draw.text((45,370),f"You received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
-        draw.text((45,407),f"Lv.{pokemon.level}  {symbol}  Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
+        draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        self._gender_mark(draw,(105,404),pokemon.gender,RETRO[1])
+        draw.text((145,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):

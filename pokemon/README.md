@@ -7,7 +7,7 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 ## Included
 
 - One global collection per Discord user across every guild served by the same bot.
-- Bulbasaur, Charmander, or Squirtle starter with a visual carousel and generated received-from-Oak reveal; immutable owned-Pokémon IDs; six-member parties; ten 30-slot boxes; Pokédex tracking; and profiles.
+- Level-1 Bulbasaur, Charmander, or Squirtle starter with a visual carousel and personalized generated laboratory reveal; immutable owned-Pokémon IDs; six-member parties; ten 30-slot boxes; Pokédex tracking; and profiles.
 - Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, owner-bounded generation filters, approachable rarity tiers, 15-minute wild encounter expiry, and administrator recovery.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
