@@ -872,10 +872,11 @@ class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_private_pass_clears_hand_panel_and_refreshes_table(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.player(10).kept=game.player(20).kept=True; game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
-        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock()))
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),response=SimpleNamespace(defer=AsyncMock(),send_message=AsyncMock()),delete_original_response=AsyncMock())
         view=HandPaginationView(cog,1,10,0,1); passing=next(item for item in view.children if getattr(item,"label",None)=="Pass priority")
         await passing.callback(interaction)
-        interaction.response.edit_message.assert_awaited_once_with(content="Priority passed. Return to the public game table for the next action.",attachments=[],view=None)
+        interaction.response.defer.assert_awaited_once()
+        interaction.delete_original_response.assert_awaited_once()
         cog.refresh_message.assert_awaited_once_with(game)
 
     def test_required_combat_steps_have_selectors_and_none_buttons(self):
