@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -127,11 +127,19 @@ class CogPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             bundled=Path(__file__).parents[1] / "gen1.json"
             runtime=Path(folder) / "catalog.json"
-            item=PokemonCatalog.to_cached(SPECIES[19]);item.pop("learnset",None)
+            item=PokemonCatalog.to_cached(SPECIES[19]);item["learnset"]=[[1,"tackle"]];item["moves"]=["tackle"]
             runtime.write_text(json.dumps({"schema":1,"species":[item]}),encoding="utf-8")
             PokemonCatalog(runtime,bundled).load()
-            self.assertTrue(SPECIES[19].learnset)
-            self.assertEqual(SPECIES[19].moves,("tackle",))
+            self.assertGreater(len(SPECIES[19].learnset),1)
+            self.assertEqual(SPECIES[19].moves,("tackle","tail_whip"))
+
+    def test_old_owned_moves_migrate_in_place(self):
+        pokemon=OwnedPokemon.create("legacy",4,10,seed=2)
+        raw=pokemon.raw();raw["moves"]=["scratch","ember"];raw["move_pp"]={"scratch":7,"ember":1}
+        migrated=authentic_moves_raw(raw)
+        self.assertEqual(migrated["instance_id"],"legacy")
+        self.assertEqual(migrated["moves"],["scratch","growl","ember"])
+        self.assertEqual((migrated["move_pp"]["growl"],migrated["move_pp"]["scratch"],migrated["move_pp"]["ember"]),(40,7,1))
 
     def test_catalog_cache_round_trip(self):
         with tempfile.TemporaryDirectory() as folder:

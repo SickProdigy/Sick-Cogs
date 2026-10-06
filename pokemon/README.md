@@ -11,7 +11,7 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 - Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, owner-bounded generation filters, approachable rarity tiers, 15-minute wild encounter expiry, and administrator recovery.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
 - A generated gold six-slot horizontal party lineup with no backend ownership IDs exposed.
-- Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
+- Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, all 147 Red/Blue/Yellow level-up moves used by the original 151 species, authentic four-move progression, PP, accuracy, physical/special damage, priority/Speed ordering, complete type effectiveness, critical hits, supported status/stat/healing/fixed-damage/multi-hit/drain/recoil effects, switching, fainting, deterministic action history/recovery, XP, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, bottom-box catch messages, battle-relative defeat and escape scenes, bounded sprite/render caches, and accessible embed text.
 - An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
@@ -58,6 +58,6 @@ Presentation is intentionally modular: a style implements list and detail embed 
 
 ## Boundaries
 
-This remains a deliberately bounded first playable milestone. PvP, trading, active ability/EV/gender battle mechanics, full move coverage, stone and trade evolutions, biome/weather tables, and cross-bot ownership are deferred. Owned records already preserve ability, EV, gender, nature, origin, and catch provenance for future mechanics.
+This remains a deliberately bounded playable milestone. PvP, trading, active ability/EV/gender battle mechanics, TM/HM/tutor move acquisition, stone and trade evolutions, biome/weather tables, and cross-bot ownership are deferred. The RBY level-up catalog is complete, while unusual move-specific rules such as Transform, Metronome, Counter, field screens, trapping, and multi-turn charging still use bounded or no-effect behavior until each mechanic receives dedicated state and tests. Owned records already preserve ability, EV, gender, nature, origin, and catch provenance for future mechanics.
 
 This is an unofficial, noncommercial fan project. It uses replaceable PokéAPI data/sprite providers; operators are responsible for reviewing provider terms and Pokémon-related intellectual-property requirements before public distribution.

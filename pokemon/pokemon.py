@@ -9,7 +9,7 @@ from discord.ext import tasks
 from redbot.core import Config,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
-from .data import MOVES,SPECIES,generation_for,sprite
+from .data import MOVES,SPECIES,generation_for,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
@@ -20,7 +20,7 @@ log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
-GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
+GLOBAL={"schema":5,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -83,9 +83,15 @@ def encounter_returns_after_timeout(raw):
     battle=raw.get("battle",{})
     return raw.get("kind","wild")=="wild" and raw.get("state")=="battle" and int(battle.get("action_count",0))==0
 
+def authentic_moves_raw(raw):
+    pokemon=OwnedPokemon.from_raw(raw);old_pp=dict(pokemon.move_pp)
+    pokemon.moves=moves_for_level(pokemon.species_id,pokemon.level)
+    pokemon.move_pp={key:min(MOVES[key].pp,max(0,int(old_pp.get(key,MOVES[key].pp)))) for key in pokemon.moves}
+    return pokemon.raw()
+
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.20.2";__author__="SickProdigy"
+    __version__="0.21.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -159,7 +165,19 @@ class Pokemon(commands.Cog):
                 data["pokedex_caught"]=sorted(previous_caught|caught)
                 data["pokedex_seen"]=sorted(previous_seen|previous_caught|caught)
                 await self.config.user_from_id(int(user_id)).set(data)
-        if schema<4:await self.config.schema.set(4)
+        if schema<5:
+            for user_id,data in (await self.config.all_users()).items():
+                data["collection"]=[authentic_moves_raw(raw) for raw in data.get("collection",[])]
+                await self.config.user_from_id(int(user_id)).set(data)
+            encounters=await self.config.encounters()
+            for raw in encounters.values():
+                battle=raw.get("battle")
+                if not battle:continue
+                battle["player"]=authentic_moves_raw(battle["player"])
+                battle["party"]=[authentic_moves_raw(item) for item in battle.get("party",[])]
+                battle["wild_pp"]={}
+            await self.config.encounters.set(encounters)
+            await self.config.schema.set(5)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):

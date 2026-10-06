@@ -158,6 +158,8 @@ class Battle:
     battle_kind: str = "wild"
     gym_key: str = ""
     wild_gender: str = "unknown"
+    player_stages: dict = field(default_factory=dict)
+    wild_stages: dict = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.party:
@@ -230,6 +232,11 @@ class Battle:
         return random.Random(self.seed + self.rolls * 7919)
 
     @staticmethod
+    def stage_stat(value, stage):
+        stage=max(-6,min(6,int(stage)))
+        return max(1,value*(2+stage)//2) if stage>=0 else max(1,value*2//(2-stage))
+
+    @staticmethod
     def stat(pokemon: OwnedPokemon, name: str):
         species=SPECIES[pokemon.species_id]
         base = getattr(species, name)
@@ -290,7 +297,7 @@ class Battle:
         )
         lines = []
         for action, move in actions:
-            if self.player_hp <= 0 or self.wild_hp <= 0:
+            if self.state != "active" or self.player_hp <= 0 or self.wild_hp <= 0:
                 break
             lines.append(action(move))
         self.turn += 1
@@ -299,48 +306,87 @@ class Battle:
         self._finish_if_needed()
         self._record(f"move:{player_key}")
 
+    def _apply_stat_changes(self, move, player):
+        user_stages=self.player_stages if player else self.wild_stages
+        target_stages=self.wild_stages if player else self.player_stages
+        changed=[]
+        for stat,change in move.stat_changes:
+            stages=user_stages if change>0 else target_stages
+            stages[stat]=max(-6,min(6,int(stages.get(stat,0))+change))
+            changed.append(f"{stat.replace('_',' ')} {'rose' if change>0 else 'fell'}")
+        return changed
+
+    def _status_action(self, move, player):
+        user_name=SPECIES[self.player.species_id].name if player else SPECIES[self.wild_species_id].name
+        target_name=SPECIES[self.wild_species_id].name if player else SPECIES[self.player.species_id].name
+        changes=self._apply_stat_changes(move,player)
+        if move.healing:
+            maximum=self.max_hp(self.player) if player else self.wild_max_hp
+            amount=max(1,maximum*move.healing//100)
+            if player:self.player_hp=min(maximum,self.player_hp+amount)
+            else:self.wild_hp=min(maximum,self.wild_hp+amount)
+            changes.append(f"restored {amount} HP")
+        if move.name=="Rest":
+            if player:self.player_hp=self.max_hp(self.player);self.player_status="sleep"
+            else:self.wild_hp=self.wild_max_hp;self.wild_status="sleep"
+            changes.append("fell asleep and restored its HP")
+        if move.status in {"burn","poison","paralysis","sleep","freeze","confusion"}:
+            if player and not self.wild_status:self.wild_status=move.status;changes.append(f"{target_name} is {move.status}")
+            elif not player and not self.player_status:self.player_status=move.status;changes.append(f"{target_name} is {move.status}")
+        if move.name in {"Teleport","Roar","Whirlwind"} and self.battle_kind=="wild":
+            self.state="ran";self.result=f"{user_name} used {move.name}. {SPECIES[self.wild_species_id].name} escaped!"
+            changes.append(f"{SPECIES[self.wild_species_id].name} escaped")
+        detail="; ".join(changes) if changes else "but nothing happened"
+        return f"{user_name} used {move.name}; {detail}."
+
+    def _can_act(self, player, rng):
+        status=self.player_status if player else self.wild_status
+        name=SPECIES[self.player.species_id].name if player else f"Wild {SPECIES[self.wild_species_id].name}"
+        if status=="paralysis" and rng.randrange(100)<25:return False,f"{name} is paralyzed."
+        if status=="sleep":
+            if rng.randrange(3):return False,f"{name} is asleep."
+            if player:self.player_status=""
+            else:self.wild_status=""
+        if status=="freeze":
+            if rng.randrange(5):return False,f"{name} is frozen solid."
+            if player:self.player_status=""
+            else:self.wild_status=""
+        if status=="confusion" and rng.randrange(3)==0:
+            if player:self.player_status=""
+            else:self.wild_status=""
+        return True,""
+
     def _player_attack(self, move):
-        if self.player_status == "paralysis" and self.rng().randrange(100) < 25:
-            return f"{SPECIES[self.player.species_id].name} is paralyzed."
-        rng = self.rng()
-        if rng.randrange(100) >= move.accuracy:
-            return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
-        critical = rng.randrange(24) == 0
-        attack_stat = "special_attack" if move.category == "special" else "attack"
-        damage = self._damage(
-            self.stat(self.player, attack_stat),
-            self.wild_species_id,
-            self.player.level,
-            move,
-            rng,
-            critical,
-        )
-        self.wild_hp = max(0, self.wild_hp - damage)
-        if move.status and not self.wild_status and rng.randrange(100) < move.status_chance:
-            self.wild_status = move.status
-        return f"{SPECIES[self.player.species_id].name} used {move.name} and dealt {damage} damage" + (" (critical)." if critical else ".")
+        rng=self.rng();allowed,message=self._can_act(True,rng)
+        if not allowed:return message
+        if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
+        if move.category=="status":return self._status_action(move,True)
+        critical=rng.randrange(max(1,24-move.crit_rate*4))==0
+        attack_name="special_attack" if move.category=="special" else "attack"
+        attack=self.stage_stat(self.stat(self.player,attack_name),self.player_stages.get(attack_name,0))
+        damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,self.wild_stages,SPECIES[self.player.species_id].types)
+        self.wild_hp=max(0,self.wild_hp-damage)
+        if move.drain>0:self.player_hp=min(self.max_hp(self.player),self.player_hp+max(1,damage*move.drain//100))
+        elif move.drain<0:self.player_hp=max(0,self.player_hp-max(1,damage*(-move.drain)//100))
+        if move.status and not self.wild_status and rng.randrange(100)<move.status_chance:self.wild_status=move.status
+        if move.stat_changes and rng.randrange(100)<move.stat_chance:self._apply_stat_changes(move,True)
+        return f"{SPECIES[self.player.species_id].name} used {move.name} and dealt {damage} damage"+(" (critical)." if critical else ".")
 
     def _wild_attack(self, move):
-        if self.wild_status == "paralysis" and self.rng().randrange(100) < 25:
-            return f"Wild {SPECIES[self.wild_species_id].name} is paralyzed."
-        rng = self.rng()
-        if rng.randrange(100) >= move.accuracy:
-            return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
-        critical = rng.randrange(24) == 0
-        wild=SPECIES[self.wild_species_id]
-        attack = (wild.special_attack or wild.attack) if move.category == "special" else wild.attack
-        damage = self._damage(
-            attack,
-            self.player.species_id,
-            self.wild_level,
-            move,
-            rng,
-            critical,
-        )
-        self.player_hp = max(0, self.player_hp - damage)
-        if move.status and not self.player_status and rng.randrange(100) < move.status_chance:
-            self.player_status = move.status
-        return f"{wild.name} used {move.name} and dealt {damage} damage" + (" (critical)." if critical else ".")
+        rng=self.rng();allowed,message=self._can_act(False,rng)
+        if not allowed:return message
+        if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
+        if move.category=="status":return self._status_action(move,False)
+        critical=rng.randrange(max(1,24-move.crit_rate*4))==0
+        wild=SPECIES[self.wild_species_id];attack_name="special_attack" if move.category=="special" else "attack"
+        attack=self.stage_stat((getattr(wild,attack_name) or wild.attack),self.wild_stages.get(attack_name,0))
+        damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,self.player_stages,wild.types)
+        self.player_hp=max(0,self.player_hp-damage)
+        if move.drain>0:self.wild_hp=min(self.wild_max_hp,self.wild_hp+max(1,damage*move.drain//100))
+        elif move.drain<0:self.wild_hp=max(0,self.wild_hp-max(1,damage*(-move.drain)//100))
+        if move.status and not self.player_status and rng.randrange(100)<move.status_chance:self.player_status=move.status
+        if move.stat_changes and rng.randrange(100)<move.stat_chance:self._apply_stat_changes(move,False)
+        return f"{wild.name} used {move.name} and dealt {damage} damage"+(" (critical)." if critical else ".")
 
     def _end_turn_status(self):
         if self.player_status in {"poison", "burn"} and self.player_hp > 0:
@@ -372,18 +418,22 @@ class Battle:
                 self.state = "lost"
                 self.result = f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
 
-    def _damage(self, attack, target_id, level, move, rng, critical=False):
-        target=SPECIES[target_id]
-        defense = (target.special_defense or target.defense) if move.category=="special" else target.defense
-        base = max(
-            1,
-            (((2 * level // 5 + 2) * move.power * attack // max(1, defense)) // 50)
-            + 2,
-        )
-        modifier = effectiveness(move.type, SPECIES[target_id].types)
-        if critical:
-            modifier *= 1.5
-        return max(1, int(base * modifier * (85 + rng.randrange(16)) / 100))
+    def _damage(self, attack, target_id, level, move, rng, critical=False, target_hp=None, target_stages=None, attacker_types=()):
+        if move.effect.startswith("fixed-"):return int(move.effect.split("-",1)[1])
+        if move.effect=="level":return level
+        if move.effect=="half":return max(1,int(target_hp or 1)//2)
+        if move.effect=="ohko":return int(target_hp or 0)
+        if move.effect=="counter" or move.power<=0:return 0
+        target=SPECIES[target_id];defense_name="special_defense" if move.category=="special" else "defense"
+        defense=(target.special_defense or target.defense) if move.category=="special" else target.defense
+        if target_stages:defense=self.stage_stat(defense,target_stages.get(defense_name,0))
+        base=max(1,(((2*level//5+2)*move.power*attack//max(1,defense))//50)+2)
+        modifier=effectiveness(move.type,target.types)
+        if move.type in attacker_types:modifier*=1.5
+        if critical:modifier*=1.5
+        per_hit=max(1,int(base*modifier*(85+rng.randrange(16))/100))
+        hits=move.min_hits if move.max_hits<=move.min_hits else move.min_hits+rng.randrange(move.max_hits-move.min_hits+1)
+        return per_hit*hits
 
     def _wild_response(self):
         wild = SPECIES[self.wild_species_id]
@@ -485,6 +535,8 @@ class Battle:
         data.setdefault("action_history", [])
         data.setdefault("action_count", len(data["action_history"]))
         data["action_history"]=list(data["action_history"])[-100:]
+        data.setdefault("player_stages", {})
+        data.setdefault("wild_stages", {})
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle
