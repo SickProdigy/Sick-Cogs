@@ -2,6 +2,7 @@ import asyncio
 from itertools import permutations
 import discord
 from .art import HAND_PAGE_SIZE
+from .ai import TARGETED_EFFECTS, _target
 from .engine import GameError
 
 class ChallengeView(discord.ui.View):
@@ -314,36 +315,70 @@ class GameView(discord.ui.View):
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
     async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")
 
-class PlayCardModal(discord.ui.Modal,title="Play or cast card"):
-    target=discord.ui.TextInput(label="Target",placeholder="Optional: player ID, USER_ID:POSITION, S:POSITION, etc.",required=False,max_length=200)
-    x_value=discord.ui.TextInput(label="X value",placeholder="Only for cards with {X}",required=False,max_length=8)
-    def __init__(self,browser,position):
-        super().__init__(); self.browser,self.position=browser,position
+def _mana_help(cost):
+    names={"W":"white","U":"blue","B":"black","R":"red","G":"green","C":"colorless"}; parts=[]
+    for symbol in cost.replace("{","").split("}"):
+        if not symbol: continue
+        if symbol.isdigit(): parts.append(f"{symbol} mana of any type")
+        elif symbol=="X": parts.append("X mana")
+        else: parts.append(f"1 {names.get(symbol,symbol)} mana")
+    return " + ".join(parts) or "no mana cost"
+
+def _needs_target(card):
+    return bool(card.effect in TARGETED_EFFECTS or card.aura_target_types)
+
+def _playable_hand_entries(game,user,page):
+    start=page*HAND_PAGE_SIZE; entries=[]
+    for offset,card in enumerate(game.hand(user)[start:start+HAND_PAGE_SIZE],start+1):
+        if card.land:
+            legal=user==game.active_user and game.phase in ("precombat_main","postcombat_main") and not game.stack and game.can_play_land(user)
+        else:
+            legal=(card.kind=="Instant" or (user==game.active_user and game.phase in ("precombat_main","postcombat_main") and not game.stack)) and game.can_pay(user,card,0)
+            if card.effect=="berserk": legal=legal and game.phase in ("upkeep","draw","precombat_main","after_attackers","after_blockers","after_first_strike")
+            elif card.effect=="camouflage": legal=legal and game.phase=="after_attackers" and user==game.active_user
+            elif card.effect=="blaze_of_glory": legal=legal and game.phase=="after_attackers" and user!=game.active_user
+            elif card.effect=="false_orders": legal=legal and game.phase=="after_blockers"
+            elif card.effect=="siren_call": legal=legal and user!=game.active_user and game.phase in ("upkeep","draw","precombat_main")
+            if legal and _needs_target(card): legal=_target(game,user,card) is not None
+        if legal: entries.append((offset,card))
+    return entries
+
+class PlayCardModal(discord.ui.Modal):
+    def __init__(self,browser,position,card,suggested_target=None):
+        super().__init__(title=f"Play {card.name}"[:45]); self.browser,self.position=browser,position; self.target_input=self.x_input=None
+        if _needs_target(card):
+            self.target_input=discord.ui.TextInput(label="Target",placeholder="A suggested legal target is filled in",default=suggested_target,required=True,max_length=200)
+            self.add_item(self.target_input)
+        if "{X}" in card.mana_cost:
+            self.x_input=discord.ui.TextInput(label="X value",placeholder="Enter zero or a larger whole number",required=True,max_length=8)
+            self.add_item(self.x_input)
     async def on_submit(self,interaction):
-        target=str(self.target).strip() or None; raw_x=str(self.x_value).strip()
+        target=str(self.target_input).strip() if self.target_input else None; raw_x=str(self.x_input).strip() if self.x_input else ""
         try: x_value=int(raw_x) if raw_x else None
         except ValueError:
             await interaction.response.send_message("X must be a whole number of zero or more.",ephemeral=True); return
         await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,self.position,target,x_value)
 
 class HandPlaySelect(discord.ui.Select):
-    def __init__(self,browser,game):
-        self.browser=browser; start=browser.page*HAND_PAGE_SIZE; visible=game.hand(browser.user_id)[start:start+HAND_PAGE_SIZE]
-        options=[discord.SelectOption(label=f"{start+offset+1}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(start+offset+1)) for offset,card in enumerate(visible)]
-        super().__init__(placeholder="Choose a card to play or cast",min_values=1,max_values=1,options=options,row=0)
+    def __init__(self,browser,entries):
+        self.browser=browser
+        options=[discord.SelectOption(label=f"{position}. {card.name}"[:100],description=f"{card.kind} · {_mana_help(card.mana_cost)}"[:100],value=str(position)) for position,card in entries]
+        super().__init__(placeholder="Choose a currently playable card",min_values=1,max_values=1,options=options,row=0)
     async def callback(self,interaction):
         position=int(self.values[0]); game=self.browser.cog.games.get(self.browser.game_id)
         if not game: await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
-        card=game.hand(self.browser.user_id)[position-1]
-        if card.land: await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,position,None,None)
-        else: await interaction.response.send_modal(PlayCardModal(self.browser,position))
+        hand=game.hand(self.browser.user_id)
+        if not 1<=position<=len(hand): await interaction.response.send_message("That hand view is stale; open your hand again.",ephemeral=True); return
+        card=hand[position-1]; needs_input=_needs_target(card) or "{X}" in card.mana_cost
+        if not needs_input: await self.browser.cog.play_hand_interaction(interaction,self.browser.game_id,position,None,None)
+        else: await interaction.response.send_modal(PlayCardModal(self.browser,position,card,_target(game,self.browser.user_id,card) if _needs_target(card) else None))
 
 class HandPaginationView(discord.ui.View):
     def __init__(self,cog,game_id,user_id,page,pages):
         super().__init__(timeout=180)
         self.cog,self.game_id,self.user_id,self.page,self.pages=cog,game_id,user_id,page,pages
-        game=cog.games.get(game_id)
-        if game and game.priority_user==user_id and game.phase!="opening" and game.hand(user_id): self.add_item(HandPlaySelect(self,game))
+        game=cog.games.get(game_id); entries=_playable_hand_entries(game,user_id,page) if game and game.priority_user==user_id and game.phase!="opening" else []
+        if entries: self.add_item(HandPlaySelect(self,entries))
         self.previous.disabled=page<=0
         self.next.disabled=page>=pages-1
     async def interaction_check(self,i):

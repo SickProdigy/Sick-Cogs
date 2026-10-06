@@ -841,11 +841,21 @@ class RagingRiverRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
 
 class IntegratedGameplayControlTests(unittest.IsolatedAsyncioTestCase):
-    def test_private_hand_has_play_selector_on_priority(self):
+    def test_private_hand_only_lists_currently_playable_cards(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.phase="precombat_main"; game.priority_user=10; cog.games={1:game}
+        game.player(10).hand=[]; game.player(10).battlefield=[]
+        for key in ("mountain","strike","goblin"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(10).hand.append(uid)
+        mana=game.next_uid; game.next_uid+=1; game.cards[mana]="mountain"; game.player(10).battlefield=[Permanent(mana,"mountain",owner=10,sick=False)]
         view=HandPaginationView(cog,1,10,0,1)
-        selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose a card to play or cast")
-        self.assertEqual(len(selector.options),7)
+        selector=next(item for item in view.children if getattr(item,"placeholder",None)=="Choose a currently playable card")
+        self.assertEqual([option.label for option in selector.options],["1. Mountain","3. Raging Goblin"])
+        self.assertIn("1 red mana",selector.options[1].description)
+        second=game.next_uid; game.next_uid+=1; game.cards[second]="mountain"; game.player(10).battlefield.append(Permanent(second,"mountain",owner=10,sick=False)); game.active_index=1; game.priority_user=10
+        response_view=HandPaginationView(cog,1,10,0,1)
+        response_selector=next(item for item in response_view.children if getattr(item,"placeholder",None)=="Choose a currently playable card")
+        self.assertEqual([option.label for option in response_selector.options],["2. Lightning Strike"])
+        self.assertIn("1 mana of any type + 1 red mana",response_selector.options[0].description)
 
     def test_required_combat_steps_have_selectors_and_none_buttons(self):
         cog=cog_fixture(); game=Game(1,[10,20],1); game.player(10).battlefield=[]; game.player(20).battlefield=[]
