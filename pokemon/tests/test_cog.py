@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -198,6 +198,8 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonset rarity",admin_names)
         self.assertIn("pokemonset catalogsync",admin_names)
         self.assertIn("pokemonset resetplayer",admin_names)
+        self.assertIn("pokemonset mode",admin_names)
+        self.assertIn("pokemonset timer",admin_names)
         self.assertIs(Pokemon.pokemon_set.get_command("settings"),Pokemon.pokemon_set.get_command("status"))
         self.assertIn("Server administration",Pokemon.pokemon.help)
         self.assertEqual(Pokemon.pokemon_set.get_command("channel").help,"Enable wild encounters in a channel.")
@@ -488,7 +490,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited_once_with("Poké Balls cannot be used in a Gym battle.",ephemeral=True)
 
     async def test_server_settings_lists_channels_and_spawn_progress(self):
-        conf={"enabled":True,"channels":[10,20],"center_channel":30,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"active_encounter":None,"activity":0,"pace":"normal","battle_timeout":1800}
+        conf={"enabled":True,"channels":[10,20],"center_channel":30,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"active_encounter":None,"activity":0,"pace":"normal","battle_timeout":1800,"spawn_mode":"activity"}
         policy={"minimum_threshold":8,"minimum_cooldown":120,"allowed_generations":[1],"encounter_timeout":900,"rarity_profile":"friendly","allow_special_species":False}
         cog=Pokemon.__new__(Pokemon);cog.activity={42:5};cog.config=SimpleNamespace(guild=lambda guild:StoredSection(conf),all=AsyncMock(return_value=policy))
         ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock())
@@ -500,11 +502,26 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Rarity: **friendly**",message)
 
     async def test_channel_command_reports_already_enabled_state(self):
-        channels=StoredValue([10]);enabled=StoredValue(True);section=SimpleNamespace(channels=channels,enabled=enabled)
+        channels=StoredValue([10]);enabled=StoredValue(True);next_spawn=StoredValue(None);section=SimpleNamespace(channels=channels,enabled=enabled,spawn_mode=StoredValue("timed"),next_spawn_at=next_spawn,timer_minutes=StoredValue(60))
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(guild=lambda guild:section)
         ctx=SimpleNamespace(guild=SimpleNamespace(id=42),send=AsyncMock());channel=SimpleNamespace(id=10,mention="<#10>")
         await Pokemon.set_channel.callback(cog,ctx,channel)
         ctx.send.assert_awaited_once_with("Wild encounters were already enabled in <#10>.")
+
+    async def test_timed_mode_defaults_to_hourly_and_spawns_in_configured_channel(self):
+        self.assertEqual((GUILD["spawn_mode"],GUILD["timer_minutes"]),("timed",60))
+        now=datetime.now(timezone.utc);channel=SimpleNamespace(id=20)
+        conf={"enabled":True,"spawn_mode":"timed","channels":[20],"timer_minutes":60,"next_spawn_at":(now-timedelta(minutes=1)).isoformat(),"active_encounter":None}
+        next_spawn=StoredValue(conf["next_spawn_at"]);section=SimpleNamespace(next_spawn_at=next_spawn)
+        cog=Pokemon.__new__(Pokemon);cog.spawn=AsyncMock();cog.bot=SimpleNamespace(get_channel=lambda channel_id:channel if channel_id==20 else None)
+        cog.config=SimpleNamespace(all_guilds=AsyncMock(return_value={42:conf}),guild_from_id=lambda guild_id:section)
+        await cog.process_timed_spawns(now)
+        cog.spawn.assert_awaited_once_with(channel)
+
+    async def test_timer_rejects_faster_than_one_per_hour(self):
+        cog=Pokemon.__new__(Pokemon);ctx=SimpleNamespace(send=AsyncMock())
+        await Pokemon.spawn_timer.callback(cog,ctx,59)
+        ctx.send.assert_awaited_once_with("Use 60–10080 minutes (one hour to one week).")
 
     async def test_pokedex_style_preference_follows_default_and_persists_override(self):
         preference=StoredValue("default")

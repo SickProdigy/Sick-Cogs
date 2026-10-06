@@ -19,7 +19,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
-GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
+GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None,"spawn_mode":"timed","timer_minutes":60,"next_spawn_at":None}
 USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None}
 GLOBAL={"schema":6,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
@@ -99,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.31.2";__author__="SickProdigy"
+    __version__="0.32.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -145,6 +145,26 @@ class Pokemon(commands.Cog):
                 try:
                     message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This wild encounter expired.",view=None)
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
+        await self.process_timed_spawns(now)
+    async def process_timed_spawns(self,now=None):
+        now=now or datetime.now(timezone.utc)
+        for guild_id,conf in (await self.config.all_guilds()).items():
+            if not conf.get("enabled") or conf.get("spawn_mode","timed")!="timed" or not conf.get("channels"):continue
+            section=self.config.guild_from_id(int(guild_id));minutes=max(60,int(conf.get("timer_minutes",60)))
+            try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
+            except (TypeError,ValueError):due=None
+            if due is None:
+                await section.next_spawn_at.set((now+timedelta(minutes=minutes)).isoformat());continue
+            if due>now or conf.get("active_encounter"):continue
+            channels=[self.bot.get_channel(int(value)) for value in conf["channels"]]
+            channels=[channel for channel in channels if channel is not None]
+            if not channels:continue
+            channel=random.SystemRandom().choice(channels)
+            try:await self.spawn(channel)
+            except (discord.Forbidden,discord.HTTPException):
+                log.exception("Timed Pokémon encounter could not be posted")
+                await section.next_spawn_at.set((now+timedelta(minutes=minutes)).isoformat())
+
     @cleanup_loop.before_loop
     async def before_cleanup(self):await self.bot.wait_until_ready()
     async def _migrate(self):
@@ -197,7 +217,7 @@ class Pokemon(commands.Cog):
     async def on_message_without_command(self,message):
         if not message.guild or message.author.bot or len((message.content or "").strip())<3:return
         conf=await self.config.guild(message.guild).all()
-        if not conf["enabled"] or message.channel.id not in conf["channels"] or conf["active_encounter"]:return
+        if not conf["enabled"] or conf.get("spawn_mode","timed")!="activity" or message.channel.id not in conf["channels"] or conf["active_encounter"]:return
         policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         now=time.monotonic();content=" ".join((message.content or "").casefold().split())
         recent_key=(message.guild.id,message.author.id)
@@ -249,7 +269,9 @@ class Pokemon(commands.Cog):
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
         minimum,maximum,_=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         await self.config.guild(channel.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1))
-        await self.config.guild(channel.guild).last_spawn_at.set(datetime.now(timezone.utc).isoformat())
+        spawned_at=datetime.now(timezone.utc);section=self.config.guild(channel.guild)
+        await section.last_spawn_at.set(spawned_at.isoformat())
+        if conf.get("spawn_mode","timed")=="timed":await section.next_spawn_at.set((spawned_at+timedelta(minutes=max(60,int(conf.get("timer_minutes",60))))).isoformat())
     async def claim(self,i,eid):
         async with self.lock(("user",i.user.id)), self.lock(("encounter",eid)), self.lock("encounters"):
             if any(b.user_id==i.user.id and b.state=="active" for b in self.battles.values()):
@@ -891,6 +913,8 @@ class Pokemon(commands.Cog):
         section=self.config.guild(ctx.guild);channels=await section.channels();was_enabled=await section.enabled();already=channel.id in channels
         if not already:channels.append(channel.id)
         await section.channels.set(channels);await section.enabled.set(True)
+        if await section.spawn_mode()=="timed" and not await section.next_spawn_at():
+            minutes=max(60,int(await section.timer_minutes()));await section.next_spawn_at.set((datetime.now(timezone.utc)+timedelta(minutes=minutes)).isoformat())
         if already and was_enabled:message=f"Wild encounters were already enabled in {channel.mention}."
         elif already:message=f"Wild encounters re-enabled in {channel.mention}."
         else:message=f"Wild encounters enabled in {channel.mention}."
@@ -915,32 +939,53 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="status",aliases=["settings"])
     async def spawn_status(self,ctx):
-        """Show channels, spawn progress, and effective server settings."""
-        conf=await self.config.guild(ctx.guild).all();policy=await self.config.all()
+        """Show channels, schedule, and effective server settings."""
+        conf=await self.config.guild(ctx.guild).all();policy=await self.config.all();mode=conf.get("spawn_mode","timed")
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
-        target=max(minimum,int(conf.get("threshold",minimum)));activity=max(0,int(self.activity.get(ctx.guild.id,conf.get("activity",0))))
-        remaining=0
-        if conf.get("last_spawn_at"):
-            try:last=datetime.fromisoformat(conf["last_spawn_at"])
-            except (TypeError,ValueError):last=None
-            if last:remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds()))
         channels=", ".join(f"<#{value}>" for value in conf.get("channels",[])) or "None"
-        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None"
-        generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]))
-        active=conf.get("active_encounter")
-        if active:next_spawn=f"Blocked by active encounter #{active}"
-        elif remaining:next_spawn=f"Cooldown: {remaining}s remaining"
-        elif activity<target:next_spawn=f"Needs {target-activity} more activity points"
-        else:next_spawn="Ready on the next qualifying message"
-        enabled=conf.get("enabled",False);pace=conf.get("pace","custom");encounter_minutes=int(policy.get("encounter_timeout",900))//60;battle_minutes=int(conf.get("battle_timeout",1800))//60
-        generation_text=", ".join(map(str,generations));rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only"
+        center_id=conf.get("center_channel");center=f"<#{center_id}>" if center_id else "None";active=conf.get("active_encounter")
+        if mode=="timed":
+            minutes=max(60,int(conf.get("timer_minutes",60)));due_text="Scheduling now"
+            try:due=datetime.fromisoformat(conf.get("next_spawn_at") or "")
+            except (TypeError,ValueError):due=None
+            if due:due_text=f"<t:{int(due.timestamp())}:R>"
+            progress=f"Timer: **every {minutes} minutes** · Next encounter: {due_text}"
+            next_spawn=f"Blocked by active encounter #{active}" if active else "A random configured channel will be selected"
+        else:
+            target=max(minimum,int(conf.get("threshold",minimum)));activity=max(0,int(self.activity.get(ctx.guild.id,conf.get("activity",0))))
+            progress=f"Activity: **{activity}/{target}** points (new target range {minimum}–{maximum}) · Cooldown: **{cooldown}s**"
+            next_spawn=f"Blocked by active encounter #{active}" if active else (f"Needs {target-activity} more activity points" if activity<target else "Ready on the next qualifying message")
+        generations=effective_generations(conf.get("generations",[1]),policy.get("allowed_generations",[1]));generation_text=", ".join(map(str,generations))
+        enabled=conf.get("enabled",False);encounter_minutes=int(policy.get("encounter_timeout",900))//60;battle_minutes=int(conf.get("battle_timeout",1800))//60
+        rarity=policy.get("rarity_profile","friendly");specials="enabled" if policy.get("allow_special_species") else "event-only"
         await ctx.send(
-            f"**Pokémon server settings**\nEnabled: **{enabled}**\nSpawn channels: {channels}\nPokémon Center: {center}\n"
-            f"Activity: **{activity}/{target}** points (new target range {minimum}–{maximum})\nPace: **{pace}** · Cooldown: **{cooldown}s**\n"
-            f"Next spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** · Battle lifetime: **{battle_minutes}m**\n"
-            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\n"
-            f"Catalog species: **{len(SPECIES)}**"
+            f"**Pokémon server settings**\nEnabled: **{enabled}** · Spawn mode: **{mode}**\nSpawn channels: {channels}\nPokémon Center: {center}\n"
+            f"{progress}\nNext spawn: {next_spawn}\nEncounter lifetime: **{encounter_minutes}m** · Battle lifetime: **{battle_minutes}m**\n"
+            f"Generations: **{generation_text}** · Rarity: **{rarity}** · Special species: **{specials}**\nCatalog species: **{len(SPECIES)}**"
         )
+
+    @pokemon_set.command(name="mode")
+    async def spawn_mode(self,ctx,mode:str):
+        """Choose timed spawning or the optional activity system."""
+        mode=mode.casefold()
+        if mode not in {"timed","activity"}:await ctx.send("Choose timed or activity.");return
+        section=self.config.guild(ctx.guild);await section.spawn_mode.set(mode)
+        if mode=="timed":
+            minutes=max(60,int(await section.timer_minutes()));due=datetime.now(timezone.utc)+timedelta(minutes=minutes);await section.next_spawn_at.set(due.isoformat())
+            await ctx.send(f"Timed encounters enabled every {minutes} minutes. The next encounter is <t:{int(due.timestamp())}:R>.")
+        else:
+            await section.next_spawn_at.set(None);await ctx.send("Activity-based encounters enabled. Timed spawning is paused.")
+
+    @pokemon_set.command(name="timer")
+    async def spawn_timer(self,ctx,minutes:int):
+        """Set the timed encounter interval to 60 minutes or slower."""
+        if not 60<=minutes<=10080:await ctx.send("Use 60–10080 minutes (one hour to one week).");return
+        section=self.config.guild(ctx.guild);await section.timer_minutes.set(minutes)
+        if await section.spawn_mode()=="timed":
+            due=datetime.now(timezone.utc)+timedelta(minutes=minutes);await section.next_spawn_at.set(due.isoformat())
+            await ctx.send(f"Timed encounters set to every {minutes} minutes. The next encounter is <t:{int(due.timestamp())}:R>.")
+        else:await ctx.send(f"Saved a {minutes}-minute timer. It will apply when timed mode is enabled.")
+
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
         """Choose a preset encounter pace."""
@@ -988,11 +1033,16 @@ class Pokemon(commands.Cog):
         conf=await self.config.guild(ctx.guild).all()
         if conf["active_encounter"]:await ctx.send("This server already has an encounter.");return
         if not await self.bot.is_owner(ctx.author) and conf["last_spawn_at"]:
-            policy=await self.config.all();_,_,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
             try:last=datetime.fromisoformat(conf["last_spawn_at"])
             except (TypeError,ValueError):last=None
-            remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
-            if remaining:await ctx.send(f"The bot-wide spawn cooldown is active for another {remaining}s.");return
+            if conf.get("spawn_mode","timed")=="timed":
+                due=last+timedelta(minutes=max(60,int(conf.get("timer_minutes",60)))) if last else None
+                remaining=max(0,round((due-datetime.now(timezone.utc)).total_seconds())) if due else 0
+                if remaining:await ctx.send(f"The server spawn timer is active for another {remaining}s.");return
+            else:
+                policy=await self.config.all();_,_,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
+                remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
+                if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
         await self.spawn(channel)
     @pokemon_set.command(name="pokedexstyle")
     @commands.is_owner()
