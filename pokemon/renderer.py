@@ -375,8 +375,6 @@ class BattleRenderer:
             draw.ellipse((245,205,555,310),fill=(182,168,89),outline=RETRO[0],width=4)
             image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,240-image.height),image)
             self._pokeball(draw,(400,290),43)
-            self._gender_mark(draw,(531,329),battle.wild_gender,RETRO[1])
-            draw.text((466,325),f"Lv.{battle.wild_level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
         else:
             heading="Victory!"
             draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
@@ -384,6 +382,9 @@ class BattleRenderer:
             image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,300-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         self._dialogue(draw,message,(70,360),width=76,size=16)
+        if battle.state=="caught":
+            font=ImageFont.load_default(size=14);level=f"Lv. {battle.wild_level}";draw.text((70,386),level,fill=RETRO[1],font=font)
+            mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False):
