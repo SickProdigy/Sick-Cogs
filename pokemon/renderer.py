@@ -166,11 +166,11 @@ class BattleRenderer:
     def _gender_mark(draw,origin,gender,fill=RETRO[0]):
         x,y=origin
         if gender=="male":
-            draw.ellipse((x,y+4,x+9,y+13),outline=fill,width=2);draw.line((x+8,y+5,x+16,y-3),fill=fill,width=2)
-            draw.line((x+12,y-3,x+16,y-3,x+16,y+1),fill=fill,width=2)
+            draw.ellipse((x,y+5,x+7,y+12),outline=fill,width=1);draw.line((x+6,y+6,x+12,y),fill=fill,width=1)
+            draw.line((x+9,y,x+12,y,x+12,y+3),fill=fill,width=1)
         elif gender=="female":
-            draw.ellipse((x,y+2,x+9,y+11),outline=fill,width=2);draw.line((x+4,y+11,x+4,y+20),fill=fill,width=2);draw.line((x,y+16,x+9,y+16),fill=fill,width=2)
-        else:draw.line((x,y+9,x+12,y+9),fill=fill,width=2)
+            draw.ellipse((x,y+3,x+7,y+10),outline=fill,width=1);draw.line((x+3,y+10,x+3,y+17),fill=fill,width=1);draw.line((x,y+14,x+7,y+14),fill=fill,width=1)
+        else:draw.line((x,y+9,x+9,y+9),fill=fill,width=1)
 
     @staticmethod
     def _pokeball(draw,center,radius):
