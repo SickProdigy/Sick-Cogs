@@ -202,7 +202,7 @@ class BattleTests(unittest.TestCase):
         b.state="ran"
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped!")
         b.state="lost"
-        self.assertEqual(BattleRenderer.battle_result_text(b),"Battle over! Your party has no conscious Pokémon.")
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
 
 class CatalogTests(unittest.TestCase):

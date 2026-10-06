@@ -321,7 +321,7 @@ class BattleRenderer:
         wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
         if battle.state=="caught":return f"Gotcha! {wild.name} was caught!"
         if battle.state=="won":return f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP."
-        if battle.state=="lost":return "Battle over! Your party has no conscious Pokémon."
+        if battle.state=="lost":return f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         return f"{wild.name} escaped!"
 
     def _battle_result_sync(self,battle,data):
@@ -336,7 +336,7 @@ class BattleRenderer:
             self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
             if battle.state=="lost":
                 draw.rounded_rectangle((430,275,750,345),12,fill=RETRO[7],outline=RETRO[0],width=4)
-                draw.text((458,298),"BATTLE OVER",fill=RETRO[0],font=ImageFont.load_default(size=24))
+                draw.text((474,298),"ESCAPED",fill=RETRO[0],font=ImageFont.load_default(size=24))
             draw.rectangle((0,390,800,450),fill=RETRO[5],outline=RETRO[0],width=5)
             draw.text((20,410),message[:105],fill=RETRO[0],font=ImageFont.load_default(size=18))
             return self._save(canvas)
