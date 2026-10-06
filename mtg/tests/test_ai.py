@@ -15,6 +15,11 @@ def solo(order=(HUMAN, AI), difficulty="normal"):
 
 
 class SoloAITests(unittest.TestCase):
+    def test_ai_uses_circle_against_matching_damage_spell(self):
+        game=solo(); circle=self.add(game,AI,"lea:12"); self.add(game,AI,"forest")
+        bolt=game.next_uid; game.next_uid+=1; game.cards[bolt]="lea:161"; game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(HUMAN,bolt,"lea:161",str(AI))]
+        self.assertEqual(_activation_target(game,AI,CARDS["lea:12"],circle.uid),"S:1")
+
     def test_ai_targets_only_a_noncreature_artifact_for_animate_artifact(self):
         game=solo(); ring=self.add(game,AI,"lea:269"); self.add(game,AI,"lea:267")
         self.assertEqual(_target(game,AI,CARDS["lea:48"]),f"{AI}:1")

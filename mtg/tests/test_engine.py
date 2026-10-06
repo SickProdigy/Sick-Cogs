@@ -50,12 +50,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
-        self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
+        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
@@ -3079,6 +3079,36 @@ class AlphaStoneGiantTests(unittest.TestCase):
         game.activate_ability(10,1,"10:2"); self.resolve_top(game); game._begin_end_step()
         game._destroy(game.player(10),target,allow_regeneration=False); self.resolve_top(game)
         self.assertIn("fizzled",game.log[-1])
+
+
+class AlphaCircleOfProtectionTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_circle_chooses_matching_spell_source_and_prevents_only_its_next_event(self):
+        game=ready(); circle=self.add(game,10,"lea:12"); land=self.add(game,10,"plains")
+        bolt=game.next_uid; game.next_uid+=1; game.cards[bolt]="lea:161"; game.stack=[Spell(20,bolt,"lea:161","10")]; game.priority_user=10
+        game.activate_ability(10,1,"S:1"); self.assertTrue(land.tapped); self.assertEqual(game.stack[-1].target,f"D:{bolt}:R")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); self.assertEqual(restored.player(10).source_damage_prevention,[bolt])
+        self.resolve_top(restored); self.assertEqual(restored.player(10).life,20); self.assertEqual(restored.player(10).source_damage_prevention,[])
+        restored._damage_player(10,2,source_uid=bolt); self.assertEqual(restored.player(10).life,18)
+
+    def test_circle_rejects_wrong_color_and_survives_source_removal_for_trigger_damage(self):
+        game=ready(); self.add(game,10,"lea:12"); source=self.add(game,20,"lea:163"); game.player(10).mana_pool={"W":1}
+        with self.assertRaisesRegex(GameError,"Chosen source must be R"): game.activate_ability(10,1,"10:1")
+        self.assertEqual(game.player(10).mana_pool,{"W":1}); game.activate_ability(10,1,"20:1"); self.resolve_top(game)
+        game._destroy(game.player(20),source,allow_regeneration=False); trigger=game.next_uid; game.next_uid+=1; game.cards[trigger]="lea:163"
+        game._resolve(Spell(20,trigger,"lea:163","10",ability_effect="tap_damage",source_uid=source.uid)); self.assertEqual(game.player(10).life,20)
+
+    def test_source_shields_persist_render_cleanup_and_preserve_generic_prevention(self):
+        game=ready(); source=self.add(game,20,"lea:163"); player=game.player(10); player.source_damage_prevention=[source.uid]; player.damage_prevention=2
+        restored=Game.from_raw(game.to_raw()); restored._damage_player(10,3,source_uid=source.uid)
+        self.assertEqual((restored.player(10).life,restored.player(10).damage_prevention),(20,2)); restored._cleanup()
+        self.assertEqual(restored.player(10).source_damage_prevention,[]); self.assertEqual(restored.player(10).damage_prevention,0)
 
 
 class AlphaContinuousAnimationTests(unittest.TestCase):

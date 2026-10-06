@@ -514,6 +514,11 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Wheel of Fortune",rendered); self.assertIn("Stack",rendered)
 
+    async def test_public_embed_renders_chosen_source_prevention(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:163"; game.player(10).source_damage_prevention=[uid]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Chosen-source prevention",rendered); self.assertIn("Manabarbs",rendered)
+
     async def test_public_embed_renders_continuously_animated_permanents(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

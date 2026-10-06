@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.72.0"
+    __version__="0.73.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -141,6 +141,9 @@ class MTG(commands.Cog):
             value+=f"\nGraveyard: {len(p.graveyard)} · Exile: {len(p.exile)}"
             if pool: value+=f"\nMana pool: {pool}"
             if p.damage_prevention: value+=f"\nDamage prevention remaining: {p.damage_prevention}"
+            if p.source_damage_prevention:
+                sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_prevention]
+                value+="\nChosen-source prevention: "+", ".join(sources)
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.extra_turns:
             queued=" → ".join(names[user] for user in g.extra_turns)
@@ -160,6 +163,8 @@ class MTG(commands.Cog):
                 if item.color_override: label+=f" [{item.color_override}]"
                 if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
                 if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
+                if item.ability_effect=="prevent_source_damage" and item.target:
+                    source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
                     label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")

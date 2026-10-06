@@ -48,6 +48,7 @@ class Player:
     kept: bool = False
     mulligans: int = 0
     damage_prevention: int = 0
+    source_damage_prevention: List[int] = field(default_factory=list)
 
 @dataclass
 class Spell:
@@ -481,6 +482,18 @@ class Game:
             if item.source_uid==permanent.uid: item.source_power=power
 
     def _target_for_activation(self,card,user,target,source):
+        if card.activation_effect=="prevent_source_damage":
+            if target and target.upper().startswith("S:"):
+                source=self._target_stack(target); colors=self.spell_colors(source); source_uid=source.uid
+            else:
+                if not target or ":" not in target: raise GameError("Source must be S:POSITION or USER_ID:POSITION.")
+                try: target_user,pos=(int(x) for x in target.split(":"))
+                except (TypeError,ValueError) as e: raise GameError("Source must be S:POSITION or USER_ID:POSITION.") from e
+                battlefield=self.player(target_user).battlefield
+                if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
+                source=battlefield[pos-1]; colors=self.current_colors(source); source_uid=source.uid
+            if card.prevent_source_color not in colors: raise GameError(f"Chosen source must be {card.prevent_source_color}.")
+            return f"D:{source_uid}:{card.prevent_source_color}"
         if card.activation_effect=="counter_color":
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
@@ -900,7 +913,7 @@ class Game:
                         self.stack.extend(pending); self.stack.append(trigger); self.phase_passes=0; self.priority_user=trigger.owner; return
                 elif card.upkeep_unpaid_effect=="sacrifice" and source is not None:
                     self._remember_source_power(source); self._remove_from_combat(source.uid); source_controller.battlefield.remove(source); self._dies(source_controller,source)
-                elif card.upkeep_unpaid_effect=="damage": self._damage_player(user,card.upkeep_unpaid_damage)
+                elif card.upkeep_unpaid_effect=="damage": self._damage_player(user,card.upkeep_unpaid_damage,source_uid=trigger.source_uid)
         self.cards.pop(trigger.uid,None); self.stack.extend(pending)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
@@ -1054,9 +1067,12 @@ class Game:
         for uid in chosen: player.hand.remove(uid); player.graveyard.append(uid)
         return chosen
 
-    def _damage_player(self,user,amount,source=None,source_controller=None):
-        player=self.player(user); amount=max(0,int(amount)); prevented=min(amount,player.damage_prevention)
-        player.damage_prevention-=prevented; dealt=amount-prevented; player.life-=dealt
+    def _damage_player(self,user,amount,source=None,source_controller=None,source_uid=None):
+        player=self.player(user); amount=max(0,int(amount)); identity=source_uid if source_uid is not None else getattr(source,"uid",None)
+        if amount and identity in player.source_damage_prevention:
+            player.source_damage_prevention.remove(identity); dealt=0
+        else:
+            prevented=min(amount,player.damage_prevention); player.damage_prevention-=prevented; dealt=amount-prevented; player.life-=dealt
         if dealt and source is not None and source_controller is not None and user==self.opponent(source_controller):
             source_card=self.card(source.uid)
             if source_card.opponent_damage_discard_random:
@@ -1175,7 +1191,7 @@ class Game:
     def _resolve_ability(self,s):
         card=CARDS[s.key]; effect=s.ability_effect
         def target_permanent():
-            if not s.target or ":" not in s.target or s.target.upper().startswith("S:"): return None,None
+            if not s.target or ":" not in s.target or s.target.upper().startswith(("S:","D:")): return None,None
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             return controller,next((x for x in controller.battlefield if x.uid==uid),None)
         def fizzle(reason):
@@ -1183,7 +1199,11 @@ class Game:
         controller,target=target_permanent()
         target_card=self.card(target.uid) if target is not None else None
         if target is not None and effect not in ("self","regenerate","corpse_regenerate","end_step_corpse_counters","end_step_sacrifice","end_step_destroy","end_combat_destroy","end_combat_remove_power_counter","no_land_sacrifice","dealt_damage_counter","damaged_creature_death_counter","add_power_counters") and self._protected_from(target,card,self.ability_source_colors(s)): fizzle("its target gained protection"); return
-        if effect in ("dealt_damage_counter","damaged_creature_death_counter"):
+        if effect=="prevent_source_damage":
+            try: _,source_uid,_=s.target.split(":")
+            except (AttributeError,ValueError): fizzle("its chosen source was invalid"); return
+            self.player(s.owner).source_damage_prevention.append(int(source_uid))
+        elif effect in ("dealt_damage_counter","damaged_creature_death_counter"):
             if target is None or target.uid!=s.source_uid: fizzle("its source was gone"); return
             target.plus_one_counters+=1
         elif effect=="end_step_corpse_counters":
@@ -1219,27 +1239,27 @@ class Game:
             self.stack.remove(spell); self.player(spell.owner).graveyard.append(spell.uid)
             self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
-            self._damage_player(int(s.target),card.land_tap_damage or card.aura_tap_damage)
+            self._damage_player(int(s.target),card.land_tap_damage or card.aura_tap_damage,source_uid=s.source_uid)
         elif effect=="tap_life":
             self.player(int(s.target)).life+=card.opponent_forest_tap_life
         elif effect=="land_event_damage":
-            self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage or card.extra_land_damage)
+            self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage or card.extra_land_damage,source_uid=s.source_uid)
         elif effect=="upkeep_damage":
-            self._damage_player(int(s.target),card.upkeep_each_damage)
+            self._damage_player(int(s.target),card.upkeep_each_damage,source_uid=s.source_uid)
         elif effect=="upkeep_land_type_damage":
             target_player=self.player(int(s.target)); amount=sum(self.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in target_player.battlefield)
-            self._damage_player(target_player.user_id,amount)
+            self._damage_player(target_player.user_id,amount,source_uid=s.source_uid)
         elif effect=="aura_upkeep_damage":
-            self._damage_player(int(s.target),card.aura_upkeep_damage)
+            self._damage_player(int(s.target),card.aura_upkeep_damage,source_uid=s.source_uid)
         elif effect=="upkeep_sacrifice":
-            self._damage_player(s.owner,card.upkeep_sacrifice_damage)
+            self._damage_player(s.owner,card.upkeep_sacrifice_damage,source_uid=s.source_uid)
         elif effect=="upkeep_hand_damage":
-            target_player=self.player(int(s.target)); self._damage_player(target_player.user_id,max(0,len(target_player.hand)-4))
+            target_player=self.player(int(s.target)); self._damage_player(target_player.user_id,max(0,len(target_player.hand)-4),source_uid=s.source_uid)
         elif effect=="draw_step_draw":
             self._draw(self.player(int(s.target)),card.draw_step_extra)
         elif effect=="draw_tapped_damage":
             _,source=self.find_permanent(s.source_uid)
-            if source is not None and source.tapped: self._damage_player(int(s.target),card.draw_tapped_damage)
+            if source is not None and source.tapped: self._damage_player(int(s.target),card.draw_tapped_damage,source_uid=s.source_uid)
         elif effect=="opponent_damage_discard_random":
             self._discard_random(self.player(int(s.target)),1)
         elif effect=="draw_self":
@@ -1273,8 +1293,8 @@ class Game:
             if ":" in (s.target or ""):
                 if target_card is None or not self.is_creature(target): fizzle("its target was gone or illegal"); return
                 self._damage_permanent(target,card.activation_amount)
-            else: self._damage_player(int(s.target),card.activation_amount)
-            self._damage_player(s.owner,card.activation_self_damage)
+            else: self._damage_player(int(s.target),card.activation_amount,source_uid=s.source_uid)
+            self._damage_player(s.owner,card.activation_self_damage,source_uid=s.source_uid)
         elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall","destroy_land"):
             legal=target_card is not None
             if effect=="destroy_black_permanent": legal=legal and "B" in self.current_colors(target)
@@ -1385,9 +1405,9 @@ class Game:
                 life_cap=max(0,self.current_stats(target)[1]); dealt=self._damage_permanent(target,amount,c,self.spell_colors(s))
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
             else:
-                target_player=self.player(int(s.target or self.opponent(s.owner))); life_cap=max(0,target_player.life); dealt=self._damage_player(target_player.user_id,amount)
+                target_player=self.player(int(s.target or self.opponent(s.owner))); life_cap=max(0,target_player.life); dealt=self._damage_player(target_player.user_id,amount,source_uid=s.uid)
             if c.effect=="drain_life_x": p.life+=min(dealt,life_cap)
-            self._damage_player(s.owner,c.self_damage); p.graveyard.append(s.uid)
+            self._damage_player(s.owner,c.self_damage,source_uid=s.uid); p.graveyard.append(s.uid)
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
@@ -1457,7 +1477,7 @@ class Game:
         elif c.effect in ("earthquake_x","hurricane_x"):
             damage_batch=self.next_uid
             for controller in self.players.values():
-                self._damage_player(controller.user_id,s.x_value)
+                self._damage_player(controller.user_id,s.x_value,source_uid=s.uid)
                 for permanent in controller.battlefield:
                     card=self.card(permanent.uid)
                     keywords=self.current_keywords(permanent)
@@ -1514,7 +1534,7 @@ class Game:
     def _cleanup(self):
         self.prevent_combat_damage=False; self.creatures_died_this_turn=0
         for p in self.players.values():
-            p.damage_prevention=0
+            p.damage_prevention=0; p.source_damage_prevention=[]
             for x in p.battlefield:
                 x.damage=x.bonus=x.power_bonus=x.toughness_bonus=x.activations_this_turn=0
                 x.exile_on_death=False; x.cant_regenerate=False; x.regeneration_shields=0; x.damage_prevention=0; x.temporary_keywords=[]; x.damage_source_uids=[]
@@ -1573,6 +1593,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

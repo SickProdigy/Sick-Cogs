@@ -396,6 +396,26 @@ def _permanent_damage_threatened(game,user,permanent):
 
 def _activation_target(game,user,card,source_uid=None):
     opponent=game.opponent(user)
+    if card.activation_effect=="prevent_source_damage":
+        protected=set(game.player(user).source_damage_prevention)
+        damaging={"damage","damage_any","damage_x_exile","drain_life_x","earthquake_x","hurricane_x"}
+        for position,item in enumerate(reversed(game.stack),1):
+            source=game.card(item.uid)
+            identity=item.source_uid if item.ability_effect and item.source_uid is not None else item.uid
+            colors=game.ability_source_colors(item) if item.ability_effect else game.spell_colors(item)
+            player_target=(item.target or "")==str(user) or source.effect in ("earthquake_x","hurricane_x")
+            ability_damage=item.ability_effect in {"tap_damage","land_event_damage","upkeep_damage","upkeep_land_type_damage","aura_upkeep_damage","upkeep_sacrifice","upkeep_hand_damage","draw_tapped_damage"}
+            if identity not in protected and card.prevent_source_color in colors and ((not item.ability_effect and source.effect in damaging and player_target) or ability_damage):
+                if item.ability_effect:
+                    controller,permanent=game.find_permanent(identity)
+                    if permanent is not None: return f"{controller.user_id}:{controller.battlefield.index(permanent)+1}"
+                else: return f"S:{position}"
+        if game.active_user!=user and game.phase in ("after_blockers","after_first_strike"):
+            attacker_player=game.player(game.active_user)
+            for uid in game.attackers:
+                permanent=game.find_permanent(uid)[1]
+                if uid not in protected and uid not in game.blocks and permanent is not None and card.prevent_source_color in game.current_colors(permanent): return f"{game.active_user}:{attacker_player.battlefield.index(permanent)+1}"
+        return None
     if card.activation_effect=="counter_color":
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"

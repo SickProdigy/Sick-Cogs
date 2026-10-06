@@ -72,6 +72,7 @@ class Card:
     end_combat_remove_power_counter: bool = False
     activation_upkeep_only: bool = False
     activation_x_choice: bool = False
+    prevent_source_color: str = ""
     conditional_swamp_bonus: bool = False
     lord_subtype: str = ""
     lord_power: int = 0
@@ -269,6 +270,10 @@ ALPHA_TAP_ENCHANTMENTS = {
 
 ALPHA_ENCHANTMENTS = {
     "lea:100": {"activation_cost":"{B}{B}", "activation_effect":"counter_color", "target_color":"G", "activation_text":"Counter target green spell"},
+    "lea:10": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"U", "activation_text":"Prevent the next damage a chosen blue source would deal to you this turn"},
+    "lea:11": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"G", "activation_text":"Prevent the next damage a chosen green source would deal to you this turn"},
+    "lea:12": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"R", "activation_text":"Prevent the next damage a chosen red source would deal to you this turn"},
+    "lea:13": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"W", "activation_text":"Prevent the next damage a chosen white source would deal to you this turn"},
     "lea:206": {"activation_cost":"{G}{G}", "activation_effect":"counter_color", "target_color":"B", "activation_text":"Counter target black spell"},
     "lea:7": {"aura_target_types":("Creature",), "activation_cost":"{W}", "activated_power":1, "activated_toughness":1, "activation_attached":True, "activation_text":"Enchanted creature gets +1/+1 until end of turn"},
     "lea:108": {"aura_target_types":("Creature",), "aura_keyword":"fear"},
@@ -582,6 +587,7 @@ for reference in PLAYABLE_ALPHA:
         end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
         activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
+        prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),
         enters_tapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("enters_tapped",False),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
         lord_subtype=ALPHA_LORDS.get(reference.key,{}).get("lord_subtype",""),
