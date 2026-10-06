@@ -1763,6 +1763,51 @@ class AlphaLandEventArtifactTests(unittest.TestCase):
         self.assertFalse(any(mass.card(x.uid).land for p in mass.players.values() for x in p.battlefield)); self.assertEqual(Game.from_raw(mass.to_raw()).to_raw(),mass.to_raw())
 
 
+class AlphaCastLifeArtifactTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_matching_spell_creates_persisted_optional_payment(self):
+        game=ready(); rod=self.add(game,20,"lea:239"); spell=self.add(game,10,"lea:66","hand"); self.add(game,10,"island"); payer=self.add(game,20,"forest")
+        game.play(10,1); self.assertEqual([item.ability_effect for item in game.stack],["","cast_life"]); self.assertEqual(game.stack[-1].source_uid,rod.uid)
+        self.resolve_top(game); self.assertTrue(game.stack[-1].decision_pending); self.assertEqual(game.priority_user,20)
+        restored=Game.from_raw(game.to_raw()); restored.choose_trigger(20,True)
+        self.assertEqual(restored.player(20).life,21); self.assertTrue(next(x for x in restored.player(20).battlefield if x.uid==payer.uid).tapped); self.assertEqual(len(restored.stack),1)
+        self.resolve_top(restored); self.assertIn(spell,[x.uid for x in restored.player(10).battlefield])
+
+    def test_decline_needs_no_mana_and_source_can_be_gone(self):
+        game=ready(); star=self.add(game,10,"lea:250"); self.add(game,20,"shock","hand"); self.add(game,20,"mountain")
+        game.priority_user=20; game.play(20,1,"10"); controller,source=game.find_permanent(star.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        self.resolve_top(game); game.choose_trigger(10,False)
+        self.assertEqual(game.player(10).life,20); self.assertEqual(len(game.stack),1); self.assertIn("declined",game.log[-1])
+
+    def test_all_five_colors_trigger_only_their_matching_artifact(self):
+        pairs=(("lea:239","lea:66","island"),("lea:250","lea:156","mountain"),("lea:251","lea:30","plains"),("lea:273","lea:125","swamp"),("lea:276","lea:199","forest"))
+        for artifact,spell,land in pairs:
+            with self.subTest(artifact=artifact):
+                game=ready(); self.add(game,10,artifact); self.add(game,10,"bear"); self.add(game,10,spell,"hand"); [self.add(game,10,land) for _ in range(4)]
+                game.play(10,1); self.assertEqual(sum(item.ability_effect=="cast_life" for item in game.stack),1)
+
+    def test_multiple_controllers_use_apnap_order_and_choice_blocks_actions(self):
+        game=ready(); self.add(game,10,"lea:250"); self.add(game,20,"lea:250"); self.add(game,10,"shock","hand"); self.add(game,10,"mountain")
+        game.play(10,1,"20"); self.assertEqual([item.owner for item in game.stack if item.ability_effect=="cast_life"],[10,20])
+        self.resolve_top(game); self.assertTrue(game.stack[-1].decision_pending)
+        with self.assertRaisesRegex(GameError,"pay or decline"): game.pass_priority(20)
+        with self.assertRaisesRegex(GameError,"trigger choice"): game.choose_trigger(10,False)
+        game.choose_trigger(20,False); self.resolve_top(game); game.choose_trigger(10,False)
+
+    def test_payment_failure_keeps_pending_choice(self):
+        game=ready(); self.add(game,10,"lea:250"); self.add(game,20,"shock","hand"); self.add(game,20,"mountain"); game.priority_user=20
+        game.play(20,1,"10"); self.resolve_top(game)
+        with self.assertRaisesRegex(GameError,"cannot pay"): game.choose_trigger(10,True)
+        self.assertTrue(game.stack[-1].decision_pending); game.choose_trigger(10,False)
+
+
 class AlphaStaticArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

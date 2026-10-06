@@ -52,6 +52,7 @@ class Spell:
     ability_effect: str = ""
     source_uid: Optional[int] = None
     color_override: str = ""
+    decision_pending: bool = False
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -305,6 +306,16 @@ class Game:
             triggers.append(Spell(owner,uid,card.key,target,ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
         return triggers
 
+    def _spell_cast_triggers(self,spell):
+        colors=self.spell_colors(spell); triggers=[]
+        for controller_id in (self.active_user,self.opponent(self.active_user)):
+            for source in self.player(controller_id).battlefield:
+                card=self.card(source.uid)
+                if not card.cast_life_color or card.cast_life_color not in colors: continue
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
+                triggers.append(Spell(controller_id,uid,card.key,str(controller_id),ability_effect="cast_life",source_uid=source.uid,color_override=source.color_override))
+        return triggers
+
     def _tap_permanent(self,user,permanent,mana_symbol=None,add_mana=False,pending_triggers=None):
         if permanent.tapped: return {}
         permanent.tapped=True; player=self.player(user)
@@ -515,7 +526,8 @@ class Game:
         p.mana_pool=remaining
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        self.stack.append(Spell(user,uid,c.key,target,x_value=x_value)); self.stack.extend(pending_triggers); self._sba(); self._life()
+        spell=Spell(user,uid,c.key,target,x_value=x_value)
+        self.stack.append(spell); self.stack.extend(pending_triggers); self.stack.extend(self._spell_cast_triggers(spell)); self._sba(); self._life()
         if not self.finished: self.priority_user=self.opponent(user)
         suffix=f" with X={x_value}" if uses_x else ""
         self.log.append(f"{user} cast {c.name}{suffix}.")
@@ -657,6 +669,8 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
+                if s.ability_effect=="cast_life":
+                    s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
                 if not self.finished: self.priority_user=self.active_user
@@ -671,6 +685,24 @@ class Game:
                     self._resolve_end_step_sacrifices(); self.priority_user=self.active_user
                 else:
                     self._empty_mana(); self._advance()
+
+    def choose_trigger(self,user,pay):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user:
+            raise GameError("You do not have a trigger choice to make.")
+        trigger=self.stack.pop(); card=self.card(trigger.uid); pending=[]
+        if pay:
+            player=self.player(user); payment=self._mana_payment(player,card,mana_cost="{1}")
+            if payment is None:
+                self.stack.append(trigger); raise GameError("You cannot pay {1} for this trigger.")
+            sources,remaining,choices=payment
+            for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
+            player.mana_pool=remaining; player.life+=1
+            self.log.append(f"{user} paid {{1}} for {card.name} and gained 1 life.")
+        else: self.log.append(f"{user} declined {card.name}.")
+        self.cards.pop(trigger.uid,None); self.stack.extend(pending)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
 
     def _advance(self):
         if self.phase=="upkeep": self._begin_draw_step(); return
@@ -1096,6 +1128,7 @@ class Game:
     def _finish(self,winner,reason): self.winner=winner; self.finished_reason=reason; self.phase="finished"; self.priority_user=None
     def _priority(self,user):
         if self.finished: raise GameError("Game is over.")
+        if self.stack and self.stack[-1].decision_pending: raise GameError("The pending trigger controller must pay or decline first.")
         if self.priority_user!=user: raise GameError("You do not have priority.")
     def _active(self,user):
         if self.finished: raise GameError("Game is over.")

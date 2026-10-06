@@ -27,7 +27,10 @@ class GameView(discord.ui.View):
             item.custom_id=f"mtg:{game_id}:{item.custom_id}"
             action=item.custom_id.rsplit(":",1)[-1]
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
-            if game and action=="pass": item.disabled=game.priority_user is None or game.finished
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or bool(game.stack and game.stack[-1].decision_pending)
+            if game and action in ("pay","decline_trigger"):
+                pending=bool(game.stack and game.stack[-1].decision_pending)
+                item.disabled=not pending
             if game and action=="concede": item.disabled=game.finished
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
@@ -45,6 +48,10 @@ class GameView(discord.ui.View):
     async def mulligan(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,False),"mulligan")
     @discord.ui.button(label="Pass / next",style=discord.ButtonStyle.primary,custom_id="pass")
     async def pass_turn(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.pass_priority(i.user.id),"pass")
+    @discord.ui.button(label="Pay {1}",style=discord.ButtonStyle.success,custom_id="pay")
+    async def pay_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True),"trigger_pay")
+    @discord.ui.button(label="Decline trigger",style=discord.ButtonStyle.secondary,custom_id="decline_trigger")
+    async def decline_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,False),"trigger_decline")
     @discord.ui.button(label="Concede",style=discord.ButtonStyle.danger,custom_id="concede")
     async def concede(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.concede(i.user.id),"concede")
 

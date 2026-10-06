@@ -10,7 +10,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Creatures with abilities | 77 | 48 creatures playable through 0.29.0; 29 remain |
 | Instants and sorceries | 70 | 40 spells playable through 0.30.0; 30 remain |
 | Enchantments | 68 | 31 enchantments playable through 0.37.0; 37 remain |
-| Artifacts | 42 | Twenty-one artifacts playable through 0.41.0; 21 remain |
+| Artifacts | 42 | Twenty-six artifacts playable through 0.42.0; 16 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -104,3 +104,5 @@ The 0.41.0 static-artifact promotion adds Meekstone and Sunglasses of Urza. Meek
 ## Promotion gate
 
 A printing may change to `playable` only when mana and timing are correct, every target and choice is represented, resolution and state-based effects are complete, persistence survives reloads, the solo AI cannot bypass hidden information or legality, and focused plus full-suite tests pass on SGBTestAgent. Merely loading card text or artwork is not playability.
+
+The 0.42.0 optional cast-trigger promotion adds Crystal Rod, Iron Star, Ivory Cup, Throne of Bone, and Wooden Sphere. Each watches every player for its matching spell color, places an independently persisted and respondable trigger on the stack in APNAP order, then asks its controller to Pay {1} or Decline after responses finish. Payment uses the normal pooled or automatic mana search, can create land-tap triggers, and remains available after the source artifact leaves play. Discord exposes buttons plus the mtg trigger pay or decline command, and solo AI uses the same choice path.

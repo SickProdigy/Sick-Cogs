@@ -90,6 +90,7 @@ class Card:
     draw_step_extra: int = 0
     untap_power_limit: int = 0
     white_as_red: bool = False
+    cast_life_color: str = ""
     type_line: str = ""
     set_code: str = ""
 
@@ -150,6 +151,9 @@ class Card:
         if self.aura_tap_damage: abilities.append(f"Whenever enchanted land becomes tapped, deals {self.aura_tap_damage} damage to its controller")
         if self.mountain_extra_red: abilities.append("Mountains tapped for mana add an additional R")
         if self.opponent_forest_tap_life: abilities.append(f"Whenever an opponent taps a Forest, you gain {self.opponent_forest_tap_life} life")
+        if self.cast_life_color:
+            color_name={"W":"white","U":"blue","B":"black","R":"red","G":"green"}[self.cast_life_color]
+            abilities.append(f"Whenever a player casts a {color_name} spell, you may pay {{1}} to gain 1 life")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
@@ -244,6 +248,11 @@ ALPHA_ARTIFACTS = {
     "lea:247": {"draw_step_extra":1},
     "lea:260": {"untap_power_limit":3},
     "lea:271": {"white_as_red":True},
+    "lea:239": {"cast_life_color":"U"},
+    "lea:250": {"cast_life_color":"R"},
+    "lea:251": {"cast_life_color":"W"},
+    "lea:273": {"cast_life_color":"B"},
+    "lea:276": {"cast_life_color":"G"},
     "lea:261": {"produces":("G",)},
     "lea:262": {"produces":("B",)},
     "lea:263": {"produces":("W",)},
@@ -459,6 +468,7 @@ for reference in PLAYABLE_ALPHA:
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
         white_as_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("white_as_red",False),
+        cast_life_color=ALPHA_ARTIFACTS.get(reference.key,{}).get("cast_life_color",""),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
