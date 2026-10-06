@@ -545,7 +545,7 @@ def _activation_target(game,user,card,source_uid=None):
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
-    if card.activation_effect in ("draw_self","create_token"): return str(user)
+    if card.activation_effect in ("draw_self","create_token","take_extra_turn"): return str(user)
     if card.activation_effect in ("discard_choice","look_hand"):
         return str(opponent) if game.player(opponent).hand else None
     if card.activation_effect=="damage_all":
@@ -757,6 +757,10 @@ def advance_solo(game: Game):
                 changed = True
                 continue
             return changed
+        if game.turn_start_pending_user is not None:
+            if game.turn_start_pending_user!=user: return changed
+            choices=game.time_vault_choices(user); skip=not game.turn_start_pending_extra
+            game.choose_time_vault_turn(user,skip,choices[0][0] if skip else None); game.record(user,"ai_vault_skip" if skip else "ai_vault_take"); changed=True; continue
         if game.sanctuary_draw_pending:
             if game.active_user!=user: return changed
             opponent=game.player(game.opponent(user)); threatened=not game.player(user).island_sanctuary_active and any(game.is_creature(permanent) and "flying" not in game.current_keywords(permanent) and "islandwalk" not in game.current_keywords(permanent) for permanent in opponent.battlefield)

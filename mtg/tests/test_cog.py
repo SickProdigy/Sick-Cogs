@@ -731,5 +731,14 @@ class IslandSanctuaryRenderingTests(unittest.TestCase):
         self.assertFalse(draw.disabled); self.assertFalse(skip.disabled); self.assertTrue(passing.disabled)
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("must choose Draw or Skip",rendered); self.assertIn("flying or islandwalk",rendered)
 
+class TimeVaultRenderingTests(unittest.TestCase):
+    def test_turn_choice_renders_take_button_and_duplicate_skip_select(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1)
+        for _ in range(2):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:274"; game.player(20).battlefield.append(Permanent(uid,"lea:274",owner=20,sick=False,tapped=True))
+        game.turn_start_pending_user=20; game.turn_start_pending_extra=True; game.phase="turn_choice"; game.priority_user=20; cog.games={1:game}
+        view=GameView(cog,1); take=next(item for item in view.children if item.custom_id.endswith(":vault_take")); select=next(item for item in view.children if item.custom_id.endswith(":vault_skip")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
+        self.assertFalse(take.disabled); self.assertEqual({option.value for option in select.options},{"1","2"}); self.assertTrue(passing.disabled); self.assertIn("must take their extra turn",str(cog.game_embed(game).to_dict()))
+
 if __name__ == "__main__":
     unittest.main()

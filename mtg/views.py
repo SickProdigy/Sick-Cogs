@@ -51,6 +51,14 @@ class DrainPowerSelect(discord.ui.Select):
         position,symbol=self.values[0].split(":",1)
         await self.cog.act(i,self.game_id,lambda g:g.choose_drain_power(i.user.id,int(position),symbol),"drain_power_choice")
 
+class TimeVaultSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Skip this turn and untap this Time Vault",value=str(position)) for position,permanent in game.time_vault_choices(game.turn_start_pending_user)][:25]
+        super().__init__(placeholder="Choose a Time Vault and skip the turn",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:vault_skip")
+    async def callback(self,i):
+        await self.cog.act(i,self.game_id,lambda g:g.choose_time_vault_turn(i.user.id,True,int(self.values[0])),"vault_skip")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -59,7 +67,7 @@ class GameView(discord.ui.View):
             item.custom_id=f"mtg:{game_id}:{item.custom_id}"
             action=item.custom_id.rsplit(":",1)[-1]
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
-            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup"))
@@ -70,8 +78,10 @@ class GameView(discord.ui.View):
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand"))
+            if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
             if game and action in ("sanctuary_draw","sanctuary_skip"): item.disabled=not game.sanctuary_draw_pending or game.active_user is None
             if game and action=="concede": item.disabled=game.finished
+        if game and game.turn_start_pending_user is not None and game.time_vault_choices(game.turn_start_pending_user): self.add_item(TimeVaultSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
         if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="drain_power":
@@ -105,6 +115,8 @@ class GameView(discord.ui.View):
     async def pay_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True),"trigger_pay")
     @discord.ui.button(label="Decline trigger",style=discord.ButtonStyle.secondary,custom_id="decline_trigger")
     async def decline_trigger(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,False),"trigger_decline")
+    @discord.ui.button(label="Take turn",style=discord.ButtonStyle.primary,custom_id="vault_take")
+    async def vault_take(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_time_vault_turn(i.user.id,False),"vault_take")
     @discord.ui.button(label="Sanctuary: Draw",style=discord.ButtonStyle.secondary,custom_id="sanctuary_draw")
     async def sanctuary_draw(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.choose_sanctuary_draw(i.user.id,False),"sanctuary_draw")
     @discord.ui.button(label="Sanctuary: Skip",style=discord.ButtonStyle.success,custom_id="sanctuary_skip")

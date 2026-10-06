@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.98.0"
+    __version__="0.99.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -179,6 +179,9 @@ class MTG(commands.Cog):
         if g.extra_turns:
             queued=" → ".join(names[user] for user in g.extra_turns)
             e.add_field(name="Extra turns queued",value=queued,inline=False)
+        if g.turn_start_pending_user is not None:
+            kind="extra turn" if g.turn_start_pending_extra else "turn"
+            e.add_field(name="Time Vault turn choice",value=f"{names[g.turn_start_pending_user]} must take their {kind} or choose a tapped Time Vault and skip it.",inline=False)
         if g.sanctuary_draw_pending:
             e.add_field(name="Island Sanctuary draw choice",value=f"{names[g.active_user]} must choose Draw or Skip ({g.sanctuary_pending_draws} draw{'s' if g.sanctuary_pending_draws!=1 else ''} remaining).",inline=False)
         protected=[names[user] for user in g.order if g.player(user).island_sanctuary_active]
@@ -514,6 +517,12 @@ class MTG(commands.Cog):
     async def mana(self,ctx,position:int,color:str=None):
         """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
+    @mtg.command(name="vault")
+    async def vault(self,ctx,choice:str,position:int=None):
+        """Choose `take` or `skip POSITION` when a tapped Time Vault would let you skip a turn."""
+        normalized=choice.casefold()
+        if normalized not in ("take","skip") or (normalized=="skip" and position is None): await ctx.send("Choose `take` or `skip POSITION`."); return
+        await self.mutate_ctx(ctx,lambda g:g.choose_time_vault_turn(ctx.author.id,normalized=="skip",position),f"vault_{normalized}")
     @mtg.command(name="sanctuary")
     async def sanctuary(self,ctx,choice:str):
         """Choose `draw` or `skip` for Island Sanctuary during your draw step."""

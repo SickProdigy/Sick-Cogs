@@ -10,7 +10,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Creatures with abilities | 77 | 71 creatures playable through 0.96.0; 6 remain |
 | Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
 | Enchantments | 68 | 61 enchantments playable through 0.98.0; 7 remain |
-| Artifacts | 42 | 38 artifacts playable through 0.97.0; 4 remain |
+| Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -218,3 +218,5 @@ The 0.96.0 Hydra promotion adds Rock Hydra. Its chosen casting X becomes persist
 The 0.97.0 artifact promotion adds Cyclopean Tomb. Its upkeep-only paid activation places a source-identified mire counter on a non-Swamp land, making that land a Swamp through the timestamped land-type layer even after the Tomb leaves. A battlefield-to-graveyard move records its controller and exact Tomb instance for the rest of the game; each later upkeep creates a mandatory, reload-safe choice that removes that instance's mire counters from one eligible land. Cross-player Discord selection, public counter rendering, and solo AI use the same persisted rules.
 
 The 0.98.0 draw-replacement promotion adds Island Sanctuary. During its controller's draw step, a persisted Discord choice either performs the normal draw or skips it and grants protection until that player's next turn. The restriction permits only creatures with flying or islandwalk to attack, follows live granted keywords, preserves other draw-step triggers, survives reloads, renders publicly, and is used defensively by solo AI.
+
+The 0.99.0 turn-replacement promotion adds Time Vault. It enters tapped, skips ordinary untapping, and its tap ability queues an extra turn through the shared newest-first turn queue. Before its controller would begin a turn with a tapped Vault, a persisted choice can take the turn or select one of multiple Vaults, skip that normal or extra turn, untap the selected Vault, and continue with the exact remaining queue. Discord buttons, selects, commands, public rendering, reload recovery, and solo AI share those transitions.

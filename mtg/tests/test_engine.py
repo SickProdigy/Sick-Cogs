@@ -3863,4 +3863,28 @@ class AlphaIslandSanctuaryTests(unittest.TestCase):
         for player in raw["players"].values(): player.pop("island_sanctuary_active")
         restored=Game.from_raw(raw); self.assertFalse(restored.sanctuary_draw_pending); self.assertFalse(any(player.island_sanctuary_active for player in restored.players.values()))
 
+class AlphaTimeVaultTests(unittest.TestCase):
+    def add(self,game,user,tapped=True):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:274"
+        permanent=Permanent(uid,"lea:274",owner=user,sick=False,tapped=tapped); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_enters_tapped_skips_untap_and_activation_queues_extra_turn(self):
+        game=ready(); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:274"; game._resolve(Spell(10,uid,"lea:274")); vault=game.find_permanent(uid)[1]; self.assertTrue(vault.tapped)
+        game.active_index=0; game._start_turn(); self.assertTrue(vault.tapped); vault.tapped=False; game.phase="precombat_main"; game.priority_user=10; game.activate_ability(10,1); ability=game.stack.pop(); game._resolve_ability(ability)
+        self.assertTrue(vault.tapped); self.assertEqual(game.extra_turns,[10])
+
+    def test_begin_turn_choice_persists_can_take_or_skip_and_selects_duplicate(self):
+        game=ready(); first=self.add(game,20); second=self.add(game,20); game._offer_turn_start(20,False); restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.turn_start_pending_user,20); self.assertEqual([position for position,_ in restored.time_vault_choices(20)],[1,2])
+        restored.choose_time_vault_turn(20,True,2); self.assertFalse(restored.find_permanent(second.uid)[1].tapped); self.assertTrue(restored.find_permanent(first.uid)[1].tapped); self.assertEqual(restored.active_user,10)
+        take=ready(); self.add(take,20); previous=take.turn; take._offer_turn_start(20,False); take.choose_time_vault_turn(20,False); self.assertEqual((take.active_user,take.turn),(20,previous+1))
+
+    def test_skipped_extra_turn_uses_remaining_queue_before_normal_alternation(self):
+        game=ready(); vault=self.add(game,10); game.extra_turns=[20]; game._offer_turn_start(10,True); game.choose_time_vault_turn(10,True,1)
+        self.assertFalse(vault.tapped); self.assertEqual(game.active_user,20); self.assertFalse(game.turn_start_pending_extra)
+
+    def test_legacy_state_defaults_turn_choice_off(self):
+        raw=ready().to_raw(); raw.pop("turn_start_pending_user"); raw.pop("turn_start_pending_extra"); restored=Game.from_raw(raw)
+        self.assertIsNone(restored.turn_start_pending_user); self.assertFalse(restored.turn_start_pending_extra)
+
 if __name__=="__main__": unittest.main()
