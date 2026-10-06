@@ -4265,4 +4265,26 @@ class LibraryOfLengTests(unittest.TestCase):
         game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
         exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
+class AlphaForkTests(unittest.TestCase):
+    def zone(self,game,user,key,zone="hand"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; getattr(game.player(user),zone).append(uid); return uid
+
+    def test_fork_cast_copy_retarget_persistence_and_copy_cleanup(self):
+        game=ready(); game.player(10).hand=[]; game.player(10).mana_pool={"R":2}; bolt=game.next_uid; game.next_uid+=1; game.cards[bolt]="lea:161"; game.stack=[Spell(20,bolt,"lea:161","20")]; fork=self.zone(game,10,"lea:152"); game.phase="precombat_main"; game.priority_user=10
+        game.play(10,1,"S:1"); self.assertEqual(game.stack[-1].key,"lea:152"); game.pass_priority(20); game.pass_priority(10)
+        copied=game.stack[-1]; self.assertTrue(copied.is_copy and copied.fork_retarget and copied.decision_pending); self.assertEqual((copied.key,copied.color_override,copied.choice_owner),("lea:161","R",10)); self.assertIn(fork,game.player(10).graveyard)
+        restored=Game.from_raw(game.to_raw()); copy_uid=restored.stack[-1].uid; restored.choose_fork_target(10,"10"); self.assertEqual(restored.stack[-1].target,"10")
+        restored.pass_priority(10); restored.pass_priority(20); self.assertEqual(restored.player(10).life,17); self.assertNotIn(copy_uid,restored.cards); self.assertNotIn(copy_uid,restored.player(10).graveyard)
+        restored.pass_priority(10); restored.pass_priority(20); self.assertEqual(restored.player(20).life,17); self.assertIn(bolt,restored.player(20).graveyard)
+
+    def test_fork_copies_x_text_changes_and_can_keep_targets(self):
+        game=ready(); game.player(10).hand=[]; game.player(10).mana_pool={"R":2}; original=game.next_uid; game.next_uid+=1; game.cards[original]="lea:50"; game.stack=[Spell(20,original,"lea:50","20",x_value=3,land_word_changes={"island":"forest"})]; fork=self.zone(game,10,"lea:152"); game.phase="precombat_main"; game.priority_user=10
+        before=len(game.player(20).hand); game.play(10,1,"S:1"); game.pass_priority(20); game.pass_priority(10); copied=game.stack[-1]; self.assertEqual((copied.x_value,copied.land_word_changes),(3,{"island":"forest"}))
+        game.choose_fork_target(10); game.pass_priority(10); game.pass_priority(20); self.assertEqual(len(game.player(20).hand),before+3); self.assertNotIn(copied.uid,game.cards)
+
+    def test_fork_rejects_nonspell_and_fizzles_if_target_leaves(self):
+        game=ready(); game.player(10).hand=[]; game.player(10).mana_pool={"R":4}; ability=game.next_uid; game.next_uid+=1; game.cards[ability]="lea:73"; game.stack=[Spell(20,ability,"lea:73","10",ability_effect="damage_any")]; self.zone(game,10,"lea:152"); game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"ability"): game.play(10,1,"S:1")
+        game.stack=[]; target=game.next_uid; game.next_uid+=1; game.cards[target]="lea:161"; game.stack=[Spell(20,target,"lea:161","10")]; game.play(10,1,"S:1"); game.stack.pop(0); game.pass_priority(20); game.pass_priority(10); self.assertFalse(game.stack); self.assertTrue(any("Fork fizzled" in line for line in game.log))
+
 if __name__=="__main__": unittest.main()

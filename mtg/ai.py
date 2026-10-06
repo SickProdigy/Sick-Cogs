@@ -4,10 +4,13 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","text_change_land","text_change_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fireball","volcanic_eruption"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","text_change_land","text_change_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fork","fireball","volcanic_eruption"}
 
 
 def _target(game, user, card):
+    if card.effect=="fork":
+        choices=[(position,item) for position,item in enumerate(reversed(game.stack),1) if not item.ability_effect and game.card(item.uid).kind in ("Instant","Sorcery")]
+        return f"S:{choices[0][0]}" if choices else None
     if card.effect=="blaze_of_glory":
         if game.phase!="after_attackers" or user==game.active_user: return None
         choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.tapped and _can_target(game,card,permanent)]
@@ -412,6 +415,8 @@ def _play_one(game, user, difficulty):
             score=8
         elif card.effect=="reanimate_creature":
             score=13
+        elif card.effect=="fork":
+            score=16
         elif card.effect in ("counter_spell","counter_mana_value_x","power_sink","elemental_blast"):
             score=15 if target and target.startswith("S:") else 11
         elif card.effect in ("regenerate_target","grant_keyword","tap_or_untap"):
@@ -854,6 +859,8 @@ def advance_solo(game: Game):
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.is_copy and trigger.fork_retarget:
+                game.choose_fork_target(user); game.record(user,"ai_fork_keep_targets"); changed=True; continue
             if trigger.ability_effect=="leng_discard":
                 _,choices=game.private_hand_decision(user); card=choices[0][1]; to_library=bool(game.player(user).library) and card.cost+card.power+card.toughness>=3
                 game.choose_discard_destination(user,to_library); game.record(user,"ai_library_of_leng_top" if to_library else "ai_library_of_leng_graveyard"); changed=True; continue

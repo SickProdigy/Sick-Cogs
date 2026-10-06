@@ -543,6 +543,7 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 }
 
 ALPHA_SPELLS = {
+    "lea:152": {"effect":"fork"},
     "lea:3": {"effect":"balance"},
     "lea:63": {"effect":"text_change_land"},
     "lea:78": {"effect":"text_change_color"},

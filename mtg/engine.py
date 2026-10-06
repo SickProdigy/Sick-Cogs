@@ -101,6 +101,8 @@ class Spell:
     color_word_changes: Dict[str, str] = field(default_factory=dict)
     discard_queue: List[Dict[str, int]] = field(default_factory=list)
     discard_resume: str = ""
+    is_copy: bool = False
+    fork_retarget: bool = False
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -1248,6 +1250,10 @@ class Game:
                 if not self.is_creature(permanent): raise GameError("Healing Salve prevention target is not a creature.")
                 return f"prevent:{target_user}:{permanent.uid}"
             raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
+        if c.effect=="fork":
+            spell=self._target_stack(target); target_card=self.card(spell.uid)
+            if target_card.kind not in ("Instant","Sorcery"): raise GameError("Fork must target an instant or sorcery spell.")
+            return f"S:{spell.uid}"
         if c.effect in ("counter_spell","counter_mana_value_x","power_sink","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
@@ -1430,6 +1436,31 @@ class Game:
                 else:
                     self._empty_mana(); self._advance()
 
+    def _fork_target_spell(self,spell):
+        if not spell.target or not spell.target.startswith("S:"): return None
+        uid=int(spell.target.split(":",1)[1])
+        return next((item for item in self.stack if item.uid==uid and not item.ability_effect and self.card(item.uid).kind in ("Instant","Sorcery")),None)
+
+    def _reset_spell_choice_owner(self,spell):
+        card=self.card(spell.uid); spell.choice_owner=None
+        if card.effect=="drain_power": spell.choice_owner=int(spell.target)
+        elif card.effect=="power_sink":
+            target_uid=int(spell.target.split(":",1)[1]); target=next((item for item in self.stack if item.uid==target_uid),None); spell.choice_owner=target.owner if target is not None else None
+
+    def choose_fork_target(self,user,target=None):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].is_copy or not self.stack[-1].fork_retarget or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Fork target choice to make.")
+        spell=self.stack[-1]; card=self._text_changed_card(spell.uid,CARDS[spell.key],spell.land_word_changes,spell.color_word_changes)
+        if target is not None and str(target).casefold() not in ("keep","none","-"):
+            stable=self._target_for_cast(card,user,target,spell.x_value)
+            if stable==f"S:{spell.uid}": raise GameError("A copied spell cannot target itself.")
+            protected=self._stable_target_permanent(stable)
+            if protected is not None and self._protected_from(protected,card,("R",)): raise GameError(f"{card.name} cannot target a permanent with protection from red.")
+            spell.target=stable
+        spell.fork_retarget=False; spell.decision_pending=False; spell.passes=0; self._reset_spell_choice_owner(spell); self.phase_passes=0; self.priority_user=self.active_user
+        self.log.append(f"{user} chose targets for the Fork copy.")
+
     def false_orders_choices(self,user):
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="false_orders":
             raise GameError("You do not have a resolving False Orders choice.")
@@ -1454,18 +1485,18 @@ class Game:
     def choose_word_change(self,user,source,target):
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.card(self.stack[-1].uid).effect not in ("text_change_land","text_change_color"):
             raise GameError("No word-change choice is waiting for you.")
-        spell=self.stack[-1]; choices=self.word_change_choices(); source=source.casefold() if self.card(spell.uid).effect=="text_change_land" else source.upper(); target=target.casefold() if self.card(spell.uid).effect=="text_change_land" else target.upper()
+        spell=self.stack[-1]; spell_card=self.card(spell.uid); choices=self.word_change_choices(); source=source.casefold() if spell_card.effect=="text_change_land" else source.upper(); target=target.casefold() if spell_card.effect=="text_change_land" else target.upper()
         if (source,target) not in choices: raise GameError("Choose two different supported basic land types or colors.")
         changed=self._word_change_target(spell.target)
-        if changed is None or (isinstance(changed,Permanent) and self._protected_from(changed,self.card(spell.uid),self.spell_colors(spell))):
-            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{self.card(spell.uid).name} fizzled because its target was gone or illegal.")
+        if changed is None or (isinstance(changed,Permanent) and self._protected_from(changed,spell_card,self.spell_colors(spell))):
+            self.stack.pop(); self._finish_spell(spell); self.log.append(f"{spell_card.name} fizzled because its target was gone or illegal.")
         else:
-            mapping=changed.land_word_changes if self.card(spell.uid).effect=="text_change_land" else changed.color_word_changes
+            mapping=changed.land_word_changes if spell_card.effect=="text_change_land" else changed.color_word_changes
             source_was_mapped=source in mapping
             for key,value in list(mapping.items()):
                 if value==source: mapping[key]=target
             if not source_was_mapped: mapping[source]=target
-            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} changed {source} to {target} with {self.card(spell.uid).name}.")
+            self.stack.pop(); self._finish_spell(spell); self.log.append(f"{user} changed {source} to {target} with {spell_card.name}.")
         spell.decision_pending=False; self._sba(); self._life(); self.phase_passes=0
         if self.stack: self.stack[-1].passes=0
         if not self.finished: self.priority_user=self.active_user
@@ -1506,7 +1537,7 @@ class Game:
                     if source_card.combat_destroy_nonwall and not self._has_subtype(self.card(other.uid),"Wall"):
                         uid=self.next_uid; self.next_uid+=1; self.cards[uid]=source_card.key; pending.append(Spell(owner,uid,source_card.key,f"{other_owner}:{other.uid}",ability_effect="end_combat_destroy",source_uid=source.uid,color_override=source.color_override))
             pending.sort(key=lambda trigger:0 if trigger.owner==self.active_user else 1); self.end_combat_destroys.extend(pending)
-        self.player(spell.owner).graveyard.append(spell.uid); spell.decision_pending=False; self.log.append(f"{user} resolved False Orders"+(f" and blocked with {self.card(target.uid).name}." if attacker_position is not None else " without a new block."))
+        self._finish_spell(spell); spell.decision_pending=False; self.log.append(f"{user} resolved False Orders"+(f" and blocked with {self.card(target.uid).name}." if attacker_position is not None else " without a new block."))
         if self.stack: self.stack[-1].passes=0
         self.priority_user=self.stack[-1].choice_owner if self.stack and self.stack[-1].decision_pending else self.active_user; self.phase_passes=0
 
@@ -1569,10 +1600,10 @@ class Game:
             raise GameError("You do not have a library search to complete.")
         player=self.player(user); choices=list(reversed(player.library))
         if not 1<=position<=len(choices): raise GameError("Choose a valid private library position.")
-        chosen=choices[position-1]; spell=self.stack.pop(); player.library.remove(chosen); player.hand.append(chosen); random.SystemRandom().shuffle(player.library); player.graveyard.append(spell.uid)
+        chosen=choices[position-1]; spell=self.stack.pop(); spell_name=self.card(spell.uid).name; player.library.remove(chosen); player.hand.append(chosen); random.SystemRandom().shuffle(player.library); self._finish_spell(spell)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user
-        self.log.append(f"{user} searched their library with {self.card(spell.uid).name}, put a card into their hand, then shuffled.")
+        self.log.append(f"{user} searched their library with {spell_name}, put a card into their hand, then shuffled.")
 
     def natural_selection_decision(self,user):
         if self.finished: raise GameError("Game is over.")
@@ -1590,7 +1621,7 @@ class Game:
             except (TypeError,ValueError) as error: raise GameError(f"Order must contain each position from 1 to {size} exactly once.") from error
             if len(order)!=size or set(order)!=set(range(1,size+1)): raise GameError(f"Order must contain each position from 1 to {size} exactly once.")
             top=list(reversed(target.library[-size:])); target.library[-size:]=list(reversed([top[position-1] for position in order])); result=f"{user} arranged the top {size} cards of {target.user_id}'s library with Natural Selection."
-        self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid)
+        self.stack.pop(); self._finish_spell(spell)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0
         if not self.finished: self.priority_user=self.active_user
@@ -1678,20 +1709,20 @@ class Game:
         if self.finished: raise GameError("Game is over.")
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="power_sink":
             raise GameError("You do not have a Power Sink choice to make.")
-        spell=self.stack[-1]; target=self._power_sink_target(spell); player=self.player(user); pending=[]
+        spell=self.stack[-1]; target=self._power_sink_target(spell); target_name=self.card(target.uid).name if target is not None else "the targeted spell"; player=self.player(user); pending=[]
         if target is None:
-            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append("Power Sink fizzled because its target was gone.")
+            self.stack.pop(); self._finish_spell(spell); self.log.append("Power Sink fizzled because its target was gone.")
         elif pay:
             cost=f"{{{spell.x_value}}}"; payment=self._mana_payment(player,self.card(spell.uid),mana_cost=cost)
             if payment is None: raise GameError(f"You cannot pay {cost} for Power Sink.")
             sources,remaining,choices=payment
             for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
-            player.mana_pool=remaining; self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} paid {cost} for Power Sink; the targeted spell was not countered.")
+            player.mana_pool=remaining; self.stack.pop(); self._finish_spell(spell); self.log.append(f"{user} paid {cost} for Power Sink; the targeted spell was not countered.")
         else:
-            self.stack.pop(); self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)
+            self.stack.pop(); self.stack.remove(target); self._finish_spell(target)
             for permanent in player.battlefield:
                 if self.card(permanent.uid).land and self.current_mana_choices(permanent): self._tap_permanent(user,permanent,pending_triggers=pending)
-            player.mana_pool.clear(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append(f"{user} declined Power Sink; {self.card(target.uid).name} was countered and their mana was emptied.")
+            player.mana_pool.clear(); self._finish_spell(spell); self.log.append(f"{user} declined Power Sink; {target_name} was countered and their mana was emptied.")
         self.stack.extend(pending)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0
@@ -1768,7 +1799,7 @@ class Game:
         if stage=="hand": return
         if stage=="lands": next_stage="hand"; counts=[len(player.hand) for player in self.players.values()]
         else:
-            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append("Balance resolved."); self._sba(); self._life()
+            self.stack.pop(); self._finish_spell(spell); self.log.append("Balance resolved."); self._sba(); self._life()
             if self.stack: self.stack[-1].passes=0
             if not self.finished: self.priority_user=self.active_user
             return
@@ -2253,6 +2284,15 @@ class Game:
             self.stack[start:]=sorted(self.stack[start:],key=lambda trigger:0 if trigger.owner==self.active_user else 1)
         return dealt
 
+    def _finish_spell(self,spell):
+        if spell.is_copy:
+            for player in self.players.values():
+                for zone in (player.hand,player.graveyard,player.exile,player.library):
+                    while spell.uid in zone: zone.remove(spell.uid)
+            self.cards.pop(spell.uid,None); return
+        graveyard=self.player(spell.owner).graveyard
+        if spell.uid not in graveyard: graveyard.append(spell.uid)
+
     def _has_library_of_leng(self,user):
         return any(self.card(permanent.uid).discard_to_library for permanent in self.player(user).battlefield)
 
@@ -2280,10 +2320,10 @@ class Game:
     def _finish_effect_discard(self,spell,resume):
         spell.discard_queue=[]; spell.discard_resume=""; spell.decision_pending=False
         if resume=="wheel_seven":
-            self._draw_each(7); self.player(spell.owner).graveyard.append(spell.uid)
+            self._draw_each(7); self._finish_spell(spell)
         elif resume=="balance_hand":
             spell.ability_effect="balance_creatures"; spell.mana_choices={}; spell.choice_value=min(sum(self.is_creature(x) for x in player.battlefield) for player in self.players.values()); self.stack.append(spell); self._advance_balance(spell); return
-        elif resume in ("discard_random_spell",): self.player(spell.owner).graveyard.append(spell.uid)
+        elif resume in ("discard_random_spell",): self._finish_spell(spell)
         else: self.cards.pop(spell.uid,None)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0
@@ -2562,7 +2602,7 @@ class Game:
         elif effect=="counter_color":
             uid=int(s.target.split(":",1)[1]); spell=next((item for item in self.stack if item.uid==uid and not item.ability_effect),None)
             if spell is None or card.target_color not in self.spell_colors(spell): fizzle("its target was gone or changed color"); return
-            self.stack.remove(spell); self.player(spell.owner).graveyard.append(spell.uid)
+            self.stack.remove(spell); self._finish_spell(spell)
             self.log.append(f"{card.name} countered {self.card(spell.uid).name}.")
         elif effect=="tap_damage":
             self._damage_player(int(s.target),card.land_tap_damage or card.aura_tap_damage,source_uid=s.source_uid)
@@ -2700,19 +2740,29 @@ class Game:
         p=self.players[s.owner]; c=self._text_changed_card(s.uid,CARDS[s.key],s.land_word_changes,s.color_word_changes)
         protected=None if c.enters_copy_types else self._stable_target_permanent(s.target)
         if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
-            p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target gained protection."); return
+            self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target gained protection."); return
+        if c.effect=="fork":
+            target=self._fork_target_spell(s)
+            if target is None:
+                self._finish_spell(s); self.log.append("Fork fizzled because its target was gone or illegal."); return
+            uid=self.next_uid; self.next_uid+=1; self.cards[uid]=target.key
+            copied=Spell(s.owner,uid,target.key,target.target,x_value=target.x_value,color_override="R",batch_id=target.batch_id,source_power=target.source_power,choice_value=target.choice_value,choice_owner=target.choice_owner,mana_choices=dict(target.mana_choices),land_word_changes=dict(target.land_word_changes),color_word_changes=dict(target.color_word_changes),is_copy=True)
+            self._finish_spell(s); self.stack.append(copied)
+            if copied.target is not None:
+                copied.fork_retarget=True; copied.decision_pending=True; copied.choice_owner=s.owner; self.priority_user=s.owner
+            self.log.append(f"Fork copied {self.card(copied.uid).name}; the copy is red."); return
         if c.aura_reanimate:
             try: _,target_user_text,target_uid_text=s.target.split(":"); target_user,target_uid=int(target_user_text),int(target_uid_text)
             except (AttributeError,TypeError,ValueError): target_user=target_uid=0
             graveyard=self.player(target_user).graveyard if target_user in self.players else []
             if target_uid not in graveyard or not self.card(target_uid).creature:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             graveyard.remove(target_uid); creature=self._make_permanent(target_uid,self.cards[target_uid],owner=target_user,base_controller=s.owner); p.battlefield.append(creature)
             aura=self._make_permanent(s.uid,c.key,owner=s.owner,sick=False,attached_to=target_uid,color_override=s.color_override); p.battlefield.append(aura)
         elif c.aura_target_types:
             parts=s.target.split(":"); chosen_land_type=parts[0] if len(parts)==3 else ""; user,uid=(int(x) for x in parts[-2:]); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             aura=self._make_permanent(s.uid,c.key,owner=s.owner,sick=False,attached_to=target.uid,color_override=s.color_override,chosen_land_type=chosen_land_type); p.battlefield.append(aura)
             if c.aura_control: self._reconcile_control()
             if c.aura_enters_tapped: self._tap_permanent(user,target)
@@ -2732,43 +2782,43 @@ class Game:
             p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override,plus_one_counters=counters))
         elif c.effect=="blaze_of_glory":
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
-            if target is None or user!=self.opponent(self.active_user) or not self.is_creature(target): p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            target.temporary_max_blocks=max(target.temporary_max_blocks,len(self.attackers)); target.must_block_all=True; p.graveyard.append(s.uid)
+            if target is None or user!=self.opponent(self.active_user) or not self.is_creature(target): self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            target.temporary_max_blocks=max(target.temporary_max_blocks,len(self.attackers)); target.must_block_all=True; self._finish_spell(s)
         elif c.effect=="false_orders":
-            p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal.")
+            self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal.")
         elif c.effect=="power_sink":
-            p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone.")
+            self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone.")
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
                 target_card=self.card(target.uid) if target is not None else None
                 legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in self.spell_colors(target)) and (c.effect!="counter_mana_value_x" or self.spell_mana_value(target)==s.x_value)
                 if not legal:
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-                self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self.stack.remove(target); self._finish_spell(target)
                 self.log.append(f"{c.name} countered {target_card.name}.")
             else:
                 user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
                 target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
                 if target_card is None or c.target_color not in self.current_colors(target):
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 self._destroy(controller,target)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="set_color":
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid and not spell.ability_effect),None)
                 if target is None:
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 target.color_override=c.color_change
             else:
                 user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
                 if target is None:
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 target.color_override=c.color_change; target.color_timestamp=self.next_layer_timestamp; self.next_layer_timestamp+=1
-            p.graveyard.append(s.uid)
-        elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
-        elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
-        elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
+            self._finish_spell(s)
+        elif c.effect=="draw": self._draw(p,c.amount); self._finish_spell(s)
+        elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); self._finish_spell(s)
+        elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; self._finish_spell(s)
         elif c.effect=="discard_random_x":
             target_player=self.player(int(s.target)); self._begin_effect_discard(s,[(target_player.user_id,self._random_discard_uids(target_player,s.x_value))],"discard_random_spell")
         elif c.effect=="wheel_seven":
@@ -2778,8 +2828,8 @@ class Game:
             for player in self.players.values():
                 player.library.extend(player.hand); player.library.extend(player.graveyard); player.hand=[]; player.graveyard=[]
                 random.SystemRandom().shuffle(player.library)
-            self._draw_each(7); p.graveyard.append(s.uid)
-        elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
+            self._draw_each(7); self._finish_spell(s)
+        elif c.effect=="life": p.life+=c.amount; self._finish_spell(s)
         elif c.effect=="healing_salve":
             parts=s.target.split(":"); target_player=self.player(int(parts[1]))
             if parts[0]=="life": target_player.life+=c.amount
@@ -2787,43 +2837,43 @@ class Game:
             else:
                 target=next((permanent for permanent in target_player.battlefield if permanent.uid==int(parts[2])),None)
                 if target is None or not self.is_creature(target):
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 target.damage_prevention+=c.amount
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="simulacrum":
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or user!=s.owner or not self.is_creature(target):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            amount=p.damage_taken_this_turn; p.life+=amount; self._damage_permanent(target,amount,c,self.spell_colors(s),source_uid=s.uid); p.graveyard.append(s.uid)
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+            amount=p.damage_taken_this_turn; p.life+=amount; self._damage_permanent(target,amount,c,self.spell_colors(s),source_uid=s.uid); self._finish_spell(s)
         elif c.effect=="guardian_angel":
             target=self._stable_target_permanent(s.target)
             if ":" in s.target and (target is None or not self.is_creature(target)):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if target is not None: target.damage_prevention+=s.x_value
             else: self.player(int(s.target)).damage_prevention+=s.x_value
-            p.guardian_angel_active=True; p.graveyard.append(s.uid)
+            p.guardian_angel_active=True; self._finish_spell(s)
         elif c.effect=="reverse_damage":
             try: source_uid=int(s.target.split(":",1)[1])
-            except (AttributeError,ValueError): p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its source choice was invalid."); return
-            p.source_damage_lifegain.append(source_uid); p.graveyard.append(s.uid)
-        elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; p.graveyard.append(s.uid)
-        elif c.effect=="extra_turn": self.extra_turns.insert(0,s.owner); p.graveyard.append(s.uid)
-        elif c.effect=="channel": p.channel_active=True; p.graveyard.append(s.uid)
+            except (AttributeError,ValueError): self._finish_spell(s); self.log.append(f"{c.name} fizzled because its source choice was invalid."); return
+            p.source_damage_lifegain.append(source_uid); self._finish_spell(s)
+        elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; self._finish_spell(s)
+        elif c.effect=="extra_turn": self.extra_turns.insert(0,s.owner); self._finish_spell(s)
+        elif c.effect=="channel": p.channel_active=True; self._finish_spell(s)
         elif c.effect=="drain_power":
             target_player=self.player(int(s.target)); pending=[]
             for _,permanent,mana in self._drain_power_lands(s):
                 symbol=s.mana_choices.get(str(permanent.uid))
                 if symbol not in mana:
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because a mana choice was incomplete."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because a mana choice was incomplete."); return
                 self._tap_permanent(target_player.user_id,permanent,symbol,add_mana=True,pending_triggers=pending)
             transferred=dict(target_player.mana_pool); target_player.mana_pool.clear()
             for symbol,count in transferred.items(): p.mana_pool[symbol]=p.mana_pool.get(symbol,0)+count
-            p.graveyard.append(s.uid); self.stack.extend(pending); self.log.append(f"{s.owner} received {sum(transferred.values())} mana from {target_player.user_id} with {c.name}.")
+            self._finish_spell(s); self.stack.extend(pending); self.log.append(f"{s.owner} received {sum(transferred.values())} mana from {target_player.user_id} with {c.name}.")
         elif c.effect=="mana_short":
             target_player=self.player(int(s.target)); pending=[]
             for permanent in target_player.battlefield:
                 if self.card(permanent.uid).land: self._tap_permanent(target_player.user_id,permanent,pending_triggers=pending)
-            target_player.mana_pool.clear(); p.graveyard.append(s.uid); self.stack.extend(pending)
+            target_player.mana_pool.clear(); self._finish_spell(s); self.stack.extend(pending)
         elif c.effect=="fireball":
             chosen=(s.target or "").split(",") if s.target else []
             legal=[]
@@ -2834,67 +2884,67 @@ class Game:
                 target_user,target_uid=(int(value) for value in item.split(":")); permanent=next((x for x in self.player(target_user).battlefield if x.uid==target_uid),None)
                 if permanent is not None and self.is_creature(permanent) and not self._protected_from(permanent,c,self.spell_colors(s)): legal.append(("creature",target_user,permanent))
             if chosen and not legal:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
             amount=s.x_value//len(legal) if legal else 0; damage_batch=self.next_uid
             for kind,target_user,permanent in legal:
                 if kind=="player": self._damage_player(target_user,amount,source_uid=s.uid)
                 else: self._damage_permanent(permanent,amount,c,self.spell_colors(s),damage_batch,s.uid)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="volcanic_eruption":
             chosen=(s.target or "").split(",") if s.target else []; legal=[]
             for item in chosen:
                 target_user,target_uid=(int(value) for value in item.split(":")); permanent=next((x for x in self.player(target_user).battlefield if x.uid==target_uid),None)
                 if permanent is not None and self.has_current_land_type(permanent,"mountain") and not self._protected_from(permanent,c,self.spell_colors(s)): legal.append((self.player(target_user),permanent))
             if chosen and not legal:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because all its targets were gone or illegal."); return
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources(); destroyed=sum(self._destroy(controller,permanent,trigger_batch=trigger_batch,death_sources=death_sources) for controller,permanent in legal)
             damage_batch=self.next_uid
             for player in self.players.values():
                 for permanent in list(player.battlefield):
                     if self.is_creature(permanent): self._damage_permanent(permanent,destroyed,c,self.spell_colors(s),damage_batch,s.uid)
             for target_user in self.order: self._damage_player(target_user,destroyed,source_uid=s.uid)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect in ("damage","damage_any","damage_x_exile","drain_life_x"):
             amount=s.x_value if c.effect in ("damage_x_exile","drain_life_x") else c.amount
             life_cap=dealt=0
             if ":" in (s.target or ""):
                 user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
                 if target is None:
-                    p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+                    self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone."); return
                 life_cap=max(0,self.current_stats(target)[1]); dealt=self._damage_permanent(target,amount,c,self.spell_colors(s),source_uid=s.uid)
                 if c.effect=="damage_x_exile": target.exile_on_death=True; target.cant_regenerate=True
             else:
                 target_player=self.player(int(s.target or self.opponent(s.owner))); life_cap=max(0,target_player.life); dealt=self._damage_player(target_player.user_id,amount,source_uid=s.uid)
             if c.effect=="drain_life_x": p.life+=min(dealt,life_cap)
-            self._damage_player(s.owner,c.self_damage,source_uid=s.uid); p.graveyard.append(s.uid)
+            self._damage_player(s.owner,c.self_damage,source_uid=s.uid); self._finish_spell(s)
         elif c.effect in ("regenerate_target","grant_keyword","destroy_wall"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None); target_card=self.card(target.uid) if target is not None else None
             legal=target_card is not None and self.is_creature(target) and (c.effect!="destroy_wall" or "Wall" in target_card.type_line.split(" — ",1)[-1].split())
             if not legal:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if c.effect=="regenerate_target": target.regeneration_shields+=1
             elif c.effect=="grant_keyword":
                 if c.temporary_keyword not in target.temporary_keywords: target.temporary_keywords.append(c.temporary_keyword)
             else: self._destroy(controller,target,allow_regeneration=False)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="tap_or_untap":
             mode,user_text,uid_text=s.target.split(":"); controller=self.player(int(user_text))
             target=next((x for x in controller.battlefield if x.uid==int(uid_text)),None); target_card=self.card(target.uid) if target is not None else None
             if target_card is None or not any(self.has_current_type(target,kind) for kind in c.target_types):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if mode=="tap": self._tap_permanent(controller.user_id,target)
             else: target.tapped=False
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="add_mana":
-            p.mana_pool[c.mana_color]=p.mana_pool.get(c.mana_color,0)+c.mana_amount; p.graveyard.append(s.uid)
+            p.mana_pool[c.mana_color]=p.mana_pool.get(c.mana_color,0)+c.mana_amount; self._finish_spell(s)
         elif c.effect=="sacrifice_mana":
             if s.choice_value: p.mana_pool[c.sacrifice_mana_color]=p.mana_pool.get(c.sacrifice_mana_color,0)+s.choice_value
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="search_library":
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="natural_selection":
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="siren_call":
             active=self.player(self.active_user)
             for target in active.battlefield:
@@ -2903,16 +2953,16 @@ class Game:
                 if target.uid not in self.forced_attackers: self.forced_attackers.append(target.uid)
                 trigger_uid=self.next_uid; self.next_uid+=1; self.cards[trigger_uid]=c.key
                 self.end_step_destroys.append(Spell(s.owner,trigger_uid,c.key,f"{active.user_id}:{target.uid}",ability_effect="forced_end_step_destroy",source_uid=s.uid,color_override=s.color_override,choice_value=target.layer_timestamp))
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="destroy_all_enchantments":
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
                     if self.card(permanent.uid).has_type("Enchantment"): self._destroy(controller,permanent)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect in ("pump","pump_blocking","pump_power_x","berserk"):
             user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or (c.effect=="berserk" and not self.is_creature(target)):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             if c.effect=="pump_power_x": target.power_bonus+=s.x_value
             elif c.effect=="berserk":
                 target.power_bonus+=self.current_stats(target)[0]
@@ -2920,32 +2970,32 @@ class Game:
                 trigger_uid=self.next_uid; self.next_uid+=1; self.cards[trigger_uid]=c.key
                 self.end_step_destroys.append(Spell(s.owner,trigger_uid,c.key,f"{user}:{target.uid}",ability_effect="berserk_end_step_destroy",source_uid=s.uid,color_override=s.color_override,choice_value=target.layer_timestamp))
             else: target.bonus+=c.amount
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="return_creature_hand":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not self.is_creature(target):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone."); return
             self._remember_source_power(target); owner=self.permanent_owner(target,controller); controller.battlefield.remove(target)
             if self.is_token(target.uid): self.cards.pop(target.uid,None)
             else: owner.hand.append(target.uid)
             self._remove_from_combat(target.uid)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
             uid=int(s.target); creature_only=c.effect!="return_grave_card_hand"
             if uid not in p.graveyard or (creature_only and not self.card(uid).creature):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             p.graveyard.remove(uid)
             if c.effect=="reanimate_creature": p.battlefield.append(self._make_permanent(uid,self.cards[uid],owner=p.user_id))
             else: p.hand.append(uid)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect in ("destroy_creature","exile_creature_life"):
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             target_card=self.card(target.uid) if target is not None else None
             legal=target_card is not None and self.is_creature(target) and not (c.target_nonartifact and "Artifact" in target_card.type_line) and not (c.target_nonblack and s.color_word_changes.get("B","B") in self.current_colors(target))
             if not legal:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
             if c.effect=="exile_creature_life":
                 self._remember_source_power(target); self._remove_from_combat(target.uid); owner=self.permanent_owner(target,controller); controller.battlefield.remove(target)
@@ -2953,7 +3003,7 @@ class Game:
                 else: owner.exile.append(target.uid)
                 controller.life+=life_gain
             else: self._destroy(controller,target,allow_regeneration=False)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect in ("earthquake_x","hurricane_x"):
             damage_batch=self.next_uid
             for controller in self.players.values():
@@ -2963,30 +3013,30 @@ class Game:
                     keywords=self.current_keywords(permanent)
                     affected=self.is_creature(permanent) and ((c.effect=="earthquake_x" and "flying" not in keywords) or (c.effect=="hurricane_x" and "flying" in keywords))
                     if affected: self._damage_permanent(permanent,s.x_value,c,self.spell_colors(s),damage_batch,s.uid)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="destroy_all_creatures":
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):
                     if self.is_creature(permanent): self._destroy(controller,permanent,allow_regeneration=False,trigger_batch=trigger_batch,death_sources=death_sources)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         elif c.effect=="destroy_permanent":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not any(self.has_current_type(target,kind) for kind in c.target_types):
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            self._destroy(controller,target); p.graveyard.append(s.uid)
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            self._destroy(controller,target); self._finish_spell(s)
         elif c.effect=="destroy_land":
             user,uid=(int(x) for x in s.target.split(":")); controller=self.player(user)
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not self.card(target.uid).land:
-                p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            self._destroy(controller,target,allow_regeneration=False); p.graveyard.append(s.uid)
+                self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target was gone."); return
+            self._destroy(controller,target,allow_regeneration=False); self._finish_spell(s)
         elif c.effect in ("destroy_all_lands","destroy_land_type"):
             for controller in self.players.values():
                 destroyed=[x for x in controller.battlefield if self.card(x.uid).land and (c.effect=="destroy_all_lands" or self.has_current_land_type(x,c.land_type))]
                 for permanent in destroyed: self._destroy(controller,permanent,allow_regeneration=False)
-            p.graveyard.append(s.uid)
+            self._finish_spell(s)
         self.log.append(f"{c.name} resolved."); self._sba(); self._life()
 
     def _perm(self,p,uid):
@@ -3073,7 +3123,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect.startswith("balance_"): message="The pending Balance choice must be completed first."
+            if self.stack[-1].is_copy and self.stack[-1].fork_retarget: message="The Fork controller must choose targets for the copied spell first."
+            elif self.stack[-1].ability_effect.startswith("balance_"): message="The pending Balance choice must be completed first."
             elif self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
             elif self.stack[-1].ability_effect=="kudzu_move": message="The destroyed lands controller must reattach Kudzu or decline first."
             elif not self.stack[-1].ability_effect and self.card(self.stack[-1].uid).effect=="false_orders": message="The resolving False Orders assignment must be chosen first."

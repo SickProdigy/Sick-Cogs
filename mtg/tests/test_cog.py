@@ -793,5 +793,12 @@ class LibraryOfLengRenderingTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(8): uid=game.next_uid; game.next_uid+=1; game.cards[uid]="bear"; game.player(20).hand.append(uid)
         cleanup=GameView(cog,1); self.assertFalse(next(item for item in cleanup.children if item.custom_id.endswith(":private_hand")).disabled); self.assertTrue(next(item for item in cleanup.children if item.custom_id.endswith(":pass")).disabled); self.assertIn("privately discard 1",str(cog.game_embed(game).to_dict()))
 
+class ForkRenderingTests(unittest.TestCase):
+    def test_copy_choice_is_public_counterable_and_has_keep_control(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1)
+        original=game.next_uid; game.next_uid+=1; game.cards[original]="lea:161"; copied=game.next_uid; game.next_uid+=1; game.cards[copied]="lea:161"; game.stack=[spell_type(20,original,"lea:161","20"),spell_type(10,copied,"lea:161","20",color_override="R",decision_pending=True,choice_owner=10,is_copy=True,fork_retarget=True)]; game.priority_user=10; cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Lightning Bolt copy",rendered); self.assertIn("must choose new targets or keep",rendered); self.assertIn("[R]",rendered)
+        view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":fork_target")); self.assertEqual([option.value for option in select.options],["keep"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
+
 if __name__ == "__main__":
     unittest.main()

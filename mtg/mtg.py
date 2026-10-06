@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.114.0"
+    __version__="0.115.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -222,7 +222,7 @@ class MTG(commands.Cog):
         if g.stack:
             stack_lines=[]
             for position,item in enumerate(reversed(g.stack),1):
-                label=g.card(item.uid).name+(" ability" if item.ability_effect else "")
+                label=g.card(item.uid).name+(" ability" if item.ability_effect else "")+(" copy" if item.is_copy else "")
                 if item.color_override: label+=f" [{item.color_override}]"
                 if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
                 if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
@@ -238,7 +238,8 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
+                    if item.is_copy and item.fork_retarget: label+=f" ({item.choice_owner} must choose new targets or keep the originals)"
+                    elif not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
                     elif not item.ability_effect and g.card(item.uid).effect=="natural_selection": label+=" (controller is privately arranging the targeted library)"
                     elif not item.ability_effect and g.card(item.uid).effect in ("text_change_land","text_change_color"): label+=" (controller must choose the word replacement)"
                     elif not item.ability_effect and g.card(item.uid).effect=="false_orders": label+=" (controller must choose its new blocking assignment or decline)"
@@ -637,6 +638,10 @@ class MTG(commands.Cog):
         """Play/cast a hand position with optional target and X; comma-separated multi-target choices support Fireball and Volcanic Eruption; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, a source as S:POSITION or USER_ID:POSITION for Reverse Damage, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
+    @mtg.command(name="forktarget")
+    async def forktarget(self,ctx,target:str="keep"):
+        """Keep Fork copy targets or provide the copied spell's normal target syntax."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_fork_target(ctx.author.id,target),"fork_target_choice")
     @mtg.command(name="attack")
     async def attack(self,ctx,*groups:str):
         """Declare attackers; join positions with `+` to form a band, such as `1 2+3`."""

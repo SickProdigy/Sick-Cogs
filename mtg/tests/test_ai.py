@@ -1025,5 +1025,11 @@ class SoloAITests(unittest.TestCase):
         for _ in range(9): uid=game.next_uid; game.next_uid+=1; game.cards[uid]="bear"; game.player(AI).hand.append(uid)
         game.phase="cleanup_discard"; game.priority_user=AI; advance_solo(game); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(any(event["action"]=="ai_cleanup_discard" for event in game.history))
 
+    def test_ai_casts_fork_and_completes_copy_target_choice(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; game=solo(order=(AI,HUMAN)); game.player(AI).hand=[]; game.player(AI).mana_pool={"R":2}; fork=game.next_uid; game.next_uid+=1; game.cards[fork]="lea:152"; game.player(AI).hand=[fork]; bolt=game.next_uid; game.next_uid+=1; game.cards[bolt]="lea:161"; game.stack=[spell_type(HUMAN,bolt,"lea:161",str(AI))]; game.priority_user=AI; game.phase="precombat_main"
+        advance_solo(game); self.assertEqual(game.stack[-1].key,"lea:152"); self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
+        game.pass_priority(HUMAN); advance_solo(game); game.pass_priority(HUMAN); advance_solo(game)
+        self.assertTrue(any(event["action"]=="ai_fork_keep_targets" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

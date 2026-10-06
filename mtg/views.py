@@ -139,6 +139,13 @@ class WordChangeSelect(discord.ui.Select):
         source,target=self.values[0].split(":",1)
         await self.cog.act(i,self.game_id,lambda g:g.choose_word_change(i.user.id,source,target),"word_change_choice")
 
+class ForkTargetSelect(discord.ui.Select):
+    def __init__(self,cog,game_id):
+        self.cog,self.game_id=cog,game_id
+        super().__init__(placeholder="Fork copy target choice",options=[discord.SelectOption(label="Keep original targets",value="keep",description="Resolve the copy with the copied targets")],custom_id=f"mtg:{game_id}:fork_target")
+    async def callback(self,i):
+        await self.cog.act(i,self.game_id,lambda g:g.choose_fork_target(i.user.id),"fork_keep_targets")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -149,24 +156,24 @@ class GameView(discord.ui.View):
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase in ("untap","cleanup_discard") or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
-                pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
+                pending=bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
             if game and action=="search":
-                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
                 item.disabled=not bool(game.phase=="cleanup_discard" or (game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand","leng_discard")))
             if game and action=="natural_selection":
-                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
             if game and action in ("sanctuary_draw","sanctuary_skip"): item.disabled=not game.sanctuary_draw_pending or game.active_user is None
             if game and action=="concede": item.disabled=game.finished
         if game and game.turn_start_pending_user is not None and game.time_vault_choices(game.turn_start_pending_user): self.add_item(TimeVaultSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
-        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="drain_power":
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="drain_power":
             self.add_item(DrainPowerSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="power_leak":
             self.add_item(PowerLeakSelect(self.cog,self.game_id,game))
@@ -174,10 +181,12 @@ class GameView(discord.ui.View):
             self.add_item(CopySelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="vesuvan_copy":
             self.add_item(VesuvanSelect(self.cog,self.game_id,game))
-        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect in ("text_change_land","text_change_color"):
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect in ("text_change_land","text_change_color"):
             self.add_item(WordChangeSelect(self.cog,self.game_id,game))
-        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="false_orders":
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="false_orders":
             self.add_item(FalseOrdersSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].is_copy and game.stack[-1].fork_retarget:
+            self.add_item(ForkTargetSelect(self.cog,self.game_id))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="kudzu_move":
             self.add_item(KudzuSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("balance_lands","balance_creatures"):
