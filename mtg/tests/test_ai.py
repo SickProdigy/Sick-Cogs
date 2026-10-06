@@ -433,6 +433,19 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_casts_fog_only_while_defending_against_attackers(self):
+        quiet=solo(order=(AI,HUMAN)); quiet.player(HUMAN).kept=True; quiet.player(AI).kept=True; quiet.player(AI).hand=[]
+        fog=self.add(quiet,AI,"lea:193","hand"); self.add(quiet,AI,"forest")
+        quiet.active_index=0; quiet.phase="precombat_main"; quiet.priority_user=AI; quiet.player(AI).land_played=True
+        advance_solo(quiet); self.assertIn(fog,quiet.player(AI).hand); self.assertFalse(quiet.prevent_combat_damage)
+
+        game=solo(order=(HUMAN,AI)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        fog=self.add(game,AI,"lea:193","hand"); self.add(game,AI,"forest"); attacker=self.add(game,HUMAN,"giant")
+        game.active_index=0; game.phase="attackers"; game.priority_user=None; game.player(HUMAN).land_played=True; game.player(AI).land_played=True
+        game.declare_attackers(HUMAN,[1]); game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,fog); self.assertEqual(game.priority_user,HUMAN)
+        game.pass_priority(HUMAN); advance_solo(game); self.assertTrue(game.prevent_combat_damage); self.assertIn(fog,game.player(AI).graveyard)
+
     def test_ai_activates_conservator_only_for_pending_damage(self):
         quiet=solo(order=(AI,HUMAN)); quiet.player(HUMAN).kept=True; quiet.player(AI).kept=True; quiet.player(AI).hand=[]
         conservator=self.add(quiet,AI,"lea:237"); [self.add(quiet,AI,"forest") for _ in range(3)]

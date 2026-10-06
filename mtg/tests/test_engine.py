@@ -48,11 +48,12 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("skip_draw_step"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
-        for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertFalse(restored.skip_draw_step)
+        self.assertEqual(restored.history,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
+        self.assertTrue(all(player.damage_prevention==0 for player in restored.players.values()))
         self.assertGreater(restored.updated_at,0)
 
     def test_declaration_steps_do_not_grant_spell_priority(self):
@@ -2004,6 +2005,37 @@ class AlphaHiveTokenTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(10,[len(game.player(10).battlefield)])
         wasp.sick=False; game.declare_attackers(10,[len(game.player(10).battlefield)])
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
+
+
+class AlphaFogTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_fog_casts_without_a_target_persists_and_expires_at_cleanup(self):
+        game=ready(); fog=self.add(game,10,"lea:193","hand"); land=self.add(game,10,"forest")
+        game.play(10,1); self.assertTrue(land.tapped); self.assertFalse(game.prevent_combat_damage)
+        self.resolve_top(game); self.assertTrue(game.prevent_combat_damage); self.assertIn(fog,game.player(10).graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw())
+        before=restored.player(10).life; restored._damage_player(10,2); self.assertEqual(restored.player(10).life,before-2)
+        restored._cleanup(); self.assertFalse(restored.prevent_combat_damage)
+
+    def test_fog_prevents_first_strike_normal_unblocked_and_trample_damage(self):
+        unblocked=ready(); giant=self.add(unblocked,20,"giant"); unblocked.active_index=1; unblocked.attackers=[giant.uid]; unblocked.prevent_combat_damage=True
+        unblocked._combat_damage(False); self.assertEqual(unblocked.player(10).life,20)
+
+        blocked=ready(); striker=self.add(blocked,20,"lea:43"); bear=self.add(blocked,10,"bear"); blocked.active_index=1
+        blocked.attackers=[striker.uid]; blocked.blocks={striker.uid:bear.uid}; blocked.blocked_attackers=[striker.uid]; blocked.prevent_combat_damage=True
+        blocked._combat_damage(True); blocked._combat_damage(False)
+        self.assertEqual(striker.damage,0); self.assertEqual(bear.damage,0); self.assertIn(striker,blocked.player(20).battlefield); self.assertIn(bear,blocked.player(10).battlefield)
+
+        trample=ready(); mammoth=self.add(trample,20,"lea:227"); bear=self.add(trample,10,"bear"); trample.active_index=1
+        trample.attackers=[mammoth.uid]; trample.blocks={mammoth.uid:bear.uid}; trample.blocked_attackers=[mammoth.uid]; trample.prevent_combat_damage=True
+        trample._combat_damage(False); self.assertEqual(trample.player(10).life,20); self.assertEqual(bear.damage,0)
 
 
 class AlphaConservatorTests(unittest.TestCase):

@@ -136,6 +136,12 @@ def _global_enchantment_score(game,user,card):
     return 5+value*(own-enemy)+mountain_value
 
 
+def _fog_useful(game,user):
+    if game.active_user==user or game.phase not in ("after_attackers","after_blockers","after_first_strike") or not game.attackers or game.prevent_combat_damage: return False
+    if game.phase!="after_first_strike": return True
+    combatants=set(game.attackers)|set(game.blocks.values())
+    return any("first_strike" not in game.current_keywords(permanent) for player in game.players.values() for permanent in player.battlefield if permanent.uid in combatants)
+
 def _play_one(game, user, difficulty):
     player = game.player(user)
     if game.active_user == user and game.phase in ("precombat_main", "postcombat_main") and not game.stack and not player.land_played:
@@ -152,6 +158,8 @@ def _play_one(game, user, difficulty):
         card = game.card(uid)
         x_value=game.max_payable_x(user,card) if "{X}" in card.mana_cost else None
         if card.land or (x_value is not None and x_value<1) or not game.can_pay(user,card,x_value or 0):
+            continue
+        if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
@@ -236,6 +244,8 @@ def _play_one(game, user, difficulty):
             score=11
         elif card.effect=="add_mana":
             score=6
+        elif card.effect=="prevent_combat_damage":
+            score=20
         elif card.effect=="destroy_all_enchantments":
             enemy=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in game.player(game.opponent(user)).battlefield)
             own=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in player.battlefield)

@@ -299,6 +299,12 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Jade Statue 3/6",rendered); self.assertIn("Animated: 3/6 Golem artifact creature",rendered)
 
+    async def test_public_embed_shows_fog_turn_effect(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); game.prevent_combat_damage=True
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("All combat damage is prevented this turn",rendered)
+
     async def test_public_embed_shows_player_damage_prevention(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); game.player(10).damage_prevention=2
