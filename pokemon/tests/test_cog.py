@@ -128,6 +128,7 @@ class CogPolicyTests(unittest.TestCase):
     def test_bundled_generation_one_catalog_is_complete(self):
         path = Path(__file__).parents[1] / "gen1.json"
         self.assertEqual(PokemonCatalog(path).load(), 151)
+        self.assertEqual((SPECIES[29].name,SPECIES[32].name),("Nidoran","Nidoran"))
         self.assertEqual(set(range(1, 152)), {key for key in SPECIES if key <= 151})
         self.assertTrue(all(SPECIES[key].abilities for key in range(1,152)))
         self.assertEqual(SPECIES[81].gender_rate,-1)

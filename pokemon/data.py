@@ -21,6 +21,10 @@ class Species:
     base_experience: int = 50
     growth_rate: str = "medium"
 
+def display_species_name(species_id,name):
+    """Return the user-facing species name; sex is rendered separately."""
+    return "Nidoran" if int(species_id) in {29,32} else str(name)
+
 @dataclass(frozen=True)
 class Move:
     name: str
@@ -71,7 +75,7 @@ def _load_bundled_species():
     raw=json.loads((Path(__file__).with_name("gen1.json")).read_text(encoding="utf-8"))
     for value in raw["species"]:
         item=Species(
-            int(value["id"]),str(value["name"]),tuple(value["types"]),int(value["hp"]),
+            int(value["id"]),display_species_name(value["id"],value["name"]),tuple(value["types"]),int(value["hp"]),
             int(value["attack"]),int(value["defense"]),int(value["speed"]),int(value["catch_rate"]),
             tuple(value["moves"]),tuple((int(level),str(move)) for level,move in value["learnset"]),
             tuple(value.get("abilities",())),int(value.get("gender_rate",-1)),
