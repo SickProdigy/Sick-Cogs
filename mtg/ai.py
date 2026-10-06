@@ -434,6 +434,17 @@ def _activation_target(game,user,card,source_uid=None):
             if permanent.uid!=source_uid and game.is_creature(permanent) and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
                 choices.append((game.current_stats(permanent)[0],position))
         if choices: return f"{user}:{max(choices)[1]}"
+    if card.activation_effect=="grant_flying_delayed_destroy":
+        _,source=game.find_permanent(source_uid)
+        if source is None or game.active_user!=user or game.phase not in ("precombat_main","after_attackers"): return None
+        pending={item.target for item in game.stack if item.ability_effect=="grant_flying_delayed_destroy"}
+        delayed={item.target for item in game.end_step_destroys}
+        choices=[]
+        for position,permanent in enumerate(game.player(user).battlefield,1):
+            stable=f"{user}:{permanent.uid}"
+            if permanent.uid!=source_uid and game.is_creature(permanent) and stable not in pending and stable not in delayed and "flying" not in game.current_keywords(permanent) and game.current_stats(permanent)[1]<game.current_stats(source)[0] and _can_target(game,card,permanent):
+                choices.append((game.current_stats(permanent)[0],position))
+        return f"{user}:{max(choices)[1]}" if choices else None
     if card.activation_effect=="tap_permanent":
         choices=[]
         for position,permanent in enumerate(game.player(opponent).battlefield,1):

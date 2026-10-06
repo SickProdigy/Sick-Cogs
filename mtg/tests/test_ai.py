@@ -757,6 +757,13 @@ class SoloAITests(unittest.TestCase):
         advance_solo(tome); self.assertTrue(source.tapped); self.assertEqual(tome.stack[-1].ability_effect,"draw_self")
         tome.pass_priority(HUMAN); advance_solo(tome); self.assertEqual(len(tome.player(AI).hand),before+1)
 
+    def test_ai_uses_stone_giant_on_an_eligible_attacker(self):
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS
+        game=solo(order=(AI,HUMAN)); source=self.add(game,AI,"lea:176"); bear=self.add(game,AI,"bear"); self.add(game,HUMAN,"giant")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        self.assertEqual(_activation_target(game,AI,cards["lea:176"],source.uid),f"{AI}:2")
+        bear.temporary_keywords.append("flying"); self.assertIsNone(_activation_target(game,AI,cards["lea:176"],source.uid))
+
 
 if __name__ == "__main__":
     unittest.main()

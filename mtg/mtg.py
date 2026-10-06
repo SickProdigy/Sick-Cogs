@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.67.0"
+    __version__="0.68.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -168,6 +168,12 @@ class MTG(commands.Cog):
             e.add_field(name="Pending end-of-combat destruction",value="\n".join(pending),inline=False)
         if g.end_step_sacrifices:
             e.add_field(name="Pending end-step trigger",value="Sacrifice "+", ".join(g.card(uid).name for uid in g.end_step_sacrifices)+" · players may respond",inline=False)
+        if g.end_step_destroys:
+            pending_names=[]
+            for trigger in g.end_step_destroys:
+                _,target=g.find_permanent(int(trigger.target.split(":",1)[1])) if trigger.target and ":" in trigger.target else (None,None)
+                pending_names.append(g.card(target.uid).name if target is not None else "departed target")
+            e.add_field(name="Next end-step destruction",value=", ".join(pending_names),inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."
         e.set_footer(text="Experimental supported-card subset · hands are private")
         return e

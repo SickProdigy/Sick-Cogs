@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
@@ -2977,6 +2977,46 @@ class AlphaReusableArtifactTests(unittest.TestCase):
         game=ready(); disk=self.add(game,10,"lea:266"); self.add(game,10,"plains"); victim=self.add(game,20,"bear")
         game.activate_ability(10,1); game.player(10).battlefield.remove(disk); game.player(10).graveyard.append(disk.uid)
         self.resolve_top(game); self.assertIn(victim.uid,game.player(20).graveyard)
+
+
+class AlphaStoneGiantTests(unittest.TestCase):
+    def add(self,game,user,key,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_activation_requires_owned_creature_with_lower_toughness(self):
+        game=ready(); giant=self.add(game,10,"lea:176"); own=self.add(game,10,"bear"); enemy=self.add(game,20,"bear"); tough=self.add(game,10,"lea:176")
+        with self.assertRaisesRegex(GameError,"creature you control"): game.activate_ability(10,1,"20:1")
+        with self.assertRaisesRegex(GameError,"toughness less"): game.activate_ability(10,1,"10:3")
+        self.assertFalse(giant.tapped); game.activate_ability(10,1,"10:2")
+        self.assertTrue(giant.tapped); self.assertEqual(game.stack[-1].target,f"10:{own.uid}")
+
+    def test_resolution_rechecks_live_stats_and_uses_source_last_known_power(self):
+        fizzled=ready(); source=self.add(fizzled,10,"lea:176"); target=self.add(fizzled,10,"bear")
+        fizzled.activate_ability(10,1,"10:2"); source.power_bonus=-2; self.resolve_top(fizzled)
+        self.assertNotIn("flying",fizzled.current_keywords(target)); self.assertFalse(fizzled.end_step_destroys)
+
+        game=ready(); source=self.add(game,10,"lea:176"); source.power_bonus=2; target=self.add(game,10,"lea:176")
+        game.activate_ability(10,1,"10:2"); game._destroy(game.player(10),source,allow_regeneration=False); self.resolve_top(game)
+        self.assertIn("flying",game.current_keywords(target)); self.assertEqual(len(game.end_step_destroys),1)
+
+    def test_delayed_destruction_persists_is_respondable_and_allows_regeneration(self):
+        game=ready(); self.add(game,10,"lea:176"); target=self.add(game,10,"bear")
+        game.activate_ability(10,1,"10:2"); self.resolve_top(game); target.regeneration_shields=1
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw())
+        saved=restored.find_permanent(target.uid)[1]; restored._begin_end_step()
+        self.assertFalse(restored.end_step_destroys); self.assertEqual(restored.stack[-1].ability_effect,"end_step_destroy")
+        self.resolve_top(restored); self.assertIsNotNone(restored.find_permanent(target.uid)[1]); self.assertTrue(saved.tapped); self.assertEqual(saved.regeneration_shields,0)
+        restored._cleanup(); self.assertNotIn("flying",restored.current_keywords(saved))
+
+    def test_delayed_destruction_fizzles_after_target_leaves(self):
+        game=ready(); self.add(game,10,"lea:176"); target=self.add(game,10,"bear")
+        game.activate_ability(10,1,"10:2"); self.resolve_top(game); game._begin_end_step()
+        game._destroy(game.player(10),target,allow_regeneration=False); self.resolve_top(game)
+        self.assertIn("fizzled",game.log[-1])
 
 
 class CombatTests(unittest.TestCase):

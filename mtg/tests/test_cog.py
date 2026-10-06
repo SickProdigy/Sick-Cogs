@@ -525,6 +525,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("G:POSITION",content); self.assertIn("bottom → top",content); self.assertIn(f"1. {game.card(uid).name}",content)
         self.assertIn("everyone=False",repr(ctx.send.await_args.kwargs["allowed_mentions"]))
 
+    async def test_public_embed_shows_stone_giant_delayed_destruction(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:176"
+        target=game.next_uid; game.next_uid+=1; game.cards[target]="bear"
+        trigger=game.next_uid; game.next_uid+=1; game.cards[trigger]="lea:176"
+        game.player(10).battlefield=[permanent_type(source,"lea:176",sick=False),permanent_type(target,"bear",sick=False)]
+        game.end_step_destroys=[spell_type(10,trigger,"lea:176",f"10:{target}",ability_effect="end_step_destroy",source_uid=source)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Next end-step destruction",rendered); self.assertIn("Bear Cub",rendered)
+
     async def test_cleanup_expires_only_inactive_matches(self):
         cog = cog_fixture()
         expired, active = Game(1, [10, 20], 1), Game(2, [30, 40], 2)

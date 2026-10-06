@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),273)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),273)
+        self.assertEqual(len(CARDS),274)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),274)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),213)
-        self.assertEqual(len(REFERENCE_ALPHA),82)
+        self.assertEqual(len(PLAYABLE_ALPHA),214)
+        self.assertEqual(len(REFERENCE_ALPHA),81)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -84,6 +84,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(CARDS["lea:73"].ability_text,"{T}: Deals 1 damage to any target")
         self.assertIn("{W}{W}, {T}: Destroy target black permanent",CARDS["lea:29"].ability_text)
         self.assertIn("3 damage to you",CARDS["lea:165"].ability_text)
+        self.assertEqual(CARDS["lea:176"].activation_effect,"grant_flying_delayed_destroy")
+        self.assertIn("next end step",CARDS["lea:176"].ability_text)
         self.assertEqual(CARDS["lea:106"].ability_text,"{B}: Regenerate this creature")
         self.assertEqual(CARDS["lea:132"].ability_text,"Defender, {B}: Regenerate this creature")
         self.assertEqual(CARDS["lea:135"].ability_text,"Flying, {B}: Regenerate this creature")
@@ -188,7 +190,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("273 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("274 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
