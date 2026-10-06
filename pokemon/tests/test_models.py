@@ -70,9 +70,14 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(caught.gender,"female")
         self.assertEqual(caught.caught_guild_id,1)
         self.assertEqual(len(caught.instance_id),32)
-    def test_catch_explains_no_battle_xp(self):
-        b=battle(3);b.state="caught";b.result=f"Caught {SPECIES[b.wild_species_id].name}! Catching does not award battle XP."
-        self.assertIn("does not award battle XP",b.result)
+    def test_successful_catch_awards_half_victory_xp(self):
+        caught=None
+        for seed in range(1,100):
+            candidate=battle(seed);candidate.wild_hp=1
+            if candidate.throw_ball():caught=candidate;break
+        self.assertIsNotNone(caught)
+        self.assertEqual(caught.experience_award,caught.wild_level*10)
+        self.assertIn(f"Gained {caught.experience_award} XP",caught.result)
     def test_explicit_party_switch(self):
         first=OwnedPokemon.create("one",4,10,seed=1)
         second=OwnedPokemon.create("two",7,10,seed=2)

@@ -348,21 +348,22 @@ class Battle:
         if self.wild_status in {"poison", "burn"} and self.wild_hp > 0:
             self.wild_hp = max(0, self.wild_hp - max(1, self.wild_max_hp // 8))
 
+    def _award_experience(self,amount):
+        self.experience_award=max(0,int(amount))
+        levels,evolved,learned=self.player.gain_experience(self.experience_award)
+        detail=f" Gained {self.experience_award} XP."
+        if levels:detail+=f" Reached level {self.player.level}."
+        if evolved:detail+=f" Evolved into {SPECIES[self.player.species_id].name}."
+        if learned:detail+=" Learned "+", ".join(MOVES[key].name for key in learned)+"."
+        for index,item in enumerate(self.party):
+            if item.instance_id==self.player.instance_id:self.party[index]=self.player
+        return detail
+
     def _finish_if_needed(self):
         if self.wild_hp == 0:
             self.state = "won"
-            self.experience_award = self.wild_level * 20
-            levels, evolved, learned = self.player.gain_experience(self.experience_award)
-            detail = f" Gained {self.experience_award} XP."
-            if levels:
-                detail += f" Reached level {self.player.level}."
-            if evolved:
-                detail += f" Evolved into {SPECIES[self.player.species_id].name}."
-            if learned:
-                detail += " Learned " + ", ".join(MOVES[key].name for key in learned) + "."
-            self.result = "The wild Pokémon fainted." + detail
-            for index,item in enumerate(self.party):
-                if item.instance_id==self.player.instance_id:self.party[index]=self.player
+            detail=self._award_experience(self.wild_level*20)
+            self.result="The wild Pokémon fainted."+detail
         elif self.player_hp == 0:
             self.party_hp[self.player.instance_id]=0
             if self.needs_switch:
@@ -416,8 +417,9 @@ class Battle:
             ),
         )
         if self.rng().randrange(100) < chance:
-            self.state = "caught"
-            self.result = f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}! Catching does not award battle XP."
+            self.state="caught"
+            detail=self._award_experience(max(1,self.wild_level*10))
+            self.result=f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}!"+detail
             self._record("ball:caught")
             return True
         self._wild_response()

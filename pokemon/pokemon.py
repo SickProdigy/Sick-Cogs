@@ -38,14 +38,14 @@ def pace_for_settings(minimum,maximum,cooldown):
     return "custom"
 
 def scaled_wild_level(player_level,offset):
-    return max(2,min(100,player_level+offset))
+    return max(1,min(30,player_level+offset))
 
 def activity_weight(active_users):
     return 1+min(2,max(0,active_users-1))
 
-def encounter_level(levels):
-    values=sorted(max(2,min(100,int(value))) for value in levels)
-    return values[len(values)//2] if values else 5
+def encounter_level(levels,offset=0):
+    strongest=max((max(1,min(100,int(value))) for value in levels),default=1)
+    return scaled_wild_level(strongest,offset)
 
 def encounter_gender(species,rng):
     if species.gender_rate<0:return "genderless"
@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.17.4";__author__="SickProdigy"
+    __version__="0.18.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -192,10 +192,10 @@ class Pokemon(commands.Cog):
         levels=[]
         for user_id in list(self.recent_users.get(guild_id,{}))[:12]:
             data=await self.config.user_from_id(int(user_id)).all()
-            owned={item["instance_id"]:item for item in data.get("collection",[])}
-            lead=owned.get(data.get("party",[None])[0]) if data.get("party") else None
-            if lead:levels.append(int(lead.get("level",5)))
-        return encounter_level(levels)
+            collection=data.get("collection",[])
+            if collection:levels.append(max(int(item.get("level",1)) for item in collection))
+        offset=random.SystemRandom().choice((-2,-1,0,0,1,1,2,2,3,4))
+        return encounter_level(levels,offset)
 
     async def spawn(self,channel):
         async with self.lock("encounters"):
