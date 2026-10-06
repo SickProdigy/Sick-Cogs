@@ -17,7 +17,7 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 - Generation-aware HP, species catch-rate, status, and ball-modifier calculations with Poké, Great, and Ultra Ball inventory and restart-safe, idempotent settlement.
 - An explicit support audit classifies all 147 bundled moves as accurate, deliberately standardized, or deferred; order-sensitive flinching and Haze stat resets are supported.
 - A validated catalog-version manifest independently versions typing, stats, learnsets, evolution methods, abilities, items, weather, and terrain; battles and owned Pokémon preserve their content provenance.
-- Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, bottom-box catch messages, battle-relative defeat and escape scenes, bounded sprite/render caches, and accessible embed text.
+- Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, trainer-avatar victory and catch compositions, bottom-box catch messages, battle-relative defeat and escape scenes, bounded sprite/render caches, and accessible embed text.
 - An interactive Pokédex with paginated lists, direct entry selection, search, filters, generation selection, progressive seen/caught detail unlocks, and selectable Retro or Compact presentation.
 - Ordered Kanto Gym Leader challenges, persistent badges, and a trainer-profile badge case without introducing a separate trainer XP level.
 - Persistent party HP/status, server-configured Pokémon Center channels, and atomic Potion/Revive recovery.

@@ -171,11 +171,11 @@ class BattleRenderer:
         try:return await self._render(self._progression_sync,pokemon,current,previous,evolved_from,move_key,pending)
         except (OSError,ValueError) as exc:raise RenderError("Progression rendering failed.") from exc
 
-    async def battle(self, battle):
+    async def battle(self, battle, avatar_data=None):
         if battle.state!="active":
             species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
             result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
-            try:return await self._render(self._battle_result_sync,battle,result_sprite)
+            try:return await self._render(self._battle_result_sync,battle,result_sprite,avatar_data)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
@@ -360,7 +360,21 @@ class BattleRenderer:
         if battle.state=="lost":return f"{wild.name} escaped from {trainer}! Your party has no conscious Pokemon. Go to a Pokemon Center to heal."
         return f"{wild.name} escaped from {trainer}!"
 
-    def _battle_result_sync(self,battle,data):
+    @classmethod
+    def _trainer_portrait(cls,canvas,draw,data,center=(145,245),diameter=124):
+        if not data:return False
+        try:
+            avatar=Image.open(io.BytesIO(data)).convert("RGBA")
+            side=min(avatar.size);left=(avatar.width-side)//2;top=(avatar.height-side)//2
+            avatar=avatar.crop((left,top,left+side,top+side)).resize((diameter,diameter),Image.Resampling.LANCZOS)
+        except (OSError,ValueError):return False
+        mask=Image.new("L",(diameter,diameter),0);ImageDraw.Draw(mask).ellipse((0,0,diameter-1,diameter-1),fill=255)
+        x=center[0]-diameter//2;y=center[1]-diameter//2
+        draw.ellipse((x-7,y-7,x+diameter+7,y+diameter+7),fill=RETRO[5],outline=RETRO[0],width=5)
+        canvas.paste(avatar,(x,y),mask)
+        return True
+
+    def _battle_result_sync(self,battle,data,avatar_data=None):
         wild=SPECIES[battle.wild_species_id];message=self.battle_result_text(battle)
         if battle.state in {"lost","ran"}:
             canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
@@ -381,15 +395,17 @@ class BattleRenderer:
         for y in range(450):
             ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
         draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
+        has_avatar=self._trainer_portrait(canvas,draw,avatar_data)
+        pokemon_x=485 if has_avatar else 400
         if battle.state=="caught":
-            draw.ellipse((245,205,555,310),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,240-image.height),image)
-            self._pokeball(draw,(400,290),43)
+            draw.ellipse((pokemon_x-155,205,pokemon_x+155,310),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,240-image.height),image)
+            self._pokeball(draw,((295 if has_avatar else 400),290),43)
         else:
             heading="Victory!"
             draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
-            draw.ellipse((235,225,565,340),fill=(182,168,89),outline=RETRO[0],width=4)
-            image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,300-image.height),image)
+            draw.ellipse((pokemon_x-165,225,pokemon_x+165,340),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(pokemon_x-image.width//2,300-image.height),image)
         draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
         self._dialogue(draw,message,(70,360),width=76,size=16)
         if battle.state=="caught":

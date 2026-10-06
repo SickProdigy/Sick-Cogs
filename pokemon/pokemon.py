@@ -117,7 +117,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.37.1";__author__="SickProdigy"
+    __version__="0.38.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -345,9 +345,14 @@ class Pokemon(commands.Cog):
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=BattleView(self,eid))
     async def rendered_battle(self,battle):
-        embed=self.battle_embed(battle)
+        embed=self.battle_embed(battle);avatar_data=None
+        if battle.state in {"won","caught"}:
+            user=self.bot.get_user(battle.user_id)
+            if user:
+                try:avatar_data=await user.display_avatar.with_size(128).read()
+                except (discord.HTTPException,OSError):log.debug("Trainer avatar unavailable for battle result",exc_info=True)
         try:
-            image=await self.renderer.battle(battle);embed.set_image(url="attachment://battle.png")
+            image=await self.renderer.battle(battle,avatar_data=avatar_data);embed.set_image(url="attachment://battle.png")
             return embed,[discord.File(image,filename="battle.png")]
         except RenderError:
             log.exception("Battle rendering failed")
