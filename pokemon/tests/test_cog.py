@@ -520,6 +520,9 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(ids), len(view.children))
         self.assertTrue(all(item.custom_id.startswith("pokemon:1:") for item in view.children))
         self.assertEqual([item.label for item in view.children],["Fight","Pokémon","Bag","Run"])
+        second=OwnedPokemon.create("backup",7,5,seed=2);current.initialize_party([current.player,second]);current.player_hp=0;current.party_hp[current.player.instance_id]=0
+        forced=BattleView(cog,1);controls={item.label:item for item in forced.children}
+        self.assertTrue(controls["Fight"].disabled);self.assertFalse(controls["Pokémon"].disabled)
         fight=FightView(cog,1);party=PartyView(cog,1);bag=BagView(cog,1)
         self.assertTrue(any("PP" in item.label for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in fight.children))

@@ -121,6 +121,8 @@ class BattleView(BattleMenu):
         battle=self.cog.battles.get(encounter_id)
         if battle and battle.battle_kind=="gym":
             self.remove_item(self.bag)
+        if battle and battle.needs_switch:
+            self.fight.disabled=True
         for item in self.children:
             item.custom_id = f"pokemon:{encounter_id}:root:{item.custom_id}"
 
