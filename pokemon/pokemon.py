@@ -85,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.20.1";__author__="SickProdigy"
+    __version__="0.20.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -268,7 +268,7 @@ class Pokemon(commands.Cog):
         if b.state!="active":
             if b.state=="caught":title=f"Gotcha! {wild.name} was caught!"
             elif b.state=="won":title=f"Victory over {wild.name}!" if not gym else f"Gym Leader {gym.leader} was defeated!"
-            elif b.state=="lost":title="Battle over!"
+            elif b.state=="lost":title=f"{wild.name} escaped!"
             else:title=f"{wild.name} escaped!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
             e.set_thumbnail(url=sprite(wild.id))

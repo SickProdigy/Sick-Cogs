@@ -156,7 +156,10 @@ class CogPolicyTests(unittest.TestCase):
         current.state="ran"
         self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped!")
         current.state="lost"
-        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,"Battle over!")
+        current.result=f"{wild.name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
+        embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
+        self.assertEqual(embed.title,f"{wild.name} escaped!")
+        self.assertIn("Pokémon Center",embed.description)
 
     def test_expected_command_surfaces_are_separate_and_documented(self):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}

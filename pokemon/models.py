@@ -370,7 +370,7 @@ class Battle:
                 self.result = f"{SPECIES[self.player.species_id].name} fainted. Switch Pokémon."
             else:
                 self.state = "lost"
-                self.result = "Your party has no conscious Pokémon."
+                self.result = f"{SPECIES[self.wild_species_id].name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
 
     def _damage(self, attack, target_id, level, move, rng, critical=False):
         target=SPECIES[target_id]
