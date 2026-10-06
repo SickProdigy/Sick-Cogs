@@ -109,6 +109,7 @@ class Card:
     dealt_damage_plus_counter: bool = False
     damaged_creature_death_counter: bool = False
     end_step_corpse_counters: bool = False
+    graveyard_upkeep_return: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
@@ -187,6 +188,7 @@ class Card:
         if self.enchantment_cast_draw: abilities.append("Whenever you cast an enchantment spell, you may draw a card")
         if self.dealt_damage_plus_counter: abilities.append("Whenever dealt damage, put a +1/+1 counter on this creature")
         if self.damaged_creature_death_counter: abilities.append("Whenever a creature dealt damage by this creature this turn dies, put a +1/+1 counter on this creature")
+        if self.graveyard_upkeep_return: abilities.append("At your upkeep, if this card has three creature cards above it in your graveyard, you may return it to the battlefield")
         if self.end_step_corpse_counters: abilities.append("At each end step, put a corpse counter on this creature for each creature that died this turn")
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
@@ -355,6 +357,10 @@ ALPHA_DEATH_COUNTER_CREATURES = {
     "lea:126": {"end_step_corpse_counters":True, "activation_effect":"corpse_regenerate"},
 }
 
+ALPHA_GRAVEYARD_CREATURES = {
+    "lea:116": {"graveyard_upkeep_return":True},
+}
+
 ALPHA_OPTIONAL_TRIGGERS = {
     "lea:222": {"enchantment_cast_draw":True},
 }
@@ -465,6 +471,7 @@ ALPHA_KEYWORDS = {
     "lea:141": ("flying",),
     "lea:95": ("swampwalk",),
     "lea:112": ("flying",),
+    "lea:116": ("haste",),
     "lea:118": ("flying",),
     "lea:155": ("flying",),
     "lea:170": ("flying",),
@@ -591,6 +598,7 @@ for reference in PLAYABLE_ALPHA:
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),
         end_step_corpse_counters=ALPHA_DEATH_COUNTER_CREATURES.get(reference.key,{}).get("end_step_corpse_counters",False),
+        graveyard_upkeep_return=ALPHA_GRAVEYARD_CREATURES.get(reference.key,{}).get("graveyard_upkeep_return",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
         attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),
@@ -615,7 +623,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | set(ALPHA_GRAVEYARD_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

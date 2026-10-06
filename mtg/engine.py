@@ -221,7 +221,7 @@ class Game:
         defender=self.player(self.opponent(self.active_user))
         required=card.attack_requires_defender_land_type
         has_required=not required or any(self.card(x.uid).has_land_type(required) for x in defender.battlefield)
-        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste) and ("defender" not in keywords or defender_override) and has_required
+        return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste or "haste" in keywords) and ("defender" not in keywords or defender_override) and has_required
 
     def _draw(self,p,n=1):
         for _ in range(n):
@@ -250,6 +250,12 @@ class Game:
             p.mulligans+=1
         if all(x.kept for x in self.players.values()): self._start_turn(True)
 
+    def _graveyard_upkeep_return_eligible(self,user,uid):
+        graveyard=self.player(user).graveyard
+        if uid not in graveyard or not self.card(uid).graveyard_upkeep_return: return False
+        position=graveyard.index(uid)
+        return sum(self.card(card_uid).creature for card_uid in graveyard[position+1:])>=3
+
     def _turn_step_triggers(self,step):
         triggers=[]; active=self.active_user
         for controller_id in (active,self.opponent(active)):
@@ -269,6 +275,11 @@ class Game:
                 if not effect: continue
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
                 triggers.append(Spell(controller.user_id,uid,card.key,str(active),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
+            if step=="upkeep" and active==controller_id:
+                for source_uid in controller.graveyard:
+                    if not self._graveyard_upkeep_return_eligible(controller_id,source_uid): continue
+                    uid=self.next_uid; self.next_uid+=1; key=self.card(source_uid).key; self.cards[uid]=key
+                    triggers.append(Spell(controller_id,uid,key,str(controller_id),ability_effect="graveyard_return",source_uid=source_uid))
         return triggers
 
     def _begin_draw_step(self):
@@ -391,7 +402,7 @@ class Game:
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids: continue
-            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste):
+            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste or "haste" in self.current_keywords(permanent)):
                 options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in source.produces)
                 items.append(("permanent",str(permanent.uid),permanent,options))
 
@@ -483,7 +494,7 @@ class Game:
         if not (activation_cost or activation_effect): return False
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: return False
         if card.animate_combat and self.phase not in ("after_attackers","after_blockers","after_first_strike"): return False
-        if activation_tap and (permanent.tapped or (self.is_creature(permanent) and permanent.sick and not card.haste)): return False
+        if activation_tap and (permanent.tapped or (self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent))): return False
         try:
             stable_target=self._target_for_activation(card,user,target,permanent)
             protected=self._stable_target_permanent(stable_target)
@@ -501,7 +512,7 @@ class Game:
         if activation_effect=="corpse_regenerate" and permanent.corpse_counters<=0: raise GameError(f"{card.name} has no corpse counters to remove.")
         if card.animate_combat and self.phase not in ("after_attackers","after_blockers","after_first_strike"): raise GameError(f"{card.name} can be activated only during combat.")
         if activation_tap and permanent.tapped: raise GameError(f"{card.name} is already tapped.")
-        if activation_tap and self.is_creature(permanent) and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        if activation_tap and self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent): raise GameError(f"{card.name} has summoning sickness.")
         stable_target=self._target_for_activation(card,user,target,permanent)
         protected=self._stable_target_permanent(stable_target)
         if protected is not None and not card.activation_attached and activation_effect not in ("","regenerate") and self._protected_from(protected,card,self.current_colors(permanent)): raise GameError(f"{card.name} cannot target a permanent with protection from its color.")
@@ -531,7 +542,7 @@ class Game:
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
         if not card.produces: raise GameError("That permanent has no supported mana ability.")
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
-        if self.is_creature(permanent) and permanent.sick and not card.haste: raise GameError(f"{card.name} has summoning sickness.")
+        if self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent): raise GameError(f"{card.name} has summoning sickness.")
         symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
         if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
         pending_triggers=[]
@@ -752,7 +763,11 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost"):
+                if s.ability_effect=="graveyard_return" and not self._graveyard_upkeep_return_eligible(s.owner,s.source_uid):
+                    self.stack.pop(); self.cards.pop(s.uid,None); self.log.append(f"{self.card(s.source_uid).name} did not return because its graveyard condition was no longer true.")
+                    if self.stack: self.stack[-1].passes=0
+                    self.priority_user=self.active_user; return
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost","graveyard_return"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -771,13 +786,15 @@ class Game:
 
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
-        if trigger.ability_effect=="cast_draw": return ""
+        if trigger.ability_effect in ("cast_draw","graveyard_return"): return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
         if trigger.ability_effect=="upkeep_cost": return card.upkeep_cost
         return "{1}"
 
     def trigger_accept_label(self,trigger):
-        return "Draw a card" if trigger.ability_effect=="cast_draw" else f"Pay {self.trigger_cost(trigger)}"
+        if trigger.ability_effect=="cast_draw": return "Draw a card"
+        if trigger.ability_effect=="graveyard_return": return "Return to battlefield"
+        return f"Pay {self.trigger_cost(trigger)}"
 
     def choose_trigger(self,user,pay):
         if self.finished: raise GameError("Game is over.")
@@ -795,6 +812,10 @@ class Game:
                 player.mana_pool=remaining
             if trigger.ability_effect=="cast_draw":
                 self._draw(player,1); result=" and drew a card"
+            elif trigger.ability_effect=="graveyard_return":
+                if not self._graveyard_upkeep_return_eligible(user,trigger.source_uid):
+                    self.stack.append(trigger); raise GameError(f"{card.name} no longer has three creature cards above it.")
+                player.graveyard.remove(trigger.source_uid); player.battlefield.append(Permanent(trigger.source_uid,card.key)); result=" and returned it to the battlefield"
             elif trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
             elif trigger.ability_effect=="upkeep_untap":

@@ -193,6 +193,7 @@ class SoloAITests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
         if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        if zone=="graveyard": game.player(user).graveyard.append(uid); return uid
         permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
 
     def test_ai_activates_sol_ring_only_to_enable_a_spell(self):
@@ -655,6 +656,12 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].ability_effect,"animate_self")
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertTrue(statue.animated_until_end_combat); self.assertFalse(game.stack)
+
+    def test_ai_accepts_eligible_nether_shadow_return(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        shadow=self.add(game,AI,"lea:116","graveyard"); [self.add(game,AI,key,"graveyard") for key in ("bear","giant","centaur")]
+        game.active_index=0; game._start_turn(); advance_solo(game); game.pass_priority(HUMAN); advance_solo(game)
+        self.assertIsNotNone(game.find_permanent(shadow)[1]); self.assertTrue(any(event["action"]=="ai_trigger_accept" for event in game.history))
 
     def test_ai_uses_scavenging_ghoul_corpse_counter_for_regeneration(self):
         game=solo(); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]

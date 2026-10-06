@@ -2010,6 +2010,44 @@ class AlphaScavengingGhoulTests(unittest.TestCase):
         self.resolve_top(game); self.assertEqual(ghoul.corpse_counters,1)
 
 
+class AlphaNetherShadowTests(unittest.TestCase):
+    def add_grave(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(user).graveyard.append(uid); return uid
+
+    def make_eligible(self,game,user):
+        shadow=self.add_grave(game,user,"lea:116")
+        creatures=[self.add_grave(game,user,key) for key in ("bear","giant","centaur")]
+        return shadow,creatures
+
+    def test_only_creature_cards_above_shadow_make_it_eligible(self):
+        game=ready(); shadow=self.add_grave(game,10,"lea:116")
+        self.add_grave(game,10,"forest"); self.add_grave(game,10,"bear"); self.add_grave(game,10,"giant")
+        self.assertFalse(game._graveyard_upkeep_return_eligible(10,shadow))
+        third=self.add_grave(game,10,"centaur"); self.assertTrue(game._graveyard_upkeep_return_eligible(10,shadow))
+        game.player(10).graveyard.remove(shadow); game.player(10).graveyard.append(shadow)
+        self.assertFalse(game._graveyard_upkeep_return_eligible(10,shadow)); self.assertIn(third,game.player(10).graveyard)
+
+    def test_upkeep_trigger_persists_returns_with_haste_and_can_be_declined(self):
+        game=ready(); shadow,_=self.make_eligible(game,10); game._start_turn()
+        self.assertEqual(game.stack[-1].ability_effect,"graveyard_return"); restored=Game.from_raw(game.to_raw())
+        restored.pass_priority(10); restored.pass_priority(20); self.assertTrue(restored.stack[-1].decision_pending)
+        self.assertEqual(restored.trigger_accept_label(restored.stack[-1]),"Return to battlefield")
+        restored.choose_trigger(10,True); permanent=restored.find_permanent(shadow)[1]
+        self.assertIsNotNone(permanent); self.assertTrue(permanent.sick); restored.phase="attackers"; self.assertTrue(restored.can_attack_permanent(permanent))
+        declined=ready(); shadow,_=self.make_eligible(declined,10); declined._start_turn(); declined.pass_priority(10); declined.pass_priority(20); declined.choose_trigger(10,False)
+        self.assertIn(shadow,declined.player(10).graveyard); self.assertIsNone(declined.find_permanent(shadow)[1])
+
+    def test_trigger_only_checks_active_players_graveyard(self):
+        game=ready(); own,_=self.make_eligible(game,10); opposing,_=self.make_eligible(game,20); game._start_turn()
+        triggers=[item for item in game.stack if item.ability_effect=="graveyard_return"]
+        self.assertEqual([(item.owner,item.source_uid) for item in triggers],[(10,own)]); self.assertIn(opposing,game.player(20).graveyard)
+
+    def test_intervening_condition_is_rechecked_after_responses(self):
+        game=ready(); shadow,creatures=self.make_eligible(game,10); game._start_turn(); game.pass_priority(10)
+        moved=creatures[-1]; game.player(10).graveyard.remove(moved); game.player(10).hand.append(moved); game.pass_priority(20)
+        self.assertFalse(game.stack); self.assertIn(shadow,game.player(10).graveyard); self.assertIn("no longer true",game.log[-1])
+
+
 class AlphaCombatRequirementTests(unittest.TestCase):
     def add(self,game,user,key,tapped=False,sick=False):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

@@ -406,6 +406,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game._damage_permanent(fungusaur,1); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Fungusaur",rendered); self.assertIn("+1/+1 counters: 2",rendered); self.assertIn("Fungusaur ability",rendered)
 
+    async def test_nether_shadow_return_choice_renders_specific_button(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); shadow=game.next_uid; game.next_uid+=1; game.cards[shadow]="lea:116"; game.player(10).graveyard.append(shadow)
+        for key in ("bear","giant","centaur"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(10).graveyard.append(uid)
+        game._start_turn(); game.pass_priority(10); game.pass_priority(20); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Return to battlefield",rendered); self.assertIn("Nether Shadow ability",rendered)
+        accept=next(item for item in GameView(cog,1).children if item.custom_id.endswith(":pay")); self.assertEqual(accept.label,"Return to battlefield")
+
     async def test_public_embed_shows_scavenging_ghoul_counters_and_end_step_trigger(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
@@ -513,7 +522,7 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         cog.games={1:game}; ctx=SimpleNamespace(author=SimpleNamespace(id=10),send=AsyncMock())
         await MTG.graveyard.callback(cog,ctx,member=None)
         content=ctx.send.await_args.args[0]
-        self.assertIn("G:POSITION",content); self.assertIn(f"1. {game.card(uid).name}",content)
+        self.assertIn("G:POSITION",content); self.assertIn("bottom → top",content); self.assertIn(f"1. {game.card(uid).name}",content)
         self.assertIn("everyone=False",repr(ctx.send.await_args.kwargs["allowed_mentions"]))
 
     async def test_cleanup_expires_only_inactive_matches(self):

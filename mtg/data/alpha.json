@@ -2677,7 +2677,7 @@
       "toughness": "1",
       "layout": "normal",
       "support_family": "creature_ability",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:117",

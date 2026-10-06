@@ -430,7 +430,7 @@ def _activation_target(game,user,card,source_uid=None):
         choices=[]
         for position,permanent in enumerate(game.player(user).battlefield,1):
             target=game.card(permanent.uid)
-            can_attack=not permanent.tapped and (not permanent.sick or target.haste) and "defender" not in game.current_keywords(permanent)
+            can_attack=not permanent.tapped and (not permanent.sick or target.haste or "haste" in game.current_keywords(permanent)) and "defender" not in game.current_keywords(permanent)
             if permanent.uid!=source_uid and game.is_creature(permanent) and _can_target(game,card,permanent) and can_attack and game.current_stats(permanent)[0]<=2 and "unblockable" not in game.current_keywords(permanent) and (attackers is None or permanent.uid in attackers):
                 choices.append((game.current_stats(permanent)[0],position))
         if choices: return f"{user}:{max(choices)[1]}"
