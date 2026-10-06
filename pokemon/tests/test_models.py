@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image
 from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
+from pokemon.catalog_versions import CATALOG_VERSIONS,DIMENSIONS
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
 from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RETRO
@@ -384,6 +385,21 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
 
+class CatalogVersionTests(unittest.TestCase):
+    def test_every_release_versions_all_future_mechanics_dimensions(self):
+        self.assertEqual(set(DIMENSIONS),{"typing","stats","learnsets","evolution_methods","abilities","items","weather","terrain"})
+        self.assertTrue(CATALOG_VERSIONS.releases)
+        for release in CATALOG_VERSIONS.releases.values():
+            self.assertEqual(set(release.dimensions),set(DIMENSIONS))
+            self.assertTrue(all({"version","status"}<=set(value) for value in release.dimensions.values()))
+
+    def test_owned_and_caught_pokemon_preserve_catalog_version(self):
+        legacy=OwnedPokemon.from_raw({"instance_id":"legacy","species_id":4,"level":1})
+        self.assertEqual(legacy.catalog_version,"bundled-gen1-rby-v1")
+        current=battle();current.state="caught";current.catalog_version="pokeapi-gen2-v1"
+        self.assertEqual(current.caught("caught").catalog_version,"pokeapi-gen2-v1")
+        self.assertEqual(Battle.from_raw(current.raw()).catalog_version,"pokeapi-gen2-v1")
+
 class CatalogTests(unittest.TestCase):
     def test_parses_bounded_api_record(self):
         from pokemon.catalog import PokemonCatalog
@@ -415,6 +431,13 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(species.abilities,("Static",))
         self.assertEqual(species.gender_rate,4)
         self.assertEqual(PokemonCatalog.parse_cached(PokemonCatalog.to_cached(species)),species)
+
+    def test_api_learnsets_are_selected_for_requested_generation(self):
+        from pokemon.catalog import PokemonCatalog
+        raw={"id":25,"stats":[{"stat":{"name":name},"base_stat":50} for name in ("hp","attack","defense","special-attack","special-defense","speed")],"types":[{"slot":1,"type":{"name":"electric"}}],"moves":[{"move":{"name":"quick-attack"},"version_group_details":[{"level_learned_at":4,"move_learn_method":{"name":"level-up"},"version_group":{"name":"red-blue"}}]},{"move":{"name":"tackle"},"version_group_details":[{"level_learned_at":1,"move_learn_method":{"name":"level-up"},"version_group":{"name":"gold-silver"}}]}]}
+        species=PokemonCatalog.parse_api(raw,{"name":"pikachu","capture_rate":190},generation=2)
+        self.assertEqual(species.moves,("tackle",))
+        self.assertEqual(species.learnset,((1,"tackle"),))
 
     def test_cache_rejects_unknown_move(self):
         from pokemon.catalog import CatalogError, PokemonCatalog
