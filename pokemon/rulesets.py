@@ -30,6 +30,14 @@ class BattleRuleset:
     def paralysis_speed(speed):
         return max(1, speed // 2)
 
+    def experience_reward(self,species,level,*,trainer=False,caught=False):
+        reward=max(1,int(species.base_experience)*int(level)//7)
+        if trainer:reward=reward*3//2
+        if caught:
+            if not self.catch_experience:return 0
+            reward=max(1,reward//2)
+        return reward
+
 
 STANDARD = BattleRuleset("standard", mechanics_generation=9, catch_experience=True)
 RULESETS = {STANDARD.key: STANDARD}

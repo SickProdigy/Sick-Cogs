@@ -18,6 +18,8 @@ class Species:
     gender_rate: int = -1
     special_attack: int = 0
     special_defense: int = 0
+    base_experience: int = 50
+    growth_rate: str = "medium"
 
 @dataclass(frozen=True)
 class Move:
@@ -74,6 +76,7 @@ def _load_bundled_species():
             tuple(value["moves"]),tuple((int(level),str(move)) for level,move in value["learnset"]),
             tuple(value.get("abilities",())),int(value.get("gender_rate",-1)),
             int(value.get("special_attack",value["attack"])),int(value.get("special_defense",value["defense"])),
+            int(value.get("base_experience",50)),str(value.get("growth_rate","medium")),
         )
         SPECIES[item.id]=item
 
@@ -108,6 +111,28 @@ def moves_for_level(species_id,level):
     species=SPECIES[species_id]
     learned=[move for learned_level,move in species.learnset if learned_level<=level]
     return tuple((learned or list(species.moves))[-4:])
+
+
+def total_experience(level,growth_rate="medium"):
+    level=max(1,min(100,int(level)));x=level
+    if growth_rate=="fast":return 4*x**3//5
+    if growth_rate=="slow":return 5*x**3//4
+    if growth_rate=="medium-slow":return max(0,6*x**3//5-15*x*x+100*x-140)
+    if growth_rate=="slow-then-very-fast":
+        if x<=50:return x**3*(100-x)//50
+        if x<=68:return x**3*(150-x)//100
+        if x<=98:return x**3*((1911-10*x)//3)//500
+        return x**3*(160-x)//100
+    if growth_rate=="fast-then-very-slow":
+        if x<=15:return x**3*(((x+1)//3)+24)//50
+        if x<=36:return x**3*(x+14)//50
+        return x**3*((x//2)+32)//50
+    return x**3
+
+def experience_to_next(species_id,level):
+    if level>=100:return 0
+    species=SPECIES[species_id]
+    return total_experience(level+1,species.growth_rate)-total_experience(level,species.growth_rate)
 
 def sprite(species_id,back=False,shiny=False):
     folder="back/" if back else ""

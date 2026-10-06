@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Optional
 
-from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, moves_for_level
+from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, experience_to_next, moves_for_level
 from .rulesets import resolve_ruleset
 
 
@@ -107,8 +107,8 @@ class OwnedPokemon:
         levels = 0
         evolved_from = None
         learned = []
-        while self.level < 100 and self.experience >= self.level * self.level * 10:
-            self.experience -= self.level * self.level * 10
+        while self.level < 100 and self.experience >= experience_to_next(self.species_id,self.level):
+            self.experience -= experience_to_next(self.species_id,self.level)
             self.level += 1
             levels += 1
             evolution = EVOLUTIONS.get(self.species_id)
@@ -168,6 +168,9 @@ class Battle:
     ruleset: str = "standard"
     mechanics_generation: int = 9
     content_generation: int = 1
+    participants: list = field(default_factory=list)
+    experience_awards: dict = field(default_factory=dict)
+    progression_events: list = field(default_factory=list)
 
     def __post_init__(self):
         if not self.party:
@@ -176,6 +179,7 @@ class Battle:
         self.party_status.setdefault(self.player.instance_id, self.player_status)
         if self.player.current_hp is not None:self.player_hp=max(0,min(self.max_hp(self.player),int(self.player.current_hp)))
         if self.player.status:self.player_status=self.player.status
+        if self.player.instance_id not in self.participants:self.participants.append(self.player.instance_id)
 
     def rules(self):
         return resolve_ruleset(self.ruleset)
@@ -214,6 +218,7 @@ class Battle:
         self.party_hp[self.player.instance_id]=self.player_hp
         self.party_status[self.player.instance_id]=self.player_status
         self.player=candidate
+        if candidate.instance_id not in self.participants:self.participants.append(candidate.instance_id)
         self.player_hp=self.party_hp[candidate.instance_id]
         self.player_status=self.party_status.get(candidate.instance_id,"")
         self.last_action=f"Go, {SPECIES[candidate.species_id].name}!"
@@ -448,23 +453,30 @@ class Battle:
             self.wild_hp = max(0, self.wild_hp - max(1, self.wild_max_hp // 8))
 
     def _award_experience(self,amount):
-        self.experience_award=max(0,int(amount));previous_name=SPECIES[self.player.species_id].name
-        previous_pending=set(self.player.pending_moves);levels,evolved,learned=self.player.gain_experience(self.experience_award)
-        self.levels_gained=levels;self.evolved_from=evolved;self.learned_moves=list(learned)
-        self.pending_moves=[move for move in self.player.pending_moves if move not in previous_pending]
-        current_name=SPECIES[self.player.species_id].name;detail=f" Gained {self.experience_award} XP."
-        if levels:detail+=f" {previous_name} grew to Lv. {self.player.level}!"
-        if evolved:detail+=f" What? {previous_name} evolved into {current_name}!"
-        if learned:detail+=f" {current_name} learned "+", ".join(MOVES[key].name for key in learned)+"!"
-        if self.pending_moves:detail+=f" {current_name} is trying to learn "+", ".join(MOVES[key].name for key in self.pending_moves)+"!"
-        for index,item in enumerate(self.party):
-            if item.instance_id==self.player.instance_id:self.party[index]=self.player
-        return detail
+        self.experience_award=max(0,int(amount));self.experience_awards={};self.progression_events=[]
+        eligible=[item for item in self.party if item.instance_id in self.participants and self.party_hp.get(item.instance_id,0)>0]
+        if not eligible or not self.experience_award:return ""
+        share=max(1,self.experience_award//len(eligible));details=[]
+        for pokemon in eligible:
+            previous_name=SPECIES[pokemon.species_id].name;previous_pending=set(pokemon.pending_moves)
+            levels,evolved,learned=pokemon.gain_experience(share);current_name=SPECIES[pokemon.species_id].name
+            self.experience_awards[pokemon.instance_id]=share
+            event={"instance_id":pokemon.instance_id,"levels":levels,"evolved_from":evolved,"learned_moves":list(learned),"pending_moves":[move for move in pokemon.pending_moves if move not in previous_pending]}
+            self.progression_events.append(event)
+            detail=f" {current_name} gained {share} XP."
+            if levels:detail+=f" {previous_name} grew to Lv. {pokemon.level}!"
+            if evolved:detail+=f" What? {previous_name} evolved into {current_name}!"
+            if learned:detail+=f" {current_name} learned "+", ".join(MOVES[key].name for key in learned)+"!"
+            if event["pending_moves"]:detail+=f" {current_name} is trying to learn "+", ".join(MOVES[key].name for key in event["pending_moves"])+"!"
+            details.append(detail)
+            if pokemon.instance_id==self.player.instance_id:
+                self.levels_gained=levels;self.evolved_from=evolved;self.learned_moves=list(learned);self.pending_moves=event["pending_moves"]
+        return "".join(details)
 
     def _finish_if_needed(self):
         if self.wild_hp == 0:
             self.state = "won"
-            detail=self._award_experience(self.wild_level*20)
+            detail=self._award_experience(self.rules().experience_reward(SPECIES[self.wild_species_id],self.wild_level,trainer=self.battle_kind=="gym"))
             self.result="The wild Pokémon fainted."+detail
         elif self.player_hp == 0:
             self.party_hp[self.player.instance_id]=0
@@ -525,7 +537,7 @@ class Battle:
         )
         if self.rng().randrange(100) < chance:
             self.state="caught"
-            detail=self._award_experience(max(1,self.wild_level*10) if self.rules().catch_experience else 0)
+            detail=self._award_experience(self.rules().experience_reward(SPECIES[self.wild_species_id],self.wild_level,caught=True))
             self.result=f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}!"+detail
             self._record("ball:caught")
             return True
@@ -601,6 +613,9 @@ class Battle:
         data.setdefault("ruleset","standard")
         data.setdefault("mechanics_generation",resolve_ruleset(data["ruleset"]).mechanics_generation)
         data.setdefault("content_generation",1)
+        data.setdefault("participants",[data["player"].instance_id])
+        data.setdefault("experience_awards",{})
+        data.setdefault("progression_events",[])
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle

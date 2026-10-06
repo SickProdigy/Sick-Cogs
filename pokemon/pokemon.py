@@ -9,7 +9,7 @@ from discord.ext import tasks
 from redbot.core import Config,commands
 from redbot.core.data_manager import cog_data_path
 from .catalog import CatalogError,PokemonCatalog
-from .data import MOVES,SPECIES,generation_for,moves_for_level,sprite
+from .data import MOVES,SPECIES,experience_to_next,generation_for,moves_for_level,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
@@ -94,7 +94,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.25.0";__author__="SickProdigy"
+    __version__="0.26.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -315,15 +315,21 @@ class Pokemon(commands.Cog):
             log.exception("Trainer card rendering failed");return embed,[]
 
     async def send_progression(self,interaction,battle):
-        if battle.evolved_from:
-            embed,files=await self.rendered_progression(battle.player,evolved_from=battle.evolved_from)
-            await interaction.followup.send(embed=embed,files=files)
-        for move in battle.learned_moves:
-            embed,files=await self.rendered_progression(battle.player,move_key=move)
-            await interaction.followup.send(embed=embed,files=files)
-        if battle.player.pending_moves:
-            move=battle.player.pending_moves[0];embed,files=await self.rendered_progression(battle.player,move_key=move,pending=True)
-            await interaction.followup.send(embed=embed,files=files,view=MoveLearnView(self,battle.user_id,battle.player,move))
+        events=battle.progression_events or [{"instance_id":battle.player.instance_id,"evolved_from":battle.evolved_from,"learned_moves":battle.learned_moves,"pending_moves":battle.pending_moves}]
+        party={pokemon.instance_id:pokemon for pokemon in battle.party}
+        for event in events:
+            pokemon=party.get(event.get("instance_id"))
+            if not pokemon:continue
+            if event.get("evolved_from"):
+                embed,files=await self.rendered_progression(pokemon,evolved_from=event["evolved_from"])
+                await interaction.followup.send(embed=embed,files=files)
+            for move in event.get("learned_moves",[]):
+                embed,files=await self.rendered_progression(pokemon,move_key=move)
+                await interaction.followup.send(embed=embed,files=files)
+            pending=event.get("pending_moves",[])
+            if pending:
+                move=pending[0];embed,files=await self.rendered_progression(pokemon,move_key=move,pending=True)
+                await interaction.followup.send(embed=embed,files=files,view=MoveLearnView(self,battle.user_id,pokemon,move))
 
     async def resolve_move_choice(self,interaction,identity,new_move,forgotten):
         async with self.lock(("user",interaction.user.id)):
@@ -364,7 +370,7 @@ class Pokemon(commands.Cog):
             e.set_thumbnail(url=sprite(wild.id))
             if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild.name} · Lv. {b.wild_level}",inline=True)
             e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
-            needed=b.player.level*b.player.level*10 if b.player.level<100 else 0
+            needed=experience_to_next(b.player.species_id,b.player.level)
             e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
             return e
         title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level}" if gym else f"Wild {wild.name} · Lv. {b.wild_level}"
@@ -373,7 +379,7 @@ class Pokemon(commands.Cog):
         e.add_field(name=f"{wild.name} HP",value=f"{b.wild_hp}/{b.wild_max_hp}",inline=True)
         e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
         e.add_field(name="Moves",value=" · ".join(f"{n+1}. {MOVES[k].name} ({b.player.move_pp.get(k,MOVES[k].pp)} PP)" for n,k in enumerate(b.player.moves)),inline=False)
-        needed=b.player.level*b.player.level*10 if b.player.level<100 else 0
+        needed=experience_to_next(b.player.species_id,b.player.level)
         e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
         e.set_footer(text="Defeat the Gym Leader to earn the badge; switch Pokémon or forfeit." if gym else "Defeat it for XP, catch it from Bag, switch Pokémon, or run.")
         return e
