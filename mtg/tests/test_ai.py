@@ -825,6 +825,15 @@ class SoloAITests(unittest.TestCase):
         advance_solo(tome); self.assertTrue(source.tapped); self.assertEqual(tome.stack[-1].ability_effect,"draw_self")
         tome.pass_priority(HUMAN); advance_solo(tome); self.assertEqual(len(tome.player(AI).hand),before+1)
 
+    def test_ai_targets_word_of_command_at_an_opponent_with_cards(self):
+        game=solo(); self.assertEqual(_target(game,AI,CARDS["lea:136"]),str(HUMAN)); game.player(HUMAN).hand=[]; self.assertIsNone(_target(game,AI,CARDS["lea:136"]))
+
+    def test_ai_completes_word_of_command_with_a_land_choice(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(HUMAN).hand=[]; land=self.add(game,HUMAN,"forest","hand")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:136"; game.stack=[spell_type(AI,uid,"lea:136",str(HUMAN),ability_effect="word_choose",decision_pending=True,choice_owner=AI)]; game.priority_user=AI; game.phase="precombat_main"
+        advance_solo(game); self.assertIn(land,game.player(HUMAN).hand); self.assertFalse(game.stack); self.assertTrue(any(event["action"]=="ai_word_of_command" for event in game.history))
+
     def test_ai_completes_lich_sacrifice_with_low_value_nonlich_permanents(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.phase="precombat_main"; game.player(AI).battlefield=[]; lich=self.add(game,AI,"lea:113"); forest=self.add(game,AI,"forest"); giant=self.add(game,AI,"giant")

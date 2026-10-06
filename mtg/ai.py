@@ -4,10 +4,12 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","text_change_land","text_change_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fork","fireball","volcanic_eruption"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","text_change_land","text_change_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory","false_orders","fork","fireball","volcanic_eruption","word_of_command"}
 
 
 def _target(game, user, card):
+    if card.effect=="word_of_command":
+        opponent=game.player(game.opponent(user)); return str(opponent.user_id) if opponent.hand else None
     if card.effect=="fork":
         choices=[(position,item) for position,item in enumerate(reversed(game.stack),1) if not item.ability_effect and game.card(item.uid).kind in ("Instant","Sorcery")]
         return f"S:{choices[0][0]}" if choices else None
@@ -867,6 +869,15 @@ def advance_solo(game: Game):
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.ability_effect=="word_choose":
+                choices=game.private_hand_decision(user)[1]; ordered=sorted(choices,key=lambda item:(not item[1].land,item[1].cost,item[0])); completed=False
+                for position,card in ordered:
+                    target=None if card.land else _target(game,int(trigger.target),card); x_value=0 if "{X}" in card.mana_cost else None
+                    try: game.choose_word_command(user,position,target,x_value)
+                    except GameError: continue
+                    completed=True; break
+                if not completed: return changed
+                game.record(user,"ai_word_of_command"); changed=True; continue
             if trigger.ability_effect=="lich_damage":
                 choices=game.lich_sacrifice_choices(trigger); ranked=sorted(choices,key=lambda item:(game.card(item[1].uid).lich,game.card(item[1].uid).cost+sum(game.current_stats(item[1])) if game.is_creature(item[1]) else game.card(item[1].uid).cost,item[0])); game.choose_lich_sacrifices(user,[position for position,_ in ranked[:trigger.choice_value]]); game.record(user,"ai_lich_sacrifice"); changed=True; continue
             if trigger.ability_effect in ("raging_river_split","raging_river_attackers"):

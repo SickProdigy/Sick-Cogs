@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.118.0"
+    __version__="0.119.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -246,7 +246,8 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    if item.ability_effect=="lich_damage": label+=f" ({item.choice_owner} must sacrifice {item.choice_value} nontoken permanents)"
+                    if item.ability_effect=="word_choose": label+=f" ({item.choice_owner} is privately choosing a card from the targeted hand)"
+                    elif item.ability_effect=="lich_damage": label+=f" ({item.choice_owner} must sacrifice {item.choice_value} nontoken permanents)"
                     elif item.ability_effect=="raging_river_split": label+=f" ({item.choice_owner} must divide nonflying defenders left/right)"
                     elif item.ability_effect=="raging_river_attackers": label+=f" ({item.choice_owner} must divide attackers left/right)"
                     elif item.is_copy and item.fork_retarget: label+=f" ({item.choice_owner} must choose new targets or keep the originals)"
@@ -337,7 +338,7 @@ class MTG(commands.Cog):
             else: await interaction.followup.send(text,view=view,ephemeral=True)
     async def send_library_search(self,interaction,game_id,page,editing=False):
         game=self.games.get(game_id); user=interaction.user.id
-        pending=bool(game and user in game.order and game.stack and game.stack[-1].decision_pending and game.stack[-1].owner==user and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
+        pending=bool(game and user in game.order and game.stack and game.stack[-1].decision_pending and game._spell_decider(game.stack[-1])==user and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
         if not pending:
             content="This private library search is unavailable."
             if editing: await interaction.edit_original_response(content=content,view=None)
@@ -383,6 +384,7 @@ class MTG(commands.Cog):
         elif effect=="balance_hand": heading=f"{name} - privately choose {game._balance_required(item,user)} cards to discard"
         elif effect=="cleanup_discard": heading=f"Cleanup - privately choose {len(game.player(user).hand)-7} cards to discard"
         elif effect=="leng_discard": heading=f"Library of Leng - choose a destination for {visible[0][1].name}"
+        elif effect=="word_choose": heading=f"Word of Command - choose a card to play from {item.target}s hand; use the word command for targets or X"
         else: heading=f"{name} - targeted hand"
         text=heading+"\n"+("\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible) or "The targeted hand is empty.")
         view=PrivateHandDecisionView(self,game_id,user,page,pages,effect,entries)
@@ -397,11 +399,12 @@ class MTG(commands.Cog):
                 effect="cleanup_discard" if game.phase=="cleanup_discard" else game.stack[-1].ability_effect
                 if effect=="cleanup_discard": game.choose_cleanup_discard(interaction.user.id,position if isinstance(position,(list,tuple)) else [position]); action="cleanup_discard"
                 elif effect=="balance_hand": game.choose_balance(interaction.user.id,position); action="balance_hand_choice"
+                elif effect=="word_choose": game.choose_word_command(interaction.user.id,position); action="word_of_command_choice"
                 else: game.choose_private_hand(interaction.user.id,position); action="private_discard" if effect=="discard_choice" else "private_hand_view"
                 game.record(interaction.user.id,action); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
-        message="Card discarded." if position is not None else "Hand view completed."
+        message=("Word of Command choice completed." if effect=="word_choose" else "Card discarded." if position is not None else "Hand view completed.")
         await interaction.response.edit_message(content=message,view=None); await self.refresh_message(game)
 
     async def complete_discard_destination(self,interaction,game_id,to_library):

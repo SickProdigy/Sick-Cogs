@@ -4265,6 +4265,50 @@ class LibraryOfLengTests(unittest.TestCase):
         game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
         exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
+class AlphaWordOfCommandTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="battlefield": game.player(user).battlefield.append(Permanent(uid,key,owner=user,sick=False))
+        else: getattr(game.player(user),zone).append(uid)
+        return uid
+
+    def pending(self,game,target=20):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:136"; game.stack=[Spell(10,uid,"lea:136",str(target))]; game.priority_user=20; game.phase="precombat_main"
+        game.pass_priority(20); game.pass_priority(10); return uid
+
+    def test_private_hand_choice_persists_and_land_cannot_be_played(self):
+        game=ready(); game.player(20).hand=[]; land=self.add(game,20,"forest","hand"); word=self.pending(game)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual((restored.stack[-1].ability_effect,restored.stack[-1].choice_owner),("word_choose",10)); self.assertEqual(restored.private_hand_decision(10)[1][0][1].name,"Forest")
+        with self.assertRaisesRegex(GameError,"private hand"): restored.private_hand_decision(20)
+        restored.choose_word_command(10,1); self.assertIn(land,restored.player(20).hand); self.assertIn(word,restored.player(10).graveyard); self.assertFalse(restored.stack)
+
+    def test_controller_casts_targeted_spell_with_opponents_lands(self):
+        game=ready(); game.player(20).hand=[]; game.player(20).battlefield=[]; bolt=self.add(game,20,"lea:161","hand"); mountain=self.add(game,20,"mountain"); word=self.pending(game)
+        game.choose_word_command(10,1,"20"); chosen=game.stack[-1]
+        self.assertEqual((chosen.uid,chosen.owner,chosen.controlled_by,chosen.target),(bolt,20,10,"20")); self.assertTrue(game.find_permanent(mountain)[1].tapped); self.assertIn(word,game.player(10).graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.stack[-1].controlled_by,10); restored.pass_priority(10); restored.pass_priority(20); self.assertEqual(restored.player(20).life,17)
+
+    def test_only_land_mana_abilities_may_be_activated(self):
+        game=ready(); game.player(20).hand=[]; game.player(20).battlefield=[]; counter=self.add(game,20,"lea:51","hand"); [self.add(game,20,"island") for _ in range(3)]; mox=self.add(game,20,"lea:261"); word=self.pending(game)
+        game.choose_word_command(10,1)
+        self.assertIn(counter,game.player(20).hand); self.assertFalse(game.find_permanent(mox)[1].tapped); self.assertIn(word,game.player(10).graveyard); self.assertFalse(game.stack)
+
+    def test_controller_makes_balance_and_copy_choices_for_controlled_player(self):
+        balance=ready(); balance.player(10).hand=[]; balance.player(20).hand=[]; balance.player(10).battlefield=[]; balance.player(20).battlefield=[]; self.add(balance,10,"plains"); [self.add(balance,20,"plains") for _ in range(3)]; self.add(balance,20,"lea:3","hand"); self.add(balance,20,"plains"); self.pending(balance)
+        balance.choose_word_command(10,1); balance.pass_priority(10); balance.pass_priority(20)
+        self.assertEqual((balance.stack[-1].ability_effect,balance.stack[-1].choice_owner),("balance_lands",10)); self.assertEqual(len(balance.balance_choices(balance.stack[-1],10)),4)
+        balance.choose_balance(10,[1]); self.assertEqual(sum(balance.card(x.uid).land for x in balance.player(20).battlefield),1); self.assertFalse(balance.stack)
+
+        copy=ready(); copy.player(20).hand=[]; copy.player(20).battlefield=[]; target=self.add(copy,10,"giant"); clone=self.add(copy,20,"lea:51","hand"); [self.add(copy,20,"island") for _ in range(4)]; self.pending(copy); copy.choose_word_command(10,1); copy.pass_priority(10); copy.pass_priority(20)
+        self.assertEqual(copy.stack[-1].choice_owner,10); copy.choose_copy(10,10,1); permanent=copy.find_permanent(clone)[1]; self.assertIsNotNone(permanent); self.assertEqual(permanent.copy_key,"giant"); self.assertEqual(copy.find_permanent(target)[1].uid,target)
+
+    def test_controller_makes_search_choice_during_chosen_spell_resolution(self):
+        game=ready(); game.player(20).hand=[]; game.player(20).battlefield=[]; game.player(20).library=[]; tutor=self.add(game,20,"lea:104","hand"); self.add(game,20,"swamp"); self.add(game,20,"swamp"); found=self.add(game,20,"giant","library"); self.pending(game)
+        game.choose_word_command(10,1); game.pass_priority(10); game.pass_priority(20)
+        self.assertTrue(game.stack[-1].decision_pending); self.assertEqual(game.stack[-1].choice_owner,10); self.assertEqual(game.library_search(10)[0][1].key,"giant")
+        with self.assertRaisesRegex(GameError,"library search"): game.choose_library(20,1)
+        game.choose_library(10,1); self.assertIn(found,game.player(20).hand); self.assertNotIn(found,game.player(10).hand)
+
 class AlphaLichTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

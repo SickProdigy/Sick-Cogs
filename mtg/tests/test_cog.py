@@ -800,6 +800,16 @@ class ForkRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Lightning Bolt copy",rendered); self.assertIn("must choose new targets or keep",rendered); self.assertIn("[R]",rendered)
         view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":fork_target")); self.assertEqual([option.value for option in select.options],["keep"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
 
+class WordOfCommandRenderingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_target_hand_control_is_requester_bound_and_publicly_hidden(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.player(20).hand=[]
+        for key in ("forest","lea:161"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(20).hand.append(uid)
+        word=game.next_uid; game.next_uid+=1; game.cards[word]="lea:136"; game.stack=[spell_type(10,word,"lea:136","20",ability_effect="word_choose",decision_pending=True,choice_owner=10)]; game.priority_user=10; cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("privately choosing a card from the targeted hand",rendered); self.assertNotIn("Lightning Bolt",rendered)
+        view=GameView(cog,1); private=next(item for item in view.children if item.custom_id.endswith(":private_hand")); passing=next(item for item in view.children if item.custom_id.endswith(":pass")); self.assertFalse(private.disabled); self.assertTrue(passing.disabled)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock())); await cog.send_private_hand_decision(interaction,1,0); kwargs=interaction.followup.send.await_args.kwargs; self.assertTrue(kwargs["ephemeral"]); self.assertIn("Lightning Bolt",interaction.followup.send.await_args.args[0]); select=next(item for item in kwargs["view"].children if hasattr(item,"options")); self.assertEqual(select.placeholder,"Choose a card to play")
+
 class LichRenderingTests(unittest.TestCase):
     def test_pending_sacrifices_have_exact_select_and_disable_other_actions(self):
         spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.player(10).battlefield=[]

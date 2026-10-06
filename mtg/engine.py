@@ -103,6 +103,7 @@ class Spell:
     discard_resume: str = ""
     is_copy: bool = False
     fork_retarget: bool = False
+    controlled_by: Optional[int] = None
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -275,7 +276,10 @@ class Game:
         return tuple(mapping[kind] for kind in ("plains","island","swamp","mountain","forest") if kind in types) if types else card.produces
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
-    def library_search(self,user): return [(position,self.card(uid)) for position,uid in enumerate(reversed(self.player(user).library),1)]
+    def library_search(self,user):
+        player=self.player(user)
+        if self.stack and self.stack[-1].decision_pending and not self.stack[-1].ability_effect and self.card(self.stack[-1].uid).effect=="search_library" and self._spell_decider(self.stack[-1])==user: player=self.player(self.stack[-1].owner)
+        return [(position,self.card(uid)) for position,uid in enumerate(reversed(player.library),1)]
     def characteristic_stats(self,user,card,entering=False,permanent_uid=None):
         player=self.player(user)
         land_characteristics={"plains":"plains","islands":"island","swamps":"swamp","mountains":"mountain","forests":"forest"}
@@ -729,7 +733,7 @@ class Game:
             for symbol,count in output.items(): player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+count
         return output
 
-    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=(),activation_colors=(),activation_is_enchantment=False):
+    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=(),activation_colors=(),activation_is_enchantment=False,land_only=False):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
         for battlefield in self.players.values():
             for source in battlefield.battlefield:
@@ -744,7 +748,7 @@ class Game:
             for number in range(count): items.append(("pool",f"{symbol}:{number}",None,((symbol,{symbol:1}),)))
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
-            if permanent.uid in excluded_uids: continue
+            if permanent.uid in excluded_uids or (land_only and not source.land): continue
             mana_choices=self.current_mana_choices(permanent)
             if mana_choices and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste or "haste" in self.current_keywords(permanent)):
                 options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in mana_choices)
@@ -1063,8 +1067,11 @@ class Game:
     def _empty_mana(self):
         for player in self.players.values(): player.mana_pool.clear()
 
-    def play(self,user,index,target=None,x_value=None):
-        self._priority(user); p=self.player(user)
+    def play(self,user,index,target=None,x_value=None,controlling_user=None,ignore_timing=False,land_mana_only=False,resolving_word=None):
+        actor=user if controlling_user is None else controlling_user
+        if resolving_word is None: self._priority(actor)
+        elif not self.stack or self.stack[-1] is not resolving_word or not resolving_word.decision_pending or resolving_word.choice_owner!=actor: raise GameError("Word of Command is no longer waiting for your choice.")
+        p=self.player(user)
         if not 1<=index<=len(p.hand): raise GameError("No card at that hand position.")
         uid=p.hand[index-1]; c=self.card(uid)
         uses_x="{X}" in c.mana_cost
@@ -1083,7 +1090,7 @@ class Game:
             p.hand.pop(index-1); p.battlefield.append(self._make_permanent(uid,c.key,owner=user)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
             self.stack.extend(self._land_event_triggers(user,"enter",played_extra))
             self.log.append(f"{user} played {c.name}."); return
-        if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
+        if not ignore_timing and c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         if c.effect=="berserk" and self.phase not in ("upkeep","draw","precombat_main","after_attackers","after_blockers","after_first_strike"):
             raise GameError("Berserk can be cast only before the combat damage step.")
         if c.effect=="camouflage" and (self.phase!="after_attackers" or user!=self.active_user):
@@ -1111,11 +1118,14 @@ class Game:
         protected=self._stable_target_permanent(target)
         if protected is not None and self._protected_from(protected,c): raise GameError(f"{c.name} cannot target a permanent with protection from its color.")
         payment_cost=c.mana_cost+(f"{{{max(0,len(target.split(chr(44)))-1)}}}" if c.effect=="fireball" and target else "")
-        payment=self._mana_payment(p,c,x_value,mana_cost=payment_cost if c.effect=="fireball" else None)
+        payment=self._mana_payment(p,c,x_value,mana_cost=payment_cost if c.effect=="fireball" else None,land_only=land_mana_only)
         if payment is None: raise GameError(f"You cannot pay {c.mana_cost or c.cost} with your available mana.")
         sources,remaining,choices=payment; pending_triggers=[]
         for permanent in sources: self._tap_permanent(user,permanent,choices[permanent.uid],pending_triggers=pending_triggers)
         p.mana_pool=remaining
+        if resolving_word is not None:
+            if not self.stack or self.stack[-1] is not resolving_word: raise GameError("Word of Command is no longer resolving.")
+            self.stack.pop(); self._finish_spell(resolving_word)
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
         sacrifice_value=self.card(sacrificed.uid).cost if sacrificed is not None else 0
@@ -1124,7 +1134,8 @@ class Game:
         elif c.effect=="power_sink":
             target_uid=int(target.split(":",1)[1]); target_spell=next(item for item in self.stack if item.uid==target_uid)
             choice_owner=target_spell.owner
-        spell=Spell(user,uid,c.key,target,x_value=x_value,choice_value=sacrifice_value,choice_owner=choice_owner)
+        if controlling_user is not None and choice_owner==user: choice_owner=controlling_user
+        spell=Spell(user,uid,c.key,target,x_value=x_value,choice_value=sacrifice_value,choice_owner=choice_owner,controlled_by=controlling_user)
         self.stack.append(spell)
         if sacrificed is not None:
             sacrificed_name=self.card(sacrificed.uid).name; was_land=self.card(sacrificed.uid).land; death_sources=self._death_trigger_sources(); batch=self.next_uid
@@ -1132,9 +1143,12 @@ class Game:
             if was_land and sacrificed.uid in p.graveyard: self.stack.extend(self._land_event_triggers(user,"grave"))
             self.log.append(f"{user} sacrificed {sacrificed_name} as an additional cost for {c.name}.")
         self.stack.extend(pending_triggers); self.stack.extend(self._spell_cast_triggers(spell)); self._sba(); self._life()
-        if not self.finished: self.priority_user=self.opponent(user)
+        if not self.finished: self.priority_user=self.active_user if controlling_user is not None else self.opponent(user)
         suffix=f" with X={x_value}" if uses_x else ""
         self.log.append(f"{user} cast {c.name}{suffix}.")
+
+    def _spell_decider(self,spell):
+        return spell.controlled_by if spell.controlled_by is not None else spell.owner
 
     def _target_creature(self,target,message="Target must be USER_ID:POSITION."):
         if not target or ":" not in target: raise GameError(message)
@@ -1338,6 +1352,12 @@ class Game:
             target_user,permanent=self._target_creature(target)
             if target_user!=user: raise GameError("Simulacrum must target a creature you control.")
             return f"{target_user}:{permanent.uid}"
+        if c.effect=="word_of_command":
+            try: target_user=int(target)
+            except (TypeError,ValueError) as error: raise GameError("Word of Command target must be an opponent player ID.") from error
+            self.player(target_user)
+            if target_user==user: raise GameError("Word of Command must target an opponent.")
+            return str(target_user)
         if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short","drain_power","natural_selection"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
@@ -1371,7 +1391,7 @@ class Game:
                 if s.ability_effect=="lich_damage":
                     available=[permanent for permanent in self.player(s.owner).battlefield if not self.is_token(permanent.uid)]
                     if len(available)>=s.choice_value:
-                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                        s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                     self.stack.pop(); self._resolve(s)
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
@@ -1404,10 +1424,18 @@ class Game:
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
                     return
+                if not s.ability_effect and self.card(s.uid).effect=="word_of_command":
+                    target=self.player(int(s.target))
+                    if target.hand:
+                        s.ability_effect="word_choose"; s.decision_pending=True; s.choice_owner=s.owner; s.passes=0; self.priority_user=s.owner; return
+                    self.stack.pop(); self._finish_spell(s); self.log.append("Word of Command resolved with an empty hand.")
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
                 if not s.ability_effect and self.card(s.uid).effect=="balance":
                     s.ability_effect="balance_lands"; s.mana_choices={}; s.choice_value=min(sum(self.card(x.uid).land for x in player.battlefield) for player in self.players.values()); self._advance_balance(s); return
                 if not s.ability_effect and self.card(s.uid).enters_copy_types and self.copy_choices(s):
-                    s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                    s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
                     self.stack.pop(); self._resolve(s)
                     if self.stack: self.stack[-1].passes=0
@@ -1418,17 +1446,17 @@ class Game:
                 if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_vitality","upkeep_cost","graveyard_return","upkeep_sacrifice","tomb_cleanup","power_leak"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
-                    s.decision_pending=True; self.priority_user=s.owner; return
+                    s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="natural_selection" and self.player(int(s.target)).library:
-                    s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                    s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect in ("text_change_land","text_change_color"):
                     target=self._word_change_target(s.target)
                     if target is not None and not (isinstance(target,Permanent) and self._protected_from(target,self.card(s.uid),self.spell_colors(s))):
-                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                        s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="false_orders":
                     target=self._stable_target_permanent(s.target)
                     if target is not None and self.find_permanent(target.uid)[0].user_id==self.opponent(self.active_user) and self.is_creature(target) and not self._protected_from(target,self.card(s.uid),self.spell_colors(s)):
-                        s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
+                        s.decision_pending=True; s.choice_owner=self._spell_decider(s); self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="drain_power" and self._drain_power_lands(s):
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="power_sink" and self._power_sink_target(s) is not None:
@@ -1465,7 +1493,7 @@ class Game:
             raise GameError("You do not have a Fork target choice to make.")
         spell=self.stack[-1]; card=self._text_changed_card(spell.uid,CARDS[spell.key],spell.land_word_changes,spell.color_word_changes)
         if target is not None and str(target).casefold() not in ("keep","none","-"):
-            stable=self._target_for_cast(card,user,target,spell.x_value)
+            stable=self._target_for_cast(card,spell.owner,target,spell.x_value)
             if stable==f"S:{spell.uid}": raise GameError("A copied spell cannot target itself.")
             protected=self._stable_target_permanent(stable)
             if protected is not None and self._protected_from(protected,card,("R",)): raise GameError(f"{card.name} cannot target a permanent with protection from red.")
@@ -1608,9 +1636,9 @@ class Game:
 
     def choose_library(self,user,position):
         if self.finished: raise GameError("Game is over.")
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="search_library":
+        if not self.stack or not self.stack[-1].decision_pending or self._spell_decider(self.stack[-1])!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="search_library":
             raise GameError("You do not have a library search to complete.")
-        player=self.player(user); choices=list(reversed(player.library))
+        spell=self.stack[-1]; player=self.player(spell.owner); choices=list(reversed(player.library))
         if not 1<=position<=len(choices): raise GameError("Choose a valid private library position.")
         chosen=choices[position-1]; spell=self.stack.pop(); spell_name=self.card(spell.uid).name; player.library.remove(chosen); player.hand.append(chosen); random.SystemRandom().shuffle(player.library); self._finish_spell(spell)
         if self.stack: self.stack[-1].passes=0
@@ -1643,12 +1671,31 @@ class Game:
         if self.finished: raise GameError("Game is over.")
         if self.phase=="cleanup_discard" and user==self.active_user:
             return None,[(position,self.card(uid)) for position,uid in enumerate(self.player(user).hand,1)]
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand","leng_discard"):
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand","leng_discard","word_choose"):
             raise GameError("You do not have a private hand decision to complete.")
         item=self.stack[-1]
         if item.ability_effect=="leng_discard": return item,[(1,self.card(item.discard_queue[0]["uid"]))]
         target=self.player(user) if item.ability_effect=="balance_hand" else self.player(int(item.target))
         return item,[(position,self.card(uid)) for position,uid in enumerate(target.hand,1)]
+
+    def choose_word_command(self,user,position,target=None,x_value=None):
+        item,choices=self.private_hand_decision(user)
+        if item is None or item.ability_effect!="word_choose": raise GameError("Word of Command is not waiting for your choice.")
+        try: position=int(position)
+        except (TypeError,ValueError) as error: raise GameError("Choose a valid private hand position for Word of Command.") from error
+        if not 1<=position<=len(choices): raise GameError("Choose a valid private hand position for Word of Command.")
+        controlled=self.player(int(item.target)); chosen_uid=controlled.hand[position-1]; chosen=self.card(chosen_uid)
+        if chosen.land:
+            self.stack.pop(); item.decision_pending=False; self._finish_spell(item); self.phase_passes=0; self.priority_user=self.active_user
+            self.log.append(f"{user} chose a land with Word of Command; it could not be played during resolution."); return
+        try:
+            self.play(controlled.user_id,position,target,x_value,controlling_user=user,ignore_timing=True,land_mana_only=True,resolving_word=item)
+        except GameError as error:
+            if str(error).startswith("You cannot pay") or "can be cast only" in str(error):
+                self.stack.pop(); item.decision_pending=False; self._finish_spell(item); self.phase_passes=0; self.priority_user=self.active_user
+                self.log.append(f"{user} chose {chosen.name} with Word of Command, but the controlled player could not pay for it."); return
+            raise
+        self.log.append(f"{user} controlled {controlled.user_id} to cast {chosen.name} with Word of Command.")
 
     def choose_private_hand(self,user,position=None):
         item,choices=self.private_hand_decision(user); card=self.card(item.uid)
@@ -1764,7 +1811,7 @@ class Game:
 
     def balance_choices(self,spell,user):
         if spell.choice_owner!=user or not spell.ability_effect.startswith("balance_"): return []
-        player=self.player(user); stage=spell.ability_effect.split("_",1)[1]
+        affected=int(spell.mana_choices.get("_balance_player",user)); player=self.player(affected); stage=spell.ability_effect.split("_",1)[1]
         if stage=="lands": return [(position,permanent) for position,permanent in enumerate(player.battlefield,1) if self.card(permanent.uid).land]
         if stage=="creatures": return [(position,permanent) for position,permanent in enumerate(player.battlefield,1) if self.is_creature(permanent)]
         if stage=="hand": return [(position,self.card(uid)) for position,uid in enumerate(player.hand,1)]
@@ -1799,14 +1846,15 @@ class Game:
 
     def _advance_balance(self,spell):
         stage=spell.ability_effect.split("_",1)[1]
-        for user in (self.active_user,self.opponent(self.active_user)):
-            key=f"{stage}:{user}"
+        for affected in (self.active_user,self.opponent(self.active_user)):
+            key=f"{stage}:{affected}"
             if key in spell.mana_choices: continue
-            spell.choice_owner=user; choices=self.balance_choices(spell,user); required=self._balance_required(spell,user)
+            actor=self._spell_decider(spell) if affected==spell.owner else affected
+            spell.choice_owner=actor; spell.mana_choices["_balance_player"]=str(affected); choices=self.balance_choices(spell,actor); required=self._balance_required(spell,actor)
             if required in (0,len(choices)):
-                chosen=choices if required else []; spell.mana_choices[key]=",".join(str(item.uid if stage!="hand" else self.player(user).hand[position-1]) for position,item in chosen)
+                chosen=choices if required else []; spell.mana_choices[key]=",".join(str(item.uid if stage!="hand" else self.player(affected).hand[position-1]) for position,item in chosen)
                 continue
-            spell.decision_pending=True; spell.passes=0; self.priority_user=user; return
+            spell.decision_pending=True; spell.passes=0; self.priority_user=actor; return
         spell.decision_pending=False; self._apply_balance_stage(spell,stage)
         if stage=="hand": return
         if stage=="lands": next_stage="hand"; counts=[len(player.hand) for player in self.players.values()]
@@ -1826,9 +1874,10 @@ class Game:
         except (TypeError,ValueError) as error: raise GameError("Choose valid distinct positions for Balance.") from error
         required=self._balance_required(spell,user)
         if len(positions)!=required or len(set(positions))!=required or any(position not in indexed for position in positions): raise GameError(f"Choose exactly {required} distinct {stage} positions for Balance.")
-        if stage=="hand": selected=[self.player(user).hand[position-1] for position in positions]
+        affected=int(spell.mana_choices.get("_balance_player",user))
+        if stage=="hand": selected=[self.player(affected).hand[position-1] for position in positions]
         else: selected=[indexed[position].uid for position in positions]
-        spell.mana_choices[f"{stage}:{user}"]=",".join(map(str,selected)); spell.decision_pending=False; self.log.append(f"{user} completed their private Balance choice." if stage=="hand" else f"{user} chose {stage} for Balance."); self._advance_balance(spell)
+        spell.mana_choices[f"{stage}:{affected}"]=",".join(map(str,selected)); spell.decision_pending=False; self.log.append(f"{user} completed their private Balance choice." if stage=="hand" else f"{user} chose {stage} for Balance."); self._advance_balance(spell)
 
     def kudzu_choices(self,trigger):
         _,aura=self.find_permanent(trigger.source_uid)
@@ -2872,7 +2921,7 @@ class Game:
             copied=Spell(s.owner,uid,target.key,target.target,x_value=target.x_value,color_override="R",batch_id=target.batch_id,source_power=target.source_power,choice_value=target.choice_value,choice_owner=target.choice_owner,mana_choices=dict(target.mana_choices),land_word_changes=dict(target.land_word_changes),color_word_changes=dict(target.color_word_changes),is_copy=True)
             self._finish_spell(s); self.stack.append(copied)
             if copied.target is not None:
-                copied.fork_retarget=True; copied.decision_pending=True; copied.choice_owner=s.owner; self.priority_user=s.owner
+                copied.fork_retarget=True; copied.decision_pending=True; copied.choice_owner=self._spell_decider(s); self.priority_user=copied.choice_owner
             self.log.append(f"Fork copied {self.card(copied.uid).name}; the copy is red."); return
         if c.aura_reanimate:
             try: _,target_user_text,target_uid_text=s.target.split(":"); target_user,target_uid=int(target_user_text),int(target_uid_text)
@@ -3252,7 +3301,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect=="lich_damage": message="The damaged player must choose Lich sacrifices first."
+            if self.stack[-1].ability_effect=="word_choose": message="The Word of Command controller must choose a card from the targeted hand first."
+            elif self.stack[-1].ability_effect=="lich_damage": message="The damaged player must choose Lich sacrifices first."
             elif self.stack[-1].ability_effect.startswith("raging_river_"): message="The pending Raging River division must be completed first."
             elif self.stack[-1].is_copy and self.stack[-1].fork_retarget: message="The Fork controller must choose targets for the copied spell first."
             elif self.stack[-1].ability_effect.startswith("balance_"): message="The pending Balance choice must be completed first."
