@@ -137,20 +137,23 @@ class CogPolicyTests(unittest.TestCase):
             self.assertEqual(PokemonCatalog(path).load(), 1)
             self.assertEqual(SPECIES[25], item)
 
-    def test_expected_command_surface_registered(self):
-        names = {command.qualified_name for command in Pokemon.pokemon.walk_commands()}
-        self.assertNotIn("pokemon heal", names)
-        self.assertIn("pokemon center", names)
-        self.assertIn("pokemon use potion", names)
-        self.assertNotIn("pokemon set expiry",names)
-        self.assertIn("pokemon set battleexpiry",names)
-        self.assertIn("pokemon set encountertime",names)
-        self.assertIn("pokemon set rarity",names)
-        self.assertIn("pokemon use revive", names)
-        self.assertIn("pokemon pokedex", names)
-        self.assertIn("pokemon gym challenge", names)
-        self.assertIn("pokemon party add", names)
-        self.assertIn("pokemon set catalogsync", names)
+    def test_expected_command_surfaces_are_separate_and_documented(self):
+        player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
+        admin_names={command.qualified_name for command in Pokemon.pokemon_set.walk_commands()}
+        self.assertNotIn("pokemon heal",player_names)
+        self.assertFalse(any(name.startswith("pokemon set") for name in player_names))
+        self.assertIn("pokemon center",player_names)
+        self.assertIn("pokemon use potion",player_names)
+        self.assertIn("pokemon use revive",player_names)
+        self.assertIn("pokemon pokedex",player_names)
+        self.assertIn("pokemon gym challenge",player_names)
+        self.assertIn("pokemon party add",player_names)
+        self.assertIn("pokemonset battleexpiry",admin_names)
+        self.assertIn("pokemonset encountertime",admin_names)
+        self.assertIn("pokemonset rarity",admin_names)
+        self.assertIn("pokemonset catalogsync",admin_names)
+        self.assertIn("Server administration",Pokemon.pokemon.help)
+        self.assertEqual(Pokemon.pokemon_set.get_command("channel").help,"Enable wild encounters in a channel.")
 
 
 class GymProgressionTests(unittest.TestCase):
@@ -218,6 +221,19 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bare_pokemon_onboards_new_trainers_then_uses_help(self):
+        section=StoredSection({"collection":[],"starter_chosen":False})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)
+        ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),clean_prefix="!",send=AsyncMock(),send_help=AsyncMock())
+        await Pokemon.pokemon.callback(cog,ctx)
+        sent=ctx.send.await_args.kwargs
+        self.assertEqual(sent["embed"].title,"Choose your first Pokémon")
+        self.assertEqual(sent["embed"].footer.text,"Server setup is separate: !pokemonset")
+        self.assertIsInstance(sent["view"],StarterView)
+        ctx.send.reset_mock();section.value={"collection":[{"instance_id":"owned"}],"starter_chosen":True}
+        await Pokemon.pokemon.callback(cog,ctx)
+        ctx.send_help.assert_awaited_once()
+
     async def test_starter_picker_is_one_time_and_encounter_scoped(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         conf={"collection":[],"party":[],"starter_chosen":False,"pokedex_seen":[],"pokedex_caught":[]}

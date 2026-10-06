@@ -22,20 +22,20 @@ Collections are global only within one bot installation. Separate bots do not sh
 
 1. Load the cog.
 2. Grant Embed Links and Attach Files in spawn channels.
-3. Enable a spawn channel with `[p]pokemon set channel #channel` and designate any existing healing channel with `[p]pokemon set center #chat`.
-4. Review settings with `[p]pokemon set status`; choose `[p]pokemon set pace active|normal|relaxed`, or configure slower threshold, cooldown, battle expiry, and allowed-generation subsets individually.
+3. Enable a spawn channel with `[p]pokemonset channel #channel` and designate any existing healing channel with `[p]pokemonset center #chat`.
+4. Review settings with `[p]pokemonset status`; choose `[p]pokemonset pace active|normal|relaxed`, or configure slower threshold, cooldown, battle expiry, and allowed-generation subsets individually.
 5. Members choose `[p]pokemon starter bulbasaur|charmander|squirtle`.
-6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemon set spawn` while testing.
+6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemonset spawn` while testing.
 7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
 
-Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, `bag`, `use potion <slot-or-id>`, `use revive <slot-or-id>`, and `center`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemon set catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, `bag`, `use potion <slot-or-id>`, `use revive <slot-or-id>`, and `center`. Defeating a wild Pokémon awards XP; catching it adds it to the collection but awards no battle XP. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemonset catalogsync <1-9>`.
 
 
 ## Encounter fairness and control
 
 Wild encounters remain open for 15 minutes by default. The bot owner controls that lifetime, the friendly/standard/challenging rarity curve, available generations, minimum activity and cooldown floors, and whether legendary or mythical species may enter ordinary spawns. Special species are event-only by default. Server administrators choose spawn channels and may slow pacing or select a subset of bot-enabled generations, but cannot make encounters faster than the bot-wide floors. Manual server spawns obey the effective cooldown; the bot owner retains a testing bypass.
 
-Owner controls are `[p]pokemon set globalstatus`, `encountertime <minutes>`, `globallimits <activity> <seconds>`, `globalgenerations <1-9...>`, `rarity friendly|standard|challenging`, and `specials true|false`. Server battle duration remains adjustable through `[p]pokemon set battleexpiry <minutes>`; wild lifetime is not server-configurable.
+Owner controls are `[p]pokemonset globalstatus`, `[p]pokemonset encountertime <minutes>`, `[p]pokemonset globallimits <activity> <seconds>`, `[p]pokemonset globalgenerations <1-9...>`, `[p]pokemonset rarity friendly|standard|challenging`, and `[p]pokemonset specials true|false`. Server battle duration remains adjustable through `[p]pokemonset battleexpiry <minutes>`; wild lifetime is not server-configurable.
 
 ## Healing and persistent health
 
@@ -49,7 +49,7 @@ The initial Gym milestone uses each leader's signature Pokémon as a restart-saf
 
 ## Pokédex styles
 
-The Retro style is the initial bot default. The bot owner can change that with `[p]pokemon set pokedexstyle retro|compact`. Members can select their own style with `[p]pokemon pokedexstyle retro|compact` or return to the owner-selected default with `[p]pokemon pokedexstyle default`. The style selector inside the interactive Pokédex also saves the member's choice.
+The Retro style is the initial bot default. The bot owner can change that with `[p]pokemonset pokedexstyle retro|compact`. Members can select their own style with `[p]pokemon pokedexstyle retro|compact` or return to the owner-selected default with `[p]pokemon pokedexstyle default`. The style selector inside the interactive Pokédex also saves the member's choice.
 
 Presentation is intentionally modular: a style implements list and detail embed rendering and is registered in `POKEDEX_STYLES`. Navigation, filtering, search, generation selection, ownership checks, and unseen/seen/caught disclosure rules remain shared. Community themes must preserve those disclosure rules, remain readable on mobile, avoid proprietary assets, and retain usable embed text independent of decorative imagery. Unknown or removed style keys safely fall back to Retro.
 
