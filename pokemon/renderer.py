@@ -132,14 +132,14 @@ class BattleRenderer:
         except (OSError,ValueError) as exc:
             raise RenderError("Starter selection rendering failed.") from exc
 
-    async def party_card(self,pokemon):
+    async def party_card(self,pokemon,trainer_name):
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
-        try:return await self._render(self._party_card_sync,pokemon,data)
+        try:return await self._render(self._party_card_sync,pokemon,data,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Party card rendering failed.") from exc
 
-    async def collection_card(self,pokemon,page,pages,total):
+    async def collection_card(self,pokemon,page,pages,total,trainer_name):
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
-        try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total)
+        try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
     async def battle(self, battle):
@@ -257,18 +257,19 @@ class BattleRenderer:
             draw.text((45,407),"Use Previous and Next, then choose your partner.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         else:
             trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
-            draw.text((45,370),f"@{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
+            draw.text((45,370),f"{trainer} received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
             draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
             self._gender_mark(draw,(84,410),pokemon.gender,RETRO[1])
             draw.text((104,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         return self._save(canvas)
 
-    def _party_card_sync(self,pokemon,data):
+    def _party_card_sync(self,pokemon,data,trainer_name):
         canvas=Image.new("RGB",(1200,360),(236,205,105));draw=ImageDraw.Draw(canvas)
         for y in range(360):
             ratio=y/359;draw.line((0,y,1200,y),fill=(int(246-66*ratio),int(220-74*ratio),int(132-63*ratio)))
         draw.rounded_rectangle((20,18,1180,342),20,fill=(255,244,194),outline=(92,66,25),width=5)
-        draw.text((46,34),"YOUR POKEMON PARTY",fill=(92,66,25),font=ImageFont.load_default(size=28))
+        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
+        draw.text((46,34),f"{trainer}'s Party",fill=(92,66,25),font=ImageFont.load_default(size=28))
         self._pokeball(draw,(1138,56),26)
         slots=list(zip(pokemon,data))
         for index in range(6):
@@ -287,12 +288,13 @@ class BattleRenderer:
             self._gender_mark(draw,(left+145,top+207),item.gender,(82,62,29))
         return self._save(canvas)
 
-    def _collection_card_sync(self,pokemon,data,page,pages,total):
+    def _collection_card_sync(self,pokemon,data,page,pages,total,trainer_name):
         canvas=Image.new("RGB",(900,720),(225,217,177));draw=ImageDraw.Draw(canvas)
         for y in range(720):
             ratio=y/719;draw.line((0,y,900,y),fill=(int(240-36*ratio),int(230-40*ratio),int(181-34*ratio)))
         draw.rounded_rectangle((20,18,880,702),18,fill=(245,239,207),outline=(54,83,70),width=5)
-        draw.text((44,34),f"GLOBAL COLLECTION · {total} POKEMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
+        trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"
+        draw.text((44,34),f"{trainer}'s Collection · {total} POKEMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
         draw.text((735,43),f"PAGE {page}/{pages}",fill=(65,91,78),font=ImageFont.load_default(size=16))
         for index,(item,raw) in enumerate(zip(pokemon,data)):
             col=index%3;row=index//3;left=43+280*col;top=82+198*row;cx=left+127
