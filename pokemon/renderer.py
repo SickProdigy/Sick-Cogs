@@ -292,7 +292,7 @@ class BattleRenderer:
         for y in range(720):
             ratio=y/719;draw.line((0,y,900,y),fill=(int(240-36*ratio),int(230-40*ratio),int(181-34*ratio)))
         draw.rounded_rectangle((20,18,880,702),18,fill=(245,239,207),outline=(54,83,70),width=5)
-        draw.text((44,34),f"GLOBAL COLLECTION · {total} POKÉMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
+        draw.text((44,34),f"GLOBAL COLLECTION · {total} POKEMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
         draw.text((735,43),f"PAGE {page}/{pages}",fill=(65,91,78),font=ImageFont.load_default(size=16))
         for index,(item,raw) in enumerate(zip(pokemon,data)):
             col=index%3;row=index//3;left=43+280*col;top=82+198*row;cx=left+127
@@ -300,9 +300,10 @@ class BattleRenderer:
             draw.ellipse((cx-69,top+102,cx+69,top+145),fill=(169,188,132),outline=(76,104,76),width=2)
             image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
-            draw.text((left+12,top+10),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=18))
             shiny=" · SHINY" if item.shiny else ""
-            draw.text((left+12,top+151),f"Lv.{item.level}{shiny}",fill=(65,91,78),font=ImageFont.load_default(size=15))
+            draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
+            draw.text((left+190,top+151),f"Lv.{item.level}",fill=(65,91,78),font=ImageFont.load_default(size=14))
+            if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
