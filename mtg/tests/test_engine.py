@@ -4309,6 +4309,44 @@ class AlphaWordOfCommandTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"library search"): game.choose_library(20,1)
         game.choose_library(10,1); self.assertIn(found,game.player(20).hand); self.assertNotIn(found,game.player(10).hand)
 
+class AlphaIllusionaryMaskTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",face_down=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="battlefield": game.player(user).battlefield.append(Permanent(uid,key,owner=user,sick=False,face_down=face_down))
+        else: getattr(game.player(user),zone).append(uid)
+        return uid
+
+    def pending_choice(self,game):
+        game.player(10).battlefield=[]; game.player(10).hand=[]; mask=self.add(game,10,"lea:249"); goblin=self.add(game,10,"goblin","hand"); bear=self.add(game,10,"bear","hand")
+        game.player(10).mana_pool={"R":2}; game.phase="precombat_main"; game.priority_user=10; game.activate_illusionary_mask(10,1,2)
+        game.player(10).battlefield.remove(game.find_permanent(mask)[1]); game.player(10).graveyard.append(mask); game.pass_priority(20); game.pass_priority(10)
+        return mask,goblin,bear
+
+    def test_exact_spent_mana_controls_private_choice_and_source_is_independent(self):
+        game=ready(); mask,goblin,bear=self.pending_choice(game)
+        self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].choice_owner,game.priority_user),("mask_choose",10,10))
+        self.assertEqual([(position,card.key) for position,card in game.private_hand_decision(10)[1]],[(1,"goblin")]); self.assertIn(mask,game.player(10).graveyard)
+        with self.assertRaisesRegex(GameError,"eligible creature"): game.choose_illusionary_mask(10,2)
+        self.assertEqual(game.stack[-1].ability_effect,"mask_choose"); self.assertIn(bear,game.player(10).hand)
+
+    def test_face_down_spell_and_permanent_are_hidden_and_persist(self):
+        game=ready(); _,goblin,_=self.pending_choice(game); game.choose_illusionary_mask(10,1)
+        self.assertTrue(game.stack[-1].face_down); self.assertEqual(game.spell_mana_value(game.stack[-1]),0); self.assertEqual(game.spell_colors(game.stack[-1]),())
+        restored=Game.from_raw(game.to_raw()); restored.pass_priority(10); restored.pass_priority(20); permanent=restored.find_permanent(goblin)[1]
+        self.assertTrue(permanent.face_down); self.assertEqual((restored.card(goblin).name,restored.current_stats(permanent)),("Face-down creature",(2,2)))
+        again=Game.from_raw(restored.to_raw()); self.assertTrue(again.find_permanent(goblin)[1].face_down)
+
+    def test_tap_damage_and_combat_reveal_before_the_event(self):
+        tapped=ready(); tapped.player(10).battlefield=[]; giant=self.add(tapped,10,"giant",face_down=True); permanent=tapped.find_permanent(giant)[1]; tapped._tap_permanent(10,permanent); self.assertFalse(permanent.face_down); self.assertEqual(tapped.card(giant).name,"Hill Giant")
+        damaged=ready(); damaged.player(10).battlefield=[]; knight=self.add(damaged,10,"lea:43",face_down=True); target=damaged.find_permanent(knight)[1]; damaged._damage_permanent(target,1); self.assertFalse(target.face_down); self.assertEqual(target.damage,1)
+        combat=ready(); combat.player(10).battlefield=[]; combat.player(20).battlefield=[]; attacker=self.add(combat,10,"giant",face_down=True); combat.active_index=0; combat.attackers=[attacker]; combat._combat_damage(False); self.assertEqual(combat.player(20).life,17); self.assertFalse(combat.find_permanent(attacker)[1].face_down)
+        strike=ready(); strike.player(10).battlefield=[]; strike.player(20).battlefield=[]; masked=self.add(strike,10,"lea:43",face_down=True); strike.find_permanent(masked)[1].toughness_bonus=1; first=self.add(strike,20,"lea:191"); strike.active_index=0; strike.phase="after_blockers"; strike.attackers=[masked]; strike.blocks={masked:first}; strike.blocked_attackers=[masked]; strike._combat_damage(True); self.assertTrue(strike.find_permanent(masked)[1].mask_normal_damage); strike.phase="after_first_strike"; strike._combat_damage(False); self.assertIn(first,strike.player(20).graveyard)
+
+    def test_decline_and_unrevealed_death_use_actual_card_without_its_death_trigger(self):
+        decline=ready(); _,goblin,_=self.pending_choice(decline); decline.choose_illusionary_mask(10,None); self.assertIn(goblin,decline.player(10).hand); self.assertFalse(decline.stack)
+        game=ready(); game.player(10).battlefield=[]; incarnation=self.add(game,10,"lea:31",face_down=True); game.player(10).life=20; permanent=game.find_permanent(incarnation)[1]; game._dies(10,permanent)
+        self.assertEqual(game.player(10).life,20); self.assertIn(incarnation,game.player(10).graveyard)
+
 class AlphaLichTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

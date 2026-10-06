@@ -1,6 +1,6 @@
 import unittest
 
-from mtg.ai import _activate_clockwork, _activate_hydra, _activation_target, _attack_positions, _global_enchantment_score, _play_one, _target, advance_solo
+from mtg.ai import _activate_clockwork, _activate_hydra, _activate_illusionary_mask, _activation_target, _attack_positions, _global_enchantment_score, _play_one, _target, advance_solo
 from mtg.cards import CARDS
 from mtg.engine import Game, Permanent
 
@@ -1025,6 +1025,12 @@ class SoloAITests(unittest.TestCase):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:63"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
         game.stack=[spell_type(AI,uid,"lea:63",f"{HUMAN}:{target.uid}",decision_pending=True,choice_owner=AI)]; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
         advance_solo(game); self.assertTrue(target.land_word_changes); self.assertTrue(any(event["action"]=="ai_word_change" for event in game.history))
+
+    def test_ai_activates_mask_and_privately_casts_an_eligible_creature(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).battlefield=[]; game.player(AI).hand=[]
+        self.add(game,AI,"lea:249"); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="bear"; game.player(AI).hand=[uid]; game.player(AI).mana_pool={"G":1,"C":1}; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        self.assertEqual(_activate_illusionary_mask(game,AI),"mask_activate"); game.pass_priority(HUMAN); game.pass_priority(AI); advance_solo(game)
+        self.assertTrue(game.stack[-1].face_down); self.assertEqual(game.stack[-1].uid,uid); self.assertTrue(any(event["action"]=="ai_mask_creature" for event in game.history))
 
     def test_ai_activates_chaos_orb_against_best_nontoken_permanent(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; orb=self.add(game,AI,"lea:235"); target=self.add(game,HUMAN,"lea:269"); self.add(game,HUMAN,"token:wasp")

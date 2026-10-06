@@ -158,6 +158,7 @@ class Card:
     combat_destroy_nonwall: bool = False
     raging_river: bool = False
     lich: bool = False
+    illusionary_mask: bool = False
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
     damaged_creature_death_counter: bool = False
@@ -420,6 +421,7 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:249": {"illusionary_mask":True},
     "lea:257": {"no_maximum_hand":True, "discard_to_library":True},
     "lea:235": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"chaos_orb_destroy", "activation_text":"Digital adaptation: destroy target nontoken permanent, then destroy this artifact"},
     "lea:246": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"grant_banding", "activation_text":"Target creature gains banding until end of turn"},
@@ -833,6 +835,7 @@ for reference in PLAYABLE_ALPHA:
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         raging_river=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("raging_river",False),
         lich=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("lich",False),
+        illusionary_mask=ALPHA_ARTIFACTS.get(reference.key,{}).get("illusionary_mask",False),
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),

@@ -4,7 +4,9 @@ import time
 from itertools import combinations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Dict, List, Optional
-from .cards import CARDS, TOKENS, starter
+from .cards import CARDS, TOKENS, Card, starter
+
+FACE_DOWN_CREATURE=Card(key="face_down",name="Face-down creature",kind="Creature",type_line="Creature",scryfall_id="",oracle_id="",power=2,toughness=2,text="")
 
 class GameError(ValueError): pass
 
@@ -52,6 +54,8 @@ class Permanent:
     must_block_all: bool = False
     land_word_changes: Dict[str, str] = field(default_factory=dict)
     color_word_changes: Dict[str, str] = field(default_factory=dict)
+    face_down: bool = False
+    mask_normal_damage: bool = False
 
 @dataclass
 class Player:
@@ -104,6 +108,7 @@ class Spell:
     is_copy: bool = False
     fork_retarget: bool = False
     controlled_by: Optional[int] = None
+    face_down: bool = False
 
 class Game:
     """Serializable two-player rules subset; Discord is only a view of this state."""
@@ -225,6 +230,7 @@ class Game:
         key=self.cards[uid]; permanent=None
         if hasattr(self,"players"):
             permanent=next((item for player in self.players.values() for item in player.battlefield if item.uid==uid),None)
+        if permanent is not None and permanent.face_down: return FACE_DOWN_CREATURE
         copy_key=permanent.copy_key if permanent is not None else ""
         card=CARDS.get(copy_key or key) or TOKENS[copy_key or key]
         if copy_key and permanent.copy_added_types:
@@ -239,7 +245,7 @@ class Game:
     def _make_permanent(self,uid,key,**kwargs):
         kwargs.setdefault("layer_timestamp",self.next_layer_timestamp); self.next_layer_timestamp+=1
         permanent=Permanent(uid,key,**kwargs)
-        effective=(CARDS.get(permanent.copy_key) or TOKENS.get(permanent.copy_key)) if permanent.copy_key else self.card(uid)
+        effective=FACE_DOWN_CREATURE if permanent.face_down else (CARDS.get(permanent.copy_key) or TOKENS.get(permanent.copy_key)) if permanent.copy_key else self.card(uid)
         permanent.power_counters=effective.enters_power_counters
         return permanent
     def _global_land_animation_sources(self,permanent):
@@ -353,8 +359,10 @@ class Game:
         layers.extend((source.layer_timestamp or source.uid,self.card(source.uid).animate_land_color) for source in self._global_land_animation_sources(permanent) if self.card(source.uid).animate_land_color)
         return (max(layers)[1],) if layers else self.card(permanent.uid).colors
     def spell_colors(self,spell):
+        if spell.face_down: return ()
         return (spell.color_override,) if spell.color_override else self.card(spell.uid).colors
     def spell_mana_value(self,spell):
+        if spell.face_down: return 0
         card=self.card(spell.uid); return card.cost+card.mana_cost.count("{X}")*spell.x_value
     def ability_source_colors(self,spell):
         _,source=self.find_permanent(spell.source_uid)
@@ -722,8 +730,17 @@ class Game:
                 triggers.append(Spell(controller_id,uid,card.key,str(controller_id),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
         return triggers
 
+    def _turn_face_up(self,permanent,reason):
+        if not permanent.face_down: return False
+        if reason=="being dealt damage" and self.phase=="after_blockers" and self._combat_has_first_strike(): permanent.mask_normal_damage=True
+        permanent.face_down=False
+        actual=CARDS.get(self.cards.get(permanent.uid,"")) or TOKENS.get(self.cards.get(permanent.uid,""))
+        self.log.append(f"{actual.name if actual else 'A face-down creature'} was turned face up before {reason}.")
+        return True
+
     def _tap_permanent(self,user,permanent,mana_symbol=None,add_mana=False,pending_triggers=None):
         if permanent.tapped: return {}
+        self._turn_face_up(permanent,"becoming tapped")
         permanent.tapped=True; player=self.player(user)
         triggers=self._tap_triggers(user,permanent,mana_symbol)
         if pending_triggers is None: self.stack.extend(triggers)
@@ -733,7 +750,7 @@ class Game:
             for symbol,count in output.items(): player.mana_pool[symbol]=player.mana_pool.get(symbol,0)+count
         return output
 
-    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=(),activation_colors=(),activation_is_enchantment=False,land_only=False):
+    def _mana_payment(self,player,card,x_value=0,mana_cost=None,excluded_uids=(),activation_colors=(),activation_is_enchantment=False,land_only=False,pool_only=False):
         generic,colored=self._mana_requirements(card,x_value,mana_cost)
         for battlefield in self.players.values():
             for source in battlefield.battlefield:
@@ -746,7 +763,7 @@ class Game:
         items=[]
         for symbol,count in player.mana_pool.items():
             for number in range(count): items.append(("pool",f"{symbol}:{number}",None,((symbol,{symbol:1}),)))
-        for permanent in player.battlefield:
+        for permanent in (() if pool_only else player.battlefield):
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids or (land_only and not source.land): continue
             mana_choices=self.current_mana_choices(permanent)
@@ -1052,6 +1069,52 @@ class Game:
         self.stack.extend(pending); self.phase_passes=0
         for item in self.stack: item.passes=0
         self.log.append(f"{user} activated Rock Hydra to {'prevent 1 damage' if mode=='prevent' else 'add a +1/+1 counter'}.")
+
+    def activate_illusionary_mask(self,user,position,x_value):
+        self._priority(user); player=self.player(user)
+        if self.active_user!=user or self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Activate Illusionary Mask only as a sorcery.")
+        if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
+        source=player.battlefield[position-1]; card=self.card(source.uid)
+        if not card.illusionary_mask: raise GameError("Choose an Illusionary Mask you control.")
+        try: x_value=int(x_value)
+        except (TypeError,ValueError) as error: raise GameError("Illusionary Mask requires a nonnegative X value.") from error
+        if x_value<0: raise GameError("Illusionary Mask requires a nonnegative X value.")
+        before=dict(player.mana_pool); payment=self._mana_payment(player,card,x_value,mana_cost="{X}")
+        if payment is None: raise GameError(f"You cannot pay {{{x_value}}} for Illusionary Mask.")
+        sources,remaining,choices=payment; available=dict(before); pending=[]
+        for permanent in sources:
+            for symbol,count in self._mana_output(permanent,choices[permanent.uid]).items(): available[symbol]=available.get(symbol,0)+count
+            self._tap_permanent(user,permanent,choices[permanent.uid],pending_triggers=pending)
+        spent={symbol:count-remaining.get(symbol,0) for symbol,count in available.items() if count>remaining.get(symbol,0)}; player.mana_pool=remaining
+        uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
+        ability=Spell(user,uid,card.key,str(user),ability_effect="illusionary_mask",source_uid=source.uid,x_value=x_value,mana_choices={"mask_spent":",".join(f"{symbol}:{count}" for symbol,count in sorted(spent.items()))})
+        self.stack.append(ability); self.stack.extend(pending); self.phase_passes=0
+        for item in self.stack: item.passes=0
+        self.priority_user=self.opponent(user); self.log.append(f"{user} activated Illusionary Mask with X={x_value}.")
+
+    def illusionary_mask_choices(self,spell=None):
+        spell=spell or (self.stack[-1] if self.stack else None)
+        if spell is None or spell.ability_effect not in ("illusionary_mask","mask_choose"): return []
+        spent={}
+        for item in spell.mana_choices.get("mask_spent","").split(","):
+            if item:
+                symbol,count=item.split(":",1); spent[symbol]=int(count)
+        player=self.player(spell.owner); payment_player=replace(player,mana_pool=spent,battlefield=[])
+        return [(position,self.card(uid)) for position,uid in enumerate(player.hand,1) if self.card(uid).creature and self._mana_payment(payment_player,self.card(uid),pool_only=True) is not None]
+
+    def choose_illusionary_mask(self,user,position=None):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="mask_choose" or self.stack[-1].choice_owner!=user: raise GameError("Illusionary Mask is not waiting for your private choice.")
+        ability=self.stack[-1]; choices={position:card for position,card in self.illusionary_mask_choices(ability)}
+        if position is not None:
+            try: position=int(position)
+            except (TypeError,ValueError) as error: raise GameError("Choose a valid eligible creature position or decline.") from error
+            if position not in choices: raise GameError("Choose a valid eligible creature position or decline.")
+        self.stack.pop(); self.cards.pop(ability.uid,None); ability.decision_pending=False
+        if position is not None:
+            player=self.player(user); uid=player.hand.pop(position-1); self.stack.append(Spell(user,uid,self.cards[uid],face_down=True)); self.log.append(f"{user} cast a face-down creature spell with Illusionary Mask.")
+        else: self.log.append(f"{user} declined to cast a creature with Illusionary Mask.")
+        self.phase_passes=0; self.priority_user=self.active_user
 
     def choose_hydra_order(self,user,position,order):
         self._priority(user); player=self.player(user)
@@ -1388,6 +1451,19 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
+                if s.face_down:
+                    self.stack.pop(); self._resolve(s)
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
+                if s.ability_effect=="illusionary_mask":
+                    choices=self.illusionary_mask_choices(s)
+                    if choices:
+                        s.ability_effect="mask_choose"; s.decision_pending=True; s.choice_owner=s.owner; s.passes=0; self.priority_user=s.owner; return
+                    self.stack.pop(); self.cards.pop(s.uid,None); self.log.append("Illusionary Mask resolved with no eligible creature card.")
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
                 if s.ability_effect=="lich_damage":
                     available=[permanent for permanent in self.player(s.owner).battlefield if not self.is_token(permanent.uid)]
                     if len(available)>=s.choice_value:
@@ -1671,10 +1747,11 @@ class Game:
         if self.finished: raise GameError("Game is over.")
         if self.phase=="cleanup_discard" and user==self.active_user:
             return None,[(position,self.card(uid)) for position,uid in enumerate(self.player(user).hand,1)]
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand","leng_discard","word_choose"):
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand","leng_discard","word_choose","mask_choose"):
             raise GameError("You do not have a private hand decision to complete.")
         item=self.stack[-1]
         if item.ability_effect=="leng_discard": return item,[(1,self.card(item.discard_queue[0]["uid"]))]
+        if item.ability_effect=="mask_choose": return item,self.illusionary_mask_choices(item)
         target=self.player(user) if item.ability_effect=="balance_hand" else self.player(int(item.target))
         return item,[(position,self.card(uid)) for position,uid in enumerate(target.hand,1)]
 
@@ -2103,7 +2180,7 @@ class Game:
         if required: raise GameError(", ".join(self.card(x.uid).name for x in required)+" must attack this combat if able.")
         self.attackers=chosen; self.attack_bands=formed; self.attacked_this_turn.extend(uid for uid in chosen if uid not in self.attacked_this_turn); self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=list(chosen); self.trample_assignments={}; self.attacker_damage_assignments={}; self.phase_passes=0; self.blocker_damage_assignments={}
         for x in list(p.battlefield):
-            if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
+            if x.uid in chosen and "vigilance" not in self.current_keywords(x): self._tap_permanent(user,x)
         self._sba(); self._life()
         self.phase="after_attackers" if self.attackers else "postcombat_main"
         if self.attackers:
@@ -2300,7 +2377,7 @@ class Game:
         if user not in self.order or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign attacker damage after blockers with an empty stack.")
         battlefield=self.player(self.active_user).battlefield
         if not 1<=attacker_position<=len(battlefield): raise GameError("No permanent at that battlefield position.")
-        attacker=battlefield[attacker_position-1]; blocker_uids=[uid for uid in self.blockers_for(attacker.uid) if self.find_permanent(uid)[1] is not None]
+        attacker=battlefield[attacker_position-1]; self._turn_face_up(attacker,"assigning combat damage"); blocker_uids=[uid for uid in self.blockers_for(attacker.uid) if self.find_permanent(uid)[1] is not None]
         if attacker.uid not in self.attackers or len(blocker_uids)<2 or user!=self.attacker_damage_owner(attacker.uid): raise GameError("Choose an attacking creature blocked by multiple creatures.")
         first_step=self._combat_has_first_strike() and self.phase=="after_blockers"; strikes=("first_strike" in self.current_keywords(attacker))==first_step
         if not strikes: raise GameError("That attacker does not assign damage in the next combat damage step.")
@@ -2338,7 +2415,7 @@ class Game:
         if user not in self.order or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign blocker damage after blockers with an empty stack.")
         battlefield=self.player(self.opponent(self.active_user)).battlefield
         if not 1<=blocker_position<=len(battlefield): raise GameError("No permanent at that battlefield position.")
-        blocker=battlefield[blocker_position-1]; blocked=[uid for uid in self.attackers_for(blocker.uid) if self.find_permanent(uid)[1] is not None]
+        blocker=battlefield[blocker_position-1]; self._turn_face_up(blocker,"assigning combat damage"); blocked=[uid for uid in self.attackers_for(blocker.uid) if self.find_permanent(uid)[1] is not None]
         if len(blocked)<2 or user!=self.blocker_damage_owner(blocker.uid): raise GameError("Choose a creature whose combat damage you control and that blocks multiple attackers.")
         first_step=self._combat_has_first_strike() and self.phase=="after_blockers"; strikes=("first_strike" in self.current_keywords(blocker))==first_step
         if not strikes: raise GameError("That blocker does not assign damage in the next combat damage step.")
@@ -2412,6 +2489,7 @@ class Game:
 
     def _damage_permanent(self,permanent,amount,source=None,colors=None,trigger_batch=None,source_uid=None):
         amount=max(0,int(amount))
+        if amount: self._turn_face_up(permanent,"being dealt damage")
         if source is not None and self._protected_from(permanent,source,colors): return 0
         hydra=self.card(permanent.uid).hydra_damage_replacement
         if hydra and permanent.hydra_counters_first:
@@ -2539,6 +2617,10 @@ class Game:
 
     def _combat_damage(self,first_strike):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
+        mask_assigners=set()
+        if not first_strike:
+            mask_assigners={uid for uid in self.attackers+list(self.all_blocker_uids()) if (self.find_permanent(uid)[1] is not None and (self.find_permanent(uid)[1].face_down or self.find_permanent(uid)[1].mask_normal_damage))}
+            for uid in mask_assigners: self._turn_face_up(self.find_permanent(uid)[1],"assigning combat damage")
         if self.prevent_combat_damage:
             self.log.append("Combat damage was prevented."); self._sba(); self._life(); return
         damage_batch=self.next_uid
@@ -2547,7 +2629,7 @@ class Game:
             if a is None: continue
             blockers=[next((x for x in dfn.battlefield if x.uid==blocker_uid),None) for blocker_uid in self.blockers_for(uid)]
             blockers=[blocker for blocker in blockers if blocker is not None]
-            attacker_strikes=("first_strike" in self.current_keywords(a))==first_strike
+            attacker_strikes=uid in mask_assigners or ("first_strike" in self.current_keywords(a))==first_strike
             if attacker_strikes:
                 power=max(0,self.current_stats(a)[0]); trample="trample" in self.current_keywords(a)
                 if not blockers:
@@ -2564,12 +2646,15 @@ class Game:
                     for blocker in blockers: self._damage_permanent(blocker,assignment.get(blocker.uid,0),self.card(a.uid),self.current_colors(a),damage_batch,a.uid)
                     if trample: self._damage_player(dfn.user_id,max(0,power-sum(assignment.values())),a,atk.user_id,combat=True)
             for blocker in blockers:
-                blocker_strikes=("first_strike" in self.current_keywords(blocker))==first_strike
+                blocker_strikes=blocker.uid in mask_assigners or ("first_strike" in self.current_keywords(blocker))==first_strike
                 if blocker_strikes:
                     assigned=next((item.get("damage",0) for item in self.blocker_damage_assignments.get(blocker.uid,[]) if item.get("attacker")==a.uid),max(0,self.current_stats(blocker)[0]))
                     self._damage_permanent(a,assigned,self.card(blocker.uid),self.current_colors(blocker),damage_batch,blocker.uid)
         self.attacker_damage_assignments={}; self.blocker_damage_assignments={}
         self._sba(); self._life()
+        if not first_strike:
+            for player in self.players.values():
+                for permanent in player.battlefield: permanent.mask_normal_damage=False
 
     def _end_combat(self):
         pending=self.end_combat_destroys; self.end_combat_destroys=[]
@@ -2584,7 +2669,7 @@ class Game:
         self.attackers=[]; self.attack_bands=[]; self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=[]; self.trample_assignments={}; self.attacker_damage_assignments={}; self.blocker_damage_assignments={}; self.raging_river_rules=[]; self.camouflage_pending=False
         for player in self.players.values(): player.bodyguard_choice=0
         for player in self.players.values():
-            for permanent in player.battlefield: permanent.animated_until_end_combat=False
+            for permanent in player.battlefield: permanent.animated_until_end_combat=False; permanent.mask_normal_damage=False
         self._sba(); self.stack.extend(pending)
         return bool(pending)
 
@@ -2619,19 +2704,20 @@ class Game:
         dies=not permanent.exile_on_death
         token=self.is_token(permanent.uid); owner=self.permanent_owner(permanent,controller)
         if not token: (owner.graveyard if dies else owner.exile).append(permanent.uid)
-        if dies and self.card(permanent.uid).lich:
+        if dies and not permanent.face_down and self.card(permanent.uid).lich:
             self._finish(self.opponent(controller.user_id),"Lich left the battlefield for the graveyard")
-        if dies and self.card(permanent.uid).key=="lea:240":
+        if dies and not permanent.face_down and self.card(permanent.uid).key=="lea:240":
             marker={"owner":controller.user_id,"source_uid":permanent.uid,"source_timestamp":permanent.layer_timestamp}
             if marker not in self.tomb_cleanup_sources: self.tomb_cleanup_sources.append(marker)
-        if dies and self.card(permanent.uid).death_owner_half_life:
+        if dies and not permanent.face_down and self.card(permanent.uid).death_owner_half_life:
             owner.life-=max(0,(owner.life+1)//2)
-        if dies and self.card(permanent.uid).aura_reanimate and permanent.attached_to is not None:
+        if dies and not permanent.face_down and self.card(permanent.uid).aura_reanimate and permanent.attached_to is not None:
             uid=self.next_uid; self.next_uid+=1; self.cards[uid]=self.card(permanent.uid).key
             self.stack.append(Spell(controller.user_id,uid,self.card(permanent.uid).key,str(permanent.attached_to),ability_effect="animate_dead_sacrifice",source_uid=permanent.uid,color_override=permanent.color_override))
         if dies and self.is_creature(permanent):
             self.creatures_died_this_turn+=1
             self._death_triggers(permanent,self.next_uid if batch_id is None else batch_id,death_sources,controller)
+        permanent.face_down=False
         if token: self.cards.pop(permanent.uid,None)
 
     def _remove_from_combat(self,uid):
@@ -2650,7 +2736,7 @@ class Game:
         if self.is_indestructible(permanent):
             self.log.append(f"{self.card(permanent.uid).name} was indestructible."); return False
         if allow_regeneration and permanent.regeneration_shields:
-            permanent.regeneration_shields-=1; permanent.tapped=True; permanent.damage=0
+            permanent.regeneration_shields-=1; self._turn_face_up(permanent,"becoming tapped"); permanent.tapped=True; permanent.damage=0
             self._remove_from_combat(permanent.uid)
             self.log.append(f"{self.card(permanent.uid).name} regenerated.")
             return False
@@ -2901,7 +2987,7 @@ class Game:
             if source is not None: self._destroy(source_controller,source,allow_regeneration=False)
         elif effect=="tap_permanent":
             if target_card is None or not any(self.has_current_type(target,kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
-            target.tapped=True
+            target_controller,_=self.find_permanent(target.uid); self._tap_permanent(target_controller.user_id,target)
         else:
             fizzle("the effect is unsupported"); return
         self.cards.pop(s.uid,None); self.log.append(f"{card.name} ability resolved.")
@@ -2909,7 +2995,10 @@ class Game:
 
     def _resolve(self,s):
         if s.ability_effect: self._resolve_ability(s); return
-        p=self.players[s.owner]; c=self._text_changed_card(s.uid,CARDS[s.key],s.land_word_changes,s.color_word_changes)
+        p=self.players[s.owner]
+        if s.face_down:
+            p.battlefield.append(self._make_permanent(s.uid,s.key,owner=s.owner,face_down=True)); self.log.append(f"{s.owner} resolved a face-down 2-by-2 creature."); return
+        c=self._text_changed_card(s.uid,CARDS[s.key],s.land_word_changes,s.color_word_changes)
         protected=None if c.enters_copy_types else self._stable_target_permanent(s.target)
         if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
             self._finish_spell(s); self.log.append(f"{c.name} fizzled because its target gained protection."); return
@@ -3301,7 +3390,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect=="word_choose": message="The Word of Command controller must choose a card from the targeted hand first."
+            if self.stack[-1].ability_effect=="mask_choose": message="The Illusionary Mask controller must choose an eligible creature or decline first."
+            elif self.stack[-1].ability_effect=="word_choose": message="The Word of Command controller must choose a card from the targeted hand first."
             elif self.stack[-1].ability_effect=="lich_damage": message="The damaged player must choose Lich sacrifices first."
             elif self.stack[-1].ability_effect.startswith("raging_river_"): message="The pending Raging River division must be completed first."
             elif self.stack[-1].is_copy and self.stack[-1].fork_retarget: message="The Fork controller must choose targets for the copied spell first."

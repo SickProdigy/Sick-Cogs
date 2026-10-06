@@ -767,6 +767,19 @@ def _activate_hydra(game,user):
             game.activate_hydra(user,position,"counter"); return "hydra_counter"
     return None
 
+def _activate_illusionary_mask(game,user):
+    if game.active_user!=user or game.phase not in ("precombat_main","postcombat_main") or game.stack: return None
+    player=game.player(user)
+    if not any(game.card(uid).creature for uid in player.hand): return None
+    for position,permanent in enumerate(player.battlefield,1):
+        card=game.card(permanent.uid)
+        if not card.illusionary_mask: continue
+        x_value=0
+        while x_value<20 and game._mana_payment(player,card,x_value+1,mana_cost="{X}") is not None: x_value+=1
+        if x_value:
+            game.activate_illusionary_mask(user,position,x_value); return "mask_activate"
+    return None
+
 def _activate_owned_incarnation(game,user):
     for controller in game.players.values():
         if controller.user_id==user: continue
@@ -869,6 +882,11 @@ def advance_solo(game: Game):
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.ability_effect=="mask_choose":
+                choices=game.illusionary_mask_choices(trigger)
+                if choices: position,_=max(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0])); game.choose_illusionary_mask(user,position); action="ai_mask_creature"
+                else: game.choose_illusionary_mask(user); action="ai_mask_decline"
+                game.record(user,action); changed=True; continue
             if trigger.ability_effect=="word_choose":
                 choices=game.private_hand_decision(user)[1]; ordered=sorted(choices,key=lambda item:(not item[1].land,item[1].cost,item[0])); completed=False
                 for position,card in ordered:
@@ -966,7 +984,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _choose_bodyguard(game,user) or _activate_hydra(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _choose_bodyguard(game,user) or _activate_hydra(game,user) or _activate_illusionary_mask(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

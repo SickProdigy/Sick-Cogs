@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.119.0"
+    __version__="0.120.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -230,7 +230,7 @@ class MTG(commands.Cog):
         if g.stack:
             stack_lines=[]
             for position,item in enumerate(reversed(g.stack),1):
-                label=g.card(item.uid).name+(" ability" if item.ability_effect else "")+(" copy" if item.is_copy else "")
+                label=("Face-down creature spell" if item.face_down else g.card(item.uid).name+(" ability" if item.ability_effect else ""))+(" copy" if item.is_copy else "")
                 if item.color_override: label+=f" [{item.color_override}]"
                 if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
                 if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
@@ -246,7 +246,8 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    if item.ability_effect=="word_choose": label+=f" ({item.choice_owner} is privately choosing a card from the targeted hand)"
+                    if item.ability_effect=="mask_choose": label+=" (controller is privately choosing an eligible creature or declining)"
+                    elif item.ability_effect=="word_choose": label+=f" ({item.choice_owner} is privately choosing a card from the targeted hand)"
                     elif item.ability_effect=="lich_damage": label+=f" ({item.choice_owner} must sacrifice {item.choice_value} nontoken permanents)"
                     elif item.ability_effect=="raging_river_split": label+=f" ({item.choice_owner} must divide nonflying defenders left/right)"
                     elif item.ability_effect=="raging_river_attackers": label+=f" ({item.choice_owner} must divide attackers left/right)"
@@ -385,6 +386,7 @@ class MTG(commands.Cog):
         elif effect=="cleanup_discard": heading=f"Cleanup - privately choose {len(game.player(user).hand)-7} cards to discard"
         elif effect=="leng_discard": heading=f"Library of Leng - choose a destination for {visible[0][1].name}"
         elif effect=="word_choose": heading=f"Word of Command - choose a card to play from {item.target}s hand; use the word command for targets or X"
+        elif effect=="mask_choose": heading=f"Illusionary Mask - privately choose an eligible creature or decline"
         else: heading=f"{name} - targeted hand"
         text=heading+"\n"+("\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible) or "The targeted hand is empty.")
         view=PrivateHandDecisionView(self,game_id,user,page,pages,effect,entries)
@@ -400,11 +402,12 @@ class MTG(commands.Cog):
                 if effect=="cleanup_discard": game.choose_cleanup_discard(interaction.user.id,position if isinstance(position,(list,tuple)) else [position]); action="cleanup_discard"
                 elif effect=="balance_hand": game.choose_balance(interaction.user.id,position); action="balance_hand_choice"
                 elif effect=="word_choose": game.choose_word_command(interaction.user.id,position); action="word_of_command_choice"
+                elif effect=="mask_choose": game.choose_illusionary_mask(interaction.user.id,position); action="illusionary_mask_choice"
                 else: game.choose_private_hand(interaction.user.id,position); action="private_discard" if effect=="discard_choice" else "private_hand_view"
                 game.record(interaction.user.id,action); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
-        message=("Word of Command choice completed." if effect=="word_choose" else "Card discarded." if position is not None else "Hand view completed.")
+        message=("Illusionary Mask choice completed." if effect=="mask_choose" else "Word of Command choice completed." if effect=="word_choose" else "Card discarded." if position is not None else "Hand view completed.")
         await interaction.response.edit_message(content=message,view=None); await self.refresh_message(game)
 
     async def complete_discard_destination(self,interaction,game_id,to_library):
@@ -642,6 +645,19 @@ class MTG(commands.Cog):
     async def hydraorder(self,ctx,position:int,order:str):
         """Choose Rock Hydra replacement priority: `counters` or `shields`."""
         await self.mutate_ctx(ctx,lambda g:g.choose_hydra_order(ctx.author.id,position,order),"hydra_order")
+    @mtg.command(name="mask")
+    async def mask(self,ctx,position:int,x_value:int):
+        """Activate Illusionary Mask at a battlefield position and pay X."""
+        await self.mutate_ctx(ctx,lambda g:g.activate_illusionary_mask(ctx.author.id,position,x_value),"illusionary_mask")
+    @mtg.command(name="maskpick")
+    async def maskpick(self,ctx,choice:str):
+        """Choose an eligible hand position for Illusionary Mask, or `decline`."""
+        position=None
+        if choice.casefold()!="decline":
+            try: position=int(choice)
+            except ValueError:
+                await ctx.send("Choose an eligible hand position or `decline`."); return
+        await self.mutate_ctx(ctx,lambda g:g.choose_illusionary_mask(ctx.author.id,position),"illusionary_mask_choice")
     @mtg.command(name="activate")
     async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
         """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`; Jade Monolith uses `SOURCE>TARGET`."""

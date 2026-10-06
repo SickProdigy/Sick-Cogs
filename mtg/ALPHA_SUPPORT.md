@@ -7,10 +7,10 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | All playable through 0.108.0 |
-| Instants and sorceries | 70 | 67 spells playable through 0.112.0; 3 remain |
-| Enchantments | 68 | 66 enchantments playable through 0.110.0; 2 remain |
-| Artifacts | 42 | 40 artifacts playable through 0.108.0; 2 remain |
+| Creatures with abilities | 77 | All playable through 0.120.0 |
+| Instants and sorceries | 70 | All playable through 0.119.0 |
+| Enchantments | 68 | All playable through 0.118.0 |
+| Artifacts | 42 | All playable through 0.120.0 |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb is playable through the disclosed deterministic Discord adaptation in 0.113.0 |
@@ -88,12 +88,12 @@ The 0.41.0 static-artifact promotion adds Meekstone and Sunglasses of Urza. Meek
 ## Delivery stages
 
 1. **Mana, lands, and vanilla creatures (complete):** colored and generic costs, backtracking-safe automatic land selection, all 19 Alpha lands, all 15 textless Alpha creatures, catalog status, persistence, and solo-AI compatibility.
-2. **Creature combat abilities (in progress):** flying/reach interaction, vigilance, defender, first-strike timing, all currently required landwalk variants, color protection, subtype-lord stat/keyword/regeneration grants, Ironclaw Orcs’ block restriction, summoning-sick creature mana activation, and live characteristic power/toughness are complete. Trample damage is complete for War Mammoth, and delayed end-of-combat destruction is complete for Cockatrice and Thicket Basilisk; upkeep-linked tramplers, multi-block assignment, banding, and other creature-specific rules remain.
-3. **Spell and zone actions (in progress):** any-target damage, creature damage, self-damage, targeted draw, temporary creature pump, blocking-target restrictions, fizzle behavior, simultaneous zero-life draws, targeted/all/basic-type land destruction, restricted and mass creature destruction, exile with controller life gain, artifact/enchantment destruction, targeted regeneration and temporary flying, explicit tap/untap choices, spell-produced mana, non-regenerable Wall destruction, mass enchantment destruction, indefinite spell/permanent color changes, and floating-mana responses are complete. Sacrifice beyond mana costs, prevention, conditional/X counterspells beyond color-restricted activated counters, player-chosen discard, library search, control changes, remaining board-wide effects, complex modes, multi-target division, and conditional X costs remain.
-4. **Artifacts and activated abilities (in progress):** artifact permanents, one- and multi-mana tap abilities, mana pools, chosen colors, tap-plus-sacrifice mana costs, surplus preservation, and artifact destruction are complete. Reusable non-mana activation payments, temporary keywords, delayed sacrifice triggers, tap costs, stable activation targets, response windows, and resolution-time fizzling are complete. Persisted regeneration shields and their destruction replacement are complete. Color-restricted enchantment counter costs, reusable paid artifact tap abilities for tapping, damage, and draw, paid mana filtering, multi-mana production, skip-untap/self-untap behavior, and land entry/death triggers, enters-tapped permanents, regenerable nonland mass destruction, and mandatory upkeep/draw-step artifact triggers, global power-based untap restrictions, and white-as-red spending are complete. Granted abilities and more complex activation controls remain.
-5. **Enchantments and continuous rules (in progress):** Stable Aura targeting, persisted cross-controller attachments, additive stat and keyword effects, combat restrictions, attached activations, public rendering, state-based cleanup, protection-granting Wards, Blessing, Fear, and Aspect of Wolf are complete for 20 creature Auras. Controller-, color-, tapped-, and attacking-scoped global stat effects are complete for Castle, Crusade, Bad Moon, and Orcish Oriflamme. Land-tap mana, damage, and life triggers are complete for Psychic Venom, Mana Flare, Manabarbs, Wild Growth, Gauntlet of Might, and Lifetap. Activated color-restricted spell counters are complete for Deathgrip and Lifeforce. Other land/artifact Auras, type-changing effects, control changes, dependency-aware layers, global effects, triggers, and replacement effects remain.
-6. **Complex Alpha behavior:** X costs and extra turns are established; copying, control changes, delayed effects, face-down state, card-specific choices, and remaining manual exceptions remain.
-7. **Completion audit:** per-card behavior matrix, AI safety, persistence round trips, Discord component limits, complete-match simulations, and hands-on test matches.
+2. **Creature combat abilities (complete):** all Alpha creature combat, upkeep, triggered, activated, control, copy, and characteristic rules are represented in the shared engine.
+3. **Spell and zone actions (complete):** all non-ante Alpha spells use persisted targeting, choices, priority, state actions, hidden-information boundaries, and Discord controls.
+4. **Artifacts and activated abilities (complete):** all Alpha artifacts are playable, including the deterministic Chaos Orb adaptation and Illusionary Mask face-down state.
+5. **Enchantments and continuous rules (complete):** all Alpha enchantments use the shared Aura, layer, trigger, replacement, combat, and persistence paths.
+6. **Complex Alpha behavior (complete with explicit exceptions):** copy, control, delayed effects, face-down state, card-specific choices, and digital adaptations are implemented; only the three ante cards are excluded.
+7. **Completion audit:** per-card inventory, focused mechanic tests, AI safety, persistence round trips, Discord component limits, and complete-match simulations are automated; maintainer hands-on Discord matches remain the release smoke test.
 
 ## Explicit exceptions
 
@@ -252,3 +252,8 @@ The 0.105.0 multi-block combat promotion adds Two-Headed Giant of Foriys and Bla
 The 0.113.0 dexterity adaptation promotes Chaos Orb without simulating physical card flipping. Its `{1}, {T}` activation targets one nontoken permanent through the normal stable-target stack; if the Orb remains on the battlefield at resolution, it destroys that permanent and then itself. Target loss still destroys the Orb, source loss prevents the effect, costs are atomic, and persistence, public Discord rendering, explicit adaptation text, and solo AI use the shared activation path.
 
 The 0.112.0 text-word promotion adds Magical Hack and Sleight of Mind. Either spell targets a permanent or another spell on the stack, then pauses at resolution for one of twenty basic-land-type or color-word replacements through a Discord selector or `[p]mtg wording FROM TO`. Changes persist on the affected battlefield object or stack object, compose in timestamp order, alter displayed Oracle text, and feed shared land types, landwalk, characteristic stats, typed destruction, animation, mana and tap effects, protection, color restrictions, Fear, Gloom, and related rules. Target legality is rechecked at resolution; solo AI uses the same target and choice paths.
+
+
+The 0.114.0 through 0.119.0 milestones complete Library of Leng, Fork, Raging River, Camouflage, Lich, and Word of Command through persisted engine choices, Discord controls, hidden-information boundaries, and solo AI.
+
+The 0.120.0 face-down promotion adds Illusionary Mask. Its exact spent mana determines eligible creature cards without reusing battlefield mana sources; the source may leave before resolution; the private controller may choose or decline; and the chosen card becomes a publicly anonymous, colorless, mana-value-zero 2/2 creature spell and permanent. It turns face up immediately before becoming tapped, assigning or dealing damage, or being dealt damage, including first-strike timing, while unrevealed death exposes the real card in its owner’s graveyard without applying hidden printed battlefield abilities. Spell and permanent identity, pending choices, reveal timing, Discord rendering, text fallbacks, reload recovery, and solo AI share the persisted path. This leaves exactly the three explicitly excluded ante cards reference-only.

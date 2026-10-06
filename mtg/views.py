@@ -190,7 +190,7 @@ class GameView(discord.ui.View):
             if game and action=="search":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
-                item.disabled=not bool(game.phase=="cleanup_discard" or (game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand","leng_discard","word_choose")))
+                item.disabled=not bool(game.phase=="cleanup_discard" or (game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand","leng_discard","word_choose","mask_choose")))
             if game and action=="natural_selection":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
@@ -334,7 +334,7 @@ class PrivateHandSelect(discord.ui.Select):
         self.browser=browser; start=browser.page*browser.page_size
         visible=entries[start:start+browser.page_size]
         options=[discord.SelectOption(label=f"{position}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(position)) for position,card in visible]
-        super().__init__(placeholder="Choose a card to play" if browser.effect=="word_choose" else "Choose a card to discard",min_values=1,max_values=1,options=options,row=0)
+        super().__init__(placeholder="Choose an eligible creature" if browser.effect=="mask_choose" else "Choose a card to play" if browser.effect=="word_choose" else "Choose a card to discard",min_values=1,max_values=1,options=options,row=0)
     async def callback(self,interaction):
         await self.browser.cog.complete_private_hand_interaction(interaction,self.browser.game_id,int(self.values[0]))
 
@@ -358,14 +358,15 @@ class PrivateHandDecisionView(discord.ui.View):
     page_size=25
     def __init__(self,cog,game_id,user_id,page,pages,effect,entries):
         super().__init__(timeout=300); self.cog,self.game_id,self.user_id,self.page,self.pages,self.effect=cog,game_id,user_id,page,pages,effect
-        if effect in ("discard_choice","cleanup_discard","word_choose"): self.add_item(PrivateHandSelect(self,entries))
+        if effect in ("discard_choice","cleanup_discard","word_choose","mask_choose"): self.add_item(PrivateHandSelect(self,entries))
         if effect=="balance_hand":
             game=cog.games[game_id]; required=game._balance_required(game.stack[-1],user_id)
             if pages==1 and 1<=required<=25: self.add_item(BalanceHandSelect(self,entries,required))
         if effect=="leng_discard":
             self.add_item(DiscardDestinationSelect(self))
         self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
-        self.done.disabled=effect!="look_hand"
+        self.done.disabled=effect not in ("look_hand","mask_choose")
+        if effect=="mask_choose": self.done.label="Decline"
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id: return True
         await interaction.response.send_message("This private hand decision belongs to another player.",ephemeral=True); return False
