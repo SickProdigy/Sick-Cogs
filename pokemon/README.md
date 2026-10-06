@@ -49,7 +49,7 @@ Battle HP and primary status—including remaining sleep turns—persist on owne
 
 ## Trainer profile and Kanto Gyms
 
-`[p]pokemon profile [@member]` displays your or another server member's generated trainer card, six-slot current-party strip, badge case, Pokédex progress, collection, bag, partner level/XP, and next Gym. Trainers challenge Brock through Giovanni in order. Members choose their own Retro or Gold card with `[p]pokemon profilestyle retro|gold`; viewers see the trainer's saved style. Each first victory awards that leader's badge exactly once; rematches are not required for progression. Gym battles award ordinary Pokémon battle XP, cannot award or consume a caught Gym Pokémon, and occupy the server's encounter slot until victory, defeat, forfeit, or expiry.
+`[p]pokemon profile [@member]` displays your or another server member's generated trainer card, six-slot current-party strip with sprites, names, levels, and sex marks, badge case, Pokédex progress, collection, bag, partner level/XP, and next Gym. Trainers challenge Brock through Giovanni in order. Members choose their own Retro or Gold card with `[p]pokemon profilestyle retro|gold`; viewers see the trainer's saved style. Each first victory awards that leader's badge exactly once; rematches are not required for progression. Gym battles award ordinary Pokémon battle XP, cannot award or consume a caught Gym Pokémon, and occupy the server's encounter slot until victory, defeat, forfeit, or expiry.
 
 The initial Gym milestone uses each leader's signature Pokémon as a restart-safe ace challenge. Full leader teams are deliberately deferred until opponent-party support is added to the battle engine; badge storage and ordering do not need to change for that expansion.
 
