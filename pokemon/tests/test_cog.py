@@ -1,4 +1,5 @@
 import asyncio
+import io
 import discord
 import json
 import tempfile
@@ -284,6 +285,15 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_pokedex_registration_names_the_trainer(self):
+        pokemon=OwnedPokemon.create("registration",39,3,seed=2)
+        cog=Pokemon.__new__(Pokemon);cog.renderer=SimpleNamespace(pokedex_registration=AsyncMock(return_value=io.BytesIO(b"png")))
+        embed,files=await cog.rendered_pokedex_registration(pokemon,"  SickProdigy  ")
+        self.assertEqual(embed.description,"New Pokémon data was added to SickProdigy's Pokédex.")
+        cog.renderer.pokedex_registration.assert_awaited_once_with(pokemon,"SickProdigy")
+        self.assertEqual(len(files),1)
+
+
     async def test_completed_member_commands_count_as_activity_without_repeat_farming(self):
         conf={"enabled":True,"spawn_mode":"activity","channels":[10],"active_encounter":None,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"activity":0}
         policy={"minimum_threshold":8,"minimum_cooldown":120}
