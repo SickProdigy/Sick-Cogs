@@ -117,7 +117,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.37.0";__author__="SickProdigy"
+    __version__="0.37.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -286,7 +286,7 @@ class Pokemon(commands.Cog):
         offset=random.SystemRandom().choice((-2,-1,0,0,1,1,2,2,3,4))
         return encounter_level(levels,offset)
 
-    async def spawn(self,channel):
+    async def spawn(self,channel,*,force_shiny=False):
         async with self.lock("encounters"):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
         conf=await self.config.guild(channel.guild).all();policy=await self.config.all()
@@ -295,7 +295,7 @@ class Pokemon(commands.Cog):
         if not pool:raise RuntimeError("No Pokémon are available under the bot-wide encounter policy.")
         rng=random.SystemRandom()
         chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
-        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);shiny=encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
+        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);shiny=True if force_shiny else encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
         display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
             image=await self.renderer.encounter(sid,level,gender,backdrop,shiny=shiny);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
@@ -1198,12 +1198,20 @@ class Pokemon(commands.Cog):
         if not selected or not set(selected)<=set(allowed):await ctx.send(f"Choose from bot-enabled generations: {', '.join(map(str,allowed))}.");return
         await self.config.guild(ctx.guild).generations.set(selected);await ctx.send(f"Enabled generations: {', '.join(map(str,selected))}.")
     @pokemon_set.command(name="spawn")
-    async def force_spawn(self,ctx,channel:discord.TextChannel=None):
-        """Trigger a cooldown-limited test encounter."""
-        channel=channel or ctx.channel
+    async def force_spawn(self,ctx,target:str=None):
+        """Trigger a test encounter; bot owners may use `shiny`."""
+        force_shiny=(target or "").casefold()=="shiny"
+        owner=await self.bot.is_owner(ctx.author)
+        if force_shiny and not owner:
+            await ctx.send("Only the bot owner can force a shiny encounter.");return
+        if target and not force_shiny:
+            try:channel=await commands.TextChannelConverter().convert(ctx,target)
+            except commands.BadArgument:
+                await ctx.send("Choose a text channel, or use `pokemonset spawn shiny` as the bot owner.");return
+        else:channel=ctx.channel
         conf=await self.config.guild(ctx.guild).all()
         if conf["active_encounter"]:await ctx.send("This server already has an encounter.");return
-        if not await self.bot.is_owner(ctx.author) and conf["last_spawn_at"]:
+        if not owner and conf["last_spawn_at"]:
             try:last=datetime.fromisoformat(conf["last_spawn_at"])
             except (TypeError,ValueError):last=None
             if conf.get("spawn_mode","timed")=="timed":
@@ -1214,7 +1222,7 @@ class Pokemon(commands.Cog):
                 policy=await self.config.all();_,_,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
                 remaining=max(0,round((last+timedelta(seconds=cooldown)-datetime.now(timezone.utc)).total_seconds())) if last else 0
                 if remaining:await ctx.send(f"The activity spawn cooldown is active for another {remaining}s.");return
-        await self.spawn(channel)
+        await self.spawn(channel,force_shiny=force_shiny)
     @pokemon_set.command(name="pokedexstyle")
     @commands.is_owner()
     async def default_pokedex_style(self,ctx,style:str=None):

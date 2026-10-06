@@ -597,6 +597,26 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(timer.value,30);self.assertIsNotNone(next_spawn.value)
         self.assertIn("every 30 minutes",owner_ctx.send.await_args.args[0])
 
+    async def test_forced_shiny_spawn_is_bot_owner_only(self):
+        conf={"active_encounter":None,"last_spawn_at":None}
+        cog=Pokemon.__new__(Pokemon);cog.spawn=AsyncMock();cog.config=SimpleNamespace(guild=lambda guild:StoredSection(conf))
+        channel=SimpleNamespace(id=20);ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),channel=channel,send=AsyncMock())
+        cog.bot=SimpleNamespace(is_owner=AsyncMock(return_value=False))
+        await Pokemon.force_spawn.callback(cog,ctx,"shiny")
+        ctx.send.assert_awaited_once_with("Only the bot owner can force a shiny encounter.")
+        cog.spawn.assert_not_awaited()
+
+        ctx.send.reset_mock();cog.bot.is_owner=AsyncMock(return_value=True)
+        await Pokemon.force_spawn.callback(cog,ctx,"shiny")
+        cog.spawn.assert_awaited_once_with(channel,force_shiny=True)
+
+    async def test_normal_manual_spawn_does_not_force_shiny(self):
+        conf={"active_encounter":None,"last_spawn_at":None}
+        channel=SimpleNamespace(id=20);ctx=SimpleNamespace(author=SimpleNamespace(id=7),guild=SimpleNamespace(id=42),channel=channel,send=AsyncMock())
+        cog=Pokemon.__new__(Pokemon);cog.spawn=AsyncMock();cog.config=SimpleNamespace(guild=lambda guild:StoredSection(conf));cog.bot=SimpleNamespace(is_owner=AsyncMock(return_value=False))
+        await Pokemon.force_spawn.callback(cog,ctx)
+        cog.spawn.assert_awaited_once_with(channel,force_shiny=False)
+
     async def test_pokedex_style_preference_follows_default_and_persists_override(self):
         preference=StoredValue("default")
         default=StoredValue("compact")
