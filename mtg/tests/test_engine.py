@@ -2161,6 +2161,55 @@ class AlphaHiveTokenTests(unittest.TestCase):
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
 
 
+class AlphaMassRedrawTests(unittest.TestCase):
+    def add(self,game,user,key,zone):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        getattr(game.player(user),zone).append(uid); return uid
+
+    def spell(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; return Spell(user,uid,key)
+
+    def test_wheel_discards_each_hand_then_draws_seven(self):
+        game=ready()
+        for player in game.players.values(): player.hand=[]; player.library=[]; player.graveyard=[]
+        old10=[self.add(game,10,"bear","hand"),self.add(game,10,"shock","hand")]
+        old20=[self.add(game,20,"giant","hand")]
+        for user in (10,20):
+            for _ in range(8): self.add(game,user,"forest" if user==20 else "mountain","library")
+        spell=self.spell(game,10,"lea:183"); game._resolve(spell)
+        self.assertEqual(len(game.player(10).hand),7); self.assertEqual(len(game.player(20).hand),7)
+        self.assertTrue(set(old10+[spell.uid])<=set(game.player(10).graveyard)); self.assertTrue(set(old20)<=set(game.player(20).graveyard))
+
+    def test_timetwister_shuffles_hands_and_graveyards_but_not_itself(self):
+        game=ready()
+        originals={}
+        for user in (10,20):
+            player=game.player(user); player.hand=[]; player.library=[]; player.graveyard=[]
+            originals[user]=[
+                self.add(game,user,"mountain" if user==10 else "forest","library"),
+                self.add(game,user,"bear","hand"),
+                self.add(game,user,"shock","graveyard"),
+            ]
+            for _ in range(6): originals[user].append(self.add(game,user,"mountain" if user==10 else "forest","library"))
+        spell=self.spell(game,10,"lea:84"); game._resolve(spell)
+        for user in (10,20):
+            player=game.player(user); self.assertEqual(len(player.hand),7)
+            self.assertEqual(set(player.hand+player.library),set(originals[user])); self.assertEqual(player.graveyard,[spell.uid] if user==10 else [])
+        self.assertNotIn(spell.uid,game.player(10).hand+game.player(10).library)
+
+    def test_mass_redraw_empty_library_losses_are_simultaneous(self):
+        game=ready()
+        for player in game.players.values(): player.hand=[]; player.library=[]; player.graveyard=[]
+        spell=self.spell(game,10,"lea:183"); restored=Game.from_raw(game.to_raw())
+        restored._resolve(Spell(10,spell.uid,"lea:183"))
+        self.assertIsNone(restored.winner); self.assertEqual(restored.finished_reason,"both players drew from empty libraries")
+
+    def test_mass_redraw_spell_persists_on_stack(self):
+        game=ready(); spell=self.spell(game,10,"lea:84"); game.stack=[spell]
+        restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.stack[-1].key,"lea:84"); self.assertEqual(restored.stack[-1].owner,10)
+
+
 class AlphaRandomDiscardTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

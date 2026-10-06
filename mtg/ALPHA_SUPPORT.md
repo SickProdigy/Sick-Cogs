@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
-| Instants and sorceries | 70 | 45 spells playable through 0.53.0; 25 remain |
+| Instants and sorceries | 70 | 47 spells playable through 0.57.0; 23 remain |
 | Enchantments | 68 | 36 enchantments playable through 0.56.0; 32 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -134,3 +134,5 @@ The 0.54.0 delayed-combat-destruction promotion adds Cockatrice and Thicket Basi
 The 0.55.0 creature-upkeep promotion adds Phantasmal Forces and Force of Nature. Each controller receives a persisted, respondable upkeep trigger followed by an explicit payment decision using the printed colored cost. Declining Phantasmal Forces sacrifices it without allowing regeneration; declining Force of Nature deals eight preventable damage even if its source has left the battlefield. Discord displays the actual Pay {U} or Pay {G}{G}{G}{G} choice, and solo AI preserves a live Forces or avoids Force of Nature damage whenever legal mana is available.
 
 The 0.56.0 upkeep-damage-enchantment promotion adds Karma, Feedback, Cursed Land, Warp Artifact, and Wanderlust. The four Auras can enchant their complete printed permanent types and trigger only at the enchanted permanent controller's upkeep; their persisted damage remains independent after the Aura leaves. Karma triggers for each player and counts that player's current Swamps on resolution, including typed dual lands. All damage uses shared prevention and lethal handling, public Discord views expose attachments and pending triggers, and solo AI chooses legal hostile Aura targets and values Karma from both battlefields.
+
+The 0.57.0 mass-redraw promotion adds Wheel of Fortune and Timetwister. Wheel moves every hand to its owner's graveyard before both players draw seven; Timetwister independently shuffles each hand and graveyard into its owner's library, deliberately excluding the resolving Timetwister, before both redraw. A shared two-player draw transaction completes all instructed draws before resolving simultaneous or one-sided empty-library losses. Stack persistence and public Discord rendering never expose private cards, while solo AI casts a redraw only when its relative hand and, for Timetwister, graveyard position benefits.

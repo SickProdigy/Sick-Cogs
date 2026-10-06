@@ -233,6 +233,13 @@ def _play_one(game, user, difficulty):
             score=10+(x_value or 0)
         elif card.effect=="discard_random_x":
             score=12+2*(x_value or 0)
+        elif card.effect in ("wheel_seven","timetwister"):
+            own_after=max(0,len(player.hand)-1); enemy=len(game.player(game.opponent(user)).hand)
+            advantage=enemy-own_after
+            if card.effect=="timetwister":
+                advantage+=max(0,len(player.graveyard)-len(game.player(game.opponent(user)).graveyard))//2
+            if advantage<=0: continue
+            score=12+advantage
         elif card.effect in ("pump","pump_blocking"):
             score = 7 + card.amount
         elif card.effect=="pump_power_x":

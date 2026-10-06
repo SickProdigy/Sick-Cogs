@@ -444,6 +444,18 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_casts_helpful_mass_redraw_and_avoids_helping_opponent(self):
+        helpful=solo(order=(AI,HUMAN)); helpful.player(AI).kept=True; helpful.player(HUMAN).kept=True; helpful.player(AI).hand=[]
+        spell=self.add(helpful,AI,"lea:183","hand"); [self.add(helpful,AI,"mountain") for _ in range(3)]
+        [self.add(helpful,HUMAN,"bear","hand") for _ in range(5)]
+        helpful.active_index=0; helpful.phase="precombat_main"; helpful.priority_user=AI; helpful.player(AI).land_played=True
+        advance_solo(helpful); self.assertEqual(helpful.stack[-1].uid,spell)
+
+        harmful=solo(order=(AI,HUMAN)); harmful.player(AI).kept=True; harmful.player(HUMAN).kept=True; harmful.player(AI).hand=[]; harmful.player(HUMAN).hand=[]
+        wheel=self.add(harmful,AI,"lea:183","hand"); [self.add(harmful,AI,"forest","hand") for _ in range(5)]; [self.add(harmful,AI,"mountain") for _ in range(3)]
+        harmful.active_index=0; harmful.phase="precombat_main"; harmful.priority_user=AI; harmful.player(AI).land_played=True
+        advance_solo(harmful); self.assertIn(wheel,harmful.player(AI).hand); self.assertFalse(harmful.stack)
+
     def test_ai_casts_mind_twist_for_the_opponents_remaining_hand(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         game.player(HUMAN).hand=game.player(HUMAN).hand[:2]

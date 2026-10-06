@@ -218,6 +218,16 @@ class Game:
             if not p.library: self._finish(self.opponent(p.user_id),"empty library"); return
             p.hand.append(p.library.pop())
 
+    def _draw_each(self,n):
+        failed=set()
+        for user in (self.active_user,self.opponent(self.active_user)):
+            player=self.player(user)
+            for _ in range(n):
+                if player.library: player.hand.append(player.library.pop())
+                else: failed.add(user)
+        if len(failed)==2: self._finish(None,"both players drew from empty libraries")
+        elif failed: self._finish(self.opponent(next(iter(failed))),"empty library")
+
     def mulligan(self,user,keep):
         if self.phase!="opening": raise GameError("Opening hands are complete.")
         p=self.player(user)
@@ -1132,6 +1142,15 @@ class Game:
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
         elif c.effect=="discard_random_x": self._discard_random(self.player(int(s.target)),s.x_value); p.graveyard.append(s.uid)
+        elif c.effect=="wheel_seven":
+            for player in self.players.values():
+                player.graveyard.extend(player.hand); player.hand=[]
+            self._draw_each(7); p.graveyard.append(s.uid)
+        elif c.effect=="timetwister":
+            for player in self.players.values():
+                player.library.extend(player.hand); player.library.extend(player.graveyard); player.hand=[]; player.graveyard=[]
+                random.SystemRandom().shuffle(player.library)
+            self._draw_each(7); p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
         elif c.effect=="healing_salve":
             parts=s.target.split(":"); target_player=self.player(int(parts[1]))

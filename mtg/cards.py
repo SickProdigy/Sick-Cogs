@@ -346,6 +346,8 @@ ALPHA_SPELLS = {
     "lea:82": {"effect":"set_color", "color_change":"U"},
     "lea:83": {"effect":"extra_turn"},
     "lea:115": {"effect":"discard_random_x"},
+    "lea:84": {"effect":"timetwister"},
+    "lea:183": {"effect":"wheel_seven"},
     "lea:101": {"effect":"set_color", "color_change":"B"},
     "lea:139": {"effect":"set_color", "color_change":"R"},
     "lea:207": {"effect":"set_color", "color_change":"G"},
