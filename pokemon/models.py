@@ -31,6 +31,7 @@ class OwnedPokemon:
     caught_at: Optional[str] = None
     current_hp: Optional[int] = None
     status: str = ""
+    pending_moves: list = field(default_factory=list)
 
     def __post_init__(self):
         if not self.moves:
@@ -97,6 +98,7 @@ class OwnedPokemon:
         data.setdefault("origin","wild" if data.get("caught_guild_id") is not None else "starter")
         data.setdefault("current_hp",None)
         data.setdefault("status","")
+        data.setdefault("pending_moves",[])
         return cls(**data)
 
     def gain_experience(self, amount: int):
@@ -112,13 +114,11 @@ class OwnedPokemon:
             if evolution and self.level >= evolution[1] and evolution[0] in SPECIES:
                 evolved_from = self.species_id
                 self.species_id = evolution[0]
-            for move in moves_for_level(self.species_id, self.level):
-                if move in self.moves:
-                    continue
-                known=list(self.moves)+[move]
-                if len(known)>4:
-                    forgotten=known.pop(0);self.move_pp.pop(forgotten,None)
-                self.moves=tuple(known);self.move_pp[move]=MOVES[move].pp;learned.append(move)
+            for learned_level,move in SPECIES[self.species_id].learnset:
+                if learned_level!=self.level or move in self.moves or move in self.pending_moves:continue
+                if len(self.moves)<4:
+                    self.moves=tuple((*self.moves,move));self.move_pp[move]=MOVES[move].pp;learned.append(move)
+                else:self.pending_moves.append(move)
         return levels, evolved_from, learned
 
 
@@ -160,6 +160,10 @@ class Battle:
     wild_gender: str = "unknown"
     player_stages: dict = field(default_factory=dict)
     wild_stages: dict = field(default_factory=dict)
+    levels_gained: int = 0
+    evolved_from: Optional[int] = None
+    learned_moves: list = field(default_factory=list)
+    pending_moves: list = field(default_factory=list)
 
     def __post_init__(self):
         if not self.party:
@@ -436,11 +440,14 @@ class Battle:
 
     def _award_experience(self,amount):
         self.experience_award=max(0,int(amount));previous_name=SPECIES[self.player.species_id].name
-        levels,evolved,learned=self.player.gain_experience(self.experience_award)
+        previous_pending=set(self.player.pending_moves);levels,evolved,learned=self.player.gain_experience(self.experience_award)
+        self.levels_gained=levels;self.evolved_from=evolved;self.learned_moves=list(learned)
+        self.pending_moves=[move for move in self.player.pending_moves if move not in previous_pending]
         current_name=SPECIES[self.player.species_id].name;detail=f" Gained {self.experience_award} XP."
         if levels:detail+=f" {previous_name} grew to Lv. {self.player.level}!"
         if evolved:detail+=f" What? {previous_name} evolved into {current_name}!"
         if learned:detail+=f" {current_name} learned "+", ".join(MOVES[key].name for key in learned)+"!"
+        if self.pending_moves:detail+=f" {current_name} is trying to learn "+", ".join(MOVES[key].name for key in self.pending_moves)+"!"
         for index,item in enumerate(self.party):
             if item.instance_id==self.player.instance_id:self.party[index]=self.player
         return detail
@@ -577,6 +584,10 @@ class Battle:
         data["action_history"]=list(data["action_history"])[-100:]
         data.setdefault("player_stages", {})
         data.setdefault("wild_stages", {})
+        data.setdefault("levels_gained",0)
+        data.setdefault("evolved_from",None)
+        data.setdefault("learned_moves",[])
+        data.setdefault("pending_moves",[])
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle

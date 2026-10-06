@@ -182,6 +182,7 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemon pokedex",player_names)
         self.assertIn("pokemon gym challenge",player_names)
         self.assertIn("pokemon party add",player_names)
+        self.assertIn("pokemon moves",player_names)
         self.assertIn("pokemonset battleexpiry",admin_names)
         self.assertIn("pokemonset encountertime",admin_names)
         self.assertIn("pokemonset rarity",admin_names)
@@ -326,6 +327,22 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(section.value["party"],["catch-22"])
         message=response.edit_message.await_args.kwargs["content"]
         self.assertIn("Tentacool",message);self.assertNotIn("catch-22",message)
+
+    async def test_move_choice_replaces_a_move_and_clears_persisted_prompt(self):
+        pokemon=OwnedPokemon.create("full",19,23,seed=4)
+        pokemon.moves=("tackle","tail_whip","quick_attack","hyper_fang");pokemon.pending_moves=["focus_energy"]
+        section=StoredSection({"collection":[pokemon.raw()]})
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.locks={}
+        cog.rendered_progression=AsyncMock(return_value=(discord.Embed(title="Rattata learned Focus Energy!"),[]))
+        response=SimpleNamespace(edit_message=AsyncMock(),send_message=AsyncMock())
+        interaction=SimpleNamespace(user=SimpleNamespace(id=42),response=response)
+        await cog.resolve_move_choice(interaction,"full","focus_energy","tail_whip")
+        saved=OwnedPokemon.from_raw(section.value["collection"][0])
+        self.assertEqual(saved.moves,("tackle","focus_energy","quick_attack","hyper_fang"))
+        self.assertEqual(saved.pending_moves,[])
+        self.assertEqual(saved.move_pp["focus_energy"],30)
+        response.edit_message.assert_awaited_once()
+        self.assertIsNone(response.edit_message.await_args.kwargs["view"])
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})

@@ -14,7 +14,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,PartyPlacementView,PartyView,StarterView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,MoveLearnView,PartyPlacementView,PartyView,StarterView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -91,7 +91,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.22.0";__author__="SickProdigy"
+    __version__="0.23.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -254,6 +254,8 @@ class Pokemon(commands.Cog):
             if not owned_raw:
                 await i.response.send_message("Your active party needs repair.",ephemeral=True);return
             owned=OwnedPokemon.from_raw(owned_raw)
+            if owned.pending_moves:
+                await i.response.send_message("Your active Pokémon has an unfinished move choice. Use `pokemon moves` first.",ephemeral=True);return
             if not raw.get("level_locked") or int(raw.get("level",0))<2:
                 raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
                 raw["gender"]=encounter_gender(SPECIES[int(raw["species_id"])],random.SystemRandom())
@@ -278,6 +280,54 @@ class Pokemon(commands.Cog):
         except RenderError:
             log.exception("Battle rendering failed")
             return embed,[]
+    async def rendered_progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
+        species=SPECIES[pokemon.species_id]
+        if evolved_from:title=f"{SPECIES[evolved_from].name} evolved!";description=f"Congratulations! Your {SPECIES[evolved_from].name} evolved into {species.name}!"
+        elif pending:title=f"{species.name} wants to learn {MOVES[move_key].name}!";description="Choose one move to forget, or give up learning the new move."
+        else:title=f"{species.name} learned {MOVES[move_key].name}!";description=f"{species.name} can now use {MOVES[move_key].name}."
+        embed=discord.Embed(title=title,description=description,color=discord.Color.gold())
+        try:
+            image=await self.renderer.progression(pokemon,evolved_from,move_key,pending);embed.set_image(url="attachment://progression.png")
+            return embed,[discord.File(image,filename="progression.png")]
+        except RenderError:
+            log.exception("Progression rendering failed");return embed,[]
+
+    async def send_progression(self,interaction,battle):
+        if battle.evolved_from:
+            embed,files=await self.rendered_progression(battle.player,evolved_from=battle.evolved_from)
+            await interaction.followup.send(embed=embed,files=files)
+        for move in battle.learned_moves:
+            embed,files=await self.rendered_progression(battle.player,move_key=move)
+            await interaction.followup.send(embed=embed,files=files)
+        if battle.player.pending_moves:
+            move=battle.player.pending_moves[0];embed,files=await self.rendered_progression(battle.player,move_key=move,pending=True)
+            await interaction.followup.send(embed=embed,files=files,view=MoveLearnView(self,battle.user_id,battle.player,move))
+
+    async def resolve_move_choice(self,interaction,identity,new_move,forgotten):
+        async with self.lock(("user",interaction.user.id)):
+            conf=await self.config.user(interaction.user).all();raw=next((item for item in conf.get("collection",[]) if item.get("instance_id")==identity),None)
+            if not raw:
+                await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
+            pokemon=OwnedPokemon.from_raw(raw)
+            if new_move not in pokemon.pending_moves:
+                await interaction.response.send_message("That move choice is no longer pending.",ephemeral=True);return
+            learned=forgotten in pokemon.moves if forgotten else False
+            if learned:
+                known=list(pokemon.moves);index=known.index(forgotten);known[index]=new_move;pokemon.moves=tuple(known)
+                pokemon.move_pp.pop(forgotten,None);pokemon.move_pp[new_move]=MOVES[new_move].pp
+            pokemon.pending_moves.remove(new_move)
+            conf["collection"]=[pokemon.raw() if item.get("instance_id")==identity else item for item in conf["collection"]]
+            await self.config.user(interaction.user).set(conf)
+        if pokemon.pending_moves:
+            next_move=pokemon.pending_moves[0];embed,files=await self.rendered_progression(pokemon,move_key=next_move,pending=True)
+            await interaction.response.edit_message(embed=embed,attachments=files,view=MoveLearnView(self,interaction.user.id,pokemon,next_move));return
+        if learned:
+            embed,files=await self.rendered_progression(pokemon,move_key=new_move)
+            await interaction.response.edit_message(embed=embed,attachments=files,view=None)
+        else:
+            embed=discord.Embed(title=f"{SPECIES[pokemon.species_id].name} did not learn {MOVES[new_move].name}.",color=discord.Color.gold())
+            await interaction.response.edit_message(embed=embed,attachments=[],view=None)
+
     @staticmethod
     def move_label(key):return MOVES[key].name[:80]
     def battle_embed(self,b):
@@ -321,6 +371,7 @@ class Pokemon(commands.Cog):
             if done:await self.clear_guild(battle.guild_id,eid)
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=None if done else BattleView(self,eid))
+            if done:await self.send_progression(i,battle)
     @staticmethod
     def apply_battle_party(conf,battle):
         battle.party_hp[battle.player.instance_id]=battle.player_hp
@@ -381,6 +432,7 @@ class Pokemon(commands.Cog):
             if battle.state!="active":await self.clear_guild(battle.guild_id,eid)
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=None if battle.state!="active" else BattleView(self,eid))
+            if battle.state!="active":await self.send_progression(i,battle)
     async def save_battle(self,b):
         seconds=await self.config.guild_from_id(b.guild_id).battle_timeout()
         async with self.lock("encounters"):
@@ -578,6 +630,15 @@ class Pokemon(commands.Cog):
             if 1<=slot<=len(conf["party"]):return owned.get(conf["party"][slot-1])
         wanted=str(identifier).casefold();matches=[raw for key,raw in owned.items() if key.startswith(str(identifier)) or (raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold()==wanted]
         return matches[0] if len(matches)==1 else None
+
+    @pokemon.command(name="moves")
+    async def moves(self,ctx):
+        """Resume an unfinished move-learning choice."""
+        conf=await self.config.user(ctx.author).all()
+        pokemon=next((OwnedPokemon.from_raw(raw) for raw in conf.get("collection",[]) if raw.get("pending_moves")),None)
+        if not pokemon:await ctx.send("None of your Pokémon are waiting to learn a move.");return
+        move=pokemon.pending_moves[0];embed,files=await self.rendered_progression(pokemon,move_key=move,pending=True)
+        await ctx.send(embed=embed,files=files,view=MoveLearnView(self,ctx.author.id,pokemon,move))
 
     @pokemon.command(name="bag")
     async def pokemon_bag(self,ctx):
