@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.12.0";__author__="SickProdigy"
+    __version__="0.13.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -364,7 +364,19 @@ class Pokemon(commands.Cog):
         conf=self.config.guild_from_id(guild_id)
         if await conf.active_encounter()==eid:await conf.active_encounter.set(None)
     @commands.group(name="pokemon",aliases=["pkmn"],invoke_without_command=True)
-    async def pokemon(self,ctx):await ctx.send_help()
+    async def pokemon(self,ctx):
+        """Play the global Pokémon catching and battle game.
+
+        New trainers can choose a first partner here. Server administration is kept separately under `[p]pokemonset`.
+        """
+        conf=await self.config.user(ctx.author).all()
+        if not conf["starter_chosen"] and not conf["collection"]:
+            embed=self.starter_embed(ctx.author)
+            embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poké Ball to catch it.",inline=False)
+            embed.set_footer(text=f"Server setup is separate: {ctx.clean_prefix}pokemonset")
+            await ctx.send(embed=embed,view=StarterView(self,ctx.author.id))
+            return
+        await ctx.send_help()
     @staticmethod
     def starter_embed(user):
         embed=discord.Embed(title="Choose your first Pokémon",description="Every trainer begins with one partner. Choose carefully—this can only be done once.",color=discord.Color.green())
@@ -615,32 +627,43 @@ class Pokemon(commands.Cog):
     async def profile(self,ctx):
         conf=await self.config.user(ctx.author).all()
         await ctx.send(embed=trainer_profile_embed(ctx.author,conf,MAX_COLLECTION))
-    @pokemon.group(name="set",invoke_without_command=True)
+    @commands.group(name="pokemonset",aliases=["pkmnset"],invoke_without_command=True)
+    @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)
-    async def pokemon_set(self,ctx):await ctx.send_help()
+    async def pokemon_set(self,ctx):
+        """Configure Pokémon without cluttering player commands.
+
+        Server administrators control channels and slower local pacing. Bot-owner-only subcommands control global fairness and availability.
+        """
+        await ctx.send_help()
     @pokemon_set.command(name="channel")
     async def set_channel(self,ctx,channel:discord.TextChannel):
+        """Enable wild encounters in a channel."""
         channels=await self.config.guild(ctx.guild).channels()
         if channel.id not in channels:channels.append(channel.id)
         await self.config.guild(ctx.guild).channels.set(channels);await self.config.guild(ctx.guild).enabled.set(True)
         await ctx.send(f"Wild encounters enabled in {channel.mention}.")
     @pokemon_set.command(name="removechannel")
     async def remove_channel(self,ctx,channel:discord.TextChannel):
+        """Stop wild encounters in a channel."""
         channels=await self.config.guild(ctx.guild).channels()
         if channel.id in channels:channels.remove(channel.id)
         await self.config.guild(ctx.guild).channels.set(channels);await ctx.send(f"Removed {channel.mention}.")
     @pokemon_set.command(name="center")
     async def set_center(self,ctx,channel:discord.TextChannel):
+        """Designate the server Pokémon Center."""
         await self.config.guild(ctx.guild).center_channel.set(channel.id)
         await ctx.send(f"{channel.mention} is now this server's Pokémon Center.")
 
     @pokemon_set.command(name="removecenter")
     async def remove_center(self,ctx):
+        """Remove the server Pokémon Center."""
         await self.config.guild(ctx.guild).center_channel.set(None)
         await ctx.send("This server's Pokémon Center was removed.")
 
     @pokemon_set.command(name="status")
     async def spawn_status(self,ctx):
+        """Show effective server encounter settings."""
         conf=await self.config.guild(ctx.guild).all();policy=await self.config.all()
         minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
         generations=effective_generations(conf["generations"],policy["allowed_generations"])
@@ -658,6 +681,7 @@ class Pokemon(commands.Cog):
         )
     @pokemon_set.command(name="pace")
     async def pace(self,ctx,setting:str):
+        """Choose a preset encounter pace."""
         setting=setting.casefold()
         if setting not in PACE:
             await ctx.send("Choose active, normal, or relaxed.");return
@@ -671,6 +695,7 @@ class Pokemon(commands.Cog):
 
     @pokemon_set.command(name="threshold")
     async def threshold(self,ctx,minimum:int,maximum:int):
+        """Set a slower custom activity threshold."""
         policy=await self.config.all();floor=policy["minimum_threshold"]
         if not floor<=minimum<=maximum<=500:await ctx.send(f"Use {floor}–500 with minimum <= maximum.");return
         await self.config.guild(ctx.guild).pace.set("custom")
@@ -678,21 +703,25 @@ class Pokemon(commands.Cog):
         await self.config.guild(ctx.guild).threshold.set(random.SystemRandom().randrange(minimum,maximum+1));await ctx.send("Spawn threshold updated.")
     @pokemon_set.command(name="cooldown")
     async def cooldown(self,ctx,seconds:int):
+        """Set a slower custom spawn cooldown."""
         policy=await self.config.all();floor=policy["minimum_cooldown"]
         if not floor<=seconds<=86400:await ctx.send(f"Use {floor}–86400 seconds.");return
         await self.config.guild(ctx.guild).pace.set("custom")
         await self.config.guild(ctx.guild).spawn_cooldown.set(seconds);await ctx.send("Spawn cooldown updated.")
     @pokemon_set.command(name="battleexpiry")
     async def battle_expiry(self,ctx,battle_minutes:int):
+        """Set the server battle time limit."""
         if not 5<=battle_minutes<=1440:await ctx.send("Use 5–1440 minutes.");return
         await self.config.guild(ctx.guild).battle_timeout.set(battle_minutes*60);await ctx.send("Battle expiry updated. Wild encounter lifetime is controlled by the bot owner.")
     @pokemon_set.command(name="generations")
     async def generations(self,ctx,*values:int):
+        """Choose from bot-enabled generations."""
         selected=sorted(set(values));allowed=await self.config.allowed_generations()
         if not selected or not set(selected)<=set(allowed):await ctx.send(f"Choose from bot-enabled generations: {', '.join(map(str,allowed))}.");return
         await self.config.guild(ctx.guild).generations.set(selected);await ctx.send(f"Enabled generations: {', '.join(map(str,selected))}.")
     @pokemon_set.command(name="spawn")
     async def force_spawn(self,ctx,channel:discord.TextChannel=None):
+        """Trigger a cooldown-limited test encounter."""
         channel=channel or ctx.channel
         conf=await self.config.guild(ctx.guild).all()
         if conf["active_encounter"]:await ctx.send("This server already has an encounter.");return
@@ -721,24 +750,28 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="globalstatus")
     @commands.is_owner()
     async def global_status(self,ctx):
+        """Show the bot-wide encounter policy."""
         policy=await self.config.all()
         await ctx.send(f"Encounter lifetime: {policy['encounter_timeout']//60}m\nMinimum threshold/cooldown: {policy['minimum_threshold']} points/{policy['minimum_cooldown']}s\nAllowed generations: {', '.join(map(str,policy['allowed_generations']))}\nRarity: {policy['rarity_profile']}\nSpecial species: {'enabled' if policy['allow_special_species'] else 'event-only'}")
 
     @pokemon_set.command(name="encountertime")
     @commands.is_owner()
     async def encounter_time(self,ctx,minutes:int):
+        """Set the global wild encounter lifetime."""
         if not 1<=minutes<=1440:await ctx.send("Use 1–1440 minutes.");return
         await self.config.encounter_timeout.set(minutes*60);await ctx.send(f"Global wild encounter lifetime set to {minutes} minutes.")
 
     @pokemon_set.command(name="globallimits")
     @commands.is_owner()
     async def global_limits(self,ctx,minimum_threshold:int,minimum_cooldown:int):
+        """Set global spawn-rate floors."""
         if not 5<=minimum_threshold<=500 or not 60<=minimum_cooldown<=86400:await ctx.send("Threshold: 5–500; cooldown: 60–86400 seconds.");return
         await self.config.minimum_threshold.set(minimum_threshold);await self.config.minimum_cooldown.set(minimum_cooldown);await ctx.send("Global spawn-rate floors updated. Servers may only use slower settings.")
 
     @pokemon_set.command(name="globalgenerations")
     @commands.is_owner()
     async def global_generations(self,ctx,*values:int):
+        """Set bot-wide available generations."""
         selected=sorted(set(values))
         if not selected or any(value<1 or value>9 for value in selected):await ctx.send("Choose generations 1–9.");return
         await self.config.allowed_generations.set(selected);await ctx.send(f"Bot-wide generations: {', '.join(map(str,selected))}.")
@@ -746,6 +779,7 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="rarity")
     @commands.is_owner()
     async def rarity(self,ctx,profile:str):
+        """Choose the global rarity profile."""
         profile=profile.casefold()
         if profile not in RARITY_PROFILES:await ctx.send("Choose friendly, standard, or challenging.");return
         await self.config.rarity_profile.set(profile);await ctx.send(f"Global encounter rarity set to {profile}.")
@@ -753,17 +787,20 @@ class Pokemon(commands.Cog):
     @pokemon_set.command(name="specials")
     @commands.is_owner()
     async def specials(self,ctx,enabled:bool):
+        """Allow or gate special species."""
         await self.config.allow_special_species.set(enabled);await ctx.send("Special species may appear normally." if enabled else "Legendary and mythical species are event-only.")
 
     @pokemon_set.command(name="catalogsync")
     @commands.is_owner()
     async def catalog_sync(self,ctx,generation:int):
+        """Cache catalog data for a generation."""
         async with ctx.typing():
             try:count=await self.catalog.sync_generation(generation)
             except CatalogError as exc:await ctx.send(str(exc));return
         await ctx.send(f"Cached {count} generation {generation} species.")
     @pokemon_set.command(name="clear")
     async def clear_encounter(self,ctx):
+        """End the active server encounter."""
         eid=await self.config.guild(ctx.guild).active_encounter();raw=None
         if eid:
             async with self.lock(("battle",eid)),self.lock(("encounter",eid)),self.lock("encounters"):
@@ -786,6 +823,7 @@ class Pokemon(commands.Cog):
         await ctx.send("Active encounter cleared.")
     @pokemon_set.command(name="disable")
     async def disable(self,ctx):
+        """Disable wild encounters in this server."""
         await self.config.guild(ctx.guild).enabled.set(False);await ctx.send("Wild encounters disabled.")
     async def red_delete_data_for_user(self,*,requester,user_id):
         await self.config.user_from_id(user_id).clear()
