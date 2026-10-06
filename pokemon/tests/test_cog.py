@@ -227,9 +227,15 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         ctx=SimpleNamespace(author=SimpleNamespace(id=42,display_name="Trainer"),clean_prefix="!",send=AsyncMock(),send_help=AsyncMock())
         await Pokemon.pokemon.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs
-        self.assertEqual(sent["embed"].title,"Choose your first Pokémon")
-        self.assertEqual(sent["embed"].footer.text,"Server setup is separate: !pokemonset")
+        self.assertEqual(sent["embed"].title,"Choose Bulbasaur?")
+        self.assertTrue(sent["embed"].image.url.endswith("/1.png"))
+        self.assertIn("Server setup: !pokemonset",sent["embed"].footer.text)
         self.assertIsInstance(sent["view"],StarterView)
+        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose","▶"])
+        self.assertEqual(sent["view"].cycle(1),4)
+        charmander=cog.starter_embed(ctx.author,sent["view"].selected,"!pokemonset")
+        self.assertEqual(charmander.title,"Choose Charmander?")
+        self.assertTrue(charmander.image.url.endswith("/4.png"))
         ctx.send.reset_mock();section.value={"collection":[{"instance_id":"owned"}],"starter_chosen":True}
         await Pokemon.pokemon.callback(cog,ctx)
         ctx.send_help.assert_awaited_once()
@@ -246,7 +252,8 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         sent=response.send_message.await_args.kwargs
         self.assertTrue(sent["ephemeral"])
         self.assertIsInstance(sent["view"],StarterView)
-        self.assertEqual(len(sent["view"].children),3)
+        self.assertEqual([item.label for item in sent["view"].children],["◀","Choose","▶"])
+        self.assertEqual(sent["view"].cycle(-1),7)
         await cog.choose_starter(interaction,4,9)
         self.assertTrue(section.value["starter_chosen"])
         self.assertEqual(section.value["collection"][0]["species_id"],4)
