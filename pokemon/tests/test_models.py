@@ -7,6 +7,7 @@ from pokemon.catching import BALLS,attempt_catch,calculate_catch_value
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness,experience_to_next,total_experience
 from pokemon.models import Battle,BattleError,OwnedPokemon
 from pokemon.renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RETRO
+from pokemon.rulesets import STANDARD,TYPE_CHARTS
 
 def battle(seed=1,wild=10):
     p=OwnedPokemon("abc",4,10)
@@ -44,6 +45,18 @@ class BattleTests(unittest.TestCase):
         self.assertIn("Caterpie was burned!",line)
         current=battle();scratch=moves["scratch"]
         self.assertEqual(current._damage(10,92,5,scratch,current.rng(),attacker_types=("normal",),defense=10),0)
+
+    def test_standard_ruleset_versions_damage_stats_type_chart_and_criticals(self):
+        moves=__import__("pokemon.data",fromlist=["MOVES"]).MOVES
+        self.assertEqual(STANDARD.mechanics_generation,9)
+        self.assertIs(TYPE_CHARTS[STANDARD.type_chart],TYPE_CHARTS["modern"])
+        self.assertEqual(STANDARD.damage_stats(moves["ember"]),("special_attack","special_defense"))
+        self.assertEqual(STANDARD.damage_stats(moves["scratch"]),("attack","defense"))
+        self.assertEqual(STANDARD.critical_denominator(moves["scratch"],1),24)
+        self.assertEqual(STANDARD.critical_denominator(moves["slash"],1),8)
+        self.assertEqual(STANDARD.effective_stage(-3,critical=True,offensive=True),0)
+        self.assertEqual(STANDARD.effective_stage(3,critical=True,offensive=False),0)
+        self.assertEqual(STANDARD.effective_stage(3,critical=True,offensive=True),3)
 
     def test_classic_level_and_move_learning_narration(self):
         player=OwnedPokemon.create("learner",4,8,seed=3);player.experience=experience_to_next(4,8)-1
