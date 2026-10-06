@@ -51,6 +51,9 @@ def encounter_level(levels,offset=0):
     strongest=max((max(1,min(100,int(value))) for value in levels),default=1)
     return scaled_wild_level(strongest,offset)
 
+def encounter_shiny(rng):
+    return rng.randrange(4096)==0
+
 def encounter_gender(species,rng):
     if species.gender_rate<0:return "genderless"
     return "female" if rng.randrange(8)<species.gender_rate else "male"
@@ -114,7 +117,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.36.0";__author__="SickProdigy"
+    __version__="0.37.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -160,7 +163,7 @@ class Pokemon(commands.Cog):
                 channel=self.bot.get_channel(int(raw["channel_id"]))
                 if channel:
                     try:
-                        message=await channel.fetch_message(int(raw["message_id"]));species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+                        message=await channel.fetch_message(int(raw["message_id"]));species=SPECIES.get(int(raw.get("species_id",0)));name=(("Shiny " if raw.get("shiny") else "")+species.name) if species else "Pokemon"
                         await message.edit(content=f"The wild {name} escaped.",view=None)
                     except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
             else:await self.expire_unclaimed_message(raw)
@@ -292,14 +295,14 @@ class Pokemon(commands.Cog):
         if not pool:raise RuntimeError("No Pokémon are available under the bot-wide encounter policy.")
         rng=random.SystemRandom()
         chosen=rng.choices(pool,weights=[spawn_weight(item,policy["rarity_profile"]) for item in pool],k=1)[0]
-        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
-        embed=discord.Embed(title=f"A wild {SPECIES[sid].name} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
+        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);shiny=encounter_shiny(rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
+        display=("Shiny " if shiny else "")+SPECIES[sid].name;embed=discord.Embed(title=f"A wild {display} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
-            image=await self.renderer.encounter(sid,level,gender,backdrop);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
+            image=await self.renderer.encounter(sid,level,gender,backdrop,shiny=shiny);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
             msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
         except RenderError:
-            log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
-        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=policy["encounter_timeout"])).isoformat(),"encounter_timeout":policy["encounter_timeout"]}
+            log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid,shiny=shiny));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
+        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"shiny":shiny,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=policy["encounter_timeout"])).isoformat(),"encounter_timeout":policy["encounter_timeout"]}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
@@ -336,7 +339,7 @@ class Pokemon(commands.Cog):
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
                 await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
-            wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version,trainer_name=str(getattr(i.user,"display_name",getattr(i.user,"name","Trainer")))[:24]);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            wild=SPECIES[raw["species_id"]];content_generation=generation_for(int(raw["species_id"]));catalog_version=CATALOG_VERSIONS.for_generation(content_generation,bundled=content_generation==1).key;battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"),content_generation=content_generation,catalog_version=catalog_version,wild_shiny=bool(raw.get("shiny",False)),trainer_name=str(getattr(i.user,"display_name",getattr(i.user,"name","Trainer")))[:24]);battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
             embed,files=await self.rendered_battle(battle)
@@ -350,15 +353,15 @@ class Pokemon(commands.Cog):
             log.exception("Battle rendering failed")
             return embed,[]
     async def rendered_expired_encounter(self,raw):
-        species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+        species=SPECIES.get(int(raw.get("species_id",0)));name=(("Shiny " if raw.get("shiny") else "")+species.name) if species else "Pokemon"
         embed=discord.Embed(title=f"The wild {name} got away!",description="No trainer encountered it in time.",color=discord.Color.light_grey())
         try:
-            image=await self.renderer.encounter(int(raw["species_id"]),int(raw.get("level",1)),raw.get("gender","unknown"),int(raw.get("backdrop",0)),expired=True)
+            image=await self.renderer.encounter(int(raw["species_id"]),int(raw.get("level",1)),raw.get("gender","unknown"),int(raw.get("backdrop",0)),expired=True,shiny=bool(raw.get("shiny",False)))
             embed.set_image(url="attachment://encounter-expired.png")
             return embed,[discord.File(image,filename="encounter-expired.png")]
         except (RenderError,KeyError,TypeError,ValueError):
             log.exception("Expired encounter rendering failed")
-            if species:embed.set_image(url=sprite(species.id))
+            if species:embed.set_image(url=sprite(species.id,shiny=bool(raw.get("shiny",False))))
             return embed,[]
     async def expire_unclaimed_message(self,raw,mode=None):
         channel=self.bot.get_channel(int(raw.get("channel_id",0)))
@@ -450,25 +453,25 @@ class Pokemon(commands.Cog):
     @staticmethod
     def move_label(key):return MOVES[key].name[:80]
     def battle_embed(self,b):
-        player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id]
+        player=SPECIES[b.player.species_id];wild=SPECIES[b.wild_species_id];wild_name=("Shiny " if b.wild_shiny else "")+wild.name
         gym=GYMS.get(b.gym_key) if b.battle_kind=="gym" else None
         if b.state!="active":
             trainer=" ".join(str(b.trainer_name or "Trainer").split())[:24] or "Trainer"
-            if b.state=="caught":title=f"Gotcha! {wild.name} was caught by {trainer}!"
-            elif b.state=="won":title=f"{trainer} defeated {wild.name}!"
-            elif b.state=="lost":title=f"{wild.name} escaped from {trainer}!"
-            else:title=f"{wild.name} escaped from {trainer}!"
+            if b.state=="caught":title=f"Gotcha! {wild_name} was caught by {trainer}!"
+            elif b.state=="won":title=f"{trainer} defeated {wild_name}!"
+            elif b.state=="lost":title=f"{wild_name} escaped from {trainer}!"
+            else:title=f"{wild_name} escaped from {trainer}!"
             e=discord.Embed(title=title,description=b.result or b.last_action,color=discord.Color.gold())
-            e.set_thumbnail(url=sprite(wild.id))
-            if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild.name} · Lv. {b.wild_level}",inline=True)
+            e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
+            if b.state=="caught":e.add_field(name="Caught Pokémon",value=f"{wild_name} · Lv. {b.wild_level}",inline=True)
             e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
             needed=experience_to_next(b.player.species_id,b.player.level)
             e.add_field(name="Experience",value="MAX" if not needed else f"{b.player.experience}/{needed} XP",inline=True)
             return e
-        title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level}" if gym else f"Wild {wild.name} · Lv. {b.wild_level}"
+        title=f"Gym Leader {gym.leader} · {wild.name} Lv. {b.wild_level}" if gym else f"Wild {wild_name} · Lv. {b.wild_level}"
         e=discord.Embed(title=title,description=b.result or b.last_action or f"Turn {b.turn}",color=discord.Color.gold() if gym else discord.Color.blurple())
-        e.set_thumbnail(url=sprite(wild.id))
-        e.add_field(name=f"{wild.name} HP",value=f"{b.wild_hp}/{b.wild_max_hp}",inline=True)
+        e.set_thumbnail(url=sprite(wild.id,shiny=b.wild_shiny))
+        e.add_field(name=f"{wild_name} HP",value=f"{b.wild_hp}/{b.wild_max_hp}",inline=True)
         e.add_field(name=f"{player.name} HP",value=f"{b.player_hp}/{b.max_hp(b.player)}",inline=True)
         e.add_field(name="Moves",value=" · ".join(f"{n+1}. {MOVES[k].name} ({b.player.move_pp.get(k,MOVES[k].pp)} PP)" for n,k in enumerate(b.player.moves)),inline=False)
         needed=experience_to_next(b.player.species_id,b.player.level)

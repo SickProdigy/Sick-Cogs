@@ -169,6 +169,7 @@ class Battle:
     battle_kind: str = "wild"
     gym_key: str = ""
     wild_gender: str = "unknown"
+    wild_shiny: bool = False
     player_stages: dict = field(default_factory=dict)
     wild_stages: dict = field(default_factory=dict)
     levels_gained: int = 0
@@ -622,10 +623,9 @@ class Battle:
         if self.state != "caught":
             raise BattleError("The Pokémon was not caught.")
         identity = instance_id or uuid.uuid4().hex
-        shiny = random.Random(self.seed + 4049).randrange(4096) == 0
         pokemon=OwnedPokemon.create(
             identity,self.wild_species_id,self.wild_level,seed=self.seed+991,
-            shiny=shiny,guild_id=self.guild_id,catalog_version=self.catalog_version,
+            shiny=self.wild_shiny,guild_id=self.guild_id,catalog_version=self.catalog_version,
         )
         if self.wild_gender!="unknown":pokemon.gender=self.wild_gender
         return pokemon
@@ -684,6 +684,7 @@ class Battle:
         data.setdefault("progression_events",[])
         data.setdefault("player_status_turns",0)
         data.setdefault("trainer_name","Trainer")
+        data.setdefault("wild_shiny",False)
         data.setdefault("wild_status_turns",0)
         data.setdefault("player_confusion_turns",0)
         data.setdefault("wild_confusion_turns",0)

@@ -13,7 +13,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import GUILD, PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_shiny, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, migrated_pokedex_stats, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -64,6 +64,10 @@ class CogPolicyTests(unittest.TestCase):
         self.assertLess(PACE["active"][2],PACE["relaxed"][2])
         self.assertEqual(pace_for_settings(*PACE["normal"]),"normal")
         self.assertEqual(pace_for_settings(7,13,90),"custom")
+
+    def test_shiny_roll_uses_modern_one_in_4096_odds(self):
+        self.assertTrue(encounter_shiny(SimpleNamespace(randrange=lambda limit:0)))
+        self.assertFalse(encounter_shiny(SimpleNamespace(randrange=lambda limit:1)))
 
     def test_ball_inventory_migration_is_additive_and_idempotent(self):
         data={"items":{"potion":2,"great_ball":9}}
