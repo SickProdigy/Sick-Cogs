@@ -4001,4 +4001,36 @@ class AlphaAnimateDeadTests(unittest.TestCase):
         gone=ready(); creature=self.grave_creature(gone,20,"bear"); aura=self.resolve_aura(gone,20,creature); target=gone.find_permanent(creature)[1]; gone._destroy(gone.player(10),target); gone._sba(); self.assertIn(aura,gone.player(10).graveyard); trigger=gone.stack.pop(); gone._resolve_ability(trigger); self.assertIn("linked creature was gone",gone.log[-1])
         protected=ready(); knight=self.grave_creature(protected,20,"lea:43"); aura=self.resolve_aura(protected,20,knight); self.assertIn(aura,protected.player(10).graveyard); self.assertIsNotNone(protected.find_permanent(knight)[1]); trigger=protected.stack.pop(); protected._resolve_ability(trigger); self.assertIn(knight,protected.player(20).graveyard)
 
+class AlphaMultiBlockTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+    def combat(self,blocker_key="lea:179"):
+        game=ready(); first=self.add(game,10,"bear"); second=self.add(game,10,"giant"); blocker=self.add(game,20,blocker_key); game.phase="attackers"; game.active_index=0; game.declare_attackers(10,(1,2)); game.phase="blockers"; return game,first,second,blocker
+
+    def test_two_headed_giant_blocks_two_and_divides_persisted_damage(self):
+        game,first,second,blocker=self.combat(); game.declare_blockers(20,{1:1,2:1}); self.assertEqual(game.blocks,{first.uid:blocker.uid,second.uid:blocker.uid})
+        game.priority_user=20; game.assign_blocker_damage(20,1,((1,2),(2,2))); restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.blocker_damage_assignments[blocker.uid],[{"attacker":first.uid,"damage":2},{"attacker":second.uid,"damage":2}])
+        restored._combat_damage(False); self.assertIn(first.uid,restored.player(10).graveyard); self.assertIsNotNone(restored.find_permanent(second.uid)[1]); self.assertIn(blocker.uid,restored.player(20).graveyard)
+
+    def test_assignment_requires_lethal_order_and_combat_cannot_advance_without_it(self):
+        game,first,second,blocker=self.combat(); game.declare_blockers(20,{1:1,2:1}); game.priority_user=20
+        with self.assertRaisesRegex(GameError,"lethal damage"): game.assign_blocker_damage(20,1,((1,1),(2,3)))
+        self.assertFalse(game.blocker_damage_assignments); game.phase_passes=1; game.priority_user=20
+        with self.assertRaisesRegex(GameError,"Assign combat damage"): game.pass_priority(20)
+        self.assertEqual(game.phase,"after_blockers")
+
+    def test_blaze_forces_all_legal_blocks_and_partial_declaration_is_atomic(self):
+        game,first,second,blocker=self.combat("bear"); game.phase="after_attackers"; self.assertEqual(game._target_for_cast(CARDS["lea:6"],20,"20:1"),f"20:{blocker.uid}")
+        with self.assertRaisesRegex(GameError,"defending player"): game._target_for_cast(CARDS["lea:6"],10,"20:1")
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:6"; game.phase="after_attackers"; game._resolve(Spell(20,spell,"lea:6",f"20:{blocker.uid}")); self.assertTrue(blocker.must_block_all); self.assertEqual(blocker.temporary_max_blocks,2)
+        game.phase="blockers"
+        with self.assertRaisesRegex(GameError,"must block every"): game.declare_blockers(20,{1:1})
+        self.assertEqual(game.blocks,{}); game.declare_blockers(20,{1:1,2:1}); self.assertEqual(len(game.blocks),2)
+
+    def test_ordinary_blocker_still_cannot_block_twice_and_legacy_state_defaults(self):
+        game,first,second,blocker=self.combat("bear")
+        with self.assertRaisesRegex(GameError,"Invalid blocker"): game.declare_blockers(20,{1:1,2:1})
+        raw=ready().to_raw(); raw.pop("blocker_damage_assignments"); [item.pop("temporary_max_blocks",None) or item.pop("must_block_all",None) for player in raw["players"].values() for item in player["battlefield"]]
+        restored=Game.from_raw(raw); self.assertEqual(restored.blocker_damage_assignments,{})
+
 if __name__=="__main__": unittest.main()

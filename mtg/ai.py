@@ -4,10 +4,14 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"sacrifice_mana","simulacrum","guardian_angel","reverse_damage","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","power_sink","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall","blaze_of_glory"}
 
 
 def _target(game, user, card):
+    if card.effect=="blaze_of_glory":
+        if game.phase!="after_attackers" or user==game.active_user: return None
+        choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.tapped and _can_target(game,card,permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
     if card.aura_reanimate:
         choices=[]
         for target_user in (user,game.opponent(user)):
@@ -441,6 +445,7 @@ def _attack_positions(game, user, difficulty):
 
 
 def _blocks(game, user, difficulty):
+    counts={}
     blockers = [
         (position, permanent)
         for position, permanent in enumerate(game.player(user).battlefield, 1)
@@ -468,8 +473,26 @@ def _blocks(game, user, difficulty):
             return (2*delayed_kill-2*delayed_loss+survives,-sum(game.current_stats(blocker)))
         choice=max(legal,key=block_score)
         assignments[attacker_position] = choice[0]
-        blockers.remove(choice)
+        counts[choice[1].uid]=counts.get(choice[1].uid,0)+1
+        capacity=choice[1].temporary_max_blocks or game.card(choice[1].uid).max_blocks
+        if counts[choice[1].uid]>=capacity: blockers.remove(choice)
     return assignments
+
+
+def _assign_blocker_damage(game,user):
+    if user!=game.opponent(game.active_user) or game.phase not in ("after_blockers","after_first_strike") or game.stack: return False
+    first_step=game._combat_has_first_strike() and game.phase=="after_blockers"
+    for blocker_uid in set(game.blocks.values()):
+        blocker=game.find_permanent(blocker_uid)[1]; blocked=[uid for uid,value in game.blocks.items() if value==blocker_uid and game.find_permanent(uid)[1] is not None]
+        if blocker is None or len(blocked)<2 or (("first_strike" in game.current_keywords(blocker))!=first_step): continue
+        existing=game.blocker_damage_assignments.get(blocker_uid,[])
+        if {item.get("attacker") for item in existing}==set(blocked) and sum(item.get("damage",0) for item in existing)==max(0,game.current_stats(blocker)[0]): continue
+        power=max(0,game.current_stats(blocker)[0]); remaining=power; ordered=sorted(blocked,key=lambda uid:(game.current_stats(game.find_permanent(uid)[1])[1]-game.find_permanent(uid)[1].damage,uid)); assignments=[]
+        for uid in ordered:
+            attacker=game.find_permanent(uid)[1]; amount=min(remaining,max(0,game.current_stats(attacker)[1]-attacker.damage)); assignments.append((game.attackers.index(uid)+1,amount)); remaining-=amount
+        if remaining: assignments[-1]=(assignments[-1][0],assignments[-1][1]+remaining)
+        game.assign_blocker_damage(user,game.player(user).battlefield.index(blocker)+1,assignments); return True
+    return False
 
 
 def _player_damage_threatened(game,user):
@@ -794,6 +817,7 @@ def advance_solo(game: Game):
             continue
         if game.priority_user != user:
             return changed
+        if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
             if trigger.ability_effect in ("discard_choice","look_hand"):

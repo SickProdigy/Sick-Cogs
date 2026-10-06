@@ -945,6 +945,11 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertFalse(game.stack[-1].decision_pending); self.assertTrue(any(event["action"]=="ai_vesuvan_target" for event in game.history))
         game.pass_priority(HUMAN); advance_solo(game); self.assertTrue(any(event["action"]=="ai_vesuvan_copy" for event in game.history)); self.assertEqual(game.card(source.uid).name,"Hill Giant"); self.assertEqual(game.current_colors(source),("U",))
 
+    def test_ai_multi_blocks_and_assigns_divided_damage(self):
+        game=solo(order=(HUMAN,AI)); game.player(HUMAN).kept=game.player(AI).kept=True; game.player(HUMAN).battlefield=[]; game.player(AI).battlefield=[]
+        first=self.add(game,HUMAN,"bear"); second=self.add(game,HUMAN,"giant"); blocker=self.add(game,AI,"lea:179"); game.active_index=0; game.attackers=[first.uid,second.uid]; game.phase="blockers"; game.priority_user=None
+        advance_solo(game); self.assertEqual(set(game.blocks.values()),{blocker.uid}); game.priority_user=AI; advance_solo(game); self.assertIn(blocker.uid,game.blocker_damage_assignments); self.assertTrue(any(event["action"]=="ai_blocker_damage" for event in game.history))
+
     def test_ai_targets_best_creature_in_either_graveyard_for_animate_dead(self):
         game=solo(); game.player(AI).graveyard=[]; game.player(HUMAN).graveyard=[]
         cheap=game.next_uid; game.next_uid+=1; game.cards[cheap]="bear"; game.player(AI).graveyard.append(cheap)

@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.104.0"
+    __version__="0.105.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -197,6 +197,16 @@ class MTG(commands.Cog):
                 _,attacker=g.find_permanent(uid)
                 if attacker is not None: choices.append(f"{g.card(uid).name}: {amount} to blocker")
             if choices: e.add_field(name="Trample assignments",value="\n".join(choices),inline=False)
+        multi=[]
+        for blocker_uid in set(g.blocks.values()):
+            _,blocker=g.find_permanent(blocker_uid); attackers=[uid for uid,value in g.blocks.items() if value==blocker_uid and g.find_permanent(uid)[1] is not None]
+            if blocker is None or len(attackers)<2: continue
+            assignment=g.blocker_damage_assignments.get(blocker_uid,[])
+            if assignment:
+                detail=", ".join(f"{g.card(item['attacker']).name}: {item['damage']}" for item in assignment)
+            else: detail="damage assignment required before its damage step"
+            multi.append(f"{g.card(blocker_uid).name} blocks {len(attackers)} attackers · {detail}")
+        if multi: e.add_field(name="Multiple blocking",value="\n".join(multi),inline=False)
         if g.stack:
             stack_lines=[]
             for position,item in enumerate(reversed(g.stack),1):
@@ -604,6 +614,15 @@ class MTG(commands.Cog):
                 a,b=item.split(":",1); pairs[int(a)]=int(b)
             g.declare_blockers(ctx.author.id,pairs)
         await self.mutate_ctx(ctx,run,"block")
+    @mtg.command(name="blockdamage")
+    async def blockdamage(self,ctx,blocker_position:int,*assignments:str):
+        """Divide a multi-blocker's damage in order as ATTACKER_POSITION:DAMAGE."""
+        def run(g):
+            parsed=[]
+            for item in assignments:
+                attacker,damage=item.split(":",1); parsed.append((int(attacker),int(damage)))
+            g.assign_blocker_damage(ctx.author.id,blocker_position,parsed)
+        await self.mutate_ctx(ctx,run,"blocker_damage")
     @mtg.command(name="untap")
     async def untap(self,ctx,*positions:int):
         """Choose the battlefield positions to untap when Smoke or Winter Orb restricts the untap step."""

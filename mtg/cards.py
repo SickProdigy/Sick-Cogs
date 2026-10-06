@@ -63,6 +63,7 @@ class Card:
     haste: bool = False
     keywords: Tuple[str, ...] = ()
     max_block_power: Optional[int] = None
+    max_blocks: int = 1
     characteristic_pt: Optional[str] = None
     activation_cost: str = ""
     activated_power: int = 0
@@ -188,6 +189,7 @@ class Card:
         if self.hydra_damage_replacement: abilities.extend(("Remove a +1/+1 counter to prevent each 1 damage", "{R}: Prevent the next 1 damage", "{R}{R}{R}: Add a +1/+1 counter during your upkeep"))
         if self.end_combat_remove_power_counter: abilities.append("At end of combat, remove a +1/+0 counter if this creature attacked or blocked")
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
+        if self.max_blocks>1: abilities.append(f"Can block {self.max_blocks} creatures each combat")
         if self.activation_cost or self.activation_effect:
             effects=[]
             if (self.activated_power or self.activated_toughness) and not self.activation_attached:
@@ -551,6 +553,7 @@ ALPHA_SPELLS = {
     "lea:65": {"effect":"mana_short"},
     "lea:98": {"effect":"add_mana", "mana_color":"B", "mana_amount":3},
     "lea:178": {"effect":"destroy_wall"},
+    "lea:6": {"effect":"blaze_of_glory"},
     "lea:220": {"effect":"destroy_all_enchantments"},
     "lea:193": {"effect":"prevent_combat_damage"},
     "lea:50": {"effect":"draw_target_x"},
@@ -626,6 +629,7 @@ ALPHA_KEYWORDS = {
     "lea:155": ("flying",),
     "lea:170": ("flying",),
     "lea:174": ("flying",),
+    "lea:179": ("trample",),
     "lea:181": ("defender",),
     "lea:132": ("defender",),
     "lea:135": ("flying",),
@@ -701,6 +705,7 @@ for reference in PLAYABLE_ALPHA:
         protection_colors=ALPHA_PROTECTIONS.get(reference.key,()),
         keywords=ALPHA_KEYWORDS.get(reference.key, ()),
         max_block_power=1 if reference.key == "lea:159" else None,
+        max_blocks=2 if reference.key=="lea:179" else 1,
         characteristic_pt=ALPHA_CHARACTERISTIC_CREATURES.get(reference.key),
         activation_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_cost",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_cost",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_cost",""))),
         activated_power=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activated_power",ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activated_power",0)),

@@ -7,8 +7,8 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 73 creatures playable through 0.104.0; 4 remain |
-| Instants and sorceries | 70 | 60 spells playable through 0.103.0; 10 remain |
+| Creatures with abilities | 77 | 74 creatures playable through 0.105.0; 3 remain |
+| Instants and sorceries | 70 | 61 spells playable through 0.105.0; 9 remain |
 | Enchantments | 68 | 64 enchantments playable through 0.104.0; 4 remain |
 | Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -232,3 +232,6 @@ The 0.103.0 private-library ordering promotion adds Natural Selection. Its targe
 
 
 The 0.104.0 graveyard-Aura promotion adds Animate Dead. It targets a creature card in either graveyard, returns it under the Aura controller's control while preserving ownership, applies the live -1/-0 modifier, and creates a persisted respondable sacrifice trigger when the Aura reaches a graveyard. A backward-compatible base-controller field keeps that control correct through reloads and later control-changing Auras. Target loss, protection-driven Aura cleanup, linked-creature departure, regeneration-bypassing sacrifice, cross-player graveyard syntax, public attachment rendering, and solo AI use shared engine paths.
+
+
+The 0.105.0 multi-block combat promotion adds Two-Headed Giant of Foriys and Blaze of Glory. A blocker may now engage its printed or temporary number of attackers, while a persisted ordered assignment divides its power exactly once and enforces lethal damage before moving to the next attacker in the appropriate first-strike or normal damage step. Blaze grants an eligible defending creature unlimited blocks for the combat and requires it to block every attacker it legally can. Block declaration remains atomic; target loss, protection and evasion legality, reload recovery, public rendering, the `mtg blockdamage` command, cleanup, and solo AI share the same combat model.
