@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.17.0";__author__="SickProdigy"
+    __version__="0.17.1";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -380,7 +380,6 @@ class Pokemon(commands.Cog):
     def starter_embed(user,selected=0,setup_hint=None):
         starter_ids=(1,4,7);sid=starter_ids[int(selected)%len(starter_ids)];species=SPECIES[sid]
         embed=discord.Embed(title=f"Choose {species.name}?",description="Use ◀ and ▶ to view each starter, then press **Choose**. Your first partner can only be selected once.",color=discord.Color.green())
-        embed.add_field(name="Type",value=" / ".join(value.title() for value in species.types),inline=True)
         embed.add_field(name="Starter",value=f"{int(selected)%len(starter_ids)+1} of {len(starter_ids)}",inline=True)
         embed.set_image(url=sprite(sid))
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))

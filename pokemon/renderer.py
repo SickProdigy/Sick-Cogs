@@ -242,8 +242,7 @@ class BattleRenderer:
         species=SPECIES[choice_species_id or pokemon.species_id]
         draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
         if choice_species_id is not None:
-            types=" / ".join(value.title() for value in species.types)
-            draw.text((45,370),f"{species.name} — {types}-type Pokémon",fill=RETRO[0],font=ImageFont.load_default(size=25))
+            draw.text((45,370),f"Would you like {species.name}?",fill=RETRO[0],font=ImageFont.load_default(size=25))
             draw.text((45,407),"Use ◀ and ▶, then choose your partner.",fill=RETRO[1],font=ImageFont.load_default(size=18))
         else:
             trainer=" ".join(str(trainer_name).split())[:24] or "Trainer"

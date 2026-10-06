@@ -240,6 +240,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await Pokemon.pokemon.callback(cog,ctx)
         sent=ctx.send.await_args.kwargs
         self.assertEqual(sent["embed"].title,"Choose Bulbasaur?")
+        self.assertNotIn("Type",[field.name for field in sent["embed"].fields])
         self.assertTrue(sent["embed"].image.url.endswith("/1.png"))
         self.assertIn("Server setup: !pokemonset",sent["embed"].footer.text)
         self.assertIsInstance(sent["view"],StarterView)
