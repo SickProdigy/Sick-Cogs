@@ -112,10 +112,10 @@ class BattleRenderer:
         async with self.render_slots:
             return await asyncio.to_thread(callback, *args)
 
-    async def encounter(self,species_id:int,level:int=5,gender:str="unknown",backdrop:int=0,expired:bool=False):
-        data=await self.get_sprite(species_id)
+    async def encounter(self,species_id:int,level:int=5,gender:str="unknown",backdrop:int=0,expired:bool=False,shiny:bool=False):
+        data=await self.get_sprite(species_id,shiny=shiny)
         try:
-            return await self._render(self._encounter_sync,species_id,data,level,gender,backdrop,expired)
+            return await self._render(self._encounter_sync,species_id,data,level,gender,backdrop,expired,shiny)
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
@@ -174,10 +174,10 @@ class BattleRenderer:
     async def battle(self, battle):
         if battle.state!="active":
             species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
-            result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else False)
+            result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else battle.wild_shiny)
             try:return await self._render(self._battle_result_sync,battle,result_sprite)
             except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
-        front = await self.get_sprite(battle.wild_species_id)
+        front = await self.get_sprite(battle.wild_species_id,shiny=battle.wild_shiny)
         try:
             back = await self.get_sprite(
                 battle.player.species_id, back=True, shiny=battle.player.shiny
@@ -397,7 +397,7 @@ class BattleRenderer:
             mark_x=70+int(draw.textlength(level,font=font))+8;self._gender_mark(draw,(mark_x,384),battle.wild_gender,RETRO[1])
         return self._save(canvas)
 
-    def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False):
+    def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False,shiny=False):
         canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
         self._encounter_backdrop(draw,backdrop)
         pokemon=self._open(data,(250,220),trim=True,upscale=True)
@@ -405,11 +405,12 @@ class BattleRenderer:
             alpha=pokemon.getchannel("A");pokemon=ImageOps.grayscale(pokemon).convert("RGBA");pokemon.putalpha(alpha)
         canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
         maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
-        self._status_box(draw,(30,28),SPECIES[species_id].name,level,maximum,maximum,"",gender)
+        self._status_box(draw,(30,28),("Shiny " if shiny else "")+SPECIES[species_id].name,level,maximum,maximum,"",gender)
         if expired:
             canvas=Image.blend(canvas,Image.new("RGB",canvas.size,(105,105,105)),0.42);draw=ImageDraw.Draw(canvas)
         draw.rounded_rectangle((20,360,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
-        message=f"The wild {SPECIES[species_id].name} got away!" if expired else f"A wild {SPECIES[species_id].name} appeared!"
+        display=("Shiny " if shiny else "")+SPECIES[species_id].name
+        message=f"The wild {display} got away!" if expired else f"A wild {display} appeared!"
         draw.text((45,385),message,fill=RETRO[0],font=ImageFont.load_default(size=24))
         return self._save(canvas)
 

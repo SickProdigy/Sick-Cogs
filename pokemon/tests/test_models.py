@@ -196,10 +196,11 @@ class BattleTests(unittest.TestCase):
         self.assertTrue(b.last_action.startswith("Rattata used Quick Attack"))
 
     def test_caught_instance_is_global_identity(self):
-        b=battle(3);b.state="caught";b.wild_gender="female"
+        b=battle(3);b.state="caught";b.wild_gender="female";b.wild_shiny=True
         caught=b.caught()
         self.assertEqual(caught.species_id,10)
         self.assertEqual(caught.gender,"female")
+        self.assertTrue(caught.shiny)
         self.assertEqual(caught.caught_guild_id,1)
         self.assertEqual(len(caught.instance_id),32)
     def test_successful_catch_awards_half_victory_xp(self):
@@ -223,11 +224,12 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(b.state,"ran")
         with self.assertRaises(BattleError):b.run()
     def test_round_trip(self):
-        b=battle();b.trainer_name="SickProdigy";b.use_move(0)
+        b=battle();b.trainer_name="SickProdigy";b.wild_shiny=True;b.use_move(0)
         self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
         self.assertEqual(b.action_history[-1]["action"],"move:scratch")
         self.assertEqual(b.action_count,1)
         self.assertEqual(Battle.from_raw(b.raw()).trainer_name,"SickProdigy")
+        self.assertTrue(Battle.from_raw(b.raw()).wild_shiny)
 
     def test_gym_battle_metadata_round_trip(self):
         b=battle();b.battle_kind="gym";b.gym_key="boulder"
