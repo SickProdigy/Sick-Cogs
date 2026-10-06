@@ -946,6 +946,50 @@ class AlphaCounterspellTests(unittest.TestCase):
         game.play(10,1,"20:1"); game.pass_priority(20); game.pass_priority(10)
         self.assertNotIn(target,game.player(20).battlefield); self.assertIn(target.uid,game.player(20).graveyard); self.assertIn(blast,game.player(10).graveyard)
 
+class AlphaSpellBlastTests(unittest.TestCase):
+    def add(self,game,user,key,zone="hand"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_spell_blast_requires_x_equal_target_mana_value(self):
+        game=ready(); blast=self.add(game,10,"lea:79"); [self.add(game,10,"island","battlefield") for _ in range(5)]
+        target=self.add(game,20,"giant"); game.player(20).hand.remove(target); game.stack=[Spell(20,target,"giant")]; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"must equal"):
+            game.play(10,1,"S:1",2)
+        self.assertEqual(game.player(10).hand[0],blast); self.assertTrue(all(not x.tapped for x in game.player(10).battlefield))
+        game.play(10,1,"S:1",4); restored=Game.from_raw(game.to_raw())
+        self.assertEqual(restored.stack[-1].x_value,4); self.assertEqual(restored.stack[-1].target,f"S:{target}")
+        self.resolve_top(restored)
+        self.assertFalse(restored.stack); self.assertIn(target,restored.player(20).graveyard); self.assertIn(blast,restored.player(10).graveyard)
+
+    def test_spell_mana_value_includes_chosen_x_and_allows_zero(self):
+        game=ready(); target=self.add(game,20,"lea:140"); game.player(20).hand.remove(target)
+        x_spell=Spell(20,target,"lea:140",x_value=4); self.assertEqual(game.spell_mana_value(x_spell),5)
+        lotus=self.add(game,20,"lea:232"); game.player(20).hand.remove(lotus)
+        self.assertEqual(game.spell_mana_value(Spell(20,lotus,"lea:232")),0)
+
+        self.add(game,10,"lea:79"); self.add(game,10,"island","battlefield"); game.stack=[Spell(20,lotus,"lea:232")]; game.priority_user=10
+        game.play(10,1,"S:1",0); self.resolve_top(game)
+        self.assertIn(lotus,game.player(20).graveyard)
+
+    def test_spell_blast_rejects_abilities_and_rechecks_resolution(self):
+        ability=ready(); self.add(ability,10,"lea:79"); self.add(ability,10,"island","battlefield")
+        source=self.add(ability,20,"lea:268","battlefield"); uid=ability.next_uid; ability.next_uid+=1; ability.cards[uid]="lea:268"
+        ability.stack=[Spell(20,uid,"lea:268","10",ability_effect="damage_any",source_uid=source.uid)]; ability.priority_user=10
+        with self.assertRaisesRegex(GameError,"ability"):
+            ability.play(10,1,"S:1",0)
+
+        changed=ready(); blast=self.add(changed,10,"lea:79"); [self.add(changed,10,"island","battlefield") for _ in range(3)]
+        target=self.add(changed,20,"lea:140"); changed.player(20).hand.remove(target); target_spell=Spell(20,target,"lea:140",x_value=1)
+        changed.stack=[target_spell]; changed.priority_user=10; changed.play(10,1,"S:1",2); target_spell.x_value=2
+        self.resolve_top(changed)
+        self.assertEqual(changed.stack[-1].uid,target); self.assertIn(blast,changed.player(10).graveyard)
+
+
 class AlphaColorCounterEnchantmentTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

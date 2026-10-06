@@ -399,6 +399,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
 
+    async def test_public_embed_shows_spell_blast_x_and_stack_target(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        target=game.next_uid; game.next_uid+=1; game.cards[target]="giant"
+        blast=game.next_uid; game.next_uid+=1; game.cards[blast]="lea:79"
+        game.stack=[spell_type(20,target,"giant"),spell_type(10,blast,"lea:79",f"S:{target}",x_value=3)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Spell Blast",rendered); self.assertIn("X=3",rendered); self.assertIn("Giant",rendered)
+
     async def test_public_embed_shows_drain_life_x_and_target(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

@@ -164,6 +164,8 @@ class Game:
         return (permanent.color_override,) if permanent.color_override else self.card(permanent.uid).colors
     def spell_colors(self,spell):
         return (spell.color_override,) if spell.color_override else self.card(spell.uid).colors
+    def spell_mana_value(self,spell):
+        card=self.card(spell.uid); return card.cost+card.mana_cost.count("{X}")*spell.x_value
     def ability_source_colors(self,spell):
         _,source=self.find_permanent(spell.source_uid)
         return self.current_colors(source) if source is not None else self.spell_colors(spell)
@@ -551,6 +553,9 @@ class Game:
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
+        if c.effect=="counter_mana_value_x":
+            target_uid=int(target.split(":",1)[1]); target_spell=next((item for item in self.stack if item.uid==target_uid and not item.ability_effect),None)
+            if target_spell is None or self.spell_mana_value(target_spell)!=x_value: raise GameError(f"{c.name} X must equal the target spell mana value.")
         protected=self._stable_target_permanent(target)
         if protected is not None and self._protected_from(protected,c): raise GameError(f"{c.name} cannot target a permanent with protection from its color.")
         payment=self._mana_payment(p,c,x_value)
@@ -626,12 +631,12 @@ class Game:
                 if not self.is_creature(permanent): raise GameError("Healing Salve prevention target is not a creature.")
                 return f"prevent:{target_user}:{permanent.uid}"
             raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
-        if c.effect in ("counter_spell","elemental_blast"):
+        if c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if target and target.upper().startswith("S:"):
                 spell=self._target_stack(target); target_card=self.card(spell.uid)
                 if c.target_color and c.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {c.target_color}.")
                 return f"S:{spell.uid}"
-            if c.effect=="counter_spell": raise GameError("Counterspell requires an S:POSITION stack target.")
+            if c.effect in ("counter_spell","counter_mana_value_x"): raise GameError(f"{c.name} requires an S:POSITION stack target.")
             if not target or ":" not in target: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.")
             try: target_user,pos=(int(x) for x in target.split(":"))
             except (TypeError,ValueError) as e: raise GameError("Elemental Blast target must be S:POSITION or USER_ID:POSITION.") from e
@@ -1112,11 +1117,11 @@ class Game:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             p.battlefield.append(Permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override))
         elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(Permanent(s.uid,c.key,tapped=c.enters_tapped,color_override=s.color_override))
-        elif c.effect in ("counter_spell","elemental_blast"):
+        elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             if s.target.startswith("S:"):
                 target_uid=int(s.target.split(":",1)[1]); target=next((spell for spell in self.stack if spell.uid==target_uid),None)
                 target_card=self.card(target.uid) if target is not None else None
-                legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in self.spell_colors(target))
+                legal=target_card is not None and not target.ability_effect and (not c.target_color or c.target_color in self.spell_colors(target)) and (c.effect!="counter_mana_value_x" or self.spell_mana_value(target)==s.x_value)
                 if not legal:
                     p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
                 self.stack.remove(target); self.player(target.owner).graveyard.append(target.uid)

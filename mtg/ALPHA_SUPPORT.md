@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
-| Instants and sorceries | 70 | 48 spells playable through 0.58.0; 22 remain |
+| Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 36 enchantments playable through 0.56.0; 32 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -138,3 +138,5 @@ The 0.56.0 upkeep-damage-enchantment promotion adds Karma, Feedback, Cursed Land
 The 0.57.0 mass-redraw promotion adds Wheel of Fortune and Timetwister. Wheel moves every hand to its owner's graveyard before both players draw seven; Timetwister independently shuffles each hand and graveyard into its owner's library, deliberately excluding the resolving Timetwister, before both redraw. A shared two-player draw transaction completes all instructed draws before resolving simultaneous or one-sided empty-library losses. Stack persistence and public Discord rendering never expose private cards, while solo AI casts a redraw only when its relative hand and, for Timetwister, graveyard position benefits.
 
 The 0.58.0 restricted-X promotion adds Drain Life. The mana solver now supports card-specific X colors, requiring every Drain Life X symbol to be paid with black mana while retaining its separate generic and black printed costs. Its stable creature-or-player target and X persist on the stack; resolution gains only life equal to damage actually dealt after prevention and never more than the creature's pre-damage toughness or player's pre-damage life. Fizzled and fully prevented damage gain no life. Discord exposes X and the public target, and solo AI computes the maximum payable black X.
+
+The 0.59.0 exact-mana-value-counter promotion adds Spell Blast. A shared spell mana-value calculation includes the chosen value of every X in a spell on the stack. Spell Blast requires its caster's X to equal that mana value before any mana is committed, persists the target spell UID and X, and rechecks both target existence and mana value on resolution. Zero-mana spells remain legal with X=0, while activated and triggered abilities remain illegal targets. Discord displays X and the public stack target, and solo AI selects an opposing spell only when it can pay the exact required X.

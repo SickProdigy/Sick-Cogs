@@ -370,6 +370,7 @@ ALPHA_SPELLS = {
     "lea:217": {"effect":"life_target_x"},
     "lea:49": {"effect":"elemental_blast", "target_color":"R"},
     "lea:54": {"effect":"counter_spell"},
+    "lea:79": {"effect":"counter_mana_value_x"},
     "lea:169": {"effect":"elemental_blast", "target_color":"U"},
     "lea:36": {"effect":"pump_blocking", "amount":7},
     "lea:47": {"effect":"draw_target", "amount":3},

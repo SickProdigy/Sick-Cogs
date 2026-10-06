@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -25,10 +25,10 @@ def _target(game, user, card):
             target=game.card(permanent.uid)
             if game._aura_can_attach(card,permanent): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
         return f"{target_user}:{max(choices)[1]}" if choices else None
-    if card.effect in ("counter_spell","elemental_blast"):
+    if card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
-            if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in game.spell_colors(spell)): return f"S:{position}"
+            if not spell.ability_effect and spell.owner!=user and (not card.target_color or card.target_color in game.spell_colors(spell)) and (card.effect!="counter_mana_value_x" or game.can_pay(user,card,game.spell_mana_value(spell))): return f"S:{position}"
         if card.effect=="elemental_blast":
             targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if card.target_color in game.current_colors(permanent) and _can_target(game,card,permanent)]
             if targets:
@@ -169,13 +169,19 @@ def _play_one(game, user, difficulty):
         x_value=game.max_payable_x(user,card) if "{X}" in card.mana_cost else None
         if card.effect=="discard_random_x" and x_value is not None:
             x_value=min(x_value,len(game.player(game.opponent(user)).hand))
-        if card.land or (x_value is not None and x_value<1) or not game.can_pay(user,card,x_value or 0):
+        forced_target=None
+        if card.effect=="counter_mana_value_x":
+            forced_target=_target(game,user,card)
+            if forced_target:
+                target_position=int(forced_target.split(":",1)[1]); target_spell=list(reversed(game.stack))[target_position-1]
+                x_value=game.spell_mana_value(target_spell)
+        if card.land or (x_value is not None and x_value<1 and card.effect!="counter_mana_value_x") or not game.can_pay(user,card,x_value or 0):
             continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
             continue
-        target = _target(game, user, card)
+        target = forced_target if card.effect=="counter_mana_value_x" else _target(game, user, card)
         if card.effect in TARGETED_EFFECTS and target is None:
             continue
         score = 0
@@ -268,7 +274,7 @@ def _play_one(game, user, difficulty):
             score=8
         elif card.effect=="reanimate_creature":
             score=13
-        elif card.effect in ("counter_spell","elemental_blast"):
+        elif card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
             score=15 if target and target.startswith("S:") else 11
         elif card.effect in ("regenerate_target","grant_keyword","tap_or_untap"):
             score=10

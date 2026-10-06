@@ -280,6 +280,14 @@ class SoloAITests(unittest.TestCase):
         game.pass_priority(HUMAN); advance_solo(game)
         self.assertFalse(game.stack); self.assertIn(growth,game.player(HUMAN).graveyard); self.assertIn(bear,game.player(HUMAN).battlefield)
 
+    def test_ai_casts_spell_blast_with_exact_target_mana_value(self):
+        game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        blast=self.add(game,AI,"lea:79","hand"); [self.add(game,AI,"island") for _ in range(5)]
+        target=self.add(game,HUMAN,"giant","hand"); game.player(HUMAN).hand.remove(target)
+        game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(HUMAN,target,"giant")]; game.phase="precombat_main"; game.priority_user=AI
+        advance_solo(game)
+        self.assertEqual(game.stack[-1].uid,blast); self.assertEqual(game.stack[-1].x_value,4); self.assertEqual(game.stack[-1].target,f"S:{target}")
+
     def test_ai_counters_opponent_spell_through_normal_actions(self):
         game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True
         shock=self.add(game,HUMAN,"shock","hand"); self.add(game,HUMAN,"mountain")
