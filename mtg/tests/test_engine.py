@@ -2380,6 +2380,36 @@ class AlphaCreatureUpkeepTests(unittest.TestCase):
         restored=Game.from_raw(damaged.to_raw()); restored.choose_trigger(10,False)
         self.assertEqual(restored.player(10).life,15); self.assertEqual(restored.player(10).damage_prevention,0)
 
+    def test_demonic_hordes_tap_activation_destroys_a_stable_land_target(self):
+        game=ready(); hordes=self.add(game,10,"lea:103"); target=self.add(game,20,"forest"); creature=self.add(game,20,"bear")
+        with self.assertRaisesRegex(GameError,"land"): game.activate_ability(10,1,"20:2")
+        self.assertFalse(hordes.tapped); game.activate_ability(10,1,"20:1"); self.assertTrue(hordes.tapped)
+        restored=Game.from_raw(game.to_raw()); restored._destroy(restored.player(10),restored.find_permanent(hordes.uid)[1],allow_regeneration=False); self.resolve_top(restored)
+        self.assertIn(target.uid,restored.player(20).graveyard)
+
+    def test_demonic_hordes_can_pay_upkeep_without_tapping_or_sacrificing(self):
+        game=ready(); hordes=self.add(game,10,"lea:103"); lands=[self.add(game,10,"swamp") for _ in range(4)]
+        game._start_turn(); self.resolve_top(game); self.assertEqual(game.trigger_cost(game.stack[-1]),"{B}{B}{B}")
+        game.choose_trigger(10,True); self.assertFalse(hordes.tapped); self.assertEqual(sum(land.tapped for land in lands),3); self.assertEqual(len(game.player(10).graveyard),0)
+
+    def test_demonic_hordes_decline_hands_persisted_land_choice_to_opponent(self):
+        game=ready(); hordes=self.add(game,10,"lea:103"); swamp=self.add(game,10,"swamp"); dual=self.add(game,10,"lea:277")
+        game._start_turn(); self.resolve_top(game); game.choose_trigger(10,False)
+        trigger=game.stack[-1]; self.assertTrue(hordes.tapped); self.assertTrue(trigger.decision_pending); self.assertEqual(trigger.owner,20); self.assertEqual(trigger.target,"10"); self.assertEqual(game.trigger_accept_label(trigger),"Choose a land")
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw())
+        with self.assertRaisesRegex(GameError,"trigger choice"): restored.choose_trigger(10,True,2)
+        restored.choose_trigger(20,True,3); self.assertIn(dual.uid,restored.player(10).graveyard); self.assertIsNotNone(restored.find_permanent(swamp.uid)[1])
+
+    def test_demonic_hordes_land_sacrifice_triggers_dingus_egg_and_survives_source_removal(self):
+        game=ready(); hordes=self.add(game,10,"lea:103"); land=self.add(game,10,"swamp"); self.add(game,20,"lea:241")
+        game._start_turn(); game._destroy(game.player(10),hordes,allow_regeneration=False); self.resolve_top(game); game.choose_trigger(10,False)
+        game.choose_trigger(20,True,1); self.assertIn(land.uid,game.player(10).graveyard); self.assertEqual(game.stack[-1].ability_effect,"land_event_damage")
+        self.resolve_top(game); self.assertEqual(game.player(10).life,18)
+
+    def test_demonic_hordes_with_no_land_taps_without_requesting_a_choice(self):
+        game=ready(); hordes=self.add(game,10,"lea:103"); game._start_turn(); self.resolve_top(game); game.choose_trigger(10,False)
+        self.assertTrue(hordes.tapped); self.assertFalse(game.stack); self.assertEqual(game.priority_user,10)
+
     def test_lord_of_the_pit_requires_an_explicit_other_creature_sacrifice(self):
         game=ready(); lord=self.add(game,10,"lea:114"); victim=self.add(game,10,"bear"); victim.regeneration_shields=1
         game._start_turn(); self.resolve_top(game); trigger=game.stack[-1]

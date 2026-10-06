@@ -491,7 +491,7 @@ class Game:
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
         if card.activation_effect=="unblockable" and (not self.is_creature(permanent) or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="grant_flying_delayed_destroy" and (target_user!=user or not self.is_creature(permanent) or self.current_stats(permanent)[1]>=self.current_stats(source)[0]): raise GameError("Target must be a creature you control with toughness less than this creature’s power.")
-        if card.activation_effect=="untap_land" and not target_card.land: raise GameError("Target must be a land.")
+        if card.activation_effect in ("untap_land","destroy_land") and not target_card.land: raise GameError("Target must be a land.")
         if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
@@ -799,8 +799,11 @@ class Game:
                     self._empty_mana(); self._advance()
 
     def trigger_sacrifice_choices(self,trigger):
-        if trigger.ability_effect!="upkeep_sacrifice": return []
-        return [(position,permanent) for position,permanent in enumerate(self.player(trigger.owner).battlefield,1) if permanent.uid!=trigger.source_uid and self.is_creature(permanent)]
+        if trigger.ability_effect=="upkeep_sacrifice":
+            return [(position,permanent) for position,permanent in enumerate(self.player(trigger.owner).battlefield,1) if permanent.uid!=trigger.source_uid and self.is_creature(permanent)]
+        if trigger.ability_effect=="opponent_land_sacrifice":
+            return [(position,permanent) for position,permanent in enumerate(self.player(int(trigger.target)).battlefield,1) if self.card(permanent.uid).land]
+        return []
 
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
@@ -813,6 +816,7 @@ class Game:
         if trigger.ability_effect=="cast_draw": return "Draw a card"
         if trigger.ability_effect=="graveyard_return": return "Return to battlefield"
         if trigger.ability_effect=="upkeep_sacrifice": return "Choose a creature"
+        if trigger.ability_effect=="opponent_land_sacrifice": return "Choose a land"
         return f"Pay {self.trigger_cost(trigger)}"
 
     def choose_trigger(self,user,pay,sacrifice_position=None):
@@ -820,13 +824,17 @@ class Game:
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user:
             raise GameError("You do not have a trigger choice to make.")
         trigger=self.stack[-1]; card=self.card(trigger.uid)
-        if trigger.ability_effect=="upkeep_sacrifice":
-            if not pay: raise GameError(f"{card.name} requires you to sacrifice another creature if able.")
+        if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
+            required="another creature" if trigger.ability_effect=="upkeep_sacrifice" else "a land"
+            if not pay: raise GameError(f"{card.name} requires you to sacrifice {required} if able.")
             choices=dict(self.trigger_sacrifice_choices(trigger))
-            if sacrifice_position not in choices: raise GameError("Choose the battlefield position of another creature you control.")
-            permanent=choices[sacrifice_position]; player=self.player(user); sacrificed_name=self.card(permanent.uid).name; self.stack.pop()
+            if sacrifice_position not in choices: raise GameError(f"Choose the battlefield position of {required}.")
+            permanent=choices[sacrifice_position]; player=self.player(user if trigger.ability_effect=="upkeep_sacrifice" else int(trigger.target)); sacrificed_name=self.card(permanent.uid).name; was_land=self.card(permanent.uid).land; self.stack.pop()
             self._remember_source_power(permanent); self._remove_from_combat(permanent.uid); player.battlefield.remove(permanent); self._dies(player,permanent)
-            self.cards.pop(trigger.uid,None); self.log.append(f"{user} sacrificed {sacrificed_name} for {card.name}.")
+            if was_land and permanent.uid in player.graveyard: self.stack.extend(self._land_event_triggers(player.user_id,"grave"))
+            self.cards.pop(trigger.uid,None)
+            if trigger.ability_effect=="upkeep_sacrifice": self.log.append(f"{user} sacrificed {sacrificed_name} for {card.name}.")
+            else: self.log.append(f"{user} chose {sacrificed_name} to be sacrificed for {card.name}.")
             if self.stack: self.stack[-1].passes=0
             self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life(); return
         trigger=self.stack.pop(); pending=[]; cost=self.trigger_cost(trigger)
@@ -858,7 +866,12 @@ class Game:
             self.log.append(f"{user} declined {card.name}.")
             if trigger.ability_effect=="upkeep_cost":
                 source_controller,source=self.find_permanent(trigger.source_uid)
-                if card.upkeep_unpaid_effect=="sacrifice" and source is not None:
+                if card.upkeep_unpaid_effect=="tap_opponent_land_sacrifice":
+                    if source is not None: self._tap_permanent(source_controller.user_id,source,pending_triggers=pending)
+                    trigger.owner=self.opponent(user); trigger.target=str(user); trigger.ability_effect="opponent_land_sacrifice"; trigger.decision_pending=True; trigger.passes=0
+                    if self.trigger_sacrifice_choices(trigger):
+                        self.stack.extend(pending); self.stack.append(trigger); self.phase_passes=0; self.priority_user=trigger.owner; return
+                elif card.upkeep_unpaid_effect=="sacrifice" and source is not None:
                     self._remember_source_power(source); self._remove_from_combat(source.uid); source_controller.battlefield.remove(source); self._dies(source_controller,source)
                 elif card.upkeep_unpaid_effect=="damage": self._damage_player(user,card.upkeep_unpaid_damage)
         self.cards.pop(trigger.uid,None); self.stack.extend(pending)
@@ -1221,10 +1234,11 @@ class Game:
                 self._damage_permanent(target,card.activation_amount)
             else: self._damage_player(int(s.target),card.activation_amount)
             self._damage_player(s.owner,card.activation_self_damage)
-        elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall"):
+        elif effect in ("destroy_black_permanent","destroy_tapped_creature","destroy_wall","destroy_land"):
             legal=target_card is not None
             if effect=="destroy_black_permanent": legal=legal and "B" in self.current_colors(target)
             elif effect=="destroy_tapped_creature": legal=legal and self.is_creature(target) and target.tapped
+            elif effect=="destroy_land": legal=legal and target_card.land
             else: legal=legal and "Wall" in target_card.type_line.split(" — ",1)[-1].split()
             if not legal: fizzle("its target was gone or illegal"); return
             self._destroy(controller,target)

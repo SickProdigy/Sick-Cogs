@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 64 creatures playable through 0.69.0; 13 remain |
+| Creatures with abilities | 77 | 65 creatures playable through 0.70.0; 12 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -160,3 +160,5 @@ The 0.67.0 graveyard-upkeep promotion adds Nether Shadow. Graveyards retain thei
 The 0.68.0 delayed-end-step promotion adds Stone Giant. Its tap ability targets only a creature its controller controls whose live toughness is less than Stone Giant’s live power, checks that restriction again on resolution, and uses last-known source power if Stone Giant has left the battlefield. A successful ability grants flying until cleanup and schedules a separate persisted beginning-of-the-next-end-step destruction trigger. That trigger survives source removal, grants both players a response window, allows regeneration, and safely fizzles if its target leaves. Public Discord state shows upcoming destruction, and solo AI selects useful eligible attackers without duplicating pending effects.
 
 The 0.69.0 mandatory-upkeep-sacrifice promotion adds Lord of the Pit. Its persisted upkeep trigger gives both players a response window before the controller must choose another currently controlled creature to sacrifice. Sacrifice bypasses regeneration, removes tokens correctly, feeds existing creature-death triggers, and remains mandatory if the Lord leaves after triggering. If no eligible creature exists when the trigger resolves, the Lord deals seven preventable damage to its controller. Discord supplies a bounded creature select plus an unrestricted `mtg trigger sacrifice POSITION` fallback, public rendering distinguishes the mandatory choice from optional triggers, and solo AI sacrifices its least valuable legal creature.
+
+The 0.70.0 opponent-choice upkeep promotion adds Demonic Hordes. Its tap ability uses the shared stable-target activation stack to destroy a land. At upkeep its controller may pay {B}{B}{B}; declining taps the Hordes through the shared non-mana path and persists a mandatory land choice owned by the opponent. The choice survives source removal and reload, uses current battlefield positions, bypasses regeneration, and creates existing land-to-graveyard triggers such as Dingus Egg. No choice is requested when no land exists. Discord provides the same bounded select and unrestricted sacrifice-position fallback across the cross-player handoff, while solo AI pays for its own Hordes when able and chooses an opponent’s least flexible land.

@@ -424,6 +424,7 @@ def _activation_target(game,user,card,source_uid=None):
         if card.activation_effect=="destroy_black_permanent" and "B" in game.current_colors(permanent): candidates.append((target.cost,position))
         elif card.activation_effect=="destroy_tapped_creature" and game.is_creature(permanent) and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
+        elif card.activation_effect=="destroy_land" and target.land: candidates.append((1+len(target.produces),position))
     if candidates: return f"{opponent}:{max(candidates)[1]}"
     if card.activation_effect=="unblockable" and game.active_user==user and game.phase in ("precombat_main","after_attackers"):
         attackers=set(game.attackers) if game.phase=="after_attackers" else None
@@ -559,9 +560,10 @@ def advance_solo(game: Game):
             return changed
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]; source=game.find_permanent(trigger.source_uid)[1]
-            if trigger.ability_effect=="upkeep_sacrifice":
+            if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):
                 choices=game.trigger_sacrifice_choices(trigger)
-                position,_=min(choices,key=lambda item:(game.card(item[1].uid).cost+sum(game.current_stats(item[1])),item[0]))
+                if trigger.ability_effect=="upkeep_sacrifice": position,_=min(choices,key=lambda item:(game.card(item[1].uid).cost+sum(game.current_stats(item[1])),item[0]))
+                else: position,_=min(choices,key=lambda item:(len(game.card(item[1].uid).produces),item[0]))
                 game.choose_trigger(user,True,position); game.record(user,"ai_trigger_sacrifice"); changed=True; continue
             if trigger.ability_effect=="upkeep_untap":
                 useful=source is not None and source.tapped

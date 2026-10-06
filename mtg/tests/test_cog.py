@@ -379,6 +379,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Wanderlust",rendered); self.assertIn("deals 1 damage",rendered); self.assertIn("Wanderlust ability",rendered)
 
+    async def test_demonic_hordes_opponent_land_choice_uses_mandatory_select(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        hordes=game.next_uid; game.next_uid+=1; game.cards[hordes]="lea:103"; land=game.next_uid; game.next_uid+=1; game.cards[land]="swamp"
+        game.player(10).battlefield=[permanent_type(hordes,"lea:103",sick=False),permanent_type(land,"swamp",sick=False)]
+        game._start_turn(); game.pass_priority(10); game.pass_priority(20); game.choose_trigger(10,False); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("chooser must Choose a land",rendered)
+        view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":sacrifice")); pay=next(item for item in view.children if item.custom_id.endswith(":pay"))
+        self.assertEqual(select.placeholder,"Choose a land to sacrifice"); self.assertEqual(select.options[0].value,"2"); self.assertIn("Swamp",select.options[0].label); self.assertTrue(pay.disabled)
+
     async def test_lord_of_the_pit_choice_uses_mandatory_sacrifice_select(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

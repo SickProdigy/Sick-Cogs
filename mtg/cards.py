@@ -184,6 +184,7 @@ class Card:
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="sacrifice": abilities.append(f"At your upkeep, sacrifice this creature unless you pay {self.upkeep_cost}")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="damage": abilities.append(f"At your upkeep, this creature deals {self.upkeep_unpaid_damage} damage to you unless you pay {self.upkeep_cost}")
+        if self.upkeep_cost and self.upkeep_unpaid_effect=="tap_opponent_land_sacrifice": abilities.append(f"At your upkeep, tap this creature and sacrifice a land an opponent chooses unless you pay {self.upkeep_cost}")
         if self.upkeep_sacrifice_other: abilities.append(f"At your upkeep, sacrifice another creature or this creature deals {self.upkeep_sacrifice_damage} damage to you")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
@@ -337,6 +338,7 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:258": {"activation_cost":"{1}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
     "lea:29": {"activation_cost":"{W}{W}", "activation_tap":True, "activation_effect":"destroy_black_permanent", "activation_text":"Destroy target black permanent"},
     "lea:73": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
+    "lea:103": {"activation_tap":True, "activation_effect":"destroy_land", "activation_text":"Destroy target land"},
     "lea:123": {"activation_tap":True, "activation_effect":"destroy_tapped_creature", "activation_text":"Destroy target tapped creature"},
     "lea:142": {"activation_tap":True, "activation_effect":"destroy_wall", "activation_text":"Destroy target Wall"},
     "lea:143": {"activation_tap":True, "activation_effect":"unblockable", "activation_text":"Target creature with power 2 or less can't be blocked this turn"},
@@ -457,6 +459,7 @@ ALPHA_COMBAT_TRIGGERS = {
 }
 
 ALPHA_UPKEEP_CREATURES = {
+    "lea:103": {"upkeep_cost":"{B}{B}{B}", "upkeep_unpaid_effect":"tap_opponent_land_sacrifice"},
     "lea:114": {"upkeep_sacrifice_other":True, "upkeep_sacrifice_damage":7},
     "lea:67": {"upkeep_cost":"{U}", "upkeep_unpaid_effect":"sacrifice"},
     "lea:194": {"upkeep_cost":"{G}{G}{G}{G}", "upkeep_unpaid_effect":"damage", "upkeep_unpaid_damage":8},

@@ -706,6 +706,21 @@ class SoloAITests(unittest.TestCase):
         karma.active_index=0; karma.phase="precombat_main"; karma.priority_user=AI; karma.player(AI).land_played=True
         advance_solo(karma); self.assertEqual(karma.stack[-1].uid,spell)
 
+    def test_ai_pays_for_own_demonic_hordes_and_chooses_an_opponents_basic_land(self):
+        paid=solo(order=(AI,HUMAN)); paid.player(AI).kept=True; paid.player(HUMAN).kept=True; paid.player(AI).hand=[]
+        hordes=self.add(paid,AI,"lea:103"); [self.add(paid,AI,"swamp") for _ in range(3)]
+        paid.active_index=0; paid._start_turn(); advance_solo(paid); paid.pass_priority(HUMAN); advance_solo(paid)
+        self.assertFalse(hordes.tapped); self.assertTrue(any(event["action"]=="ai_trigger_pay" for event in paid.history))
+
+        choice=solo(order=(HUMAN,AI)); choice.player(HUMAN).kept=True; choice.player(AI).kept=True; choice.player(AI).hand=[]
+        self.add(choice,HUMAN,"lea:103"); basic=self.add(choice,HUMAN,"swamp"); dual=self.add(choice,HUMAN,"lea:277")
+        choice.active_index=0; choice._start_turn(); choice.pass_priority(HUMAN); advance_solo(choice); choice.choose_trigger(HUMAN,False); advance_solo(choice)
+        self.assertIn(basic.uid,choice.player(HUMAN).graveyard); self.assertIsNotNone(choice.find_permanent(dual.uid)[1]); self.assertTrue(any(event["action"]=="ai_trigger_sacrifice" for event in choice.history))
+
+    def test_ai_uses_demonic_hordes_land_destruction(self):
+        cards=__import__("mtg.cards",fromlist=["CARDS"]).CARDS; game=solo(); source=self.add(game,AI,"lea:103"); target=self.add(game,HUMAN,"forest")
+        self.assertEqual(_activation_target(game,AI,cards["lea:103"],source.uid),f"{HUMAN}:1")
+
     def test_ai_sacrifices_its_least_valuable_creature_to_lord_of_the_pit(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
         lord=self.add(game,AI,"lea:114"); bear=self.add(game,AI,"bear"); giant=self.add(game,AI,"giant")
