@@ -4,7 +4,8 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Optional
 
-from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, effectiveness, moves_for_level
+from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, moves_for_level
+from .rulesets import resolve_ruleset
 
 
 class BattleError(ValueError):
@@ -164,6 +165,9 @@ class Battle:
     evolved_from: Optional[int] = None
     learned_moves: list = field(default_factory=list)
     pending_moves: list = field(default_factory=list)
+    ruleset: str = "standard"
+    mechanics_generation: int = 9
+    content_generation: int = 1
 
     def __post_init__(self):
         if not self.party:
@@ -172,6 +176,9 @@ class Battle:
         self.party_status.setdefault(self.player.instance_id, self.player_status)
         if self.player.current_hp is not None:self.player_hp=max(0,min(self.max_hp(self.player),int(self.player.current_hp)))
         if self.player.status:self.player_status=self.player.status
+
+    def rules(self):
+        return resolve_ruleset(self.ruleset)
 
     def initialize_party(self, party):
         self.party = list(party)
@@ -287,12 +294,8 @@ class Battle:
             self.wild_pp[wild_key] -= 1
         player_move = MOVES[player_key]
         wild_move = MOVES[wild_key]
-        player_speed = self.stat(self.player, "speed")
-        if self.player_status == "paralysis":
-            player_speed //= 2
-        wild_speed = wild.speed
-        if self.wild_status == "paralysis":
-            wild_speed //= 2
+        player_speed = self.combat_speed(True)
+        wild_speed = self.combat_speed(False)
         player_order=(player_move.priority,player_speed)
         wild_order=(wild_move.priority,wild_speed)
         player_first=(self.rng().randrange(2)==0) if player_order==wild_order else player_order>wild_order
@@ -313,6 +316,11 @@ class Battle:
         self.last_action = " ".join(lines)
         self._finish_if_needed()
         self._record(f"move:{player_key}")
+
+    def combat_speed(self,player):
+        speed=self.stat(self.player,"speed") if player else self.wild_stat("speed")
+        status=self.player_status if player else self.wild_status
+        return self.rules().paralysis_speed(speed) if status=="paralysis" else speed
 
     def _apply_stat_changes(self, move, player):
         user_stages=self.player_stages if player else self.wild_stages
@@ -365,9 +373,9 @@ class Battle:
         return True,""
 
     @staticmethod
-    def effectiveness_line(move,target_id):
+    def effectiveness_line(move,target_id,ruleset="standard"):
         if move.power<=0:return ""
-        value=effectiveness(move.type,SPECIES[target_id].types)
+        value=resolve_ruleset(ruleset).effectiveness(move.type,SPECIES[target_id].types)
         if value==0:return f"It doesn't affect {SPECIES[target_id].name}..."
         if value>1:return "It's super effective!"
         if value<1:return "It's not very effective..."
@@ -385,10 +393,10 @@ class Battle:
         }.get(status,"")
 
     @classmethod
-    def attack_line(cls,attacker,target_id,move,damage,critical=False,status="",extra=()):
+    def attack_line(cls,attacker,target_id,move,damage,critical=False,status="",extra=(),ruleset="standard"):
         parts=[f"{attacker} used {move.name} and dealt {damage} damage."]
         if critical and damage>0:parts.append("A critical hit!")
-        matchup=cls.effectiveness_line(move,target_id)
+        matchup=cls.effectiveness_line(move,target_id,ruleset)
         if matchup:parts.append(matchup)
         if status:parts.append(cls.status_line(SPECIES[target_id].name,status))
         parts.extend(f"{item}." for item in extra if item)
@@ -398,10 +406,11 @@ class Battle:
         rng=self.rng();allowed,message=self._can_act(True,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
-        if move.category=="status":return self._status_action(move,True)
-        critical=rng.randrange(max(1,24-move.crit_rate*4))==0
-        attack_name="special_attack" if move.category=="special" else "attack"
-        defense_name="special_defense" if move.category=="special" else "defense"
+        if self.rules().move_category(move)=="status":return self._status_action(move,True)
+        critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(True)))==0
+        category=self.rules().move_category(move)
+        attack_name="special_attack" if category=="special" else "attack"
+        defense_name="special_defense" if category=="special" else "defense"
         attack=self.stage_stat(self.stat(self.player,attack_name),self.player_stages.get(attack_name,0))
         defense=self.stage_stat(self.wild_stat(defense_name),self.wild_stages.get(defense_name,0))
         damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,SPECIES[self.player.species_id].types,defense)
@@ -411,16 +420,16 @@ class Battle:
         applied_status="";stat_changes=[]
         if move.status and not self.wild_status and rng.randrange(100)<move.status_chance:self.wild_status=move.status;applied_status=move.status
         if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,True)
-        return self.attack_line(SPECIES[self.player.species_id].name,self.wild_species_id,move,damage,critical,applied_status,stat_changes)
+        return self.attack_line(SPECIES[self.player.species_id].name,self.wild_species_id,move,damage,critical,applied_status,stat_changes,ruleset=self.ruleset)
 
     def _wild_attack(self, move):
         rng=self.rng();allowed,message=self._can_act(False,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
-        if move.category=="status":return self._status_action(move,False)
-        critical=rng.randrange(max(1,24-move.crit_rate*4))==0
-        wild=SPECIES[self.wild_species_id];attack_name="special_attack" if move.category=="special" else "attack"
-        defense_name="special_defense" if move.category=="special" else "defense"
+        if self.rules().move_category(move)=="status":return self._status_action(move,False)
+        critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(False)))==0
+        wild=SPECIES[self.wild_species_id];category=self.rules().move_category(move);attack_name="special_attack" if category=="special" else "attack"
+        defense_name="special_defense" if category=="special" else "defense"
         attack=self.stage_stat(self.wild_stat(attack_name),self.wild_stages.get(attack_name,0))
         defense=self.stage_stat(self.stat(self.player,defense_name),self.player_stages.get(defense_name,0))
         damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,wild.types,defense)
@@ -430,7 +439,7 @@ class Battle:
         applied_status="";stat_changes=[]
         if move.status and not self.player_status and rng.randrange(100)<move.status_chance:self.player_status=move.status;applied_status=move.status
         if move.stat_changes and rng.randrange(100)<move.stat_chance:stat_changes=self._apply_stat_changes(move,False)
-        return self.attack_line(wild.name,self.player.species_id,move,damage,critical,applied_status,stat_changes)
+        return self.attack_line(wild.name,self.player.species_id,move,damage,critical,applied_status,stat_changes,ruleset=self.ruleset)
 
     def _end_turn_status(self):
         if self.player_status in {"poison", "burn"} and self.player_hp > 0:
@@ -472,12 +481,13 @@ class Battle:
         if move.effect=="ohko":return int(target_hp or 0)
         if move.effect=="counter" or move.power<=0:return 0
         target=SPECIES[target_id]
-        if defense is None:defense=(target.special_defense or target.defense) if move.category=="special" else target.defense
+        category=self.rules().move_category(move)
+        if defense is None:defense=(target.special_defense or target.defense) if category=="special" else target.defense
         base=max(1,(((2*level//5+2)*move.power*attack//max(1,defense))//50)+2)
-        modifier=effectiveness(move.type,target.types)
+        modifier=self.rules().effectiveness(move.type,target.types)
         if modifier==0:return 0
         if move.type in attacker_types:modifier*=1.5
-        if critical:modifier*=1.5
+        if critical:modifier*=self.rules().critical_multiplier()
         per_hit=max(1,int(base*modifier*(85+rng.randrange(16))/100))
         hits=move.min_hits if move.max_hits<=move.min_hits else move.min_hits+rng.randrange(move.max_hits-move.min_hits+1)
         return per_hit*hits
@@ -515,7 +525,7 @@ class Battle:
         )
         if self.rng().randrange(100) < chance:
             self.state="caught"
-            detail=self._award_experience(max(1,self.wild_level*10))
+            detail=self._award_experience(max(1,self.wild_level*10) if self.rules().catch_experience else 0)
             self.result=f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}!"+detail
             self._record("ball:caught")
             return True
@@ -588,6 +598,9 @@ class Battle:
         data.setdefault("evolved_from",None)
         data.setdefault("learned_moves",[])
         data.setdefault("pending_moves",[])
+        data.setdefault("ruleset","standard")
+        data.setdefault("mechanics_generation",resolve_ruleset(data["ruleset"]).mechanics_generation)
+        data.setdefault("content_generation",1)
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle
