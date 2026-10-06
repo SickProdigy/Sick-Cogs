@@ -28,6 +28,8 @@ class BattleTests(unittest.TestCase):
         b.use_move(1)
         self.assertLess(b.wild_hp,old_wild)
         self.assertLessEqual(b.player_hp,old_player)
+        self.assertIn(f"{SPECIES[b.player.species_id].name} used",b.last_action)
+        self.assertIn(f"{SPECIES[b.wild_species_id].name} used",b.last_action)
     def test_invalid_move_rejected(self):
         with self.assertRaises(BattleError):battle().use_move(9)
     def test_zero_hp_ends_battle(self):
@@ -39,12 +41,15 @@ class BattleTests(unittest.TestCase):
         a=battle(22);b=battle(22)
         self.assertEqual(a.throw_ball(),b.throw_ball())
         self.assertEqual(a.raw(),b.raw())
+        self.assertIn("You threw a Poké Ball",a.result or a.last_action)
     def test_failed_ball_allows_wild_response(self):
         b=battle(1);old_hp=b.player_hp
         self.assertFalse(b.throw_ball())
         self.assertEqual(b.state,"active")
         self.assertLessEqual(b.player_hp,old_hp)
         self.assertGreater(b.rolls,0)
+        self.assertIn("You threw a Poké Ball",b.last_action)
+        self.assertIn(f"{SPECIES[b.wild_species_id].name} used",b.last_action)
     def test_speed_tie_uses_recorded_deterministic_roll(self):
         player=OwnedPokemon.create("tie",19,7,seed=3)
         first=Battle(1,100,1,2,3,player,19,7,30,30,seed=14)
@@ -56,7 +61,7 @@ class BattleTests(unittest.TestCase):
         player=OwnedPokemon.create("fast",19,7,seed=3)
         b=Battle(1,100,1,2,3,player,52,5,30,30,seed=8)
         b.use_move(1)
-        self.assertTrue(b.last_action.startswith("Quick Attack"))
+        self.assertTrue(b.last_action.startswith("Rattata used Quick Attack"))
 
     def test_caught_instance_is_global_identity(self):
         b=battle(3);b.state="caught";b.wild_gender="female"
