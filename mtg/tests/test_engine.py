@@ -50,12 +50,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
-        self.assertTrue(all(player.damage_prevention==0 for player in restored.players.values()))
+        self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
@@ -1875,6 +1875,44 @@ class SpellTests(unittest.TestCase):
         self.assertEqual(len(g.stack),1); self.assertEqual(g.stack[0].passes,0)
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
+
+class AlphaFastbondTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.append(uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_fastbond_allows_extra_lands_and_creates_independent_damage(self):
+        game=ready(); game.player(10).hand=[]; fastbond=self.add(game,10,"lea:192"); self.add(game,10,"forest","hand"); self.add(game,10,"mountain","hand")
+        game.play(10,1); self.assertFalse(game.stack); self.assertEqual(game.player(10).lands_played_this_turn,1)
+        game.play(10,1); self.assertEqual(game.stack[-1].ability_effect,"land_event_damage")
+        restored=Game.from_raw(game.to_raw()); controller,source=restored.find_permanent(fastbond.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        restored.player(10).damage_prevention=1; before=restored.player(10).life; self.resolve_top(restored)
+        self.assertEqual(restored.player(10).life,before); self.assertEqual(restored.player(10).lands_played_this_turn,2)
+        with self.assertRaisesRegex(GameError,"already played"):
+            self.add(restored,10,"forest","hand"); restored.play(10,1)
+
+    def test_multiple_fastbonds_each_trigger_and_apnap_with_ankh(self):
+        multiple=ready(); multiple.player(10).hand=[]; self.add(multiple,10,"lea:192"); self.add(multiple,10,"lea:192"); self.add(multiple,10,"forest","hand")
+        multiple.player(10).land_played=True; multiple.player(10).lands_played_this_turn=1; multiple.play(10,1)
+        self.assertEqual([item.key for item in multiple.stack],["lea:192","lea:192"])
+
+        apnap=ready(); apnap.player(20).hand=[]; self.add(apnap,20,"lea:192"); self.add(apnap,10,"lea:230"); self.add(apnap,20,"forest","hand")
+        apnap.active_index=1; apnap.phase="precombat_main"; apnap.priority_user=20; apnap.player(20).land_played=True; apnap.player(20).lands_played_this_turn=1
+        apnap.play(20,1)
+        self.assertEqual([item.key for item in apnap.stack],["lea:192","lea:230"])
+
+    def test_fastbond_count_resets_and_normal_limit_returns_without_source(self):
+        game=ready(); game.player(10).hand=[]; fastbond=self.add(game,10,"lea:192")
+        game.player(10).land_played=True; game.player(10).lands_played_this_turn=3
+        game._start_turn(); self.assertFalse(game.player(10).land_played); self.assertEqual(game.player(10).lands_played_this_turn,0)
+        game.player(10).hand=[]; self.add(game,10,"forest","hand"); game.play(10,1); controller,source=game.find_permanent(fastbond.uid); controller.battlefield.remove(source); controller.graveyard.append(source.uid)
+        self.add(game,10,"forest","hand")
+        with self.assertRaisesRegex(GameError,"already played"): game.play(10,1)
+
 
 class AlphaLandEventArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):

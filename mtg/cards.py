@@ -85,6 +85,7 @@ class Card:
     mountain_extra_red: bool = False
     opponent_forest_tap_life: int = 0
     land_enter_damage: int = 0
+    extra_land_damage: int = 0
     land_grave_damage: int = 0
     upkeep_each_damage: int = 0
     upkeep_land_type_damage: str = ""
@@ -176,6 +177,7 @@ class Card:
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
+        if self.extra_land_damage: abilities.append(f"You may play any number of lands; each after your first each turn deals {self.extra_land_damage} damage to you")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
         if self.upkeep_land_type_damage: abilities.append(f"At each player's upkeep, deals damage equal to that player's {self.upkeep_land_type_damage.title()}s")
@@ -259,6 +261,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:133": {"aura_target_types":("Artifact",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:226": {"aura_target_types":("Creature",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:26": {"upkeep_land_type_damage":"swamp"},
+    "lea:192": {"extra_land_damage":1},
 }
 
 ALPHA_ARTIFACTS = {
@@ -524,6 +527,7 @@ for reference in PLAYABLE_ALPHA:
         mountain_extra_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("mountain_extra_red",False),
         opponent_forest_tap_life=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("opponent_forest_tap_life",0),
         land_enter_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_enter_damage",0),
+        extra_land_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("extra_land_damage",0),
         land_grave_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_grave_damage",0),
         upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
         upkeep_land_type_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_land_type_damage",""),

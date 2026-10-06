@@ -399,6 +399,17 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
 
+    async def test_public_embed_shows_fastbond_and_extra_land_trigger(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        fastbond=game.next_uid; game.next_uid+=1; game.cards[fastbond]="lea:192"
+        land=game.next_uid; game.next_uid+=1; game.cards[land]="forest"
+        game.player(10).battlefield=[permanent_type(fastbond,"lea:192",sick=False)]; game.player(10).hand=[land]
+        game.player(10).land_played=True; game.player(10).lands_played_this_turn=1
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1)
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Fastbond",rendered); self.assertIn("any number of lands",rendered); self.assertIn("Fastbond ability",rendered)
+
     async def test_public_embed_shows_spell_blast_x_and_stack_target(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

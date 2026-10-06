@@ -40,6 +40,7 @@ class Player:
     mana_pool: Dict[str, int] = field(default_factory=dict)
     battlefield: List[Permanent] = field(default_factory=list)
     land_played: bool = False
+    lands_played_this_turn: int = 0
     kept: bool = False
     mulligans: int = 0
     damage_prevention: int = 0
@@ -275,7 +276,7 @@ class Game:
             self.phase="precombat_main"; self.priority_user=self.active_user
 
     def _start_turn(self,first=False):
-        self.turn+=1; p=self.players[self.active_user]; p.land_played=False
+        self.turn+=1; p=self.players[self.active_user]; p.land_played=False; p.lands_played_this_turn=0
         self._cleanup()
         limits=[self.card(source.uid).untap_power_limit for player in self.players.values() for source in player.battlefield if self.card(source.uid).untap_power_limit]
         for x in p.battlefield:
@@ -315,13 +316,22 @@ class Game:
                 if extra: output[extra]=output.get(extra,0)+1
         return output
 
-    def _land_event_triggers(self,user,event):
+    def extra_land_sources(self,user):
+        return [source for source in self.player(user).battlefield if self.card(source.uid).extra_land_damage]
+
+    def can_play_land(self,user):
+        player=self.player(user)
+        return not player.land_played or bool(self.extra_land_sources(user))
+
+    def _land_event_triggers(self,user,event,played_extra=False):
         field="land_enter_damage" if event=="enter" else "land_grave_damage"
         triggers=[]
-        for controller in self.players.values():
+        for controller_id in (self.active_user,self.opponent(self.active_user)):
+            controller=self.player(controller_id)
             for source in controller.battlefield:
-                if not getattr(self.card(source.uid),field): continue
-                uid=self.next_uid; self.next_uid+=1; card=self.card(source.uid); self.cards[uid]=card.key
+                card=self.card(source.uid)
+                if not getattr(card,field) and not (played_extra and controller_id==user and card.extra_land_damage): continue
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
                 triggers.append(Spell(controller.user_id,uid,card.key,str(user),ability_effect="land_event_damage",source_uid=source.uid,color_override=source.color_override))
         return triggers
 
@@ -547,9 +557,10 @@ class Game:
         if c.land:
             if user!=self.active_user: raise GameError("Only the active player can play a land.")
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
-            if p.land_played: raise GameError("You already played a land.")
-            p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True; self.phase_passes=0
-            self.stack.extend(self._land_event_triggers(user,"enter"))
+            if not self.can_play_land(user): raise GameError("You already played a land.")
+            prior_plays=max(p.lands_played_this_turn,int(p.land_played)); played_extra=prior_plays>0
+            p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
+            self.stack.extend(self._land_event_triggers(user,"enter",played_extra))
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         target=self._target_for_cast(c,user,target)
@@ -1037,7 +1048,7 @@ class Game:
         elif effect=="tap_life":
             self.player(int(s.target)).life+=card.opponent_forest_tap_life
         elif effect=="land_event_damage":
-            self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage)
+            self._damage_player(int(s.target),card.land_enter_damage or card.land_grave_damage or card.extra_land_damage)
         elif effect=="upkeep_damage":
             self._damage_player(int(s.target),card.upkeep_each_damage)
         elif effect=="upkeep_land_type_damage":
@@ -1358,6 +1369,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

@@ -585,6 +585,20 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_ai_casts_fastbond_and_avoids_lethal_extra_land(self):
+        casting=solo(order=(AI,HUMAN)); casting.player(AI).kept=True; casting.player(HUMAN).kept=True; casting.player(AI).hand=[]
+        spell=self.add(casting,AI,"lea:192","hand"); self.add(casting,AI,"forest","hand"); self.add(casting,AI,"forest")
+        casting.active_index=0; casting.phase="precombat_main"; casting.priority_user=AI; casting.player(AI).land_played=True; casting.player(AI).lands_played_this_turn=1
+        advance_solo(casting); self.assertEqual(casting.stack[-1].uid,spell)
+
+        safety=solo(order=(AI,HUMAN)); safety.player(AI).kept=True; safety.player(HUMAN).kept=True; safety.player(AI).hand=[]
+        self.add(safety,AI,"lea:192"); first=self.add(safety,AI,"forest","hand"); second=self.add(safety,AI,"forest","hand")
+        safety.active_index=0; safety.phase="precombat_main"; safety.priority_user=AI; safety.player(AI).land_played=True; safety.player(AI).lands_played_this_turn=1; safety.player(AI).life=2
+        advance_solo(safety)
+        self.assertEqual(len(safety.player(AI).hand),1); self.assertIn(safety.player(AI).hand[0],(first,second))
+        safety.pass_priority(HUMAN); advance_solo(safety)
+        self.assertEqual(safety.player(AI).life,1); self.assertEqual(len(safety.player(AI).hand),1)
+
     def test_ai_casts_land_event_artifacts_when_opponent_has_more_lands(self):
         for key in ("lea:230","lea:241"):
             with self.subTest(key=key):

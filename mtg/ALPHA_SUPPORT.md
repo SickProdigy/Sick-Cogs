@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
-| Enchantments | 68 | 36 enchantments playable through 0.56.0; 32 remain |
+| Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -140,3 +140,5 @@ The 0.57.0 mass-redraw promotion adds Wheel of Fortune and Timetwister. Wheel mo
 The 0.58.0 restricted-X promotion adds Drain Life. The mana solver now supports card-specific X colors, requiring every Drain Life X symbol to be paid with black mana while retaining its separate generic and black printed costs. Its stable creature-or-player target and X persist on the stack; resolution gains only life equal to damage actually dealt after prevention and never more than the creature's pre-damage toughness or player's pre-damage life. Fizzled and fully prevented damage gain no life. Discord exposes X and the public target, and solo AI computes the maximum payable black X.
 
 The 0.59.0 exact-mana-value-counter promotion adds Spell Blast. A shared spell mana-value calculation includes the chosen value of every X in a spell on the stack. Spell Blast requires its caster's X to equal that mana value before any mana is committed, persists the target spell UID and X, and rechecks both target existence and mana value on resolution. Zero-mana spells remain legal with X=0, while activated and triggered abilities remain illegal targets. Discord displays X and the public stack target, and solo AI selects an opposing spell only when it can pay the exact required X.
+
+The 0.60.0 extra-land promotion adds Fastbond. A persisted per-turn land count preserves old saves while distinguishing the first land from every later land. Each Fastbond controlled by the land player creates its own independent, preventable damage trigger for every extra land; triggers use APNAP ordering alongside Ankh of Mishra, persist through reload, and survive source removal. Removing the final Fastbond immediately restores the ordinary land-play limit. Discord renders the permission and pending triggers, while solo AI values extra lands but refuses a play whose known Fastbond triggers would be lethal.

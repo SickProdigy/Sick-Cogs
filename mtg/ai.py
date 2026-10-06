@@ -154,11 +154,13 @@ def _fog_useful(game,user):
 
 def _play_one(game, user, difficulty):
     player = game.player(user)
-    if game.active_user == user and game.phase in ("precombat_main", "postcombat_main") and not game.stack and not player.land_played:
-        for position, uid in enumerate(player.hand, 1):
-            if game.card(uid).land:
-                game.play(user, position)
-                return "play_land"
+    if game.active_user == user and game.phase in ("precombat_main", "postcombat_main") and not game.stack and game.can_play_land(user):
+        extra_sources=game.extra_land_sources(user) if player.land_played else []
+        if not extra_sources or player.life>sum(game.card(source.uid).extra_land_damage for source in extra_sources):
+            for position, uid in enumerate(player.hand, 1):
+                if game.card(uid).land:
+                    game.play(user, position)
+                    return "play_land"
 
     mana_action=_activate_helpful_mana(game,user)
     if mana_action: return mana_action
@@ -195,6 +197,8 @@ def _play_one(game, user, difficulty):
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
             score=5+own-enemy
+        elif card.extra_land_damage:
+            score=5+sum(game.card(hand_uid).land for hand_uid in player.hand if hand_uid!=uid)
         elif card.land_enter_damage or card.land_grave_damage:
             own=sum(game.card(permanent.uid).land for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land for permanent in game.player(game.opponent(user)).battlefield)
