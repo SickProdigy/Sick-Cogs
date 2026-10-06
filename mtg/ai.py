@@ -807,6 +807,13 @@ def advance_solo(game: Game):
             if trigger.ability_effect=="power_leak":
                 amount=max(game.power_leak_amounts(trigger,2))
                 game.choose_power_leak(user,amount); game.record(user,"ai_power_leak"); changed=True; continue
+            if not trigger.ability_effect and game.card(trigger.uid).enters_copy_types:
+                choices=game.copy_choices(trigger)
+                if choices:
+                    owner,position,_=max(choices,key=lambda item:(sum(game.current_stats(item[2])) if game.is_creature(item[2]) else game.card(item[2].uid).cost,item[0]==user,-item[1]))
+                    game.choose_copy(user,owner,position)
+                else: game.choose_copy(user)
+                game.record(user,"ai_copy_choice"); changed=True; continue
             source=game.find_permanent(trigger.source_uid)[1]
             if trigger.ability_effect=="tomb_cleanup":
                 choices=game.tomb_cleanup_choices(trigger.source_uid,trigger.choice_value)

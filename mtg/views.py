@@ -68,6 +68,19 @@ class PowerLeakSelect(discord.ui.Select):
         amount=int(self.values[0])
         await self.cog.act(i,self.game_id,lambda g:g.choose_power_leak(i.user.id,amount),"power_leak")
 
+class CopySelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        options=[discord.SelectOption(label="Enter without copying",value="none",description="Use the card's printed characteristics")]
+        options.extend(discord.SelectOption(label=f"{owner}:{position}. {game.card(permanent.uid).name}"[:100],description=game.card(permanent.uid).type_line[:100],value=f"{owner}:{position}") for owner,position,permanent in game.copy_choices(game.stack[-1])[:24])
+        super().__init__(placeholder="Choose a permanent to copy",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:copy")
+    async def callback(self,i):
+        value=self.values[0]
+        if value=="none": action=lambda g:g.choose_copy(i.user.id)
+        else:
+            owner,position=(int(part) for part in value.split(":")); action=lambda g:g.choose_copy(i.user.id,owner,position)
+        await self.cog.act(i,self.game_id,action,"copy_choice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -97,6 +110,8 @@ class GameView(discord.ui.View):
             self.add_item(DrainPowerSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="power_leak":
             self.add_item(PowerLeakSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).enters_copy_types:
+            self.add_item(CopySelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

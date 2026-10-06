@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.100.0"
+    __version__="0.101.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -210,6 +210,7 @@ class MTG(commands.Cog):
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
                     if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
+                    elif not item.ability_effect and g.card(item.uid).enters_copy_types: label+=" (controller is choosing a permanent to copy)"
                     elif not item.ability_effect and g.card(item.uid).effect=="drain_power": label+=" (target player is choosing land mana)"
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
                     elif item.ability_effect=="discard_choice": label+=" (target player is choosing a card privately)"
@@ -598,6 +599,14 @@ class MTG(commands.Cog):
     async def leak(self,ctx,amount:int):
         """Choose how much mana to pay for a resolving Power Leak trigger."""
         await self.mutate_ctx(ctx,lambda g:g.choose_power_leak(ctx.author.id,amount),"power_leak")
+    @mtg.command(name="copy")
+    async def copy(self,ctx,controller_id:str="none",position:int=None):
+        """Choose a permanent for Clone or Copy Artifact, or use `none`."""
+        if controller_id.casefold()=="none": await self.mutate_ctx(ctx,lambda g:g.choose_copy(ctx.author.id),"copy_none"); return
+        try: owner=int(controller_id)
+        except ValueError: await ctx.send("Use `mtg copy USER_ID POSITION` or `mtg copy none`."); return
+        if position is None: await ctx.send("Provide the battlefield position to copy."); return
+        await self.mutate_ctx(ctx,lambda g:g.choose_copy(ctx.author.id,owner,position),"copy_choice")
     @mtg.command(name="concede")
     async def concede(self,ctx): await self.mutate_ctx(ctx,lambda g:g.concede(ctx.author.id),"concede")
     async def red_delete_data_for_user(self,*,requester,user_id):

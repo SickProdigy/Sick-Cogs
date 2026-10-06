@@ -2,7 +2,7 @@ import random
 import re
 import time
 from itertools import combinations
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Dict, List, Optional
 from .cards import CARDS, TOKENS, starter
 
@@ -43,6 +43,8 @@ class Permanent:
     aura_effect_enabled: bool = False
     last_known_toughness: int = 0
     land_type_effects: List[Dict[str, object]] = field(default_factory=list)
+    copy_key: str = ""
+    copy_added_types: List[str] = field(default_factory=list)
 
 @dataclass
 class Player:
@@ -157,13 +159,23 @@ class Game:
         try: return self.players[int(user)]
         except KeyError as e: raise GameError("You are not in this game.") from e
     def card(self,uid):
-        key=self.cards[uid]
-        return CARDS.get(key) or TOKENS[key]
+        key=self.cards[uid]; permanent=None
+        if hasattr(self,"players"):
+            permanent=next((item for player in self.players.values() for item in player.battlefield if item.uid==uid),None)
+        copy_key=permanent.copy_key if permanent is not None else ""
+        card=CARDS.get(copy_key or key) or TOKENS[copy_key or key]
+        if copy_key and permanent.copy_added_types:
+            main,*subtypes=card.type_line.split(" — ",1); words=main.split()
+            for added in permanent.copy_added_types:
+                if added not in words: words.append(added)
+            card=replace(card,type_line=" ".join(words)+(f" — {subtypes[0]}" if subtypes else ""))
+        return card
     def is_token(self,uid): return self.cards.get(uid,"").startswith("token:")
     def _make_permanent(self,uid,key,**kwargs):
         kwargs.setdefault("layer_timestamp",self.next_layer_timestamp); self.next_layer_timestamp+=1
         permanent=Permanent(uid,key,**kwargs)
-        permanent.power_counters=self.card(uid).enters_power_counters
+        effective=(CARDS.get(permanent.copy_key) or TOKENS.get(permanent.copy_key)) if permanent.copy_key else self.card(uid)
+        permanent.power_counters=effective.enters_power_counters
         return permanent
     def _global_land_animation_sources(self,permanent):
         return [source for player in self.players.values() for source in player.battlefield if self.card(source.uid).animate_land_type and self.has_current_land_type(permanent,self.card(source.uid).animate_land_type)]
@@ -1236,6 +1248,8 @@ class Game:
                     self.stack.pop(); self.cards.pop(s.uid,None)
                     if self.stack: self.stack[-1].passes=0
                     self.priority_user=self.active_user; return
+                if not s.ability_effect and self.card(s.uid).enters_copy_types and self.copy_choices(s):
+                    s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
                     self.stack.pop(); self._resolve(s)
                     if self.stack: self.stack[-1].passes=0
@@ -1265,6 +1279,31 @@ class Game:
                     self._resolve_end_step_sacrifices(); self.priority_user=self.active_user
                 else:
                     self._empty_mana(); self._advance()
+
+    def copy_choices(self,spell=None):
+        spell=spell or (self.stack[-1] if self.stack else None)
+        if spell is None or spell.ability_effect: return []
+        card=CARDS.get(spell.key)
+        if card is None or not card.enters_copy_types: return []
+        return [(controller.user_id,position,permanent) for controller in self.players.values() for position,permanent in enumerate(controller.battlefield,1) if any(self.has_current_type(permanent,kind) for kind in card.enters_copy_types)]
+
+    def choose_copy(self,user,controller_id=None,position=None):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or not self.card(self.stack[-1].uid).enters_copy_types:
+            raise GameError("You do not have a copy choice to make.")
+        spell=self.stack[-1]; target=None
+        if controller_id is not None or position is not None:
+            try: key=(int(controller_id),int(position))
+            except (TypeError,ValueError) as error: raise GameError("Choose a listed permanent to copy or choose none.") from error
+            choices={(owner,index):permanent for owner,index,permanent in self.copy_choices(spell)}
+            target=choices.get(key)
+            if target is None: raise GameError("Choose a listed permanent to copy or choose none.")
+            spell.target=f"{key[0]}:{target.uid}"
+        else: spell.target=""
+        spell.decision_pending=False; self.stack.pop(); self._resolve(spell)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
 
     def choose_library(self,user,position):
         if self.finished: raise GameError("Game is over.")
@@ -2048,7 +2087,7 @@ class Game:
     def _resolve(self,s):
         if s.ability_effect: self._resolve_ability(s); return
         p=self.players[s.owner]; c=CARDS[s.key]
-        protected=self._stable_target_permanent(s.target)
+        protected=None if c.enters_copy_types else self._stable_target_permanent(s.target)
         if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target gained protection."); return
         if c.aura_target_types:
@@ -2061,6 +2100,13 @@ class Game:
             if c.aura_enter_flying_damage and "flying" in self.current_keywords(target):
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=c.key
                 self.stack.append(Spell(s.owner,uid,c.key,f"{user}:{target.uid}",ability_effect="earthbind_enter",source_uid=aura.uid,color_override=aura.color_override))
+        elif c.enters_copy_types:
+            target=self._stable_target_permanent(s.target); copy_key=""; added_types=[]
+            if target is not None and any(self.has_current_type(target,kind) for kind in c.enters_copy_types): copy_key=target.copy_key or self.cards[target.uid]; added_types=list(target.copy_added_types)
+            if copy_key and c.copy_add_type and c.copy_add_type not in added_types: added_types.append(c.copy_add_type)
+            permanent=self._make_permanent(s.uid,c.key,owner=s.owner,copy_key=copy_key,copy_added_types=added_types,color_override=s.color_override)
+            effective=(CARDS.get(copy_key) or TOKENS.get(copy_key)) if copy_key else c; permanent.tapped=effective.enters_tapped
+            p.battlefield.append(permanent)
         elif c.kind in ("Creature","Artifact","Enchantment"):
             counters=s.x_value if c.enters_x_plus_counters else 0
             p.battlefield.append(self._make_permanent(s.uid,c.key,owner=s.owner,tapped=c.enters_tapped,color_override=s.color_override,plus_one_counters=counters))
@@ -2367,7 +2413,9 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            message="The pending trigger controller must pay or decline first." if self.stack[-1].ability_effect else "The pending private library search must be completed first."
+            if self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
+            elif self.card(self.stack[-1].uid).enters_copy_types: message="The pending copy choice must be completed first."
+            else: message="The pending private library search must be completed first."
             raise GameError(message)
         if self.priority_user!=user: raise GameError("You do not have priority.")
     def _active(self,user):
@@ -2381,6 +2429,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[]))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.turn_start_pending_user=int(r["turn_start_pending_user"]) if r.get("turn_start_pending_user") is not None else None; g.turn_start_pending_extra=bool(r.get("turn_start_pending_extra",False)); g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.sanctuary_draw_pending=bool(r.get("sanctuary_draw_pending",False)); g.sanctuary_pending_draws=int(r.get("sanctuary_pending_draws",int(g.sanctuary_draw_pending))); g.sanctuary_resume_draw_step=bool(r.get("sanctuary_resume_draw_step",False)); g.sanctuary_resume_mass_draw=bool(r.get("sanctuary_resume_mass_draw",False)); g.sanctuary_mass_draw_failed=[int(user) for user in r.get("sanctuary_mass_draw_failed",[])]; g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

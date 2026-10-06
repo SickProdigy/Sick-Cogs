@@ -932,5 +932,12 @@ class SoloAITests(unittest.TestCase):
         extra=solo(order=(AI,HUMAN)); extra.player(AI).kept=extra.player(HUMAN).kept=True; self.add(extra,AI,"lea:274").tapped=True; extra._offer_turn_start(AI,True)
         advance_solo(extra); self.assertTrue(any(event["action"]=="ai_vault_take" for event in extra.history))
 
+    def test_ai_completes_copy_entry_choice(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        self.add(game,HUMAN,"giant"); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:51"
+        spell=__import__("mtg.engine",fromlist=["Spell"]).Spell(AI,uid,"lea:51",decision_pending=True,choice_owner=AI); game.stack=[spell]; game.phase="precombat_main"; game.active_index=0; game.priority_user=AI
+        advance_solo(game); clone=game.find_permanent(uid)[1]
+        self.assertEqual(game.card(uid).name,"Hill Giant"); self.assertIsNotNone(clone); self.assertTrue(any(event["action"]=="ai_copy_choice" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

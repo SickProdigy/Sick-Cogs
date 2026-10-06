@@ -7,9 +7,9 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 71 creatures playable through 0.96.0; 6 remain |
+| Creatures with abilities | 77 | 72 creatures playable through 0.101.0; 5 remain |
 | Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
-| Enchantments | 68 | 62 enchantments playable through 0.100.0; 6 remain |
+| Enchantments | 68 | 63 enchantments playable through 0.101.0; 5 remain |
 | Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -222,3 +222,5 @@ The 0.98.0 draw-replacement promotion adds Island Sanctuary. During its controll
 The 0.99.0 turn-replacement promotion adds Time Vault. It enters tapped, skips ordinary untapping, and its tap ability queues an extra turn through the shared newest-first turn queue. Before its controller would begin a turn with a tapped Vault, a persisted choice can take the turn or select one of multiple Vaults, skip that normal or extra turn, untap the selected Vault, and continue with the exact remaining queue. Discord buttons, selects, commands, public rendering, reload recovery, and solo AI share those transitions.
 
 The 0.100.0 variable-payment promotion adds Power Leak. It enchants an enchantment and creates a source-independent trigger during that enchantment controller's upkeep. After responses, that player uses a persisted Discord select or command to pay any nonnegative amount through the atomic mana solver; the amount prevents that much of Power Leak's two damage. Mana-source tap triggers, reload recovery, public rendering, and solo AI use the same decision path.
+
+The 0.101.0 copy-permanent promotion adds Clone and Copy Artifact. After both players respond, their controller makes a persisted optional choice from the current battlefield without targeting. A shared effective-card layer copies printed characteristics and copy effects while keeping the physical card's identity for later zones; Copy Artifact remains an enchantment in addition to the copied artifact types. Copied entry characteristics, copied activations, copy-of-copy flattening, reload recovery, Discord controls and rendering, and solo AI all use the same layer.

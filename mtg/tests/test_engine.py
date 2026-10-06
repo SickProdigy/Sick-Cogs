@@ -3910,4 +3910,32 @@ class AlphaPowerLeakTests(unittest.TestCase):
         self.assertEqual(game.power_leak_amounts(trigger,4),[0,1,2,3]); game.choose_power_leak(20,2)
         self.assertEqual(game.player(20).life,20); self.assertEqual(sum(land.tapped for land in lands),2)
 
+class AlphaCopyPermanentTests(unittest.TestCase):
+    def add(self,game,user,key,**kwargs):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False,**kwargs); game.player(user).battlefield.append(permanent); return permanent
+
+    def pending(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.stack=[Spell(user,uid,key)]; game.priority_user=user
+        game.pass_priority(user); game.pass_priority(game.opponent(user)); self.assertTrue(game.stack[-1].decision_pending); return uid
+
+    def test_clone_choice_persists_copies_characteristics_and_zone_identity_reverts(self):
+        game=ready(); bird=self.add(game,20,"lea:186"); uid=self.pending(game,10,"lea:51"); restored=Game.from_raw(game.to_raw())
+        restored.choose_copy(10,20,1); clone=restored.find_permanent(uid)[1]
+        self.assertEqual((restored.card(uid).name,restored.current_stats(clone)),("Birds of Paradise",(0,1))); self.assertIn("flying",restored.current_keywords(clone)); self.assertEqual(clone.copy_key,bird.key)
+        restored._destroy(restored.player(10),clone); self.assertEqual(restored.card(uid).name,"Clone")
+
+    def test_copy_artifact_keeps_enchantment_type_and_copied_entry_ability(self):
+        game=ready(); disk=self.add(game,20,"lea:266"); uid=self.pending(game,10,"lea:53"); game.choose_copy(10,20,1); copied=game.find_permanent(uid)[1]
+        self.assertTrue(copied.tapped); self.assertTrue(game.card(uid).has_type("Artifact")); self.assertTrue(game.card(uid).has_type("Enchantment")); self.assertEqual(game.card(uid).activation_effect,game.card(disk.uid).activation_effect)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.find_permanent(uid)[1].copy_key,"lea:266"); self.assertTrue(restored.card(uid).has_type("Enchantment"))
+        layered=ready(); self.add(layered,20,"lea:267"); artifact_uid=self.pending(layered,10,"lea:53"); layered.choose_copy(10,20,1)
+        clone_uid=self.pending(layered,20,"lea:51"); layered.choose_copy(20,10,1); self.assertTrue(layered.card(clone_uid).has_type("Enchantment")); self.assertEqual(layered.find_permanent(clone_uid)[1].copy_added_types,["Enchantment"])
+
+    def test_copy_choice_is_optional_not_targeted_and_copying_a_copy_flattens(self):
+        game=ready(); giant=self.add(game,20,"giant"); first=self.pending(game,10,"lea:51"); game.choose_copy(10,20,1); copied=game.find_permanent(first)[1]
+        second=self.pending(game,20,"lea:51"); choices={(owner,position) for owner,position,_ in game.copy_choices(game.stack[-1])}; self.assertIn((10,1),choices)
+        game.choose_copy(20,10,1); self.assertEqual(game.find_permanent(second)[1].copy_key,"giant"); self.assertEqual(game.current_stats(game.find_permanent(second)[1]),game.current_stats(copied))
+        optional=ready(); self.add(optional,20,"giant"); uid=self.pending(optional,10,"lea:51"); optional.choose_copy(10); self.assertIn(uid,optional.player(10).graveyard)
+
 if __name__=="__main__": unittest.main()

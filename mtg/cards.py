@@ -106,6 +106,8 @@ class Card:
     upkeep_land_type_damage: str = ""
     aura_upkeep_damage: int = 0
     aura_power_leak: int = 0
+    enters_copy_types: tuple = ()
+    copy_add_type: str = ""
     aura_enters_tapped: bool = False
     aura_skip_untap: bool = False
     aura_upkeep_untap_cost: str = ""
@@ -262,6 +264,7 @@ class Card:
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
         if self.upkeep_land_type_damage: abilities.append(f"At each player's upkeep, deals damage equal to that player's {self.upkeep_land_type_damage.title()}s")
         if self.aura_power_leak: abilities.append(f"At enchanted enchantment controller's upkeep, they may pay any amount; deals {self.aura_power_leak} damage minus the amount paid")
+        if self.enters_copy_types: abilities.append("May enter as a copy of " + " or ".join(self.enters_copy_types).lower())
         if self.aura_upkeep_damage: abilities.append(f"At enchanted permanent controller's upkeep, deals {self.aura_upkeep_damage} damage to that player")
         if self.aura_enters_tapped: abilities.append("When this Aura enters, tap enchanted creature")
         if self.aura_skip_untap: abilities.append("Enchanted creature does not untap during its controller's untap step")
@@ -316,6 +319,11 @@ BASE_CARDS = {
 }
 
 ALPHA_LAND_KEYS = {f"lea:{number}" for number in range(277,296)}
+
+ALPHA_COPY_PERMANENTS = {
+    "lea:51": {"enters_copy_types": ("Creature",)},
+    "lea:53": {"enters_copy_types": ("Artifact",), "copy_add_type": "Enchantment"},
+}
 
 ALPHA_GLOBAL_ENCHANTMENTS = {
     "lea:9": {"global_toughness":2, "global_controller_only":True, "global_requires_untapped":True},
@@ -732,6 +740,8 @@ for reference in PLAYABLE_ALPHA:
         upkeep_land_type_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_land_type_damage",""),
         aura_upkeep_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_damage",0),
         aura_power_leak=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_power_leak",0),
+        enters_copy_types=ALPHA_COPY_PERMANENTS.get(reference.key,{}).get("enters_copy_types",()),
+        copy_add_type=ALPHA_COPY_PERMANENTS.get(reference.key,{}).get("copy_add_type",""),
         aura_enters_tapped=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_enters_tapped",False),
         aura_skip_untap=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_skip_untap",False),
         aura_upkeep_untap_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_untap_cost",""),
@@ -802,7 +812,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | set(ALPHA_GRAVEYARD_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | set(ALPHA_OPTIONAL_TRIGGERS) | {"lea:51"} | set(ALPHA_DAMAGE_COUNTER_CREATURES) | set(ALPHA_DEATH_COUNTER_CREATURES) | set(ALPHA_GRAVEYARD_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:
@@ -811,7 +821,7 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALP
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != set(ALPHA_SPELLS):
     raise RuntimeError("Playable Alpha spells do not match the validated spell map.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS) | set(ALPHA_TAP_ENCHANTMENTS):
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS) | set(ALPHA_TAP_ENCHANTMENTS) | {"lea:53"}:
     raise RuntimeError("Playable Alpha enchantments do not match the validated enchantment map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):
