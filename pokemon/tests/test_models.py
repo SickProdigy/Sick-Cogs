@@ -352,8 +352,8 @@ class BattleTests(unittest.TestCase):
     def test_renderer_builds_expected_pngs(self):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
-        data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        data=source.getvalue();avatar_source=io.BytesIO();Image.new("RGBA",(80,80),(220,40,80,255)).save(avatar_source,"PNG");avatar_data=avatar_source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data,avatar_data);b.state="caught";caught_result=renderer._battle_result_sync(b,data,avatar_data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         with Image.open(encounter) as image,Image.open(alternate) as other:
             self.assertEqual(image.size,(800,450))
@@ -383,9 +383,12 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(image.getpixel((400,400)),RETRO[5])
             self.assertEqual(image.getpixel((110,398)),RETRO[5])
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
-        with Image.open(victory) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(victory) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((145,245)),(220,40,80))
         with Image.open(caught_result) as image:
             self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((145,245)),(220,40,80))
             self.assertNotIn(RETRO[1],set(image.crop((460,320,550,348)).get_flattened_data()))
             self.assertIn(RETRO[1],set(image.crop((65,380,150,408)).get_flattened_data()))
         with Image.open(escape_result) as image:
