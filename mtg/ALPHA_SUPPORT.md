@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
-| Enchantments | 68 | 54 enchantments playable through 0.78.0; 14 remain |
+| Enchantments | 68 | 56 enchantments playable through 0.79.0; 12 remain |
 | Artifacts | 42 | Thirty-two artifacts playable through 0.74.0; 10 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -178,3 +178,5 @@ The 0.76.0 land-Aura promotion adds Farmstead and Consecrate Land. Farmstead gra
 The 0.77.0 land-type promotion adds Conversion, Phantasmal Terrain, and Evil Presence. A shared persisted timestamp layer derives current basic land types and their intrinsic mana abilities, then feeds landwalk, typed destruction, characteristic stats, animation, land checks, tap triggers, public rendering, and solo AI. Phantasmal Terrain stores an explicit basic-land-type choice with its stable Aura target; Conversion uses the existing Pay {W}{W} upkeep-or-sacrifice path. Overlapping setters apply in battlefield-entry timestamp order and restore underlying types when removed.
 
 The 0.78.0 damage-enchantment promotion adds Pestilence and Power Surge. Pestilence uses the shared paid activation stack for simultaneous protection-aware damage to every creature and player, remains independent after source removal, and creates an intervening-condition end-step sacrifice trigger only when the battlefield has no creatures, rechecking on resolution. Power Surge snapshots each active player’s untapped lands before the untap step and carries that persisted value into its respondable upkeep trigger even if lands or the source later change. Public stack rendering and solo AI use the same paths.
+
+The 0.79.0 creature-Aura-trigger promotion adds Earthbind and Creature Bond. Earthbind creates a persisted enter trigger only for a flying enchanted creature, rechecks that intervening condition, deals protection-aware damage, and enables a live flying-removal layer that disappears with the Aura. Creature Bond captures the enchanted creature’s last-known toughness and battlefield controller before ordinary, state-based, sacrificed, simultaneous, or token death, then creates a source-independent persisted damage trigger before Aura cleanup. Public stack rendering and solo AI use the shared trigger and keyword paths.

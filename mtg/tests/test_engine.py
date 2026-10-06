@@ -1705,6 +1705,26 @@ class AlphaAuraTests(unittest.TestCase):
         layered.active_index=0; layered.stack=layered._turn_step_triggers("upkeep"); self.resolve_top(layered); layered.choose_trigger(10,False)
         self.assertIn(conversion.uid,layered.player(10).graveyard); self.assertEqual(layered.current_land_types(mountain),{"mountain"}); self.assertEqual(layered.current_mana_choices(mountain),("R",))
 
+    def test_earthbind_uses_persisted_intervening_flying_trigger(self):
+        game=ready(); flyer=self.add(game,20,"lea:46"); earthbind=self.add(game,10,"lea:145","hand"); self.add(game,10,"mountain")
+        game.play(10,1,"20:1"); self.resolve_top(game); self.assertEqual(game.stack[-1].ability_effect,"earthbind_enter")
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); flyer=restored.find_permanent(flyer.uid)[1]; aura=restored.find_permanent(earthbind)[1]
+        self.assertEqual(flyer.damage,2); self.assertTrue(aura.aura_effect_enabled); self.assertNotIn("flying",restored.current_keywords(flyer))
+        restored._destroy(restored.player(10),aura,allow_regeneration=False); self.assertIn("flying",restored.current_keywords(flyer))
+
+        changed=ready(); bear=self.add(changed,20,"bear"); flight=self.add(changed,20,"lea:58",attached_to=bear.uid); earthbind=self.add(changed,10,"lea:145","hand"); self.add(changed,10,"mountain")
+        changed.play(10,1,"20:1"); self.resolve_top(changed); changed._destroy(changed.player(20),flight,allow_regeneration=False); self.resolve_top(changed)
+        self.assertEqual(bear.damage,0); self.assertFalse(changed.find_permanent(earthbind)[1].aura_effect_enabled)
+
+    def test_creature_bond_uses_last_known_toughness_and_survives_aura_cleanup(self):
+        game=ready(); target=self.add(game,20,"bear"); self.add(game,20,"lea:24",attached_to=target.uid); bond=self.add(game,10,"lea:55",attached_to=target.uid)
+        game._destroy(game.player(20),target,allow_regeneration=False); game._sba(); trigger=game.stack[-1]
+        self.assertEqual((trigger.ability_effect,trigger.owner,trigger.target,trigger.choice_value),("creature_bond_damage",10,"20",4)); self.assertIn(bond.uid,game.player(10).graveyard)
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); self.assertEqual(restored.player(20).life,16)
+
+        token_game=ready(); token=self.add(token_game,20,"token:wasp"); bond=self.add(token_game,10,"lea:55",attached_to=token.uid)
+        token_game._destroy(token_game.player(20),token,allow_regeneration=False); token_game._sba(); self.assertEqual(token_game.stack[-1].choice_value,1)
+
 
 
 class AlphaProtectionTests(unittest.TestCase):

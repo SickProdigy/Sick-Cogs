@@ -23,7 +23,7 @@ def _target(game, user, card):
         choices=[]
         for position,permanent in enumerate(game.player(target_user).battlefield,1):
             target=game.card(permanent.uid)
-            if game._aura_can_attach(card,permanent) and (not card.aura_animate_mana_value or not game.is_creature(permanent)): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
+            if game._aura_can_attach(card,permanent) and (not card.aura_animate_mana_value or not game.is_creature(permanent)) and (not card.aura_enter_flying_damage or "flying" in game.current_keywords(permanent)): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
         if not choices: return None
         stable=f"{target_user}:{max(choices)[1]}"
         return f"island:{stable}" if card.aura_choose_land_type else stable

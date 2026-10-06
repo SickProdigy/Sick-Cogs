@@ -177,6 +177,8 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         bear=add(10,"bear"); add(10,"lea:184",bear.uid); add(10,"lea:108",bear.uid); add(10,"forest"); add(10,"forest"); add(10,"forest")
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Bear Cub 3/4",rendered); self.assertIn("Enchanted creature gets +X/+Y for Forests you control",rendered); self.assertIn("Enchanted creature has Fear",rendered)
+        flyer=add(20,"lea:46"); earthbind=add(10,"lea:145",flyer.uid); earthbind.aura_effect_enabled=True
+        self.assertIn("Suppressed: Flying",str(cog.game_embed(game).to_dict()))
 
     async def test_public_embed_shows_printed_and_granted_protection(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))

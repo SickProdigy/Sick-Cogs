@@ -109,6 +109,8 @@ class Card:
     aura_excludes_other_auras: bool = False
     aura_set_land_type: str = ""
     aura_choose_land_type: bool = False
+    aura_enter_flying_damage: int = 0
+    aura_death_toughness_damage: bool = False
     global_land_from_type: str = ""
     global_land_to_type: str = ""
     upkeep_turn_start_untapped_damage: bool = False
@@ -246,6 +248,8 @@ class Card:
         if self.aura_excludes_other_auras: abilities.append("Enchanted land cannot be enchanted by other Auras")
         if self.aura_set_land_type: abilities.append(f"Enchanted land is a {self.aura_set_land_type.title()}")
         if self.aura_choose_land_type: abilities.append("Choose a basic land type; enchanted land is that type")
+        if self.aura_enter_flying_damage: abilities.append(f"When this Aura enters, if enchanted creature has flying, deal {self.aura_enter_flying_damage} damage to it and it loses flying")
+        if self.aura_death_toughness_damage: abilities.append("When enchanted creature dies, deal damage equal to its toughness to its controller")
         if self.global_land_from_type: abilities.append(f"All {self.global_land_from_type.title()}s are {self.global_land_to_type.title()}s")
         if self.upkeep_turn_start_untapped_damage: abilities.append("At each player’s upkeep, deals damage equal to lands they controlled untapped at the beginning of the turn")
         if self.end_step_sacrifice_without_creatures: abilities.append("At each end step, sacrifice this enchantment if no creatures are on the battlefield")
@@ -349,6 +353,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:107": {"aura_target_types":("Land",), "aura_hostile":True, "aura_set_land_type":"swamp"},
     "lea:120": {"activation_cost":"{B}", "activation_effect":"damage_all", "activation_amount":1, "activation_text":"Deals 1 damage to each creature and each player", "end_step_sacrifice_without_creatures":True},
     "lea:167": {"upkeep_turn_start_untapped_damage":True},
+    "lea:55": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_death_toughness_damage":True},
+    "lea:145": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_enter_flying_damage":2},
 }
 
 ALPHA_ARTIFACTS = {
@@ -672,6 +678,8 @@ for reference in PLAYABLE_ALPHA:
         aura_excludes_other_auras=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_excludes_other_auras",False),
         aura_set_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_set_land_type",""),
         aura_choose_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_choose_land_type",False),
+        aura_enter_flying_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_enter_flying_damage",0),
+        aura_death_toughness_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_death_toughness_damage",False),
         global_land_from_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_from_type",""),
         global_land_to_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_to_type",""),
         upkeep_turn_start_untapped_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_turn_start_untapped_damage",False),
