@@ -48,11 +48,11 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("skip_draw_step"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[])
+        self.assertEqual(restored.history,[]); self.assertFalse(restored.skip_draw_step)
         self.assertGreater(restored.updated_at,0)
 
     def test_declaration_steps_do_not_grant_spell_priority(self):
@@ -1761,6 +1761,49 @@ class AlphaLandEventArtifactTests(unittest.TestCase):
         mass.play(10,1); self.resolve_top(mass)
         self.assertEqual(len(mass.stack),6); self.assertEqual(sum(x.target=="10" for x in mass.stack),4); self.assertEqual(sum(x.target=="20" for x in mass.stack),2)
         self.assertFalse(any(mass.card(x.uid).land for p in mass.players.values() for x in p.battlefield)); self.assertEqual(Game.from_raw(mass.to_raw()).to_raw(),mass.to_raw())
+
+
+class AlphaTurnStepArtifactTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_black_vise_targets_only_opponent_upkeep_and_uses_live_hand_size(self):
+        game=ready(); vise=self.add(game,10,"lea:233"); game.active_index=1; before=game.player(20).life
+        game._start_turn(); self.assertEqual(game.phase,"upkeep"); self.assertEqual(len(game.stack),1); self.assertEqual(game.stack[-1].target,"20")
+        moved=game.player(20).hand.pop(); game.player(20).library.insert(0,moved)
+        game.player(10).battlefield.remove(vise); game.player(10).graveyard.append(vise.uid)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(restored.player(20).life,before-max(0,len(restored.player(20).hand)-4))
+        own=ready(); self.add(own,10,"lea:233"); own._start_turn(); self.assertFalse(own.stack); self.assertEqual(own.phase,"precombat_main")
+
+    def test_copper_tablet_triggers_each_upkeep_and_uses_normal_lethal_handling(self):
+        for active in (10,20):
+            with self.subTest(active=active):
+                game=ready(); self.add(game,10,"lea:238"); game.active_index=game.order.index(active); game._start_turn()
+                self.assertEqual(game.stack[-1].ability_effect,"upkeep_damage"); self.assertEqual(game.stack[-1].target,str(active))
+                game.player(active).life=1; self.resolve_top(game)
+                self.assertTrue(game.finished); self.assertEqual(game.winner,game.opponent(active)); self.assertIsNone(game.priority_user)
+        ordered=ready(); self.add(ordered,10,"lea:238"); self.add(ordered,20,"lea:238"); ordered.active_index=1; ordered._start_turn()
+        self.assertEqual([trigger.owner for trigger in ordered.stack],[20,10])
+
+    def test_howling_mine_draws_after_normal_draw_persists_and_survives_removal(self):
+        game=ready(); mine=self.add(game,10,"lea:247"); game.active_index=1; before=len(game.player(20).hand)
+        game._start_turn(); self.assertEqual(len(game.player(20).hand),before+1); self.assertEqual(game.phase,"draw"); self.assertEqual(game.stack[-1].ability_effect,"draw_step_draw")
+        game.player(10).battlefield.remove(mine); game.player(10).graveyard.append(mine.uid)
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(len(restored.player(20).hand),before+2)
+        restored.pass_priority(restored.priority_user); restored.pass_priority(restored.priority_user); self.assertEqual(restored.phase,"precombat_main")
+
+    def test_howling_mine_respects_tapped_state_and_first_turn_draw_skip(self):
+        tapped=ready(); mine=self.add(tapped,10,"lea:247"); mine.tapped=True; tapped.active_index=1; before=len(tapped.player(20).hand); tapped._start_turn()
+        self.assertEqual(len(tapped.player(20).hand),before+1); self.assertFalse(tapped.stack); self.assertEqual(tapped.phase,"precombat_main")
+        first=Game(2,[10,20],3); self.add(first,10,"lea:247"); before=len(first.player(10).hand)
+        first.mulligan(10,True); first.mulligan(20,True)
+        self.assertEqual(len(first.player(10).hand),before); self.assertFalse(first.stack); self.assertEqual(first.phase,"precombat_main")
 
 
 class AlphaReusableArtifactTests(unittest.TestCase):

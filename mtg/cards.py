@@ -85,6 +85,9 @@ class Card:
     opponent_forest_tap_life: int = 0
     land_enter_damage: int = 0
     land_grave_damage: int = 0
+    upkeep_each_damage: int = 0
+    upkeep_opponent_hand_damage: bool = False
+    draw_step_extra: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -147,6 +150,9 @@ class Card:
         if self.opponent_forest_tap_life: abilities.append(f"Whenever an opponent taps a Forest, you gain {self.opponent_forest_tap_life} life")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
+        if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
+        if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
+        if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
             produced=(str(self.mana_amount)+" × " if self.mana_amount>1 else "")+"/".join(self.produces)
@@ -229,6 +235,9 @@ ALPHA_ARTIFACTS = {
     "lea:254": {"activation_cost":"{4}", "activation_tap":True, "activation_effect":"draw_self", "activation_text":"Draw a card"},
     "lea:268": {"activation_cost":"{3}", "activation_tap":True, "activation_effect":"damage_any", "activation_amount":1, "activation_text":"Deals 1 damage to any target"},
     "lea:232": {"produces":("W","U","B","R","G"), "mana_amount":3, "sacrifice_for_mana":True},
+    "lea:233": {"upkeep_opponent_hand_damage":True},
+    "lea:238": {"upkeep_each_damage":1},
+    "lea:247": {"draw_step_extra":1},
     "lea:261": {"produces":("G",)},
     "lea:262": {"produces":("B",)},
     "lea:263": {"produces":("W",)},
@@ -439,6 +448,9 @@ for reference in PLAYABLE_ALPHA:
         opponent_forest_tap_life=ALPHA_TAP_ENCHANTMENTS.get(reference.key,{}).get("opponent_forest_tap_life",0),
         land_enter_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_enter_damage",0),
         land_grave_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("land_grave_damage",0),
+        upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
+        upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
+        draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

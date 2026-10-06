@@ -173,6 +173,13 @@ def _play_one(game, user, difficulty):
             own=sum(game.card(permanent.uid).land for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land for permanent in game.player(game.opponent(user)).battlefield)
             score=5+enemy-own
+        elif card.upkeep_opponent_hand_damage:
+            score=5+max(0,len(game.player(game.opponent(user)).hand)-4)
+        elif card.upkeep_each_damage:
+            if player.life<=card.upkeep_each_damage: continue
+            score=4+player.life-game.player(game.opponent(user)).life
+        elif card.draw_step_extra:
+            score=5+card.draw_step_extra
         elif card.opponent_forest_tap_life:
             score=5+sum(game.card(permanent.uid).has_land_type("forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
         elif card.land_tap_damage:

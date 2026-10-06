@@ -71,6 +71,7 @@ class Game:
         self.blocked_attackers=[]
         self.trample_assignments={}
         self.end_step_sacrifices=[]
+        self.skip_draw_step=False
         self.phase_passes = 0
         self.priority_user = self.winner = self.finished_reason = None
         self.log, self.history = [], []
@@ -215,16 +216,41 @@ class Game:
             p.mulligans+=1
         if all(x.kept for x in self.players.values()): self._start_turn(True)
 
+    def _turn_step_triggers(self,step):
+        triggers=[]; active=self.active_user
+        for controller_id in (active,self.opponent(active)):
+            controller=self.player(controller_id)
+            for source in controller.battlefield:
+                card=self.card(source.uid); effect=""
+                if step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
+                elif step=="upkeep" and card.upkeep_opponent_hand_damage and active==self.opponent(controller.user_id): effect="upkeep_hand_damage"
+                elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
+                if not effect: continue
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
+                triggers.append(Spell(controller.user_id,uid,card.key,str(active),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
+        return triggers
+
+    def _begin_draw_step(self):
+        if self.skip_draw_step:
+            self.skip_draw_step=False; self.phase="precombat_main"; self.priority_user=self.active_user; return
+        self._draw(self.player(self.active_user))
+        if self.finished: return
+        triggers=self._turn_step_triggers("draw")
+        if triggers:
+            self.stack.extend(triggers); self.phase="draw"; self.priority_user=self.active_user
+        else:
+            self.phase="precombat_main"; self.priority_user=self.active_user
+
     def _start_turn(self,first=False):
         self.turn+=1; p=self.players[self.active_user]; p.land_played=False
         for x in p.battlefield:
             if not self.card(x.uid).skip_untap: x.tapped=False
             x.sick=False
-        self._cleanup()
-        if not(first and self.turn==1):
-            self._draw(p)
-            if self.finished: return
-        self.phase_passes=0; self.phase="precombat_main"; self.priority_user=self.active_user
+        self._cleanup(); self.skip_draw_step=bool(first and self.turn==1)
+        self.phase_passes=0; triggers=self._turn_step_triggers("upkeep")
+        if triggers:
+            self.stack.extend(triggers); self.phase="upkeep"; self.priority_user=self.active_user
+        else: self._begin_draw_step()
         self.log.append(f"Turn {self.turn}: {self.active_user}.")
 
     @staticmethod
@@ -638,6 +664,8 @@ class Game:
                     self._empty_mana(); self._advance()
 
     def _advance(self):
+        if self.phase=="upkeep": self._begin_draw_step(); return
+        if self.phase=="draw": self.phase="precombat_main"; self.priority_user=self.active_user; return
         if self.phase=="precombat_main": self.phase="attackers"; self.priority_user=None; return
         elif self.phase=="after_attackers": self.phase="blockers"; self.priority_user=None; return
         elif self.phase=="after_blockers":
@@ -816,6 +844,12 @@ class Game:
             self.player(int(s.target)).life+=card.opponent_forest_tap_life
         elif effect=="land_event_damage":
             self.player(int(s.target)).life-=card.land_enter_damage or card.land_grave_damage
+        elif effect=="upkeep_damage":
+            self.player(int(s.target)).life-=card.upkeep_each_damage
+        elif effect=="upkeep_hand_damage":
+            target_player=self.player(int(s.target)); target_player.life-=max(0,len(target_player.hand)-4)
+        elif effect=="draw_step_draw":
+            self._draw(self.player(int(s.target)),card.draw_step_extra)
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":
@@ -1059,12 +1093,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"skip_draw_step":self.skip_draw_step,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**x) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

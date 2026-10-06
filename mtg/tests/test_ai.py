@@ -467,6 +467,18 @@ class SoloAITests(unittest.TestCase):
                 game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
                 advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
 
+    def test_ai_casts_turn_step_artifacts_but_avoids_lethal_copper_tablet(self):
+        for key in ("lea:233","lea:247"):
+            with self.subTest(key=key):
+                game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+                spell=self.add(game,AI,key,"hand"); [self.add(game,AI,"forest") for _ in range(2)]
+                game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+                advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
+        unsafe=solo(order=(AI,HUMAN)); unsafe.player(HUMAN).kept=True; unsafe.player(AI).kept=True; unsafe.player(AI).hand=[]
+        tablet=self.add(unsafe,AI,"lea:238","hand"); [self.add(unsafe,AI,"forest") for _ in range(2)]; unsafe.player(AI).life=1
+        unsafe.active_index=0; unsafe.phase="precombat_main"; unsafe.priority_user=AI; unsafe.player(AI).land_played=True
+        advance_solo(unsafe); self.assertIn(tablet,unsafe.player(AI).hand); self.assertFalse(unsafe.stack)
+
     def test_ai_uses_paid_and_multi_mana_artifacts_to_enable_spells(self):
         prism=solo(order=(AI,HUMAN)); prism.player(HUMAN).kept=True; prism.player(AI).kept=True; prism.player(AI).hand=[]
         source=self.add(prism,AI,"lea:234"); self.add(prism,AI,"mountain"); self.add(prism,AI,"mountain"); spell=self.add(prism,AI,"lea:38","hand")

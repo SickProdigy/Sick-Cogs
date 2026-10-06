@@ -5353,7 +5353,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:234",
@@ -5448,7 +5448,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:239",
@@ -5621,7 +5621,7 @@
       "toughness": null,
       "layout": "normal",
       "support_family": "artifact",
-      "engine_status": "reference_only"
+      "engine_status": "playable"
     },
     {
       "key": "lea:248",
