@@ -149,6 +149,15 @@ class CogPolicyTests(unittest.TestCase):
         self.assertNotIn("Moves",[field.name for field in embed.fields])
         self.assertIsNone(embed.footer.text)
 
+    def test_terminal_battle_embed_uses_state_specific_titles(self):
+        current=battle();wild=SPECIES[current.wild_species_id]
+        current.state="caught"
+        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"Gotcha! {wild.name} was caught!")
+        current.state="ran"
+        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped!")
+        current.state="lost"
+        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,"Battle over!")
+
     def test_expected_command_surfaces_are_separate_and_documented(self):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
         self.assertEqual(set(Pokemon.pokemon.aliases),{"pkmn","poke"})
