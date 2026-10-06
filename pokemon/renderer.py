@@ -302,7 +302,10 @@ class BattleRenderer:
             species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
             shiny=" · SHINY" if item.shiny else ""
             draw.text((left+12,top+149),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=17))
-            draw.text((left+190,top+151),f"Lv.{item.level}",fill=(65,91,78),font=ImageFont.load_default(size=14))
+            level_text=f"Lv.{item.level}";level_font=ImageFont.load_default(size=14);level_x=left+180
+            draw.text((level_x,top+151),level_text,fill=(65,91,78),font=level_font)
+            mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+6)
+            self._gender_mark(draw,(mark_x,top+150),item.gender,(65,91,78))
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
         return self._save(canvas)
 
