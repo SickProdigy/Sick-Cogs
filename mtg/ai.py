@@ -477,33 +477,33 @@ def _blocks(game, user, difficulty):
     return assignments
 
 def _assign_attacker_damage(game,user):
-    if user!=game.active_user or game.phase not in ("after_blockers","after_first_strike") or game.stack: return False
+    if user not in game.order or game.phase not in ("after_blockers","after_first_strike") or game.stack: return False
     first_step=game._combat_has_first_strike() and game.phase=="after_blockers"
     for attacker_uid in game.attackers:
         attacker=game.find_permanent(attacker_uid)[1]; blockers=[uid for uid in game.blockers_for(attacker_uid) if game.find_permanent(uid)[1] is not None]
-        if attacker is None or len(blockers)<2 or (("first_strike" in game.current_keywords(attacker))!=first_step): continue
+        if attacker is None or len(blockers)<2 or user!=game.attacker_damage_owner(attacker_uid) or (("first_strike" in game.current_keywords(attacker))!=first_step): continue
         existing=game.attacker_damage_assignments.get(attacker_uid,[]); power=max(0,game.current_stats(attacker)[0]); trample="trample" in game.current_keywords(attacker)
         if {item.get("blocker") for item in existing}==set(blockers) and (sum(item.get("damage",0) for item in existing)==power or trample): continue
         remaining=power; ordered=sorted(blockers,key=lambda uid:(game.current_stats(game.find_permanent(uid)[1])[1]-game.find_permanent(uid)[1].damage,uid)); assignments=[]
         for uid in ordered:
-            blocker=game.find_permanent(uid)[1]; amount=min(remaining,max(0,game.current_stats(blocker)[1]-blocker.damage)); assignments.append((game.player(game.opponent(user)).battlefield.index(blocker)+1,amount)); remaining-=amount
+            blocker=game.find_permanent(uid)[1]; amount=min(remaining,max(0,game.current_stats(blocker)[1]-blocker.damage)); assignments.append((game.player(game.opponent(game.active_user)).battlefield.index(blocker)+1,amount)); remaining-=amount
         if remaining and not trample: assignments[-1]=(assignments[-1][0],assignments[-1][1]+remaining)
-        game.assign_attacker_damage(user,game.player(user).battlefield.index(attacker)+1,assignments); return True
+        game.assign_attacker_damage(user,game.player(game.active_user).battlefield.index(attacker)+1,assignments); return True
     return False
 
 def _assign_blocker_damage(game,user):
-    if user!=game.opponent(game.active_user) or game.phase not in ("after_blockers","after_first_strike") or game.stack: return False
+    if user not in game.order or game.phase not in ("after_blockers","after_first_strike") or game.stack: return False
     first_step=game._combat_has_first_strike() and game.phase=="after_blockers"
     for blocker_uid in game.all_blocker_uids():
         blocker=game.find_permanent(blocker_uid)[1]; blocked=[uid for uid in game.attackers_for(blocker_uid) if game.find_permanent(uid)[1] is not None]
-        if blocker is None or len(blocked)<2 or (("first_strike" in game.current_keywords(blocker))!=first_step): continue
+        if blocker is None or len(blocked)<2 or user!=game.blocker_damage_owner(blocker_uid) or (("first_strike" in game.current_keywords(blocker))!=first_step): continue
         existing=game.blocker_damage_assignments.get(blocker_uid,[])
         if {item.get("attacker") for item in existing}==set(blocked) and sum(item.get("damage",0) for item in existing)==max(0,game.current_stats(blocker)[0]): continue
         power=max(0,game.current_stats(blocker)[0]); remaining=power; ordered=sorted(blocked,key=lambda uid:(game.current_stats(game.find_permanent(uid)[1])[1]-game.find_permanent(uid)[1].damage,uid)); assignments=[]
         for uid in ordered:
             attacker=game.find_permanent(uid)[1]; amount=min(remaining,max(0,game.current_stats(attacker)[1]-attacker.damage)); assignments.append((game.attackers.index(uid)+1,amount)); remaining-=amount
         if remaining: assignments[-1]=(assignments[-1][0],assignments[-1][1]+remaining)
-        game.assign_blocker_damage(user,game.player(user).battlefield.index(blocker)+1,assignments); return True
+        game.assign_blocker_damage(user,game.player(game.opponent(game.active_user)).battlefield.index(blocker)+1,assignments); return True
     return False
 
 
@@ -634,6 +634,9 @@ def _activation_target(game,user,card,source_uid=None):
         elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_land" and target.land: candidates.append((1+len(target.produces),position))
     if candidates: return f"{opponent}:{max(candidates)[1]}"
+    if card.activation_effect=="grant_banding" and game.active_user==user and game.phase=="precombat_main":
+        choices=[(game.current_stats(permanent)[0],position) for position,permanent in enumerate(game.player(user).battlefield,1) if permanent.uid!=source_uid and game.is_creature(permanent) and game.can_attack_permanent(permanent) and "banding" not in game.current_keywords(permanent) and _can_target(game,card,permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
     if card.activation_effect=="unblockable" and game.active_user==user and game.phase in ("precombat_main","after_attackers"):
         attackers=set(game.attackers) if game.phase=="after_attackers" else None
         choices=[]
@@ -814,7 +817,11 @@ def advance_solo(game: Game):
         if game.phase == "attackers":
             if game.active_user != user:
                 return changed
-            game.declare_attackers(user, _attack_positions(game, user, difficulty))
+            positions=_attack_positions(game,user,difficulty)
+            banding=[position for position in positions if "banding" in game.current_keywords(game.player(user).battlefield[position-1])]
+            others=[position for position in positions if position not in banding]
+            bands=[banding+[others[0]]] if banding and others else ([banding] if len(banding)>1 else [])
+            game.declare_attackers(user,positions,bands)
             game.record(user, "ai_attack")
             changed = True
             continue

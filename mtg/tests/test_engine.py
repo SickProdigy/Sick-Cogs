@@ -4080,4 +4080,26 @@ class AlphaFalseOrdersTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"defending player"): game._target_for_cast(CARDS["lea:147"],10,"10:1")
         ward=self.add(game,20,"lea:33"); ward.attached_to=target.uid; game.pass_priority(10); game.pass_priority(20); self.assertFalse(game.stack); self.assertIn("fizzled",game.log[-1])
 
+class AlphaBandingTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_band_declaration_group_block_and_persistence(self):
+        game=ready(); hero=self.add(game,10,"lea:4"); pegasus=self.add(game,10,"lea:28"); bear=self.add(game,20,"bear"); game.active_index=0; game.phase="attackers"
+        game.declare_attackers(10,[1,2],[[1,2]]); restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.attack_bands,[[hero.uid,pegasus.uid]])
+        restored.phase="blockers"; restored.declare_blockers(20,[(2,1)]); self.assertEqual(restored.blockers_for(hero.uid),[bear.uid]); self.assertEqual(restored.blockers_for(pegasus.uid),[bear.uid]); self.assertEqual(restored.blocker_damage_owner(bear.uid),10)
+
+    def test_band_legality_and_damage_assignment_privileges(self):
+        game=ready(); hero=self.add(game,10,"lea:4"); first=self.add(game,10,"bear"); second=self.add(game,10,"giant"); blocker=self.add(game,20,"giant"); game.active_index=0; game.phase="attackers"
+        with self.assertRaisesRegex(GameError,"at most one"): game.declare_attackers(10,[1,2,3],[[1,2,3]])
+        game.declare_attackers(10,[1,2],[[1,2]]); game.phase="blockers"; game.declare_blockers(20,[(1,1)]); game.priority_user=10
+        game.assign_blocker_damage(10,1,[(1,3),(2,0)]); self.assertEqual(game.blocker_damage_assignments[blocker.uid][0]["damage"],3)
+        defending=self.add(game,20,"lea:219"); other=self.add(game,20,"bear"); game.attackers=[hero.uid]; game.attack_bands=[]; game.blocks={hero.uid:defending.uid}; game.additional_blocks={hero.uid:[other.uid]}; game.blocked_attackers=[hero.uid]; game.phase="after_blockers"; game.priority_user=20
+        game.assign_attacker_damage(20,1,[(2,0),(3,1)]); self.assertEqual(game.attacker_damage_assignments[hero.uid][-1]["damage"],1)
+
+    def test_helm_grants_temporary_banding(self):
+        game=ready(); helm=self.add(game,10,"lea:246"); target=self.add(game,10,"bear"); plains=self.add(game,10,"plains"); game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1,"10:2"); game.pass_priority(20); game.pass_priority(10); self.assertIn("banding",game.current_keywords(target)); self.assertTrue(helm.tapped)
+        game._cleanup(); self.assertNotIn("banding",game.current_keywords(target))
+
 if __name__=="__main__": unittest.main()

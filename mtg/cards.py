@@ -409,6 +409,7 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:246": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"grant_banding", "activation_text":"Target creature gains banding until end of turn"},
     "lea:230": {"land_enter_damage":2},
     "lea:240": {"activation_cost":"{2}", "activation_tap":True, "activation_effect":"add_mire_counter", "activation_upkeep_only":True, "activation_text":"Put a mire counter on target non-Swamp land; it is a Swamp while it has one"},
     "lea:241": {"land_grave_damage":2},
@@ -614,6 +615,9 @@ ALPHA_UPKEEP_CREATURES = {
 }
 
 ALPHA_KEYWORDS = {
+    "lea:4": ("banding",),
+    "lea:28": ("flying", "banding"),
+    "lea:219": ("banding",),
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
     "lea:43": ("first_strike",),

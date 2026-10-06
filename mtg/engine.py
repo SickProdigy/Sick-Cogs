@@ -112,6 +112,7 @@ class Game:
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
         self.additional_blocks = {}
+        self.attack_bands = []
         self.attacker_damage_assignments = {}
         self.blocker_damage_assignments = {}
         self.blocked_attackers=[]
@@ -822,6 +823,7 @@ class Game:
         if card.activation_effect=="destroy_black_permanent" and "B" not in self.current_colors(permanent): raise GameError("Target permanent is not black.")
         if card.activation_effect=="destroy_tapped_creature" and (not self.is_creature(permanent) or not permanent.tapped): raise GameError("Target must be a tapped creature.")
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
+        if card.activation_effect=="grant_banding" and not self.is_creature(permanent): raise GameError("Target must be a creature.")
         if card.activation_effect=="unblockable" and (not self.is_creature(permanent) or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="grant_flying_delayed_destroy" and (target_user!=user or not self.is_creature(permanent) or self.current_stats(permanent)[1]>=self.current_stats(source)[0]): raise GameError("Target must be a creature you control with toughness less than this creature’s power.")
         if card.activation_effect=="force_attack" and (target_user!=self.active_user or not self.is_creature(permanent) or self._has_subtype(target_card,"Wall") or permanent.sick): raise GameError("Target must be a non-Wall creature the active player controlled since the turn began.")
@@ -1337,7 +1339,7 @@ class Game:
             raise GameError("You do not have a resolving False Orders choice.")
         target=self._stable_target_permanent(self.stack[-1].target)
         if target is None: return []
-        return [(position,attacker) for position,uid in enumerate(self.attackers,1) if (attacker:=self.find_permanent(uid)[1]) is not None and self.can_block(uid,target.uid)[0]]
+        return [(position,attacker) for position,uid in enumerate(self.attackers,1) if (attacker:=self.find_permanent(uid)[1]) is not None and any(self.can_block(member,target.uid)[0] for member in self.attack_band(uid))]
 
     def choose_false_orders(self,user,attacker_position=None):
         choices={position:attacker for position,attacker in self.false_orders_choices(user)}; spell=self.stack[-1]; target=self._stable_target_permanent(spell.target)
@@ -1356,19 +1358,24 @@ class Game:
             self.attacker_damage_assignments.pop(attacker_uid,None); self.trample_assignments.pop(attacker_uid,None)
         self.blocker_damage_assignments.pop(target.uid,None)
         if attacker_position is not None:
-            attacker=choices[attacker_position]; blockers=self.blockers_for(attacker.uid)
-            self.attacker_damage_assignments.pop(attacker.uid,None); self.trample_assignments.pop(attacker.uid,None)
-            if target.uid not in blockers: blockers.append(target.uid)
-            self.blocks[attacker.uid]=blockers[0]
-            if len(blockers)>1: self.additional_blocks[attacker.uid]=blockers[1:]
-            else: self.additional_blocks.pop(attacker.uid,None)
-            if attacker.uid not in self.blocked_attackers: self.blocked_attackers.append(attacker.uid)
+            attacker=choices[attacker_position]; members=self.attack_band(attacker.uid)
+            for member_uid in members:
+                blockers=self.blockers_for(member_uid)
+                self.attacker_damage_assignments.pop(member_uid,None); self.trample_assignments.pop(member_uid,None)
+                if target.uid not in blockers: blockers.append(target.uid)
+                self.blocks[member_uid]=blockers[0]
+                if len(blockers)>1: self.additional_blocks[member_uid]=blockers[1:]
+                else: self.additional_blocks.pop(member_uid,None)
+                if member_uid not in self.blocked_attackers: self.blocked_attackers.append(member_uid)
             if target.uid not in self.combat_participants: self.combat_participants.append(target.uid)
             active=self.player(self.active_user); defending=self.player(self.opponent(self.active_user)); pending=[]
-            for owner,source,other,other_owner in ((active.user_id,attacker,target,defending.user_id),(defending.user_id,target,attacker,active.user_id)):
-                source_card=self.card(source.uid)
-                if source_card.combat_destroy_nonwall and not self._has_subtype(self.card(other.uid),"Wall"):
-                    uid=self.next_uid; self.next_uid+=1; self.cards[uid]=source_card.key; pending.append(Spell(owner,uid,source_card.key,f"{other_owner}:{other.uid}",ability_effect="end_combat_destroy",source_uid=source.uid,color_override=source.color_override))
+            for member_uid in members:
+                member=self.find_permanent(member_uid)[1]
+                if member is None: continue
+                for owner,source,other,other_owner in ((active.user_id,member,target,defending.user_id),(defending.user_id,target,member,active.user_id)):
+                    source_card=self.card(source.uid)
+                    if source_card.combat_destroy_nonwall and not self._has_subtype(self.card(other.uid),"Wall"):
+                        uid=self.next_uid; self.next_uid+=1; self.cards[uid]=source_card.key; pending.append(Spell(owner,uid,source_card.key,f"{other_owner}:{other.uid}",ability_effect="end_combat_destroy",source_uid=source.uid,color_override=source.color_override))
             pending.sort(key=lambda trigger:0 if trigger.owner==self.active_user else 1); self.end_combat_destroys.extend(pending)
         self.player(spell.owner).graveyard.append(spell.uid); spell.decision_pending=False; self.log.append(f"{user} resolved False Orders"+(f" and blocked with {self.card(target.uid).name}." if attacker_position is not None else " without a new block."))
         if self.stack: self.stack[-1].passes=0
@@ -1734,7 +1741,7 @@ class Game:
         else: raise GameError("Complete combat first.")
         self.priority_user=self.active_user
 
-    def declare_attackers(self,user,positions):
+    def declare_attackers(self,user,positions,bands=()):
         self.player(user)
         if self.finished: raise GameError("Game is over.")
         if self.phase!="attackers" or user!=self.active_user: raise GameError("Not your attack declaration.")
@@ -1745,9 +1752,18 @@ class Game:
             if not self.can_attack_permanent(x): raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
+        formed=[]
+        for band_positions in bands:
+            try: members=[p.battlefield[int(pos)-1] for pos in band_positions]
+            except (TypeError,ValueError,IndexError): raise GameError("Bad band position.")
+            member_uids=[x.uid for x in members]
+            if len(member_uids)<2 or len(set(member_uids))!=len(member_uids) or any(uid not in chosen for uid in member_uids): raise GameError("Each band must contain at least two distinct declared attackers.")
+            if sum("banding" not in self.current_keywords(x) for x in members)>1: raise GameError("An attacking band may contain at most one creature without banding.")
+            if any(uid in prior for prior in formed for uid in member_uids): raise GameError("An attacker can belong to only one band.")
+            formed.append(member_uids)
         required=[x for x in p.battlefield if (self.card(x.uid).attacks_each_combat or x.uid in self.forced_attackers) and self.can_attack_permanent(x) and x.uid not in chosen]
         if required: raise GameError(", ".join(self.card(x.uid).name for x in required)+" must attack this combat if able.")
-        self.attackers=chosen; self.attacked_this_turn.extend(uid for uid in chosen if uid not in self.attacked_this_turn); self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=list(chosen); self.trample_assignments={}; self.attacker_damage_assignments={}; self.phase_passes=0; self.blocker_damage_assignments={}
+        self.attackers=chosen; self.attack_bands=formed; self.attacked_this_turn.extend(uid for uid in chosen if uid not in self.attacked_this_turn); self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=list(chosen); self.trample_assignments={}; self.attacker_damage_assignments={}; self.phase_passes=0; self.blocker_damage_assignments={}
         for x in list(p.battlefield):
             if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
         self._sba(); self._life()
@@ -1763,6 +1779,17 @@ class Game:
     def all_blocker_uids(self):
         return set(self.blocks.values())|{blocker for blockers in self.additional_blocks.values() for blocker in blockers}
 
+    def attack_band(self,attacker_uid):
+        return next((band for band in self.attack_bands if attacker_uid in band),[attacker_uid])
+
+    def attack_groups(self):
+        grouped={uid for band in self.attack_bands for uid in band}
+        return list(self.attack_bands)+[[uid] for uid in self.attackers if uid not in grouped]
+
+    def _add_block(self,proposed,attacker_uid,blocker_uid):
+        for member_uid in self.attack_band(attacker_uid):
+            if blocker_uid not in proposed.setdefault(member_uid,[]): proposed[member_uid].append(blocker_uid)
+
     def declare_blockers(self,user,assignments):
         if self.phase!="blockers" or user!=self.opponent(self.active_user): raise GameError("You cannot block now.")
         p=self.player(user); counts={}; proposed={}; pairs=list(assignments.items()) if hasattr(assignments,"items") else list(assignments)
@@ -1770,20 +1797,21 @@ class Game:
             if not 1<=a<=len(self.attackers) or not 1<=b<=len(p.battlefield): raise GameError("Bad combat position.")
             blocker=p.battlefield[b-1]; attacker_uid=self.attackers[a-1]; capacity=blocker.temporary_max_blocks or self.card(blocker.uid).max_blocks
             if blocker.uid in proposed.get(attacker_uid,[]) or counts.get(blocker.uid,0)>=capacity: raise GameError("Invalid blocker.")
-            legal,reason=self.can_block(attacker_uid,blocker.uid)
+            results=[self.can_block(uid,blocker.uid) for uid in self.attack_band(attacker_uid)]
+            legal=any(result[0] for result in results); reason=next((result[1] for result in results if not result[0]),"That band cannot be blocked.")
             if not legal: raise GameError(reason)
-            counts[blocker.uid]=counts.get(blocker.uid,0)+1; proposed.setdefault(attacker_uid,[]).append(blocker.uid)
+            counts[blocker.uid]=counts.get(blocker.uid,0)+1; self._add_block(proposed,attacker_uid,blocker.uid)
         for blocker in p.battlefield:
             if not blocker.must_block_all: continue
-            legal={uid for uid in self.attackers if self.can_block(uid,blocker.uid)[0]}; assigned={uid for uid,blockers in proposed.items() if blocker.uid in blockers}
+            legal={tuple(group) for group in self.attack_groups() if any(self.can_block(uid,blocker.uid)[0] for uid in group)}; assigned={tuple(group) for group in self.attack_groups() if any(blocker.uid in proposed.get(uid,[]) for uid in group)}
             if legal!=assigned: raise GameError(f"{self.card(blocker.uid).name} must block every attacking creature it can block.")
-        lured={uid for uid in self.attackers if any(self.card(aura.uid).aura_lure for aura in self.attached_auras(self.find_permanent(uid)[1]))}
+        lured=[group for group in self.attack_groups() if any(any(self.card(aura.uid).aura_lure for aura in self.attached_auras(self.find_permanent(uid)[1])) for uid in group)]
         if lured:
             maximum=0; actual=0
             for blocker in p.battlefield:
                 if not self.is_creature(blocker) or blocker.tapped: continue
-                legal=[uid for uid in lured if self.can_block(uid,blocker.uid)[0]]; capacity=blocker.temporary_max_blocks or self.card(blocker.uid).max_blocks
-                maximum+=min(capacity,len(legal)); actual+=sum(blocker.uid in proposed.get(uid,[]) for uid in legal)
+                legal=[group for group in lured if any(self.can_block(uid,blocker.uid)[0] for uid in group)]; capacity=blocker.temporary_max_blocks or self.card(blocker.uid).max_blocks
+                maximum+=min(capacity,len(legal)); actual+=sum(any(blocker.uid in proposed.get(uid,[]) for uid in group) for group in legal)
             if actual!=maximum: raise GameError("All creatures able to block a creature enchanted by Lure must do so.")
         self.blocks={uid:blockers[0] for uid,blockers in proposed.items() if blockers}; self.additional_blocks={uid:blockers[1:] for uid,blockers in proposed.items() if len(blockers)>1}; self.blocked_attackers=list(proposed); self.attacker_damage_assignments={}; self.blocker_damage_assignments={}
         self.combat_participants.extend(uid for blockers in proposed.values() for uid in blockers if uid not in self.combat_participants)
@@ -1838,18 +1866,24 @@ class Game:
         self.trample_assignments[attacker.uid]=damage_to_blocker; self.phase_passes=0
         self.log.append(f"{user} assigned {damage_to_blocker} damage from {self.card(attacker.uid).name} to its blocker.")
 
+    def attacker_damage_owner(self,attacker_uid):
+        return self.opponent(self.active_user) if any("banding" in self.current_keywords(self.find_permanent(uid)[1]) for uid in self.blockers_for(attacker_uid) if self.find_permanent(uid)[1] is not None) else self.active_user
+
+    def blocker_damage_owner(self,blocker_uid):
+        return self.active_user if any("banding" in self.current_keywords(self.find_permanent(uid)[1]) for uid in self.attackers_for(blocker_uid) if self.find_permanent(uid)[1] is not None) else self.opponent(self.active_user)
+
     def assign_attacker_damage(self,user,attacker_position,assignments):
         self._priority(user)
-        if user!=self.active_user or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign attacker damage after blockers with an empty stack.")
-        battlefield=self.player(user).battlefield
+        if user not in self.order or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign attacker damage after blockers with an empty stack.")
+        battlefield=self.player(self.active_user).battlefield
         if not 1<=attacker_position<=len(battlefield): raise GameError("No permanent at that battlefield position.")
         attacker=battlefield[attacker_position-1]; blocker_uids=[uid for uid in self.blockers_for(attacker.uid) if self.find_permanent(uid)[1] is not None]
-        if attacker.uid not in self.attackers or len(blocker_uids)<2: raise GameError("Choose an attacking creature blocked by multiple creatures.")
+        if attacker.uid not in self.attackers or len(blocker_uids)<2 or user!=self.attacker_damage_owner(attacker.uid): raise GameError("Choose an attacking creature blocked by multiple creatures.")
         first_step=self._combat_has_first_strike() and self.phase=="after_blockers"; strikes=("first_strike" in self.current_keywords(attacker))==first_step
         if not strikes: raise GameError("That attacker does not assign damage in the next combat damage step.")
         parsed=[]
         try:
-            defending=self.player(self.opponent(user))
+            defending=self.player(self.opponent(self.active_user))
             for blocker_position,amount in assignments:
                 blocker_position=int(blocker_position); amount=int(amount)
                 if not 1<=blocker_position<=len(defending.battlefield) or amount<0: raise ValueError
@@ -1862,7 +1896,7 @@ class Game:
         remaining=power
         for index,(uid,amount) in enumerate(parsed):
             blocker=self.find_permanent(uid)[1]; lethal=max(0,self.current_stats(blocker)[1]-blocker.damage); later=any(value for _,value in parsed[index+1:]) or (trample and total<power)
-            if later and amount<min(remaining,lethal): raise GameError("Assign lethal damage to each earlier blocker before assigning damage to the next target.")
+            if user==self.active_user and later and amount<min(remaining,lethal): raise GameError("Assign lethal damage to each earlier blocker before assigning damage to the next target.")
             remaining-=amount
         self.attacker_damage_assignments[attacker.uid]=[{"blocker":uid,"damage":amount} for uid,amount in parsed]; self.phase_passes=0
         self.log.append(f"{user} assigned combat damage from {self.card(attacker.uid).name} among {len(parsed)} blockers.")
@@ -1878,11 +1912,11 @@ class Game:
 
     def assign_blocker_damage(self,user,blocker_position,assignments):
         self._priority(user)
-        if user!=self.opponent(self.active_user) or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign blocker damage after blockers with an empty stack.")
-        battlefield=self.player(user).battlefield
+        if user not in self.order or self.phase not in ("after_blockers","after_first_strike") or self.stack: raise GameError("Assign blocker damage after blockers with an empty stack.")
+        battlefield=self.player(self.opponent(self.active_user)).battlefield
         if not 1<=blocker_position<=len(battlefield): raise GameError("No permanent at that battlefield position.")
         blocker=battlefield[blocker_position-1]; blocked=[uid for uid in self.attackers_for(blocker.uid) if self.find_permanent(uid)[1] is not None]
-        if len(blocked)<2: raise GameError("Choose a creature blocking multiple attackers.")
+        if len(blocked)<2 or user!=self.blocker_damage_owner(blocker.uid): raise GameError("Choose a creature whose combat damage you control and that blocks multiple attackers.")
         first_step=self._combat_has_first_strike() and self.phase=="after_blockers"; strikes=("first_strike" in self.current_keywords(blocker))==first_step
         if not strikes: raise GameError("That blocker does not assign damage in the next combat damage step.")
         parsed=[]
@@ -1898,7 +1932,7 @@ class Game:
         remaining=power
         for uid,amount in parsed[:-1]:
             attacker=self.find_permanent(uid)[1]; lethal=max(0,self.current_stats(attacker)[1]-attacker.damage); minimum=min(remaining,lethal)
-            if amount<minimum: raise GameError("Assign lethal damage to each earlier creature before assigning damage to the next.")
+            if user==self.opponent(self.active_user) and amount<minimum: raise GameError("Assign lethal damage to each earlier creature before assigning damage to the next.")
             remaining-=amount
         self.blocker_damage_assignments[blocker.uid]=[{"attacker":uid,"damage":amount} for uid,amount in parsed]; self.phase_passes=0
         self.log.append(f"{user} assigned combat damage from {self.card(blocker.uid).name} among {len(parsed)} attackers.")
@@ -2050,7 +2084,7 @@ class Game:
                     uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
                     pending.append(Spell(controller_id,uid,card.key,f"{controller_id}:{permanent.uid}",ability_effect="end_combat_remove_power_counter",source_uid=permanent.uid,color_override=permanent.color_override))
         pending.sort(key=lambda trigger:0 if trigger.owner==self.active_user else 1)
-        self.attackers=[]; self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=[]; self.trample_assignments={}; self.attacker_damage_assignments={}; self.blocker_damage_assignments={}
+        self.attackers=[]; self.attack_bands=[]; self.blocks={}; self.additional_blocks={}; self.blocked_attackers=[]; self.combat_participants=[]; self.trample_assignments={}; self.attacker_damage_assignments={}; self.blocker_damage_assignments={}
         for player in self.players.values(): player.bodyguard_choice=0
         for player in self.players.values():
             for permanent in player.battlefield: permanent.animated_until_end_combat=False
@@ -2103,7 +2137,7 @@ class Game:
 
     def _remove_from_combat(self,uid):
         if uid in self.attackers:
-            self.attackers.remove(uid); self.blocks.pop(uid,None); self.additional_blocks.pop(uid,None); self.trample_assignments.pop(uid,None); self.attacker_damage_assignments.pop(uid,None)
+            self.attackers.remove(uid); self.attack_bands=[band for band in ([member for member in band if member!=uid] for band in self.attack_bands) if len(band)>1]; self.blocks.pop(uid,None); self.additional_blocks.pop(uid,None); self.trample_assignments.pop(uid,None); self.attacker_damage_assignments.pop(uid,None)
             if uid in self.blocked_attackers: self.blocked_attackers.remove(uid)
         for attacker in list(self.blocks):
             blockers=[blocker for blocker in self.blockers_for(attacker) if blocker!=uid]
@@ -2325,6 +2359,9 @@ class Game:
             else: legal=legal and "Wall" in target_card.type_line.split(" — ",1)[-1].split()
             if not legal: fizzle("its target was gone or illegal"); return
             self._destroy(controller,target)
+        elif effect=="grant_banding":
+            if target_card is None or not self.is_creature(target): fizzle("its target was gone or illegal"); return
+            if "banding" not in target.temporary_keywords: target.temporary_keywords.append("banding")
         elif effect=="unblockable":
             if target_card is None or not self.is_creature(target) or self.current_stats(target)[0]>2: fizzle("its target was gone or illegal"); return
             if "unblockable" not in target.temporary_keywords: target.temporary_keywords.append("unblockable")
@@ -2717,12 +2754,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"tomb_cleanup_sources":self.tomb_cleanup_sources,"extra_turns":self.extra_turns,"turn_start_pending_user":self.turn_start_pending_user,"turn_start_pending_extra":self.turn_start_pending_extra,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"sanctuary_draw_pending":self.sanctuary_draw_pending,"sanctuary_pending_draws":self.sanctuary_pending_draws,"sanctuary_resume_draw_step":self.sanctuary_resume_draw_step,"sanctuary_resume_mass_draw":self.sanctuary_resume_mass_draw,"sanctuary_mass_draw_failed":self.sanctuary_mass_draw_failed,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"attacked_this_turn":self.attacked_this_turn,"forced_attackers":self.forced_attackers,"blocks":self.blocks,"additional_blocks":self.additional_blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"attacker_damage_assignments":self.attacker_damage_assignments,"blocker_damage_assignments":self.blocker_damage_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"tomb_cleanup_sources":self.tomb_cleanup_sources,"extra_turns":self.extra_turns,"turn_start_pending_user":self.turn_start_pending_user,"turn_start_pending_extra":self.turn_start_pending_extra,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"sanctuary_draw_pending":self.sanctuary_draw_pending,"sanctuary_pending_draws":self.sanctuary_pending_draws,"sanctuary_resume_draw_step":self.sanctuary_resume_draw_step,"sanctuary_resume_mass_draw":self.sanctuary_resume_mass_draw,"sanctuary_mass_draw_failed":self.sanctuary_mass_draw_failed,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"attacked_this_turn":self.attacked_this_turn,"forced_attackers":self.forced_attackers,"blocks":self.blocks,"additional_blocks":self.additional_blocks,"attack_bands":self.attack_bands,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"attacker_damage_assignments":self.attacker_damage_assignments,"blocker_damage_assignments":self.blocker_damage_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("source_damage_lifegain",[]); d.setdefault("source_damage_caps",{}); d.setdefault("guardian_angel_active",False); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d.setdefault("damage_taken_this_turn",0); d.setdefault("bodyguard_choice",0); d.setdefault("island_sanctuary_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d["source_damage_lifegain"]=[int(uid) for uid in d["source_damage_lifegain"]]; d["source_damage_caps"]={int(uid):int(cap) for uid,cap in d["source_damage_caps"].items()}; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"owner":int(x.get("owner",k)),"base_controller":int(x.get("base_controller",0)),"damage_prevention":x.get("damage_prevention",0),"hydra_counters_first":x.get("hydra_counters_first",False),"redirect_damage_to_owner":x.get("redirect_damage_to_owner",0),"redirect_source_damage_to_player":{int(uid):int(user) for uid,user in x.get("redirect_source_damage_to_player",{}).items()},"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"vitality_counters":x.get("vitality_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])],"copy_key":x.get("copy_key",""),"copy_added_types":list(x.get("copy_added_types",[])),"copy_colors":list(x.get("copy_colors",[])),"copy_upkeep_creature":bool(x.get("copy_upkeep_creature",False)),"temporary_max_blocks":int(x.get("temporary_max_blocks",0)),"must_block_all":bool(x.get("must_block_all",False))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.turn_start_pending_user=int(r["turn_start_pending_user"]) if r.get("turn_start_pending_user") is not None else None; g.turn_start_pending_extra=bool(r.get("turn_start_pending_extra",False)); g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.sanctuary_draw_pending=bool(r.get("sanctuary_draw_pending",False)); g.sanctuary_pending_draws=int(r.get("sanctuary_pending_draws",int(g.sanctuary_draw_pending))); g.sanctuary_resume_draw_step=bool(r.get("sanctuary_resume_draw_step",False)); g.sanctuary_resume_mass_draw=bool(r.get("sanctuary_resume_mass_draw",False)); g.sanctuary_mass_draw_failed=[int(user) for user in r.get("sanctuary_mass_draw_failed",[])]; g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.additional_blocks={int(k):[int(uid) for uid in values] for k,values in r.get("additional_blocks",{}).items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.attacker_damage_assignments={int(uid):[{"blocker":int(item["blocker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("attacker_damage_assignments",{}).items()}; g.blocker_damage_assignments={int(uid):[{"attacker":int(item["attacker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("blocker_damage_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.tomb_cleanup_sources=[{"owner":int(x["owner"]),"source_uid":int(x["source_uid"]),"source_timestamp":int(x["source_timestamp"])} for x in r.get("tomb_cleanup_sources",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.turn_start_pending_user=int(r["turn_start_pending_user"]) if r.get("turn_start_pending_user") is not None else None; g.turn_start_pending_extra=bool(r.get("turn_start_pending_extra",False)); g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.sanctuary_draw_pending=bool(r.get("sanctuary_draw_pending",False)); g.sanctuary_pending_draws=int(r.get("sanctuary_pending_draws",int(g.sanctuary_draw_pending))); g.sanctuary_resume_draw_step=bool(r.get("sanctuary_resume_draw_step",False)); g.sanctuary_resume_mass_draw=bool(r.get("sanctuary_resume_mass_draw",False)); g.sanctuary_mass_draw_failed=[int(user) for user in r.get("sanctuary_mass_draw_failed",[])]; g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.forced_attackers=[int(x) for x in r.get("forced_attackers",[])]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.additional_blocks={int(k):[int(uid) for uid in values] for k,values in r.get("additional_blocks",{}).items()}; g.attack_bands=[[int(uid) for uid in band] for band in r.get("attack_bands",[])]; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.attacker_damage_assignments={int(uid):[{"blocker":int(item["blocker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("attacker_damage_assignments",{}).items()}; g.blocker_damage_assignments={int(uid):[{"attacker":int(item["attacker"]),"damage":int(item["damage"])} for item in items] for uid,items in r.get("blocker_damage_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

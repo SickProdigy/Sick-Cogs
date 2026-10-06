@@ -7,10 +7,10 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 74 creatures playable through 0.105.0; 3 remain |
+| Creatures with abilities | 77 | All playable through 0.108.0 |
 | Instants and sorceries | 70 | 62 spells playable through 0.107.0; 8 remain |
 | Enchantments | 68 | 65 enchantments playable through 0.106.0; 3 remain |
-| Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
+| Artifacts | 42 | 40 artifacts playable through 0.108.0; 2 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -235,6 +235,8 @@ The 0.104.0 graveyard-Aura promotion adds Animate Dead. It targets a creature ca
 
 
 The 0.107.0 combat-reassignment promotion adds False Orders. It targets any creature the defending player controls only after blockers, pauses at resolution for its controller’s public optional attacker choice, removes every current assignment for that creature, makes attackers unblocked only when it had been their sole blocker, and then may create one new legal block. Stable target identity, protection and evasion checks, many-to-many block state, invalidated damage assignments, delayed Cockatrice/Basilisk effects, reload recovery, the Discord select and `mtg orders` fallback, public rendering, and solo AI share the same path.
+
+The 0.108.0 banding promotion adds Benalish Hero, Mesa Pegasus, Timber Wolves, and Helm of Chatzuk. Attack declarations can group battlefield positions with `+`; a legal band contains any number of creatures with banding and at most one without. Blocking any legally blockable member blocks the whole band, including mixed-evasion bands. The appropriate banding controller distributes combat damage without the ordinary lethal-order restriction. Persisted band state, member removal, Lure, False Orders, delayed combat triggers, temporary granted banding, public rendering, and solo AI use the shared combat path.
 
 The 0.106.0 multiple-blocker promotion adds Lure and extends combat to many-to-many blocking. Every creature that can legally block a Lured attacker must satisfy the maximum possible number of blocking requirements, including competing Lures and multi-block capacity. Attackers blocked by multiple creatures use persisted ordered damage assignment with lethal-before-next validation across first-strike and normal steps; trample assigns any legal remainder to the defending player. Repeated Discord block pairs, the `mtg attackdamage` command, public rendering, battlefield removal, reload recovery, legacy defaults, and solo AI share the same model.
 

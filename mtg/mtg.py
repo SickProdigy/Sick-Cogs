@@ -191,6 +191,10 @@ class MTG(commands.Cog):
         if g.forced_attackers:
             forced=[g.card(uid).name for uid in g.forced_attackers if g.find_permanent(uid)[1] is not None]
             if forced: e.add_field(name="Must attack this combat if able",value=", ".join(forced),inline=False)
+        if g.attack_bands:
+            bands=[" + ".join(g.card(uid).name for uid in band if g.find_permanent(uid)[1] is not None) for band in g.attack_bands]
+            bands=[band for band in bands if band]
+            if bands: e.add_field(name="Attacking bands",value="\n".join(bands),inline=False)
         if g.trample_assignments:
             choices=[]
             for uid,amount in g.trample_assignments.items():
@@ -601,9 +605,14 @@ class MTG(commands.Cog):
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
     @mtg.command(name="attack")
-    async def attack(self,ctx,*positions:int):
-        """Declare battlefield positions as attackers; no positions skips combat."""
-        await self.mutate_ctx(ctx,lambda g:g.declare_attackers(ctx.author.id,positions),"attack")
+    async def attack(self,ctx,*groups:str):
+        """Declare attackers; join positions with `+` to form a band, such as `1 2+3`."""
+        try:
+            parsed=[[int(position) for position in group.split("+")] for group in groups]
+        except ValueError:
+            await ctx.send("Use battlefield positions, joining band members with `+`, such as `1 2+3`."); return
+        positions=[position for group in parsed for position in group]; bands=[group for group in parsed if len(group)>1]
+        await self.mutate_ctx(ctx,lambda g:g.declare_attackers(ctx.author.id,positions,bands),"attack")
     @mtg.command(name="bodyguard")
     async def bodyguard(self,ctx,position:int):
         """Choose which untapped Veteran Bodyguard receives unblocked-creature combat damage."""
