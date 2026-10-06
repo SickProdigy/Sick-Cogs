@@ -200,9 +200,12 @@ class Game:
         return bool(set(source_card.colors if source_colors is None else source_colors) & self.current_protections(permanent))
     def _aura_can_attach(self,aura_card,target,aura=None,colors=None):
         if not self._aura_type_legal(aura_card,target): return False
+        if any(existing.uid!=(aura.uid if aura is not None else None) and self.card(existing.uid).aura_excludes_other_auras for existing in self.attached_auras(target)): return False
         excluded=aura.uid if aura is not None and aura_card.protection_self_exception else None
         aura_colors=self.current_colors(aura) if aura is not None else aura_card.colors if colors is None else colors
         return not bool(set(aura_colors) & self.current_protections(target,excluded))
+    def is_indestructible(self,permanent):
+        return any(self.card(aura.uid).aura_indestructible for aura in self.attached_auras(permanent))
     def _stable_target_permanent(self,target):
         if not target or target.upper().startswith(("S:","G:")): return None
         parts=target.split(":")
@@ -295,6 +298,10 @@ class Game:
                 elif step=="upkeep" and card.aura_upkeep_damage:
                     attached_controller,attached=self.find_permanent(source.attached_to)
                     if attached is not None and active==attached_controller.user_id: effect="aura_upkeep_damage"
+                elif step=="upkeep" and card.aura_controller_upkeep_cost:
+                    attached_controller,attached=self.find_permanent(source.attached_to)
+                    if attached is not None and active==attached_controller.user_id:
+                        effect="aura_upkeep_life"; trigger_owner=active; choice_owner=active
                 elif step=="upkeep" and card.aura_upkeep_untap_cost:
                     attached_controller,attached=self.find_permanent(source.attached_to)
                     if attached is not None and active==attached_controller.user_id:
@@ -310,6 +317,7 @@ class Game:
                     if not self._graveyard_upkeep_return_eligible(controller_id,source_uid): continue
                     uid=self.next_uid; self.next_uid+=1; key=self.card(source_uid).key; self.cards[uid]=key
                     triggers.append(Spell(controller_id,uid,key,str(controller_id),ability_effect="graveyard_return",source_uid=source_uid))
+        triggers.sort(key=lambda trigger:trigger.owner!=active)
         return triggers
 
     def _begin_draw_step(self):
@@ -884,7 +892,7 @@ class Game:
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
                     return
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","upkeep_cost","graveyard_return","upkeep_sacrifice"):
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_cost","graveyard_return","upkeep_sacrifice"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -913,6 +921,7 @@ class Game:
         if trigger.ability_effect in ("cast_draw","graveyard_return"): return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
         if trigger.ability_effect=="aura_upkeep_untap": return card.aura_upkeep_untap_cost
+        if trigger.ability_effect=="aura_upkeep_life": return card.aura_controller_upkeep_cost
         if trigger.ability_effect=="upkeep_cost": return card.upkeep_cost
         return "{1}"
 
@@ -959,6 +968,8 @@ class Game:
                 player.graveyard.remove(trigger.source_uid); player.battlefield.append(self._make_permanent(trigger.source_uid,card.key)); result=" and returned it to the battlefield"
             elif trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
+            elif trigger.ability_effect=="aura_upkeep_life":
+                player.life+=card.aura_controller_upkeep_life; result=f" and gained {card.aura_controller_upkeep_life} life"
             elif trigger.ability_effect=="upkeep_untap":
                 _,source=self.find_permanent(trigger.source_uid)
                 if source is not None: source.tapped=False
@@ -1231,6 +1242,8 @@ class Game:
             if blocker==uid: self.blocks.pop(attacker)
 
     def _destroy(self,controller,permanent,allow_regeneration=True,trigger_batch=None,death_sources=None):
+        if self.is_indestructible(permanent):
+            self.log.append(f"{self.card(permanent.uid).name} was indestructible."); return False
         if allow_regeneration and permanent.regeneration_shields:
             permanent.regeneration_shields-=1; permanent.tapped=True; permanent.damage=0
             self._remove_from_combat(permanent.uid)
@@ -1600,7 +1613,7 @@ class Game:
                     if toughness<=0:
                         self._remember_source_power(permanent); self._remove_from_combat(permanent.uid); controller.battlefield.remove(permanent); self._dies(controller,permanent,trigger_batch,death_sources); affected=True
                     elif permanent.damage>=toughness:
-                        self._destroy(controller,permanent,allow_regeneration=not permanent.cant_regenerate,trigger_batch=trigger_batch,death_sources=death_sources); affected=True
+                        affected=self._destroy(controller,permanent,allow_regeneration=not permanent.cant_regenerate,trigger_batch=trigger_batch,death_sources=death_sources) or affected
             if not affected:
                 self._queue_state_triggers(); return
     def _cleanup(self):

@@ -9,7 +9,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
-| Enchantments | 68 | 47 enchantments playable through 0.75.0; 21 remain |
+| Enchantments | 68 | 49 enchantments playable through 0.76.0; 19 remain |
 | Artifacts | 42 | Thirty-two artifacts playable through 0.74.0; 10 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
@@ -172,3 +172,5 @@ The 0.73.0 chosen-source prevention promotion adds Circle of Protection: Blue, G
 The 0.74.0 restricted-untap promotion adds Stasis, Smoke, and Winter Orb. Stasis skips every untap step and uses the shared persisted upkeep payment flow for its {U} sacrifice condition. Smoke and an untapped Winter Orb create a persisted untap-choice phase only when multiple legal creatures or lands are constrained; unrestricted permanents still untap normally, Meekstone and printed self-untap restrictions remain honored, and creature-lands count against both limits. Players choose a maximal legal set through a bounded Discord selector or text command, the choice survives reloads, and solo AI values the same legal combinations. A tapped Winter Orb no longer restricts lands, matching its current Oracle text.
 
 The 0.75.0 Aura-untap promotion adds Paralyze and Instill Energy. Paralyze taps its enchanted creature on entry, suppresses that creature during the normal untap step, and creates a persisted Pay {4} choice at the enchanted creature controller’s upkeep. Trigger controller and payment chooser are stored separately so APNAP ordering and Discord authorization both remain correct; paying uses that player’s mana and the trigger retains its stable creature reference if the Aura leaves. Instill Energy grants attack-only haste without bypassing summoning sickness for tap abilities, and its zero-cost Aura activation untaps the enchanted creature only during the Aura controller’s turn and only once each turn. Both cards use stable attachments, public rendering, legacy-safe persistence, and solo AI.
+
+The 0.76.0 land-Aura promotion adds Farmstead and Consecrate Land. Farmstead grants the enchanted land a persisted optional Pay {W}{W} upkeep choice for that land’s controller and grants life independently of the source after triggering. Consecrate Land grants derived indestructibility, removes competing Auras through state-based legality checks, and prevents later Aura attachment. Shared destruction, persistence, public rendering, and solo AI use the same rules.

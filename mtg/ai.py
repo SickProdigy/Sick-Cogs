@@ -251,7 +251,7 @@ def _play_one(game, user, difficulty):
             score=5+enemy-own
         elif card.aura_target_types:
             scaling=sum(game.card(permanent.uid).has_land_type("forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
-            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)+3*bool(card.aura_animate_mana_value)
+            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)+3*bool(card.aura_animate_mana_value or card.aura_indestructible)+2*bool(card.aura_controller_upkeep_life)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
         elif card.effect=="damage_x_exile":
@@ -634,6 +634,8 @@ def advance_solo(game: Game):
                 target=game._stable_target_permanent(trigger.target); useful=target is not None and target.tapped
             elif trigger.ability_effect=="upkeep_cost":
                 useful=source is not None or game.card(trigger.uid).upkeep_unpaid_effect=="damage"
+            elif trigger.ability_effect=="aura_upkeep_life":
+                useful=game.player(user).life<20
             else:
                 useful=True
             cost=game.trigger_cost(trigger)

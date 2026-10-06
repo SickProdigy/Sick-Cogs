@@ -1677,6 +1677,20 @@ class AlphaAuraTests(unittest.TestCase):
         game._cleanup(); target.tapped=True; game.active_index=1; game.priority_user=10
         with self.assertRaisesRegex(GameError,"only during your turn"): game.activate_ability(10,2)
 
+    def test_land_auras_share_upkeep_exclusivity_and_indestructible_rules(self):
+        farm=ready(); land=self.add(farm,20,"plains"); aura=self.add(farm,10,"lea:19",attached_to=land.uid); self.add(farm,10,"plains"); self.add(farm,10,"plains")
+        farm.active_index=0; self.assertFalse(any(x.ability_effect=="aura_upkeep_life" for x in farm._turn_step_triggers("upkeep")))
+        farm.active_index=1; farm.stack=farm._turn_step_triggers("upkeep"); trigger=farm.stack[-1]; self.assertEqual((trigger.ability_effect,trigger.owner,trigger.choice_owner,trigger.target),("aura_upkeep_life",20,20,"20"))
+        self.resolve_top(farm); restored=Game.from_raw(farm.to_raw()); controller,source=restored.find_permanent(aura.uid); controller.battlefield.remove(source); controller.graveyard.append(aura.uid)
+        self.add(restored,20,"plains"); self.add(restored,20,"plains"); restored.choose_trigger(20,True); self.assertEqual(restored.player(20).life,21); self.assertEqual(sum(x.tapped for x in restored.player(20).battlefield),2)
+
+        protected=ready(); land=self.add(protected,10,"forest"); growth=self.add(protected,10,"lea:229",attached_to=land.uid); consecrate=self.add(protected,10,"lea:14",attached_to=land.uid)
+        protected._sba(); self.assertIn(growth.uid,protected.player(10).graveyard); self.assertTrue(protected.is_indestructible(land))
+        held=self.add(protected,10,"lea:229","hand")
+        with self.assertRaisesRegex(GameError,"cannot enchant"): protected.play(10,1,"10:1")
+        self.assertIn(held,protected.player(10).hand); self.assertFalse(protected._destroy(protected.player(10),land)); self.assertIn(land,protected.player(10).battlefield)
+        land.damage=1; protected._sba(); self.assertIn(land,protected.player(10).battlefield); self.assertEqual(consecrate.attached_to,land.uid)
+
 
 
 class AlphaProtectionTests(unittest.TestCase):

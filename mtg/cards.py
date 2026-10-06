@@ -103,6 +103,10 @@ class Card:
     aura_enters_tapped: bool = False
     aura_skip_untap: bool = False
     aura_upkeep_untap_cost: str = ""
+    aura_controller_upkeep_cost: str = ""
+    aura_controller_upkeep_life: int = 0
+    aura_indestructible: bool = False
+    aura_excludes_other_auras: bool = False
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -231,6 +235,9 @@ class Card:
         if self.aura_enters_tapped: abilities.append("When this Aura enters, tap enchanted creature")
         if self.aura_skip_untap: abilities.append("Enchanted creature does not untap during its controller's untap step")
         if self.aura_upkeep_untap_cost: abilities.append(f"At enchanted creature controller's upkeep, that player may pay {self.aura_upkeep_untap_cost} to untap it")
+        if self.aura_controller_upkeep_cost: abilities.append(f"Enchanted land has \"At your upkeep, you may pay {self.aura_controller_upkeep_cost} to gain {self.aura_controller_upkeep_life} life\"")
+        if self.aura_indestructible: abilities.append("Enchanted land has indestructible")
+        if self.aura_excludes_other_auras: abilities.append("Enchanted land cannot be enchanted by other Auras")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -324,6 +331,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:175": {"untap_creature_limit":1},
     "lea:119": {"aura_target_types":("Creature",), "aura_hostile":True, "aura_enters_tapped":True, "aura_skip_untap":True, "aura_upkeep_untap_cost":"{4}"},
     "lea:202": {"aura_target_types":("Creature",), "aura_attack_haste":True, "activation_cost":"{0}", "activation_effect":"untap_attached", "activation_attached":True, "activation_controller_turn_only":True, "activation_once_per_turn":True, "activation_text":"Untap enchanted creature; activate only during your turn and only once each turn"},
+    "lea:14": {"aura_target_types":("Land",), "aura_indestructible":True, "aura_excludes_other_auras":True},
+    "lea:19": {"aura_target_types":("Land",), "aura_controller_upkeep_cost":"{W}{W}", "aura_controller_upkeep_life":1},
 }
 
 ALPHA_ARTIFACTS = {
@@ -641,6 +650,10 @@ for reference in PLAYABLE_ALPHA:
         aura_enters_tapped=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_enters_tapped",False),
         aura_skip_untap=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_skip_untap",False),
         aura_upkeep_untap_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_untap_cost",""),
+        aura_controller_upkeep_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_controller_upkeep_cost",""),
+        aura_controller_upkeep_life=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_controller_upkeep_life",0),
+        aura_indestructible=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_indestructible",False),
+        aura_excludes_other_auras=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_excludes_other_auras",False),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
