@@ -674,7 +674,7 @@ class Game:
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
                 raise GameError(f"{c.name} must target a blocking creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("draw_target","draw_target_x","life_target_x"):
+        if c.effect in ("draw_target","draw_target_x","life_target_x","mana_short"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
@@ -1081,6 +1081,11 @@ class Game:
                 target.damage_prevention+=c.amount
             p.graveyard.append(s.uid)
         elif c.effect=="prevent_combat_damage": self.prevent_combat_damage=True; p.graveyard.append(s.uid)
+        elif c.effect=="mana_short":
+            target_player=self.player(int(s.target)); pending=[]
+            for permanent in target_player.battlefield:
+                if self.card(permanent.uid).land: self._tap_permanent(target_player.user_id,permanent,pending_triggers=pending)
+            target_player.mana_pool.clear(); p.graveyard.append(s.uid); self.stack.extend(pending)
         elif c.effect in ("damage","damage_any","damage_x_exile"):
             amount=s.x_value if c.effect=="damage_x_exile" else c.amount
             if ":" in (s.target or ""):

@@ -433,6 +433,13 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_casts_mana_short_at_opponents_available_mana(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        spell=self.add(game,AI,"lea:65","hand"); [self.add(game,AI,"island") for _ in range(3)]; target=self.add(game,HUMAN,"forest")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].uid,spell); self.assertEqual(game.stack[-1].target,str(HUMAN)); self.assertFalse(target.tapped)
+        game.pass_priority(HUMAN); advance_solo(game); self.assertTrue(target.tapped); self.assertIn(spell,game.player(AI).graveyard)
+
     def test_ai_chooses_healing_salve_prevention_or_life_mode(self):
         threatened=solo(order=(HUMAN,AI)); threatened.player(HUMAN).kept=True; threatened.player(AI).kept=True; threatened.player(AI).hand=[]
         giant=self.add(threatened,AI,"giant"); salve=self.add(threatened,AI,"lea:22","hand"); self.add(threatened,AI,"plains")

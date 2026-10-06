@@ -2010,6 +2010,45 @@ class AlphaHiveTokenTests(unittest.TestCase):
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
 
 
+class AlphaManaShortTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_taps_only_target_players_lands_clears_pool_and_persists_target(self):
+        game=ready(); spell=self.add(game,10,"lea:65","hand"); own=[self.add(game,10,"island") for _ in range(3)]
+        forest=self.add(game,20,"forest"); island=self.add(game,20,"island"); bear=self.add(game,20,"bear"); game.player(20).mana_pool={"R":2,"C":1}
+        game.play(10,1,"20"); self.assertEqual(game.stack[-1].target,"20"); self.assertTrue(all(x.tapped for x in own)); self.assertFalse(forest.tapped); self.assertFalse(island.tapped)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw()); self.resolve_top(restored)
+        target=restored.player(20); self.assertTrue(target.battlefield[0].tapped); self.assertTrue(target.battlefield[1].tapped); self.assertFalse(target.battlefield[2].tapped)
+        self.assertEqual(target.mana_pool,{}); self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_rejects_missing_or_invalid_player_before_payment(self):
+        game=ready(); spell=self.add(game,10,"lea:65","hand"); lands=[self.add(game,10,"island") for _ in range(3)]
+        for target in (None,"bad","999"):
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(GameError,"player ID|not in this game"): game.play(10,1,target)
+                self.assertIn(spell,game.player(10).hand); self.assertTrue(all(not land.tapped for land in lands))
+
+    def test_nonmana_land_taps_create_venom_and_lifetap_but_not_manabarbs_triggers(self):
+        game=ready(); self.add(game,10,"lea:65","hand"); game.player(10).mana_pool={"U":1,"C":2}
+        lifetap=self.add(game,10,"lea:61"); self.add(game,10,"lea:163"); forest=self.add(game,20,"forest"); venom=self.add(game,10,"lea:75"); venom.attached_to=forest.uid
+        game.play(10,1,"20"); self.resolve_top(game)
+        effects=[item.ability_effect for item in game.stack]; self.assertCountEqual(effects,["tap_damage","tap_life"]); self.assertNotIn("",effects)
+        before=(game.player(10).life,game.player(20).life)
+        while game.stack: self.resolve_top(game)
+        self.assertEqual((game.player(10).life,game.player(20).life),(before[0]+1,before[1]-2))
+
+    def test_already_tapped_land_does_not_trigger_again(self):
+        game=ready(); self.add(game,10,"lea:65","hand"); [self.add(game,10,"island") for _ in range(3)]; self.add(game,10,"lea:61")
+        forest=self.add(game,20,"forest"); forest.tapped=True; game.play(10,1,"20"); self.resolve_top(game)
+        self.assertFalse(game.stack)
+
+
 class AlphaHealingSalveTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

@@ -8,7 +8,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 49 creatures playable through 0.49.0; 28 remain |
-| Instants and sorceries | 70 | 42 spells playable through 0.50.0; 28 remain |
+| Instants and sorceries | 70 | 43 spells playable through 0.51.0; 27 remain |
 | Enchantments | 68 | 31 enchantments playable through 0.37.0; 37 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -122,3 +122,5 @@ The 0.48.0 Fog promotion adds a persisted turn-wide combat-damage prevention eff
 The 0.49.0 Samite Healer promotion extends next-damage shields to stable player or creature targets and centralizes creature damage from combat, targeted spells, activated abilities, and mass effects. Its tap activation obeys summoning sickness, targeting and color protection before payment, persists through reloads, fizzles if a chosen creature leaves, and remains independent after the Healer leaves. Shields stack, are consumed before damage is marked, expire during cleanup, and render publicly. Disintegrate still applies its independent regeneration and death/exile clauses even when its damage is fully prevented. Solo AI chooses its controller or a threatened friendly creature only when pending damage makes prevention useful.
 
 The 0.50.0 Healing Salve promotion adds an explicit cast-time mode and stable target syntax: `life:PLAYER_ID`, `prevent:PLAYER_ID`, or `prevent:USER_ID:FIELD_POSITION`. Life mode gives the chosen player 3 life; prevention mode adds a persisted next-3-damage shield to a player or creature. Invalid modes and illegal/protected targets are rejected before payment, vanished creature targets fizzle on resolution, and the choice survives reloads. Discord help documents the syntax, existing public shield rendering shows prevention, and solo AI chooses prevention for credible pending damage or life gain when injured.
+
+The 0.51.0 Mana Short promotion adds stable player targeting for instant-speed mana denial. Resolution taps every untapped land that player controls through the shared non-mana tap path, leaves nonlands and already-tapped lands unchanged, then clears all of that player’s floating mana. Those taps correctly create Psychic Venom damage and opponent-Forest Lifetap life triggers, while Manabarbs does not trigger because no land was tapped for mana. The stable player target and pending tap triggers survive reloads, public stack and battlefield views use existing rendering, invalid targets are rejected before payment, and solo AI selects an opponent only when they have available lands or pooled mana.

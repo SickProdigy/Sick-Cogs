@@ -333,6 +333,7 @@ ALPHA_SPELLS = {
     "lea:22": {"effect":"healing_salve", "amount":3},
     "lea:60": {"effect":"grant_keyword", "temporary_keyword":"flying"},
     "lea:85": {"effect":"tap_or_untap", "target_types":("Artifact","Creature","Land")},
+    "lea:65": {"effect":"mana_short"},
     "lea:98": {"effect":"add_mana", "mana_color":"B", "mana_amount":3},
     "lea:178": {"effect":"destroy_wall"},
     "lea:220": {"effect":"destroy_all_enchantments"},

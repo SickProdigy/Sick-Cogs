@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -39,6 +39,9 @@ def _target(game, user, card):
         return str(game.opponent(user))
     if card.effect in ("draw_target","draw_target_x","life_target_x"):
         return str(user)
+    if card.effect=="mana_short":
+        opponent=game.player(game.opponent(user))
+        return str(opponent.user_id) if opponent.mana_pool or any(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield) else None
     if card.effect=="return_creature_hand":
         creatures=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.is_creature(permanent) and _can_target(game,card,permanent)]
         if not creatures: return None
@@ -229,6 +232,8 @@ def _play_one(game, user, difficulty):
             score=14 if target and target.startswith("prevent:") else 7
         elif card.effect=="life_target_x":
             score=4+(x_value or 0)
+        elif card.effect=="mana_short":
+            opponent=game.player(game.opponent(user)); score=8+sum(opponent.mana_pool.values())+sum(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield)
         elif card.effect == "destroy_land":
             score = 11
         elif card.effect == "destroy_permanent":
