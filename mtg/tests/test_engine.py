@@ -48,13 +48,13 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
+        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
@@ -2879,6 +2879,39 @@ class AlphaConservatorTests(unittest.TestCase):
         combat._combat_damage(False); self.assertEqual(combat.player(10).life,19)
         recoil=ready(); recoil.player(10).damage_prevention=3; uid=recoil.next_uid; recoil.next_uid+=1; recoil.cards[uid]="lea:74"
         recoil.stack.append(Spell(10,uid,"lea:74","20")); recoil._resolve(recoil.stack.pop()); self.assertEqual(recoil.player(10).life,20)
+
+
+class AlphaRestrictedUntapTests(unittest.TestCase):
+    def add(self,game,user,key,tapped=False,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,tapped=tapped,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_stasis_skips_untap_and_uses_persisted_upkeep_payment(self):
+        game=ready(); stasis=self.add(game,10,"lea:80"); land=self.add(game,10,"island",tapped=True); creature=self.add(game,10,"bear",tapped=True,sick=True)
+        game.active_index=0; game._start_turn()
+        self.assertTrue(land.tapped and creature.tapped); self.assertFalse(creature.sick); self.assertEqual(game.phase,"upkeep"); self.assertEqual(game.stack[-1].source_uid,stasis.uid)
+        self.resolve_top(game); restored=Game.from_raw(game.to_raw()); restored.choose_trigger(10,False)
+        self.assertIsNone(restored.find_permanent(stasis.uid)[1]); self.assertIn(stasis.uid,restored.player(10).graveyard)
+        restored._start_turn(); self.assertFalse(restored.find_permanent(land.uid)[1].tapped); self.assertFalse(restored.find_permanent(creature.uid)[1].tapped)
+
+    def test_smoke_persists_one_creature_choice_and_auto_untaps_other_types(self):
+        game=ready(); self.add(game,10,"lea:175"); first=self.add(game,20,"bear",tapped=True); second=self.add(game,20,"giant",tapped=True); ring=self.add(game,20,"lea:269",tapped=True)
+        game.active_index=1; game._start_turn()
+        self.assertEqual(game.phase,"untap"); self.assertFalse(ring.tapped); self.assertEqual(set(game.untap_choices()),{(1,),(2,)})
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.untap_pending,[first.uid,second.uid])
+        with self.assertRaisesRegex(GameError,"maximal legal"): restored.choose_untap(20,())
+        restored.choose_untap(20,(2,)); self.assertTrue(restored.find_permanent(first.uid)[1].tapped); self.assertFalse(restored.find_permanent(second.uid)[1].tapped); self.assertNotEqual(restored.phase,"untap")
+
+    def test_winter_orb_applies_only_while_untapped_and_combines_with_smoke(self):
+        game=ready(); self.add(game,10,"lea:175"); orb=self.add(game,10,"lea:275"); forest=self.add(game,20,"forest",tapped=True); creature=self.add(game,20,"bear",tapped=True); island=self.add(game,20,"island",tapped=True)
+        self.add(game,10,"lea:209"); game.active_index=1; game._start_turn()
+        self.assertEqual(set(game.untap_choices()),{(1,),(2,3)})
+        game.choose_untap(20,(2,3)); self.assertTrue(forest.tapped); self.assertFalse(creature.tapped); self.assertFalse(island.tapped)
+        other=ready(); tapped_orb=self.add(other,10,"lea:275",tapped=True); one=self.add(other,20,"forest",tapped=True); two=self.add(other,20,"island",tapped=True)
+        other.active_index=1; other._start_turn(); self.assertNotEqual(other.phase,"untap"); self.assertFalse(one.tapped or two.tapped); self.assertTrue(tapped_orb.tapped)
 
 
 class AlphaStaticArtifactTests(unittest.TestCase):

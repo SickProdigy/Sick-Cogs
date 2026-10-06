@@ -1,6 +1,7 @@
 import random
 import re
 import time
+from itertools import combinations
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 from .cards import CARDS, TOKENS, starter
@@ -88,6 +89,7 @@ class Game:
         self.end_step_destroys=[]
         self.end_combat_destroys=[]
         self.extra_turns=[]
+        self.untap_pending=[]
         self.skip_draw_step=False
         self.prevent_combat_damage=False
         self.creatures_died_this_turn=0
@@ -314,20 +316,69 @@ class Game:
         else:
             self.phase="precombat_main"; self.priority_user=self.active_user
 
-    def _start_turn(self,first=False):
-        self.turn+=1; p=self.players[self.active_user]; p.land_played=False; p.lands_played_this_turn=0
-        self._cleanup()
-        limits=[self.card(source.uid).untap_power_limit for player in self.players.values() for source in player.battlefield if self.card(source.uid).untap_power_limit]
-        for x in p.battlefield:
-            restricted=self.is_creature(x) and any(self.current_stats(x)[0]>=limit for limit in limits)
-            if not self.card(x.uid).skip_untap and not restricted: x.tapped=False
-            x.sick=False
-        self.skip_draw_step=bool(first and self.turn==1)
+    def _begin_upkeep(self):
         self.phase_passes=0; triggers=self._turn_step_triggers("upkeep")
         if triggers:
             self.stack.extend(triggers); self.phase="upkeep"; self.priority_user=self.active_user
         else: self._begin_draw_step()
-        self.log.append(f"Turn {self.turn}: {self.active_user}.")
+
+    def _untap_limits(self):
+        creature=[]; land=[]; skip=False
+        for player in self.players.values():
+            for source in player.battlefield:
+                card=self.card(source.uid)
+                if card.skip_all_untap: skip=True
+                if card.untap_creature_limit and (not card.untap_limit_requires_untapped or not source.tapped): creature.append(card.untap_creature_limit)
+                if card.untap_land_limit and (not card.untap_limit_requires_untapped or not source.tapped): land.append(card.untap_land_limit)
+        return skip,(min(creature) if creature else None),(min(land) if land else None)
+
+    def untap_choices(self):
+        if self.phase!="untap" or not self.untap_pending: return []
+        p=self.player(self.active_user); positions={x.uid:i for i,x in enumerate(p.battlefield,1)}
+        candidates=[x for x in p.battlefield if x.uid in self.untap_pending]
+        _,creature_limit,land_limit=self._untap_limits()
+        maximum=(creature_limit or 0)+(land_limit or 0)
+        def legal(group):
+            return (creature_limit is None or sum(self.is_creature(x) for x in group)<=creature_limit) and (land_limit is None or sum(self.card(x.uid).land for x in group)<=land_limit)
+        choices=[]
+        for size in range(min(len(candidates),maximum)+1):
+            for group in combinations(candidates,size):
+                if not legal(group): continue
+                if any(legal(group+(other,)) for other in candidates if other not in group): continue
+                choices.append(tuple(sorted(positions[x.uid] for x in group)))
+        return choices
+
+    def choose_untap(self,user,positions):
+        if self.phase!="untap" or user!=self.active_user: raise GameError("You do not have a restricted untap choice to make.")
+        choice=tuple(sorted(set(int(x) for x in positions)))
+        if choice not in self.untap_choices(): raise GameError("Choose a maximal legal set of restricted permanents to untap.")
+        p=self.player(user); names=[]
+        for position in choice:
+            permanent=p.battlefield[position-1]; permanent.tapped=False; names.append(self.card(permanent.uid).name)
+        self.untap_pending=[]; self.log.append(f"{user} untapped "+(", ".join(names) if names else "no restricted permanents")+".")
+        self._begin_upkeep()
+
+    def _start_turn(self,first=False):
+        self.turn+=1; p=self.players[self.active_user]; p.land_played=False; p.lands_played_this_turn=0
+        self._cleanup(); self.untap_pending=[]
+        power_limits=[self.card(source.uid).untap_power_limit for player in self.players.values() for source in player.battlefield if self.card(source.uid).untap_power_limit]
+        skip,creature_limit,land_limit=self._untap_limits()
+        for x in p.battlefield: x.sick=False
+        self.skip_draw_step=bool(first and self.turn==1); self.log.append(f"Turn {self.turn}: {self.active_user}.")
+        if skip:
+            self._begin_upkeep(); return
+        for x in p.battlefield:
+            restricted_power=self.is_creature(x) and any(self.current_stats(x)[0]>=limit for limit in power_limits)
+            eligible=x.tapped and not self.card(x.uid).skip_untap and not restricted_power
+            constrained=(creature_limit is not None and self.is_creature(x)) or (land_limit is not None and self.card(x.uid).land)
+            if eligible and constrained: self.untap_pending.append(x.uid)
+            elif eligible: x.tapped=False
+        if self.untap_pending:
+            self.phase="untap"; self.phase_passes=0; self.priority_user=self.active_user
+            choices=self.untap_choices()
+            if len(choices)==1: self.choose_untap(self.active_user,choices[0])
+            return
+        self._begin_upkeep()
 
     @staticmethod
     def _mana_requirements(card,x_value=0,mana_cost=None):
@@ -1587,12 +1638,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
             d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

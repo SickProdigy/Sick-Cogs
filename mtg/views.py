@@ -29,6 +29,16 @@ class SacrificeSelect(discord.ui.Select):
         position=int(self.values[0])
         await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True,position),"trigger_sacrifice")
 
+class UntapSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        player=game.player(game.active_user); pending=set(game.untap_pending)
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Untap this permanent" if len(game.untap_choices())==1 else "Include in your legal untap choice",value=str(position)) for position,permanent in enumerate(player.battlefield,1) if permanent.uid in pending][:25]
+        maximum=max(len(choice) for choice in game.untap_choices())
+        super().__init__(placeholder="Choose restricted permanents to untap",min_values=1,max_values=min(maximum,len(options)),options=options,custom_id=f"mtg:{game_id}:untap")
+    async def callback(self,i):
+        await self.cog.act(i,self.game_id,lambda g:g.choose_untap(i.user.id,[int(value) for value in self.values]),"untap")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -37,7 +47,7 @@ class GameView(discord.ui.View):
             item.custom_id=f"mtg:{game_id}:{item.custom_id}"
             action=item.custom_id.rsplit(":",1)[-1]
             if game and action in ("keep","mulligan"): item.disabled=game.phase!="opening"
-            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or bool(game.stack and game.stack[-1].decision_pending)
+            if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending)
                 mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"))
@@ -46,6 +56,7 @@ class GameView(discord.ui.View):
             if game and action=="concede": item.disabled=game.finished
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") and game.trigger_sacrifice_choices(game.stack[-1]):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
+        if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
         if game and game.finished:

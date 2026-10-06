@@ -358,6 +358,22 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.active_index=1; game._start_turn(); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Upkeep",rendered); self.assertIn("opponent's upkeep",rendered); self.assertIn("Black Vise ability",rendered)
 
+    async def test_restricted_untap_renders_select_and_command(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        smoke=game.next_uid; game.next_uid+=1; game.cards[smoke]="lea:175"
+        bear=game.next_uid; game.next_uid+=1; game.cards[bear]="bear"
+        giant=game.next_uid; game.next_uid+=1; game.cards[giant]="giant"
+        game.player(20).battlefield=[permanent_type(smoke,"lea:175",sick=False)]
+        game.player(10).battlefield=[permanent_type(bear,"bear",tapped=True,sick=False),permanent_type(giant,"giant",tapped=True,sick=False)]
+        game._start_turn(); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Restricted untap choice",rendered)
+        view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":untap")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
+        self.assertEqual([option.value for option in select.options],["1","2"]); self.assertTrue(passing.disabled)
+        command_cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.untap.callback(command_cog,ctx,2); _,mutation,action=command_cog.mutate_ctx.await_args.args; fake=SimpleNamespace(choose_untap=Mock()); mutation(fake)
+        fake.choose_untap.assert_called_once_with(10,(2,)); self.assertEqual(action,"untap")
+
     async def test_mana_vault_pending_choice_shows_dynamic_cost(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

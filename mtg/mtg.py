@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.73.0"
+    __version__="0.74.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -145,6 +145,10 @@ class MTG(commands.Cog):
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_prevention]
                 value+="\nChosen-source prevention: "+", ".join(sources)
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
+        if g.phase=="untap" and g.untap_pending:
+            pending=set(g.untap_pending); player=g.player(g.active_user)
+            choices=[f"{position}. {g.card(permanent.uid).name}" for position,permanent in enumerate(player.battlefield,1) if permanent.uid in pending]
+            e.add_field(name="Restricted untap choice",value="Choose a maximal legal set: "+", ".join(choices),inline=False)
         if g.extra_turns:
             queued=" → ".join(names[user] for user in g.extra_turns)
             e.add_field(name="Extra turns queued",value=queued,inline=False)
@@ -445,6 +449,10 @@ class MTG(commands.Cog):
                 a,b=item.split(":",1); pairs[int(a)]=int(b)
             g.declare_blockers(ctx.author.id,pairs)
         await self.mutate_ctx(ctx,run,"block")
+    @mtg.command(name="untap")
+    async def untap(self,ctx,*positions:int):
+        """Choose the battlefield positions to untap when Smoke or Winter Orb restricts the untap step."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_untap(ctx.author.id,positions),"untap")
     @mtg.command(name="pass")
     async def pass_(self,ctx): await self.mutate_ctx(ctx,lambda g:g.pass_priority(ctx.author.id),"pass")
     @mtg.command(name="trigger")

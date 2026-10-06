@@ -100,6 +100,10 @@ class Card:
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
+    untap_creature_limit: int = 0
+    untap_land_limit: int = 0
+    untap_limit_requires_untapped: bool = False
+    skip_all_untap: bool = False
     white_as_red: bool = False
     cast_life_color: str = ""
     upkeep_untap_cost: str = ""
@@ -193,7 +197,7 @@ class Card:
             color_name={"W":"white","U":"blue","B":"black","R":"red","G":"green"}[self.cast_life_color]
             abilities.append(f"Whenever a player casts a {color_name} spell, you may pay {{1}} to gain 1 life")
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
-        if self.upkeep_cost and self.upkeep_unpaid_effect=="sacrifice": abilities.append(f"At your upkeep, sacrifice this creature unless you pay {self.upkeep_cost}")
+        if self.upkeep_cost and self.upkeep_unpaid_effect=="sacrifice": abilities.append(f"At your upkeep, sacrifice this permanent unless you pay {self.upkeep_cost}")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="damage": abilities.append(f"At your upkeep, this creature deals {self.upkeep_unpaid_damage} damage to you unless you pay {self.upkeep_cost}")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="tap_opponent_land_sacrifice": abilities.append(f"At your upkeep, tap this creature and sacrifice a land an opponent chooses unless you pay {self.upkeep_cost}")
         if self.upkeep_sacrifice_other: abilities.append(f"At your upkeep, sacrifice another creature or this creature deals {self.upkeep_sacrifice_damage} damage to you")
@@ -220,6 +224,9 @@ class Card:
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
+        if self.untap_creature_limit: abilities.append(f"Players can untap no more than {self.untap_creature_limit} creature during their untap steps")
+        if self.untap_land_limit: abilities.append(f"While untapped, players can untap no more than {self.untap_land_limit} land during their untap steps")
+        if self.skip_all_untap: abilities.append("Players skip their untap steps")
         if self.white_as_red: abilities.append("You may spend white mana as though it were red mana")
         if self.skip_untap: abilities.append("Doesn't untap during your untap step")
         if self.produces:
@@ -303,6 +310,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:209": {"animate_land_type":"forest"},
     "lea:26": {"upkeep_land_type_damage":"swamp"},
     "lea:192": {"extra_land_damage":1},
+    "lea:80": {"skip_all_untap":True, "upkeep_cost":"{U}", "upkeep_unpaid_effect":"sacrifice"},
+    "lea:175": {"untap_creature_limit":1},
 }
 
 ALPHA_ARTIFACTS = {
@@ -320,6 +329,7 @@ ALPHA_ARTIFACTS = {
     "lea:247": {"draw_step_extra":1},
     "lea:259": {"produces":("C",), "mana_amount":3, "skip_untap":True, "upkeep_untap_cost":"{4}", "draw_tapped_damage":1},
     "lea:260": {"untap_power_limit":3},
+    "lea:275": {"untap_land_limit":1, "untap_limit_requires_untapped":True},
     "lea:271": {"white_as_red":True},
     "lea:239": {"cast_life_color":"U"},
     "lea:250": {"cast_life_color":"R"},
@@ -616,11 +626,15 @@ for reference in PLAYABLE_ALPHA:
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
+        untap_creature_limit=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("untap_creature_limit",0),
+        untap_land_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_land_limit",0),
+        untap_limit_requires_untapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_limit_requires_untapped",False),
+        skip_all_untap=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("skip_all_untap",False),
         white_as_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("white_as_red",False),
         cast_life_color=ALPHA_ARTIFACTS.get(reference.key,{}).get("cast_life_color",""),
         upkeep_untap_cost=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_untap_cost",""),
-        upkeep_cost=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_cost",""),
-        upkeep_unpaid_effect=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_effect",""),
+        upkeep_cost=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_cost",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_cost","")),
+        upkeep_unpaid_effect=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_effect",ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_unpaid_effect","")),
         upkeep_unpaid_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_damage",0),
         upkeep_sacrifice_other=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_sacrifice_other",False),
         upkeep_sacrifice_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_sacrifice_damage",0),

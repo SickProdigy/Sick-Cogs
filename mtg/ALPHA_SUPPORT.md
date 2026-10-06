@@ -9,8 +9,8 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Vanilla creatures | 15 | All playable since 0.7.0 |
 | Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
-| Enchantments | 68 | 43 enchantments playable through 0.73.0; 25 remain |
-| Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
+| Enchantments | 68 | 45 enchantments playable through 0.74.0; 23 remain |
+| Artifacts | 42 | Thirty-two artifacts playable through 0.74.0; 10 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -168,3 +168,5 @@ The 0.71.0 power-counter promotion adds Clockwork Beast. A shared battlefield-en
 The 0.72.0 continuous-animation promotion adds Animate Artifact and Living Lands. A shared live type/stat layer makes a noncreature artifact enchanted by Animate Artifact into a creature whose base power and toughness equal its mana value, while leaving printed or otherwise animated artifact creatures unchanged. Living Lands makes every typed Forest, including Alpha dual lands, a 1/1 creature that remains a land. All targeting, mana activation, summoning sickness, combat, state-based death, Aura cleanup, persistence, public rendering, and solo AI consult the same live layer. Lands now retain control-duration sickness even while not creatures, so a newly played Forest cannot attack or use a tap ability if Living Lands animates it. Kormus Bell remains gated because its black color-setting effect requires timestamp ordering with the playable Laces.
 
 The 0.73.0 chosen-source prevention promotion adds Circle of Protection: Blue, Green, Red, and White. Each paid activation chooses a matching-color spell or permanent source by stable UID and creates a persisted shield that prevents the next damage event that source would deal to the Circle controller that turn. Source eligibility is snapshotted when chosen, so an already chosen source can leave while its pending trigger remains preventable. Spell, activated, triggered, self, mass, and combat player-damage paths now carry source identity through the shared prevention function. Only one matching shield is consumed per event, ordinary numeric prevention remains available, cleanup expires unused shields, Discord renders pending choices and shields, and solo AI responds only to credible matching-color damage.
+
+The 0.74.0 restricted-untap promotion adds Stasis, Smoke, and Winter Orb. Stasis skips every untap step and uses the shared persisted upkeep payment flow for its {U} sacrifice condition. Smoke and an untapped Winter Orb create a persisted untap-choice phase only when multiple legal creatures or lands are constrained; unrestricted permanents still untap normally, Meekstone and printed self-untap restrictions remain honored, and creature-lands count against both limits. Players choose a maximal legal set through a bounded Discord selector or text command, the choice survives reloads, and solo AI values the same legal combinations. A tapped Winter Orb no longer restricts lands, matching its current Oracle text.

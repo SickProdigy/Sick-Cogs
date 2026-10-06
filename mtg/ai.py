@@ -222,6 +222,18 @@ def _play_one(game, user, difficulty):
             score=5+enemy-own
         elif card.draw_step_extra:
             score=5+card.draw_step_extra
+        elif card.skip_all_untap:
+            own=sum(permanent.tapped for permanent in player.battlefield); enemy=sum(permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            if own>=enemy: continue
+            score=5+enemy-own
+        elif card.untap_creature_limit:
+            own=sum(game.is_creature(permanent) and permanent.tapped for permanent in player.battlefield); enemy=sum(game.is_creature(permanent) and permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            if own>enemy: continue
+            score=5+enemy-own
+        elif card.untap_land_limit:
+            own=sum(game.card(permanent.uid).land and permanent.tapped for permanent in player.battlefield); enemy=sum(game.card(permanent.uid).land and permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            if own>enemy: continue
+            score=5+enemy-own
         elif card.untap_power_limit:
             own=sum(game.is_creature(permanent) and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in player.battlefield)
             enemy=sum(game.is_creature(permanent) and game.current_stats(permanent)[0]>=card.untap_power_limit for permanent in game.player(game.opponent(user)).battlefield)
@@ -578,6 +590,12 @@ def advance_solo(game: Game):
                 changed = True
                 continue
             return changed
+        if game.phase == "untap":
+            choices=game.untap_choices()
+            def untap_value(choice):
+                player=game.player(user)
+                return sum((3 if game.card(player.battlefield[position-1].uid).produces else 0)+sum(game.current_stats(player.battlefield[position-1])) for position in choice)
+            game.choose_untap(user,max(choices,key=untap_value)); game.record(user,"ai_untap"); changed=True; continue
         if game.phase == "attackers":
             if game.active_user != user:
                 return changed

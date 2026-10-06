@@ -15,6 +15,12 @@ def solo(order=(HUMAN, AI), difficulty="normal"):
 
 
 class SoloAITests(unittest.TestCase):
+    def test_ai_chooses_high_value_restricted_untaps(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True
+        self.add(game,HUMAN,"lea:175"); small=self.add(game,AI,"bear"); large=self.add(game,AI,"giant"); small.tapped=large.tapped=True
+        game.active_index=0; game._start_turn(); self.assertEqual(game.phase,"untap")
+        advance_solo(game); self.assertTrue(small.tapped); self.assertFalse(large.tapped); self.assertNotEqual(game.phase,"untap")
+
     def test_ai_uses_circle_against_matching_damage_spell(self):
         game=solo(); circle=self.add(game,AI,"lea:12"); self.add(game,AI,"forest")
         bolt=game.next_uid; game.next_uid+=1; game.cards[bolt]="lea:161"; game.stack=[__import__("mtg.engine",fromlist=["Spell"]).Spell(HUMAN,bolt,"lea:161",str(AI))]
