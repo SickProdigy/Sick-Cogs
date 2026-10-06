@@ -143,6 +143,11 @@ class BattleRenderer:
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
 
     async def battle(self, battle):
+        if battle.state!="active":
+            species_id=battle.player.species_id if battle.state=="won" else battle.wild_species_id
+            result_sprite=await self.get_sprite(species_id,shiny=battle.player.shiny if battle.state=="won" else False)
+            try:return await self._render(self._battle_result_sync,battle,result_sprite)
+            except (OSError,ValueError) as exc:raise RenderError("Battle result rendering failed.") from exc
         front = await self.get_sprite(battle.wild_species_id)
         try:
             back = await self.get_sprite(
@@ -309,6 +314,33 @@ class BattleRenderer:
             mark_x=min(left+239,level_x+int(draw.textlength(level_text,font=level_font))+6)
             self._gender_mark(draw,(mark_x,top+150),item.gender,(65,91,78))
             if shiny:draw.text((left+190,top+12),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=11))
+        return self._save(canvas)
+
+    def _battle_result_sync(self,battle,data):
+        canvas=Image.new("RGB",(800,450),(229,214,145));draw=ImageDraw.Draw(canvas)
+        for y in range(450):
+            ratio=y/449;draw.line((0,y,800,y),fill=(int(244-49*ratio),int(232-58*ratio),int(174-69*ratio)))
+        draw.rounded_rectangle((24,20,776,430),22,fill=(250,243,205),outline=RETRO[0],width=5)
+        wild=SPECIES[battle.wild_species_id];player=SPECIES[battle.player.species_id]
+        if battle.state=="caught":
+            heading=f"{wild.name} was caught!";sub=f"Lv.{battle.wild_level} joined your collection."
+            draw.ellipse((245,225,555,330),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,260-image.height),image)
+            self._pokeball(draw,(400,310),43)
+            self._gender_mark(draw,(531,369),battle.wild_gender,RETRO[1])
+            draw.text((466,365),f"Lv.{battle.wild_level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        elif battle.state=="won":
+            heading="Victory!";sub=f"{wild.name} fainted. {player.name} gained {battle.experience_award} XP."
+            draw.ellipse((235,225,565,340),fill=(182,168,89),outline=RETRO[0],width=4)
+            image=self._open(data,(250,215),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,300-image.height),image)
+        elif battle.state=="lost":
+            heading="Battle over";sub="Your party has no conscious Pokémon."
+            image=self._open(data,(230,190),trim=True,upscale=True);canvas.paste(image,(400-image.width//2,285-image.height),image)
+        else:
+            heading="Encounter ended";sub=battle.result or "You got away safely."
+        draw.text((400-int(draw.textlength(heading,font=ImageFont.load_default(size=34)))//2,42),heading,fill=RETRO[0],font=ImageFont.load_default(size=34))
+        draw.rounded_rectangle((48,350,752,410),12,fill=RETRO[5],outline=RETRO[0],width=4)
+        draw.text((70,370),sub[:78],fill=RETRO[0],font=ImageFont.load_default(size=20))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):

@@ -165,7 +165,7 @@ class BattleTests(unittest.TestCase):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");scene=renderer._battle_sync(b,data,data)
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         with Image.open(encounter) as image,Image.open(alternate) as other:
             self.assertEqual(image.size,(800,450))
@@ -186,6 +186,8 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(image.getpixel((400,400)),RETRO[5])
             self.assertEqual(image.getpixel((110,398)),RETRO[5])
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(victory) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(caught_result) as image:self.assertEqual(image.size,(800,450))
 
 
 class CatalogTests(unittest.TestCase):
