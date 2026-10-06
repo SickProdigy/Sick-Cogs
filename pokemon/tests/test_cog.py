@@ -139,6 +139,7 @@ class CogPolicyTests(unittest.TestCase):
 
     def test_expected_command_surfaces_are_separate_and_documented(self):
         player_names={command.qualified_name for command in Pokemon.pokemon.walk_commands()}
+        self.assertEqual(set(Pokemon.pokemon.aliases),{"pkmn","poke"})
         admin_names={command.qualified_name for command in Pokemon.pokemon_set.walk_commands()}
         self.assertNotIn("pokemon heal",player_names)
         self.assertFalse(any(name.startswith("pokemon set") for name in player_names))

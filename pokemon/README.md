@@ -2,6 +2,8 @@
 
 Persistent cross-guild Pokémon catching and wild battles for Red.
 
+Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shorter aliases.
+
 ## Included
 
 - One global collection per Discord user across every guild served by the same bot.
