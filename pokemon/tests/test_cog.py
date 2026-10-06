@@ -262,7 +262,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         section=StoredSection(conf);encounters=StoredEncounters();encounters.value={"9":{"state":"open"}}
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={}
         cog.config=SimpleNamespace(user=lambda user:section,encounters=encounters)
-        cog.rendered_starter=AsyncMock(return_value=(discord.Embed(title="@Trainer received Charmander!"),[]))
+        cog.rendered_starter=AsyncMock(return_value=(discord.Embed(title="Trainer received Charmander!"),[]))
         cog.rendered_starter_choice=AsyncMock(return_value=(Pokemon.starter_embed(SimpleNamespace(display_name="Trainer")),[]))
         response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock())
         interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
@@ -276,7 +276,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(section.value["starter_chosen"])
         self.assertEqual((section.value["collection"][0]["species_id"],section.value["collection"][0]["level"]),(4,1))
         edited=response.edit_message.await_args.kwargs
-        self.assertEqual(edited["embed"].title,"@Trainer received Charmander!")
+        self.assertEqual(edited["embed"].title,"Trainer received Charmander!")
         self.assertEqual(edited["attachments"],[])
         self.assertIsNone(edited["view"])
         cog.rendered_starter.assert_awaited_once_with(unittest.mock.ANY,"Trainer",9)

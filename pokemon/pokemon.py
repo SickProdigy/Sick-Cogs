@@ -85,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.19.3";__author__="SickProdigy"
+    __version__="0.19.4";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -413,7 +413,7 @@ class Pokemon(commands.Cog):
         species=SPECIES[pokemon.species_id];symbol={"female":"♀","male":"♂","genderless":"—"}.get(pokemon.gender,"?")
         description="Professor Oak entrusted this Pokémon to you. Your journey begins now."
         if encounter_id is not None:description+=" Press **Encounter** again when you are ready to battle."
-        embed=discord.Embed(title=f"@{trainer_name} received {species.name}!",description=description,color=discord.Color.green())
+        embed=discord.Embed(title=f"{trainer_name} received {species.name}!",description=description,color=discord.Color.green())
         embed.add_field(name="Partner",value=f"{species.name} · {symbol} · Lv. {pokemon.level}",inline=False)
         try:
             image=await self.renderer.starter(pokemon,trainer_name);embed.set_image(url="attachment://starter.png")
@@ -460,10 +460,11 @@ class Pokemon(commands.Cog):
         for number,raw in numbered:
             species=SPECIES[raw["species_id"]];marker="Shiny " if raw.get("shiny") else ""
             lines.append(f"{number}. {marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
-        embed=discord.Embed(title=f"Global Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
+        embed=discord.Embed(title=f"{trainer}'s Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
         embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon · Select one below to manage your party")
         try:
-            image=await self.renderer.collection_card(items,page,pages,total);embed.set_image(url="attachment://collection.png")
+            image=await self.renderer.collection_card(items,page,pages,total,trainer);embed.set_image(url="attachment://collection.png")
             files=[discord.File(image,filename="collection.png")]
         except RenderError:
             log.exception("Collection card rendering failed");files=[]
@@ -507,9 +508,10 @@ class Pokemon(commands.Cog):
         for slot,item in enumerate(party,1):
             maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp;name=item.nickname or SPECIES[item.species_id].name
             lines.append(f"{slot}. {name} · Lv. {item.level} · HP {current}/{maximum}")
-        embed=discord.Embed(title="Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        trainer=getattr(ctx.author,"display_name",getattr(ctx.author,"name",str(ctx.author)))
+        embed=discord.Embed(title=f"{trainer}'s Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
         try:
-            image=await self.renderer.party_card(party);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
+            image=await self.renderer.party_card(party,trainer);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
         except RenderError:
             log.exception("Party card rendering failed");files=[]
         await ctx.send(embed=embed,files=files)
