@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 from typing import Optional
 
+from .catching import BALLS,attempt_catch
 from .data import EVOLUTIONS, MOVES, NATURES, SPECIES, experience_to_next, moves_for_level
 from .rulesets import resolve_ruleset
 
@@ -178,6 +179,8 @@ class Battle:
     wild_status_turns: int = 0
     player_confusion_turns: int = 0
     wild_confusion_turns: int = 0
+    last_ball: str = ""
+    catch_shakes: int = 0
 
     def __post_init__(self):
         if not self.party:
@@ -570,35 +573,20 @@ class Battle:
         self._end_turn_status()
         self._finish_if_needed()
 
-    def throw_ball(self):
-        if self.state != "active":
-            raise BattleError("This encounter is over.")
-        if self.needs_switch:
-            raise BattleError("Switch to another party Pokémon first.")
-        rate = SPECIES[self.wild_species_id].catch_rate
-        chance = min(
-            95,
-            max(
-                5,
-                int(
-                    rate / 255 * 55
-                    + (1 - self.wild_hp / self.wild_max_hp) * 40
-                    + (10 if self.wild_status else 0)
-                ),
-            ),
-        )
-        if self.rng().randrange(100) < chance:
-            self.state="caught"
-            detail=self._award_experience(self.rules().experience_reward(SPECIES[self.wild_species_id],self.wild_level,caught=True))
-            self.result=f"You threw a Poké Ball. Caught {SPECIES[self.wild_species_id].name}!"+detail
-            self._record("ball:caught")
-            return True
-        self._wild_response()
-        ball_line=f"You threw a Poké Ball, but {SPECIES[self.wild_species_id].name} broke free!"
+    def throw_ball(self,ball_key="poke_ball"):
+        if self.state!="active":raise BattleError("This encounter is over.")
+        if self.needs_switch:raise BattleError("Switch to another party Pokémon first.")
+        if ball_key not in BALLS:raise BattleError("That Poké Ball is unavailable.")
+        ball=BALLS[ball_key];result=attempt_catch(SPECIES[self.wild_species_id],self.wild_max_hp,self.wild_hp,self.wild_status,ball_key,self.rules(),self.rng())
+        self.last_ball=ball_key;self.catch_shakes=result.shakes
+        if result.caught:
+            self.state="caught";detail=self._award_experience(self.rules().experience_reward(SPECIES[self.wild_species_id],self.wild_level,caught=True))
+            self.result=f"You threw a {ball.name}. Caught {SPECIES[self.wild_species_id].name}!"+detail
+            self._record(f"ball:{ball_key}:caught");return True
+        self._wild_response();ball_line=f"You threw a {ball.name}, but {SPECIES[self.wild_species_id].name} broke free!"
         self.last_action=f"{ball_line} {self.last_action}"
         if self.result:self.result=f"{self.last_action} {self.result}"
-        self._record("ball:failed")
-        return False
+        self._record(f"ball:{ball_key}:failed:{result.shakes}");return False
 
     def run(self):
         if self.state != "active":
@@ -673,6 +661,8 @@ class Battle:
         data.setdefault("wild_status_turns",0)
         data.setdefault("player_confusion_turns",0)
         data.setdefault("wild_confusion_turns",0)
+        data.setdefault("last_ball","")
+        data.setdefault("catch_shakes",0)
         battle=cls(**data)
         if not battle.party:battle.party=[battle.player]
         return battle

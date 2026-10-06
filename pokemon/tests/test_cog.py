@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
+from pokemon.pokemon import PACE, Pokemon, activity_weight, authentic_moves_raw, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, first_pokedex_registration, migrate_ball_items, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
@@ -63,6 +63,11 @@ class CogPolicyTests(unittest.TestCase):
         self.assertLess(PACE["active"][2],PACE["relaxed"][2])
         self.assertEqual(pace_for_settings(*PACE["normal"]),"normal")
         self.assertEqual(pace_for_settings(7,13,90),"custom")
+
+    def test_ball_inventory_migration_is_additive_and_idempotent(self):
+        data={"items":{"potion":2,"great_ball":9}}
+        self.assertEqual(migrate_ball_items(data)["items"],{"potion":2,"great_ball":9,"ultra_ball":1})
+        self.assertEqual(migrate_ball_items(data)["items"],{"potion":2,"great_ball":9,"ultra_ball":1})
 
     def test_first_catch_only_requires_pokedex_registration_once(self):
         self.assertTrue(first_pokedex_registration({"pokedex_caught":[]},25))
@@ -374,6 +379,12 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         message.edit.assert_awaited_once_with(content="This battle ended because the trainer profile was reset.",view=None)
         self.assertIn("choose a new starter",ctx.send.await_args.args[0])
 
+    async def test_ball_inventory_preserves_legacy_poke_ball_storage(self):
+        conf={"balls":10,"items":{"great_ball":3,"ultra_ball":1}}
+        self.assertEqual([Pokemon.ball_inventory(conf,key) for key in ("poke_ball","great_ball","ultra_ball")],[10,3,1])
+        Pokemon.consume_ball(conf,"poke_ball");Pokemon.consume_ball(conf,"great_ball");Pokemon.consume_ball(conf,"ultra_ball")
+        self.assertEqual((conf["balls"],conf["items"]["great_ball"],conf["items"]["ultra_ball"]),(9,2,0))
+
     async def test_potion_and_revive_consume_inventory_atomically(self):
         PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
         pokemon=OwnedPokemon.create("medicine",7,10,seed=4)
@@ -570,7 +581,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("PP" in item.label for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in fight.children))
         self.assertTrue(any(item.label=="Back" for item in party.children))
-        self.assertEqual([item.label for item in bag.children],["Poké Ball","Back"])
+        self.assertEqual([item.label for item in bag.children],["Poké Ball","Great Ball","Ultra Ball","Back"])
         allowed = SimpleNamespace(
             user=SimpleNamespace(id=current.user_id),
             response=SimpleNamespace(send_message=AsyncMock()),

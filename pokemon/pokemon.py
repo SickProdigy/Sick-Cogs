@@ -19,8 +19,8 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
-GLOBAL={"schema":5,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2,"great_ball":3,"ultra_ball":1},"center_last_at":None}
+GLOBAL={"schema":6,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
@@ -86,6 +86,10 @@ def encounter_returns_after_timeout(raw):
     battle=raw.get("battle",{})
     return raw.get("kind","wild")=="wild" and raw.get("state")=="battle" and int(battle.get("action_count",0))==0
 
+def migrate_ball_items(data):
+    items=dict(data.get("items",{}));items.setdefault("great_ball",3);items.setdefault("ultra_ball",1);data["items"]=items
+    return data
+
 def authentic_moves_raw(raw):
     pokemon=OwnedPokemon.from_raw(raw);old_pp=dict(pokemon.move_pp)
     pokemon.moves=moves_for_level(pokemon.species_id,pokemon.level)
@@ -94,7 +98,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.27.0";__author__="SickProdigy"
+    __version__="0.28.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -180,7 +184,10 @@ class Pokemon(commands.Cog):
                 battle["party"]=[authentic_moves_raw(item) for item in battle.get("party",[])]
                 battle["wild_pp"]={}
             await self.config.encounters.set(encounters)
-            await self.config.schema.set(5)
+        if schema<6:
+            for user_id,data in (await self.config.all_users()).items():
+                await self.config.user_from_id(int(user_id)).set(migrate_ball_items(data))
+            await self.config.schema.set(6)
     def lock(self,key):return self.locks.setdefault(key,asyncio.Lock())
     async def put_encounter(self,eid,raw):
         async with self.lock("encounters"):
@@ -427,7 +434,18 @@ class Pokemon(commands.Cog):
                 battle.result+=f" Earned the {gym.badge}!"
             conf["badges"]=badges
         await self.config.user_from_id(battle.user_id).set(conf)
-    async def throw_ball(self,i,eid):
+    @staticmethod
+    def ball_inventory(conf,ball_key):
+        if ball_key=="poke_ball":return int(conf.get("balls",0))
+        return int(conf.get("items",{}).get(ball_key,0))
+
+    @staticmethod
+    def consume_ball(conf,ball_key):
+        if ball_key=="poke_ball":conf["balls"]=int(conf.get("balls",0))-1
+        else:
+            items=conf.setdefault("items",{});items[ball_key]=int(items.get(ball_key,0))-1
+
+    async def throw_ball(self,i,eid,ball_key="poke_ball"):
         battle=self.battles.get(eid)
         if not battle:
             await i.response.send_message("This battle is unavailable.",ephemeral=True);return
@@ -442,11 +460,13 @@ class Pokemon(commands.Cog):
             conf=await self.config.user(i.user).all();tx_key=f"{eid}:{battle.rolls}";tx=conf["transactions"].get(tx_key,{})
             if len(conf["collection"])>=MAX_COLLECTION and not tx.get("settled"):
                 await i.response.send_message(f"Your {MAX_BOXES} boxes are full.",ephemeral=True);return
-            if conf["balls"]<1 and not tx.get("ball_charged"):await i.response.send_message("You have no Poké Balls.",ephemeral=True);return
+            ball_names={"poke_ball":"Poké Balls","great_ball":"Great Balls","ultra_ball":"Ultra Balls"}
+            if ball_key not in ball_names:await i.response.send_message("That Poké Ball is unavailable.",ephemeral=True);return
+            if self.ball_inventory(conf,ball_key)<1 and not tx.get("ball_charged"):await i.response.send_message(f"You have no {ball_names[ball_key]}.",ephemeral=True);return
             if not tx.get("ball_charged"):
-                conf["balls"]-=1;tx["ball_charged"]=True;conf["transactions"][tx_key]=tx
+                self.consume_ball(conf,ball_key);tx["ball_charged"]=True;tx["ball_key"]=ball_key;conf["transactions"][tx_key]=tx
             first_registration=False
-            try:caught=battle.throw_ball()
+            try:caught=battle.throw_ball(ball_key)
             except BattleError as e:await i.response.send_message(str(e),ephemeral=True);return
             if caught:
                 self.apply_battle_party(conf,battle)
@@ -679,7 +699,7 @@ class Pokemon(commands.Cog):
     async def pokemon_bag(self,ctx):
         """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
-        await ctx.send(f"**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
+        await ctx.send(f"**Poké Balls**\nPoké Ball: **{int(conf.get('balls',0))}** · Great Ball: **{int(items.get('great_ball',0))}** · Ultra Ball: **{int(items.get('ultra_ball',0))}**\n**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
 
     @pokemon.group(name="use",invoke_without_command=True)
     async def pokemon_use(self,ctx):
