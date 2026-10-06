@@ -157,6 +157,7 @@ class Battle:
     action_count: int = 0
     battle_kind: str = "wild"
     gym_key: str = ""
+    wild_gender: str = "unknown"
 
     def __post_init__(self):
         if not self.party:
@@ -435,14 +436,12 @@ class Battle:
             raise BattleError("The Pokémon was not caught.")
         identity = instance_id or uuid.uuid4().hex
         shiny = random.Random(self.seed + 4049).randrange(4096) == 0
-        return OwnedPokemon.create(
-            identity,
-            self.wild_species_id,
-            self.wild_level,
-            seed=self.seed + 991,
-            shiny=shiny,
-            guild_id=self.guild_id,
+        pokemon=OwnedPokemon.create(
+            identity,self.wild_species_id,self.wild_level,seed=self.seed+991,
+            shiny=shiny,guild_id=self.guild_id,
         )
+        if self.wild_gender!="unknown":pokemon.gender=self.wild_gender
+        return pokemon
 
     def _record(self, action):
         self.action_count += 1

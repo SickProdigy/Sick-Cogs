@@ -37,6 +37,14 @@ def scaled_wild_level(player_level,offset):
 def activity_weight(active_users):
     return 1+min(2,max(0,active_users-1))
 
+def encounter_level(levels):
+    values=sorted(max(2,min(100,int(value))) for value in levels)
+    return values[len(values)//2] if values else 5
+
+def encounter_gender(species,rng):
+    if species.gender_rate<0:return "genderless"
+    return "female" if rng.randrange(8)<species.gender_rate else "male"
+
 def available_species(generations):
     return [item for item in SPECIES.values() if item.id not in {1,4,7} and generation_for(item.id) in generations]
 
@@ -51,7 +59,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.8.2";__author__="SickProdigy"
+    __version__="0.9.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -77,7 +85,7 @@ class Pokemon(commands.Cog):
             for key,raw in encounters.items():
                 if not encounter_is_expired(raw,now):continue
                 if encounter_returns_after_timeout(raw):
-                    raw["state"]="open";raw.pop("battle",None);raw.pop("level_locked",None);raw["level"]=0
+                    raw["state"]="open";raw.pop("battle",None)
                     raw["expires_at"]=(now+timedelta(seconds=int(raw.get("encounter_timeout",900)))).isoformat()
                     returned.append((int(key),dict(raw)))
                 else:
@@ -154,21 +162,31 @@ class Pokemon(commands.Cog):
             current=await self.config.guild(message.guild).active_encounter()
             if current:return
             await self.spawn(message.channel)
+    async def spawn_level(self,guild_id):
+        levels=[]
+        for user_id in list(self.recent_users.get(guild_id,{}))[:12]:
+            data=await self.config.user_from_id(int(user_id)).all()
+            owned={item["instance_id"]:item for item in data.get("collection",[])}
+            lead=owned.get(data.get("party",[None])[0]) if data.get("party") else None
+            if lead:levels.append(int(lead.get("level",5)))
+        return encounter_level(levels)
+
     async def spawn(self,channel):
         async with self.lock("encounters"):
             eid=await self.config.next_encounter();await self.config.next_encounter.set(eid+1)
         conf=await self.config.guild(channel.guild).all()
         pool=available_species(conf["generations"])
         if not pool:raise RuntimeError("No Pokémon are available for the configured generations.")
-        chosen=random.SystemRandom().choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
-        sid=chosen.id;level=0
+        rng=random.SystemRandom()
+        chosen=rng.choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
+        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng)
         embed=discord.Embed(title=f"A wild {SPECIES[sid].name} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
-            image=await self.renderer.encounter(sid);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
+            image=await self.renderer.encounter(sid,level,gender);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
             msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
         except RenderError:
             log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
-        raw={"state":"open","species_id":sid,"level":level,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
+        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
@@ -186,8 +204,9 @@ class Pokemon(commands.Cog):
             if not owned_raw:
                 await i.response.send_message("Your active party needs repair.",ephemeral=True);return
             owned=OwnedPokemon.from_raw(owned_raw)
-            if not raw.get("level_locked"):
+            if not raw.get("level_locked") or int(raw.get("level",0))<2:
                 raw["level"]=scaled_wild_level(owned.level,random.SystemRandom().randrange(-2,3))
+                raw["gender"]=encounter_gender(SPECIES[int(raw["species_id"])],random.SystemRandom())
                 raw["level_locked"]=True
             seen={int(value) for value in user.get("pokedex_seen",[])}
             seen.add(int(raw["species_id"]));user["pokedex_seen"]=sorted(seen)
@@ -196,7 +215,7 @@ class Pokemon(commands.Cog):
             party=[OwnedPokemon.from_raw(collection[identity]) for identity in user["party"] if identity in collection]
             if not any((item.current_hp if item.current_hp is not None else pokemon_max_hp(item))>0 for item in party):
                 await i.response.send_message("Your party has fainted. Visit a Pokémon Center or use a Revive.",ephemeral=True);return
-            wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
+            wild=SPECIES[raw["species_id"]];battle=Battle(eid,i.user.id,raw["guild_id"],raw["channel_id"],raw["message_id"],owned,raw["species_id"],raw["level"],Battle.stat(owned,"hp"),wild.hp+raw["level"]*2,seed=random.SystemRandom().randrange(1,2**31),wild_gender=raw.get("gender","unknown"));battle.initialize_party(party);battle.wild_hp=battle.wild_max_hp
             battle_seconds=await self.config.guild_from_id(int(raw["guild_id"])).battle_timeout()
             raw["state"]="battle";raw["expires_at"]=(datetime.now(timezone.utc)+timedelta(seconds=battle_seconds)).isoformat();raw["battle"]=battle.raw();encounters[str(eid)]=raw;await self.config.encounters.set(encounters);self.battles[eid]=battle
             embed,files=await self.rendered_battle(battle)

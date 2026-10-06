@@ -12,7 +12,7 @@ from pokemon.catalog import PokemonCatalog
 from pokemon.data import SPECIES
 from pokemon.gyms import KANTO_GYMS,badge_case,gym_status_embed,next_gym,trainer_profile_embed
 from pokemon.models import Battle,OwnedPokemon
-from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_is_expired, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
+from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, scaled_wild_level
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
 from pokemon.views import BagView, BattleView, FightView, PartyView
@@ -63,6 +63,18 @@ class CogPolicyTests(unittest.TestCase):
 
     def test_activity_weight_is_bounded(self):
         self.assertEqual([activity_weight(n) for n in (0, 1, 2, 8)], [1, 1, 2, 3])
+
+    def test_spawn_level_uses_bounded_participant_median(self):
+        self.assertEqual(encounter_level([]),5)
+        self.assertEqual(encounter_level([4,20,10]),10)
+        self.assertEqual(encounter_level([-4,200]),100)
+
+    def test_spawn_gender_obeys_species_ratio(self):
+        female_rng=SimpleNamespace(randrange=lambda maximum:0)
+        male_rng=SimpleNamespace(randrange=lambda maximum:7)
+        self.assertEqual(encounter_gender(SimpleNamespace(gender_rate=4),female_rng),"female")
+        self.assertEqual(encounter_gender(SimpleNamespace(gender_rate=4),male_rng),"male")
+        self.assertEqual(encounter_gender(SimpleNamespace(gender_rate=-1),female_rng),"genderless")
 
     def test_wild_level_scales_near_player(self):
         self.assertEqual(scaled_wild_level(1,-2),2)

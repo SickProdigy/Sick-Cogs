@@ -96,10 +96,10 @@ class BattleRenderer:
         async with self.render_slots:
             return await asyncio.to_thread(callback, *args)
 
-    async def encounter(self, species_id: int):
-        data = await self.get_sprite(species_id)
+    async def encounter(self,species_id:int,level:int=5,gender:str="unknown"):
+        data=await self.get_sprite(species_id)
         try:
-            return await self._render(self._encounter_sync, species_id, data)
+            return await self._render(self._encounter_sync,species_id,data,level,gender)
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
@@ -141,16 +141,16 @@ class BattleRenderer:
         output.seek(0)
         return output
 
-    def _encounter_sync(self, species_id, data):
-        canvas = Image.new("RGB", (800, 450), (105, 174, 93))
-        draw = ImageDraw.Draw(canvas)
-        for y in range(0, 330):
-            ratio = y / 330
-            draw.line((0, y, 800, y), fill=(90 + int(80 * ratio), 165 + int(45 * ratio), 220))
-        draw.ellipse((90, 310, 710, 470), fill=(72, 139, 74))
-        draw.ellipse((400, 285, 730, 375), fill=(198, 222, 165))
-        pokemon = self._open(data,(240,210),trim=True,upscale=True)
-        canvas.paste(pokemon,(565-pokemon.width//2,300-pokemon.height),pokemon)
+    def _encounter_sync(self,species_id,data,level=5,gender="unknown"):
+        canvas=Image.new("RGB",(800,450),(105,174,93));draw=ImageDraw.Draw(canvas)
+        for y in range(0,330):
+            ratio=y/330;draw.line((0,y,800,y),fill=(90+int(80*ratio),165+int(45*ratio),220))
+        draw.ellipse((70,310,700,470),fill=(72,139,74))
+        draw.ellipse((270,285,610,375),fill=(198,222,165))
+        pokemon=self._open(data,(250,220),trim=True,upscale=True)
+        canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
+        maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
+        self._status_box(draw,(30,28),SPECIES[species_id].name,level,maximum,maximum,"",gender)
         return self._save(canvas)
 
     def _battle_sync(self, battle, front_data, back_data):
@@ -167,8 +167,8 @@ class BattleRenderer:
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]
         player = SPECIES[battle.player.species_id]
-        self._status_box(draw, (40, 35), wild.name, battle.wild_level, battle.wild_hp, battle.wild_max_hp, battle.wild_status)
-        self._status_box(draw, (430, 270), player.name, battle.player.level, battle.player_hp, battle.max_hp(battle.player), battle.player_status)
+        self._status_box(draw,(40,35),wild.name,battle.wild_level,battle.wild_hp,battle.wild_max_hp,battle.wild_status,battle.wild_gender)
+        self._status_box(draw,(430,270),player.name,battle.player.level,battle.player_hp,battle.max_hp(battle.player),battle.player_status,battle.player.gender)
         draw.rectangle((0, 390, 800, 450), fill=RETRO[5], outline=RETRO[0], width=5)
         text = battle.result or battle.last_action or f"What will {player.name} do?"
         draw.text((20, 410), text[:105], fill=RETRO[0], font=ImageFont.load_default(size=18))
@@ -188,10 +188,11 @@ class BattleRenderer:
         return rgb
 
     @staticmethod
-    def _status_box(draw, origin, name, level, hp, maximum, status):
+    def _status_box(draw,origin,name,level,hp,maximum,status,gender="unknown"):
         x, y = origin
         draw.rounded_rectangle((x, y, x + 320, y + 88), 12, fill=RETRO[7], outline=RETRO[0], width=4)
-        draw.text((x + 14, y + 10), f"{name}  Lv.{level}", fill=RETRO[0], font=ImageFont.load_default(size=18))
+        symbol={"female":"♀","male":"♂","genderless":"—"}.get(gender,"")
+        draw.text((x+14,y+10),f"{name}  {symbol}  Lv.{level}",fill=RETRO[0],font=ImageFont.load_default(size=18))
         draw.rectangle((x + 70, y + 45, x + 295, y + 62), outline=RETRO[0], width=2)
         width = int(221 * max(0, hp) / max(1, maximum))
         draw.rectangle((x + 72, y + 47, x + 72 + width, y + 60), fill=RETRO[2])
