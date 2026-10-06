@@ -9,7 +9,7 @@ import aiohttp
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.20.1 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.21.0 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 
 
@@ -34,7 +34,7 @@ class PokemonCatalog:
                 raise CatalogError("The Pokémon catalog cache is invalid.") from exc
             for item in parsed:
                 previous=SPECIES.get(item.id)
-                if previous and previous.learnset and not item.learnset:
+                if previous and previous.learnset and (item.id<=151 or not item.learnset):
                     learned=previous.learnset
                     moves=tuple(move for level,move in learned if level<=5)[-4:] or item.moves
                     item=Species(
@@ -124,7 +124,7 @@ class PokemonCatalog:
                 ):
                     level = int(detail.get("level_learned_at", 0))
                     learned[key] = min(level, learned.get(key, level))
-        learnset = tuple(sorted((level, key) for key, level in learned.items()))
+        learnset = tuple((level,key) for key,level in sorted(learned.items(),key=lambda item:item[1]))
         moves = tuple(key for level, key in learnset if level <= 5)[-4:]
         if not moves:
             moves = ("tackle",)

@@ -19,13 +19,32 @@ class DataTests(unittest.TestCase):
         self.assertEqual(len([key for key in SPECIES if key <= 151]),151)
         self.assertEqual(effectiveness("fire",("grass",)),2)
         self.assertEqual(effectiveness("water",("grass",)),0.5)
+        self.assertEqual(effectiveness("electric",("ground",)),0)
+        self.assertEqual(effectiveness("rock",("flying",)),2)
+        self.assertEqual(effectiveness("psychic",("poison",)),2)
         self.assertTrue(EVOLUTIONS)
         self.assertTrue(all(1<=source<=151 and 1<=target<=151 and 2<=level<=100 for source,(target,level) in EVOLUTIONS.items()))
+        from pokemon.data import MOVES
+        self.assertEqual(len(MOVES),147)
+        self.assertTrue(all(SPECIES[key].learnset for key in range(1,152)))
+        self.assertEqual(SPECIES[63].moves,("teleport",))
+        self.assertEqual(SPECIES[129].moves,("splash",))
+        self.assertEqual(SPECIES[132].moves,("transform",))
 
 class BattleTests(unittest.TestCase):
+    def test_status_and_fixed_damage_moves_are_not_tackle_substitutes(self):
+        bulbasaur=OwnedPokemon.create("bulba",1,5,seed=2)
+        current=Battle(1,100,1,2,3,bulbasaur,10,5,30,30,seed=4)
+        old_hp=current.wild_hp
+        current.use_move(1)
+        self.assertEqual(current.wild_hp,old_hp)
+        self.assertEqual(current.wild_stages.get("attack"),-1)
+        fixed=__import__("pokemon.data",fromlist=["MOVES"]).MOVES["dragon_rage"]
+        self.assertEqual(current._damage(1,10,5,fixed,current.rng(),target_hp=99),40)
+
     def test_move_damages_and_wild_responds(self):
         b=battle();old_wild=b.wild_hp;old_player=b.player_hp
-        b.use_move(1)
+        b.use_move(2)
         self.assertLess(b.wild_hp,old_wild)
         self.assertLessEqual(b.player_hp,old_player)
         self.assertIn(f"{SPECIES[b.player.species_id].name} used",b.last_action)
@@ -33,7 +52,7 @@ class BattleTests(unittest.TestCase):
     def test_invalid_move_rejected(self):
         with self.assertRaises(BattleError):battle().use_move(9)
     def test_zero_hp_ends_battle(self):
-        b=battle();b.wild_hp=1;b.use_move(1)
+        b=battle();b.wild_hp=1;b.use_move(2)
         self.assertEqual(b.state,"won")
         self.assertGreater(b.experience_award,0)
         self.assertGreater(b.player.experience,0)
@@ -54,13 +73,13 @@ class BattleTests(unittest.TestCase):
         player=OwnedPokemon.create("tie",19,7,seed=3)
         first=Battle(1,100,1,2,3,player,19,7,30,30,seed=14)
         second=Battle.from_raw(first.raw())
-        first.use_move(1);second.use_move(1)
+        first.use_move(2);second.use_move(2)
         self.assertEqual(first.raw(),second.raw())
 
     def test_quick_attack_beats_higher_speed(self):
         player=OwnedPokemon.create("fast",19,7,seed=3)
         b=Battle(1,100,1,2,3,player,52,5,30,30,seed=8)
-        b.use_move(1)
+        b.use_move(2)
         self.assertTrue(b.last_action.startswith("Rattata used Quick Attack"))
 
     def test_caught_instance_is_global_identity(self):
@@ -115,7 +134,8 @@ class BattleTests(unittest.TestCase):
 
     def test_owned_pokemon_has_stable_moves_and_pp(self):
         pokemon=OwnedPokemon("stable",4,5)
-        self.assertEqual(pokemon.moves,("scratch",))
+        self.assertEqual(pokemon.moves,("scratch","growl"))
+        self.assertEqual(pokemon.move_pp["growl"],40)
         self.assertEqual(pokemon.move_pp["scratch"],35)
         pokemon.current_hp=3;pokemon.status="burn"
         self.assertEqual(OwnedPokemon.from_raw(pokemon.raw()).raw(),pokemon.raw())
