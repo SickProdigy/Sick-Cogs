@@ -23,7 +23,7 @@ def _target(game, user, card):
         choices=[]
         for position,permanent in enumerate(game.player(target_user).battlefield,1):
             target=game.card(permanent.uid)
-            if game._aura_can_attach(card,permanent): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
+            if game._aura_can_attach(card,permanent) and (not card.aura_animate_mana_value or not game.is_creature(permanent)): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
         return f"{target_user}:{max(choices)[1]}" if choices else None
     if card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
@@ -195,6 +195,11 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
+        elif card.animate_land_type:
+            own=sum(game.card(permanent.uid).has_land_type(card.animate_land_type) for permanent in player.battlefield)
+            enemy=sum(game.card(permanent.uid).has_land_type(card.animate_land_type) for permanent in game.player(game.opponent(user)).battlefield)
+            if own<=enemy: continue
+            score=4+2*(own-enemy)
         elif card.mana_flare:
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
@@ -234,7 +239,7 @@ def _play_one(game, user, difficulty):
             score=5+enemy-own
         elif card.aura_target_types:
             scaling=sum(game.card(permanent.uid).has_land_type("forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
-            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)
+            score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)+3*bool(card.aura_animate_mana_value)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
         elif card.effect=="damage_x_exile":

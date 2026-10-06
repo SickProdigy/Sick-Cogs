@@ -1,6 +1,7 @@
 import unittest
 
 from mtg.ai import _activate_clockwork, _activation_target, _global_enchantment_score, _target, advance_solo
+from mtg.cards import CARDS
 from mtg.engine import Game, Permanent
 
 
@@ -14,6 +15,10 @@ def solo(order=(HUMAN, AI), difficulty="normal"):
 
 
 class SoloAITests(unittest.TestCase):
+    def test_ai_targets_only_a_noncreature_artifact_for_animate_artifact(self):
+        game=solo(); ring=self.add(game,AI,"lea:269"); self.add(game,AI,"lea:267")
+        self.assertEqual(_target(game,AI,CARDS["lea:48"]),f"{AI}:1")
+
     def test_ai_repairs_clockwork_beast_during_its_upkeep(self):
         game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.phase="upkeep"; game.priority_user=AI
         beast=self.add(game,AI,"lea:236"); beast.power_counters=5

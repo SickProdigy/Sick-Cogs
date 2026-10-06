@@ -129,7 +129,12 @@ class Game:
         permanent=Permanent(uid,key,**kwargs)
         permanent.power_counters=self.card(uid).enters_power_counters
         return permanent
-    def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat
+    def _global_land_animation(self,permanent):
+        card=self.card(permanent.uid)
+        return any(self.card(source.uid).animate_land_type and card.has_land_type(self.card(source.uid).animate_land_type) for player in self.players.values() for source in player.battlefield)
+    def _aura_artifact_animation(self,permanent):
+        return self.card(permanent.uid).has_type("Artifact") and any(self.card(aura.uid).aura_animate_mana_value for aura in self.attached_auras(permanent))
+    def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat or self._global_land_animation(permanent) or self._aura_artifact_animation(permanent)
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
     def characteristic_stats(self,user,card,entering=False):
@@ -203,7 +208,12 @@ class Game:
     def current_stats(self,permanent):
         owner=next((p.user_id for p in self.players.values() if permanent in p.battlefield),None)
         if owner is None: raise GameError("Permanent is not on the battlefield.")
-        card=self.card(permanent.uid); power,toughness=((3,6) if permanent.animated_until_end_combat else self.characteristic_stats(owner,card))
+        card=self.card(permanent.uid)
+        if permanent.animated_until_end_combat: power,toughness=3,6
+        elif card.creature: power,toughness=self.characteristic_stats(owner,card)
+        elif self._global_land_animation(permanent): power,toughness=1,1
+        elif self._aura_artifact_animation(permanent): power=toughness=card.cost
+        else: power,toughness=card.power,card.toughness
         swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
         auras=self.attached_auras(permanent)
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
@@ -609,7 +619,7 @@ class Game:
             if self.phase not in ("precombat_main","postcombat_main") or self.stack: raise GameError("Land requires an empty-stack main phase.")
             if not self.can_play_land(user): raise GameError("You already played a land.")
             prior_plays=max(p.lands_played_this_turn,int(p.land_played)); played_extra=prior_plays>0
-            p.hand.pop(index-1); p.battlefield.append(Permanent(uid,c.key,sick=False)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
+            p.hand.pop(index-1); p.battlefield.append(self._make_permanent(uid,c.key)); p.land_played=True; p.lands_played_this_turn=prior_plays+1; self.phase_passes=0
             self.stack.extend(self._land_event_triggers(user,"enter",played_extra))
             self.log.append(f"{user} played {c.name}."); return
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")

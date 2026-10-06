@@ -3081,6 +3081,38 @@ class AlphaStoneGiantTests(unittest.TestCase):
         self.assertIn("fizzled",game.log[-1])
 
 
+class AlphaContinuousAnimationTests(unittest.TestCase):
+    def add(self,game,user,key,sick=False,attached_to=None):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=sick,attached_to=attached_to); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_animate_artifact_uses_mana_value_but_not_on_artifact_creatures(self):
+        game=ready(); ring=self.add(game,10,"lea:269"); aura=self.add(game,10,"lea:48",attached_to=ring.uid)
+        self.assertTrue(game.is_creature(ring)); self.assertEqual(game.current_stats(ring),(1,1))
+        golem=self.add(game,10,"lea:267"); second=self.add(game,10,"lea:48",attached_to=golem.uid)
+        self.assertEqual(game.current_stats(golem),(4,6))
+        game._destroy(game.player(10),aura,allow_regeneration=False); self.assertFalse(game.is_creature(ring))
+
+    def test_zero_mana_artifact_dies_and_its_animation_aura_cleans_up(self):
+        game=ready(); mox=self.add(game,10,"lea:263"); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:48"
+        game._resolve(Spell(10,uid,"lea:48",f"10:{mox.uid}"))
+        self.assertIn(mox.uid,game.player(10).graveyard); self.assertIn(uid,game.player(10).graveyard)
+
+    def test_living_lands_animates_typed_forests_and_tracks_sickness(self):
+        game=ready(); source=self.add(game,10,"lea:209"); forest=self.add(game,10,"forest",sick=True); dual=self.add(game,20,"lea:278"); mountain=self.add(game,20,"mountain")
+        self.assertTrue(game.is_creature(forest) and game.is_creature(dual)); self.assertEqual(game.current_stats(dual),(1,1)); self.assertFalse(game.is_creature(mountain))
+        game.phase="attackers"; game.priority_user=None; self.assertFalse(game.can_attack_permanent(forest)); self.assertTrue(game.can_attack_permanent(dual))
+        game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_mana(10,2)
+        restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.is_creature(restored.find_permanent(dual.uid)[1]))
+        game._destroy(game.player(10),source,allow_regeneration=False); self.assertFalse(game.is_creature(forest) or game.is_creature(dual))
+
+    def test_creature_aura_falls_off_when_living_lands_leaves(self):
+        game=ready(); source=self.add(game,10,"lea:209"); forest=self.add(game,10,"forest"); strength=self.add(game,10,"lea:24",attached_to=forest.uid)
+        self.assertEqual(game.current_stats(forest),(2,3)); game._destroy(game.player(10),source,allow_regeneration=False); game._sba()
+        self.assertIn(strength.uid,game.player(10).graveyard); self.assertFalse(game.is_creature(forest))
+
+
 class AlphaClockworkBeastTests(unittest.TestCase):
     def add(self,game,user,key,power_counters=0):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

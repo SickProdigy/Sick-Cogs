@@ -48,6 +48,8 @@ class Card:
     aura_attack_override: bool = False
     aura_blocked_except_wall: bool = False
     aura_hostile: bool = False
+    aura_animate_mana_value: bool = False
+    animate_land_type: str = ""
     activation_attached: bool = False
     protection_colors: Tuple[str, ...] = ()
     aura_protection: str = ""
@@ -159,6 +161,7 @@ class Card:
         aura=[]
         if self.aura_power or self.aura_toughness: aura.append(f"Enchanted creature gets {self.aura_power:+d}/{self.aura_toughness:+d}")
         if self.aura_forest_scaling: aura.append("Enchanted creature gets +X/+Y for Forests you control")
+        if self.aura_animate_mana_value: aura.append("Enchanted noncreature artifact is a creature with power and toughness equal to its mana value")
         if self.aura_keyword: aura.append(f"Enchanted creature has {self.aura_keyword.replace('_',' ').title()}")
         if self.aura_protection: aura.append(f"Enchanted creature has Protection From {self.aura_protection}")
         if self.aura_attack_override: aura.append("Enchanted Wall can attack")
@@ -171,6 +174,7 @@ class Card:
             if self.lord_keyword: granted.append(self.lord_keyword.replace("_"," ").title())
             if self.lord_regeneration_cost: granted.append(f"{self.lord_regeneration_cost}: Regenerate")
             abilities.append(f"Other {self.lord_subtype} creatures have "+", ".join(granted))
+        if self.animate_land_type: abilities.append(f"All {self.animate_land_type.title()}s are 1/1 creatures that are still lands")
         if self.global_power or self.global_toughness:
             color_name={"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}.get(self.global_buff_color,self.global_buff_color)
             subject=(color_name+" creatures" if color_name else "Creatures")
@@ -290,6 +294,8 @@ ALPHA_ENCHANTMENTS = {
     "lea:97": {"aura_target_types":("Land",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:133": {"aura_target_types":("Artifact",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:226": {"aura_target_types":("Creature",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:48": {"aura_target_types":("Artifact",), "aura_animate_mana_value":True},
+    "lea:209": {"animate_land_type":"forest"},
     "lea:26": {"upkeep_land_type_damage":"swamp"},
     "lea:192": {"extra_land_damage":1},
 }
@@ -554,6 +560,8 @@ for reference in PLAYABLE_ALPHA:
         aura_attack_override=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_attack_override",False),
         aura_blocked_except_wall=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_blocked_except_wall",False),
         aura_hostile=ALPHA_ENCHANTMENTS.get(reference.key, ALPHA_TAP_ENCHANTMENTS.get(reference.key, {})).get("aura_hostile",False),
+        aura_animate_mana_value=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_animate_mana_value",False),
+        animate_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("animate_land_type",ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_land_type","")),
         aura_protection=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("aura_protection",""),
         protection_self_exception=ALPHA_ENCHANTMENTS.get(reference.key, {}).get("protection_self_exception",False),
         protection_colors=ALPHA_PROTECTIONS.get(reference.key,()),
