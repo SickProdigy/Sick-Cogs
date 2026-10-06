@@ -393,6 +393,10 @@ def _play_one(game, user, difficulty):
             score=6
         elif card.effect=="prevent_combat_damage":
             score=20
+        elif card.effect=="siren_call":
+            eligible=sum(game.is_creature(permanent) and not game._has_subtype(game.card(permanent.uid),"Wall") and not permanent.sick for permanent in game.player(game.active_user).battlefield)
+            if user==game.active_user or game.phase not in ("upkeep","draw","precombat_main") or not eligible: continue
+            score=10+3*eligible
         elif card.effect=="destroy_all_enchantments":
             enemy=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in game.player(game.opponent(user)).battlefield)
             own=sum(game.card(permanent.uid).has_type("Enchantment") for permanent in player.battlefield)
@@ -423,7 +427,7 @@ def _attack_positions(game, user, difficulty):
         if game.can_attack_permanent(permanent):
             legal.append(position)
     if difficulty == "easy":
-        required=[position for position in legal if game.card(game.player(user).battlefield[position-1].uid).attacks_each_combat]
+        required=[position for position in legal if game.card(game.player(user).battlefield[position-1].uid).attacks_each_combat or game.player(user).battlefield[position-1].uid in game.forced_attackers]
         optional=[position for position in legal if position not in required]
         return required+optional[::2]
     return legal
@@ -512,6 +516,10 @@ def _activation_target(game,user,card,source_uid=None):
                 permanent=game.find_permanent(uid)[1]
                 if uid not in protected and uid not in game.blocks and permanent is not None and card.prevent_source_color in game.current_colors(permanent): return f"{game.active_user}:{attacker_player.battlefield.index(permanent)+1}"
         return None
+    if card.activation_effect=="force_attack":
+        if game.active_user==user or game.phase not in ("upkeep","draw","precombat_main"): return None
+        choices=[(sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(game.active_user).battlefield,1) if game.is_creature(permanent) and not game._has_subtype(game.card(permanent.uid),"Wall") and not permanent.sick and _can_target(game,card,permanent)]
+        return f"{game.active_user}:{max(choices)[1]}" if choices else None
     if card.activation_effect=="cap_unblocked_damage":
         if game.phase not in ("after_blockers","after_first_strike") or game.active_user==user: return None
         protected=game.player(user).source_damage_caps

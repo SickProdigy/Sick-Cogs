@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.94.0"
+    __version__="0.95.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -178,6 +178,9 @@ class MTG(commands.Cog):
             e.add_field(name="Extra turns queued",value=queued,inline=False)
         if g.prevent_combat_damage:
             e.add_field(name="Turn effect",value="All combat damage is prevented this turn.",inline=False)
+        if g.forced_attackers:
+            forced=[g.card(uid).name for uid in g.forced_attackers if g.find_permanent(uid)[1] is not None]
+            if forced: e.add_field(name="Must attack this combat if able",value=", ".join(forced),inline=False)
         if g.trample_assignments:
             choices=[]
             for uid,amount in g.trample_assignments.items():

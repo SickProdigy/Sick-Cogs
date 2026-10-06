@@ -425,6 +425,7 @@ ALPHA_MANA_CREATURES = {
 
 ALPHA_ACTIVATED_CREATURES = {
     "lea:41": {"redirects_unblocked_combat_damage":True},
+    "lea:117": {"activation_tap":True, "activation_effect":"force_attack", "activation_text":"Target eligible non-Wall creature the active player controls attacks this turn if able; destroy it at the next end step if it did not attack"},
     "lea:31": {"activation_cost":"{0}", "activation_effect":"redirect_one_to_owner", "activation_owner_only":True, "death_owner_half_life":True, "activation_text":"The next 1 damage to this creature is dealt to its owner instead"},
     "lea:37": {"activation_tap":True, "activation_effect":"prevent_any_damage", "activation_amount":1, "activation_text":"Prevent the next 1 damage that would be dealt to any target this turn"},
     "lea:106": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
@@ -557,6 +558,7 @@ ALPHA_SPELLS = {
     "lea:124": {"effect":"sacrifice_mana", "additional_sacrifice_creature":True, "sacrifice_mana_color":"B"},
     "lea:128": {"effect":"simulacrum"},
     "lea:214": {"effect":"return_grave_card_hand"},
+    "lea:77": {"effect":"siren_call"},
 }
 
 ALPHA_DAMAGE_TRIGGERS = {

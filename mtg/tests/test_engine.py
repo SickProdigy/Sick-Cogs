@@ -48,7 +48,7 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("forced_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("bodyguard_choice"); player.pop("lands_played_this_turn"); player.pop("channel_active")
             for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("redirect_source_damage_to_player"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
@@ -3744,5 +3744,39 @@ class AlphaVeteranBodyguardTests(unittest.TestCase):
     def test_duplicate_choice_persists_and_controls_redirect_destination(self):
         game=ready(); attacker=Permanent(game.next_uid,"giant",owner=10,sick=False); game.cards[attacker.uid]="giant"; game.next_uid+=1; first=Permanent(game.next_uid,"lea:41",owner=20,sick=False); game.cards[first.uid]="lea:41"; game.next_uid+=1; second=Permanent(game.next_uid,"lea:41",owner=20,sick=False); game.cards[second.uid]="lea:41"; game.next_uid+=1; game.player(10).battlefield=[attacker]; game.player(20).battlefield=[first,second]; game.attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=20
         game.choose_bodyguard(20,2); restored=Game.from_raw(game.to_raw()); restored._combat_damage(False); self.assertEqual(restored.find_permanent(first.uid)[1].damage,0); self.assertEqual(restored.find_permanent(second.uid)[1].damage,3)
+
+class AlphaForcedAttackTests(unittest.TestCase):
+    def add(self,game,user,key,tapped=False,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,tapped=tapped,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_nettling_imp_forces_eligible_target_and_persists_delayed_consequence(self):
+        game=ready(); target=self.add(game,10,"bear"); imp=self.add(game,20,"lea:117"); game.active_index=0; game.phase="precombat_main"; game.priority_user=20
+        game.activate_ability(20,1,"10:1"); ability=game.stack.pop(); game._resolve_ability(ability)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.forced_attackers,[target.uid]); self.assertEqual(restored.end_step_destroys[0].ability_effect,"forced_end_step_destroy")
+        restored.phase="attackers"
+        with self.assertRaisesRegex(GameError,"must attack"): restored.declare_attackers(10,[])
+        restored.declare_attackers(10,[1]); trigger=restored.end_step_destroys[0]; restored._resolve_ability(trigger); self.assertIsNotNone(restored.find_permanent(target.uid)[1])
+
+    def test_nettling_imp_timing_eligibility_and_regenerable_failure_to_attack(self):
+        game=ready(); target=self.add(game,10,"bear",tapped=True); imp=self.add(game,20,"lea:117"); game.active_index=0; game.phase="postcombat_main"; game.priority_user=20
+        with self.assertRaisesRegex(GameError,"before attackers"): game.activate_ability(20,1,"10:1")
+        game.phase="precombat_main"; game.activate_ability(20,1,"10:1"); ability=game.stack.pop(); game._resolve_ability(ability); target.regeneration_shields=1; game._resolve_ability(game.end_step_destroys[0]); self.assertIsNotNone(game.find_permanent(target.uid)[1]); self.assertTrue(target.tapped)
+        sick=ready(); self.add(sick,10,"bear",sick=True); self.add(sick,20,"lea:117"); sick.phase="precombat_main"; sick.priority_user=20
+        with self.assertRaisesRegex(GameError,"controlled since"): sick.activate_ability(20,1,"10:1")
+
+    def test_sirens_call_snapshots_eligible_creatures_and_destroys_only_nonattackers(self):
+        game=ready(); attacker=self.add(game,10,"bear"); nonattacker=self.add(game,10,"giant",tapped=True); wall=self.add(game,10,"lea:42"); newcomer=self.add(game,10,"bear",sick=True)
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:77"; game._resolve(Spell(20,uid,"lea:77"))
+        self.assertEqual(set(game.forced_attackers),{attacker.uid,nonattacker.uid}); self.assertEqual(len(game.end_step_destroys),2)
+        restored=Game.from_raw(game.to_raw()); restored.phase="attackers"; restored.declare_attackers(10,[1])
+        for trigger in list(restored.end_step_destroys): restored._resolve_ability(trigger)
+        self.assertIsNotNone(restored.find_permanent(attacker.uid)[1]); self.assertIsNone(restored.find_permanent(nonattacker.uid)[1]); self.assertIsNotNone(restored.find_permanent(wall.uid)[1]); self.assertIsNotNone(restored.find_permanent(newcomer.uid)[1])
+
+    def test_sirens_call_rejects_wrong_turn_or_late_cast(self):
+        game=ready(); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:77"; game.player(20).hand=[uid]; self.add(game,20,"island"); game.phase="precombat_main"; game.priority_user=20; game.active_index=1
+        with self.assertRaisesRegex(GameError,"opponent.*before attackers"): game.play(20,1)
+        game.active_index=0; game.phase="after_attackers"; game.priority_user=20
+        with self.assertRaisesRegex(GameError,"opponent.*before attackers"): game.play(20,1)
 
 if __name__=="__main__": unittest.main()

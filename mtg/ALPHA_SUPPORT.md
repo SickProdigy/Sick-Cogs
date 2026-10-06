@@ -7,8 +7,8 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 69 creatures playable through 0.94.0; 8 remain |
-| Instants and sorceries | 70 | 58 spells playable through 0.91.0; 12 remain |
+| Creatures with abilities | 77 | 70 creatures playable through 0.95.0; 7 remain |
+| Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
 | Enchantments | 68 | 60 enchantments playable through 0.90.0; 8 remain |
 | Artifacts | 42 | Thirty-seven artifacts playable through 0.93.0; 5 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -210,3 +210,5 @@ The 0.92.0 permanent-replacement promotion adds Forcefield and Personal Incarnat
 The 0.93.0 source-redirection promotion adds Jade Monolith. Its activation accepts a stable source choice from the stack or battlefield plus a separately targeted creature, preserves both through the response window and reloads, and redirects that source’s next damage event from the creature to the Monolith controller. The replacement consumes only on matching damage, target removal safely fizzles the ability, unused effects clear at cleanup, and spell, activated-ability, mass, and combat damage now carry consistent source identity. Discord rendering and solo AI use the same source-and-target path.
 
 The 0.94.0 unblocked-redirection promotion adds Veteran Bodyguard. During combat, actual unblocked-attacker damage is dealt to an eligible untapped Bodyguard instead of its controller, while creatures that became blocked remain blocked and trample excess is not redirected. A persisted requester action chooses among duplicate eligible Bodyguards before damage; a single eligible copy works automatically, and stale, tapped, or removed choices fall back only to another currently eligible copy. The choice, public rendering, cleanup, and solo AI share the same combat state.
+
+The 0.95.0 forced-attack promotion adds Nettling Imp and Siren’s Call. Both are restricted to an opponent’s turn before attackers, snapshot only non-Wall creatures the active player controlled continuously since the turn began, require those creatures to attack if able, and schedule persisted next-end-step destruction for each one that did not attack. The destruction permits regeneration, survives source removal and control changes, and cannot attach to a returned object with the same card identity. Public rendering and solo AI consume the shared forced-attacker state.
