@@ -117,6 +117,13 @@ class BattleRenderer:
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
+    async def starter(self,pokemon):
+        data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
+        try:
+            return await self._render(self._starter_sync,pokemon,data)
+        except (OSError,ValueError) as exc:
+            raise RenderError("Starter reveal rendering failed.") from exc
+
     async def battle(self, battle):
         front = await self.get_sprite(battle.wild_species_id)
         try:
@@ -154,6 +161,26 @@ class BattleRenderer:
             raise RenderError("Rendered image exceeds Discord's upload limit.")
         output.seek(0)
         return output
+
+    def _starter_sync(self,pokemon,data):
+        canvas=Image.new("RGB",(800,450),RETRO[5]);draw=ImageDraw.Draw(canvas)
+        for y in range(330):
+            ratio=y/329;color=tuple(round(a+(b-a)*ratio) for a,b in zip((151,205,224),(229,238,207)))
+            draw.line((0,y,800,y),fill=color)
+        draw.rectangle((0,270,800,360),fill=(111,157,91))
+        draw.ellipse((285,245,650,345),fill=RETRO[2],outline=RETRO[0],width=4)
+        # An original, simple opened-ball symbol marks this as receiving a partner.
+        draw.pieslice((105,230,245,370),180,360,fill=(205,63,58),outline=RETRO[0],width=5)
+        draw.pieslice((105,250,245,390),0,180,fill=RETRO[7],outline=RETRO[0],width=5)
+        draw.line((107,300,243,300),fill=RETRO[0],width=7);draw.ellipse((157,282,193,318),fill=RETRO[7],outline=RETRO[0],width=5)
+        for end in ((125,205),(175,190),(225,205),(260,235)):draw.line((175,245,*end),fill=RETRO[3],width=5)
+        image=self._open(data,(250,220),trim=True,upscale=True)
+        canvas.paste(image,(465-image.width//2,290-image.height),image)
+        species=SPECIES[pokemon.species_id];symbol={"female":"♀","male":"♂","genderless":"—"}.get(pokemon.gender,"?")
+        draw.rounded_rectangle((20,350,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
+        draw.text((45,370),f"You received {species.name}!",fill=RETRO[0],font=ImageFont.load_default(size=26))
+        draw.text((45,407),f"Lv.{pokemon.level}  {symbol}  Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
         canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)

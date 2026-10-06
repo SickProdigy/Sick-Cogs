@@ -247,6 +247,7 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         section=StoredSection(conf);encounters=StoredEncounters();encounters.value={"9":{"state":"open"}}
         cog=Pokemon.__new__(Pokemon);cog.locks={};cog.battles={}
         cog.config=SimpleNamespace(user=lambda user:section,encounters=encounters)
+        cog.rendered_starter=AsyncMock(return_value=(discord.Embed(title="You received Charmander!"),[]))
         response=SimpleNamespace(send_message=AsyncMock(),edit_message=AsyncMock())
         interaction=SimpleNamespace(user=SimpleNamespace(id=42,display_name="Trainer"),response=response)
         await cog.claim(interaction,9)
@@ -258,7 +259,11 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         await cog.choose_starter(interaction,4,9)
         self.assertTrue(section.value["starter_chosen"])
         self.assertEqual(section.value["collection"][0]["species_id"],4)
-        self.assertIn("Press **Encounter** again",response.edit_message.await_args.kwargs["content"])
+        edited=response.edit_message.await_args.kwargs
+        self.assertEqual(edited["embed"].title,"You received Charmander!")
+        self.assertEqual(edited["attachments"],[])
+        self.assertIsNone(edited["view"])
+        cog.rendered_starter.assert_awaited_once_with(unittest.mock.ANY,9)
         self.assertIsNone(await cog.grant_starter(interaction.user,7))
         self.assertEqual(len(section.value["collection"]),1)
 
