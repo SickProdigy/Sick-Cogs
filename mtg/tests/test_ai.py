@@ -433,6 +433,16 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_casts_mind_twist_for_the_opponents_remaining_hand(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        game.player(HUMAN).hand=game.player(HUMAN).hand[:2]
+        spell=self.add(game,AI,"lea:115","hand"); [self.add(game,AI,"swamp") for _ in range(4)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].uid,spell)
+        self.assertEqual((game.stack[-1].target,game.stack[-1].x_value),(str(HUMAN),2))
+        game.pass_priority(HUMAN); advance_solo(game)
+        self.assertEqual(game.player(HUMAN).hand,[]); self.assertIn(spell,game.player(AI).graveyard)
+
     def test_ai_casts_time_walk_and_queues_its_extra_turn(self):
         game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         spell=self.add(game,AI,"lea:83","hand"); self.add(game,AI,"island"); self.add(game,AI,"island")

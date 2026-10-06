@@ -2033,6 +2033,49 @@ class AlphaHiveTokenTests(unittest.TestCase):
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
 
 
+class AlphaRandomDiscardTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_mind_twist_uses_stable_player_and_random_x_discard(self):
+        game=ready(); player=game.player(10); opponent=game.player(20); player.hand=[]
+        spell=self.add(game,10,"lea:115","hand"); [self.add(game,10,"swamp") for _ in range(4)]
+        original=set(opponent.hand); grave_before=set(opponent.graveyard)
+        game.play(10,1,"20",3)
+        restored=Game.from_raw(game.to_raw()); pending=restored.stack[-1]
+        self.assertEqual((pending.target,pending.x_value),("20",3))
+        restored.pass_priority(20); restored.pass_priority(10)
+        self.assertEqual(len(restored.player(20).hand),len(original)-3)
+        discarded=set(restored.player(20).graveyard)-grave_before
+        self.assertEqual(len(discarded),3); self.assertTrue(discarded<=original)
+        self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_mind_twist_discards_only_the_available_cards(self):
+        game=ready(); target=game.player(20); target.hand=target.hand[:2]
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:115"
+        game._resolve(Spell(10,uid,"lea:115","20",x_value=7))
+        self.assertEqual(target.hand,[]); self.assertEqual(len(target.graveyard),2)
+
+    def test_hypnotic_specter_damage_creates_persisted_independent_trigger(self):
+        game=ready(); specter=self.add(game,10,"lea:112"); target=game.player(20); original=set(target.hand)
+        game.attackers=[specter.uid]; game.phase="after_blockers"; game.priority_user=10
+        game._combat_damage(False)
+        self.assertEqual(target.life,18); self.assertEqual(set(target.hand),original)
+        self.assertEqual(game.stack[-1].ability_effect,"opponent_damage_discard_random"); self.assertEqual(game.stack[-1].target,"20")
+        restored=Game.from_raw(game.to_raw()); saved=restored.find_permanent(specter.uid)[1]
+        restored.player(10).battlefield.remove(saved); restored.player(10).graveyard.append(saved.uid)
+        trigger=restored.stack.pop(); restored._resolve(trigger)
+        self.assertEqual(len(restored.player(20).hand),len(original)-1)
+        self.assertEqual(len(set(restored.player(20).graveyard)&original),1)
+
+    def test_prevented_specter_damage_does_not_trigger_discard(self):
+        game=ready(); specter=self.add(game,10,"lea:112"); game.player(20).damage_prevention=2
+        game.attackers=[specter.uid]; game.phase="after_blockers"; game._combat_damage(False)
+        self.assertEqual(game.player(20).life,20); self.assertEqual(game.stack,[])
+
+
 class AlphaManaShortTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

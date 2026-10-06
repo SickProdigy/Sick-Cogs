@@ -96,6 +96,7 @@ class Card:
     death_life: bool = False
     animate_combat: bool = False
     creates_token: str = ""
+    opponent_damage_discard_random: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -161,6 +162,7 @@ class Card:
             abilities.append(f"Whenever a player casts a {color_name} spell, you may pay {{1}} to gain 1 life")
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
+        if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
@@ -327,6 +329,7 @@ ALPHA_SPELLS = {
     "lea:32": {"effect":"set_color", "color_change":"W"},
     "lea:82": {"effect":"set_color", "color_change":"U"},
     "lea:83": {"effect":"extra_turn"},
+    "lea:115": {"effect":"discard_random_x"},
     "lea:101": {"effect":"set_color", "color_change":"B"},
     "lea:139": {"effect":"set_color", "color_change":"R"},
     "lea:207": {"effect":"set_color", "color_change":"G"},
@@ -370,6 +373,10 @@ ALPHA_SPELLS = {
     "lea:214": {"effect":"return_grave_card_hand"},
 }
 
+ALPHA_DAMAGE_TRIGGERS = {
+    "lea:112": {"opponent_damage_discard_random":True},
+}
+
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
@@ -382,6 +389,7 @@ ALPHA_KEYWORDS = {
     "lea:94": ("first_strike",),
     "lea:141": ("flying",),
     "lea:95": ("swampwalk",),
+    "lea:112": ("flying",),
     "lea:118": ("flying",),
     "lea:155": ("flying",),
     "lea:170": ("flying",),
@@ -493,6 +501,7 @@ for reference in PLAYABLE_ALPHA:
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
+        opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

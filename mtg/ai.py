@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -39,6 +39,8 @@ def _target(game, user, card):
         return str(game.opponent(user))
     if card.effect in ("draw_target","draw_target_x","life_target_x"):
         return str(user)
+    if card.effect=="discard_random_x":
+        opponent=game.player(game.opponent(user)); return str(opponent.user_id) if opponent.hand else None
     if card.effect=="mana_short":
         opponent=game.player(game.opponent(user))
         return str(opponent.user_id) if opponent.mana_pool or any(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield) else None
@@ -165,6 +167,8 @@ def _play_one(game, user, difficulty):
     for position, uid in enumerate(player.hand, 1):
         card = game.card(uid)
         x_value=game.max_payable_x(user,card) if "{X}" in card.mana_cost else None
+        if card.effect=="discard_random_x" and x_value is not None:
+            x_value=min(x_value,len(game.player(game.opponent(user)).hand))
         if card.land or (x_value is not None and x_value<1) or not game.can_pay(user,card,x_value or 0):
             continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
@@ -222,6 +226,8 @@ def _play_one(game, user, difficulty):
             score = 10 + card.amount
         elif card.effect=="draw_target_x":
             score=10+(x_value or 0)
+        elif card.effect=="discard_random_x":
+            score=12+2*(x_value or 0)
         elif card.effect in ("pump","pump_blocking"):
             score = 7 + card.amount
         elif card.effect=="pump_power_x":

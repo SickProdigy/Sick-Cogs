@@ -675,7 +675,7 @@ class Game:
             if c.effect=="pump_blocking" and permanent.uid not in self.blocks.values():
                 raise GameError(f"{c.name} must target a blocking creature.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("draw_target","draw_target_x","life_target_x","mana_short"):
+        if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
@@ -861,10 +861,20 @@ class Game:
         prevented=min(amount,permanent.damage_prevention); permanent.damage_prevention-=prevented; permanent.damage+=amount-prevented
         return amount-prevented
 
-    def _damage_player(self,user,amount):
+    def _discard_random(self,player,amount):
+        chosen=random.SystemRandom().sample(player.hand,min(max(0,int(amount)),len(player.hand)))
+        for uid in chosen: player.hand.remove(uid); player.graveyard.append(uid)
+        return chosen
+
+    def _damage_player(self,user,amount,source=None,source_controller=None):
         player=self.player(user); amount=max(0,int(amount)); prevented=min(amount,player.damage_prevention)
-        player.damage_prevention-=prevented; player.life-=amount-prevented
-        return amount-prevented
+        player.damage_prevention-=prevented; dealt=amount-prevented; player.life-=dealt
+        if dealt and source is not None and source_controller is not None and user==self.opponent(source_controller):
+            source_card=self.card(source.uid)
+            if source_card.opponent_damage_discard_random:
+                uid=self.next_uid; self.next_uid+=1; self.cards[uid]=source_card.key
+                self.stack.append(Spell(source_controller,uid,source_card.key,str(user),ability_effect="opponent_damage_discard_random",source_uid=source.uid,color_override=source.color_override))
+        return dealt
 
     def _combat_damage(self,first_strike):
         atk=self.players[self.active_user]; dfn=self.players[self.opponent(self.active_user)]
@@ -880,13 +890,13 @@ class Game:
                 power=max(0,self.current_stats(a)[0])
                 trample="trample" in self.current_keywords(a)
                 if b is None:
-                    if uid not in self.blocked_attackers or trample: self._damage_player(dfn.user_id,power)
+                    if uid not in self.blocked_attackers or trample: self._damage_player(dfn.user_id,power,a,atk.user_id)
                 else:
                     lethal=max(0,self.current_stats(b)[1]-b.damage)
                     chosen=self.trample_assignments.get(uid,lethal)
                     assigned=min(power,max(lethal,chosen)) if trample else power
                     self._damage_permanent(b,assigned,self.card(a.uid),self.current_colors(a))
-                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned))
+                    if trample: self._damage_player(dfn.user_id,max(0,power-assigned),a,atk.user_id)
             if blocker_strikes: self._damage_permanent(a,max(0,self.current_stats(b)[0]),self.card(b.uid),self.current_colors(b))
         self._sba(); self._life()
 
@@ -978,6 +988,8 @@ class Game:
         elif effect=="draw_tapped_damage":
             _,source=self.find_permanent(s.source_uid)
             if source is not None and source.tapped: self._damage_player(int(s.target),card.draw_tapped_damage)
+        elif effect=="opponent_damage_discard_random":
+            self._discard_random(self.player(int(s.target)),1)
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":
@@ -1072,6 +1084,7 @@ class Game:
         elif c.effect=="draw": self._draw(p,c.amount); p.graveyard.append(s.uid)
         elif c.effect in ("draw_target","draw_target_x"): self._draw(self.player(int(s.target)),s.x_value if c.effect=="draw_target_x" else c.amount); p.graveyard.append(s.uid)
         elif c.effect=="life_target_x": self.player(int(s.target)).life+=s.x_value; p.graveyard.append(s.uid)
+        elif c.effect=="discard_random_x": self._discard_random(self.player(int(s.target)),s.x_value); p.graveyard.append(s.uid)
         elif c.effect=="life": p.life+=c.amount; p.graveyard.append(s.uid)
         elif c.effect=="healing_salve":
             parts=s.target.split(":"); target_player=self.player(int(parts[1]))
