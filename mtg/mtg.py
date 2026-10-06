@@ -12,7 +12,7 @@ from .art import HAND_PAGE_SIZE, ArtError, ScryfallArtCache, render_battlefield,
 from .cards import BASE_CARDS, CARDS
 from .catalog import ALPHA_CARDS, ALPHA_SET, search_alpha
 from .engine import Game, GameError
-from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView, PrivateHandDecisionView
+from .views import CatalogDetailView, CatalogView, ChallengeView, GameView, HandPaginationView, LibrarySearchView, NaturalSelectionView, PrivateHandDecisionView
 
 log=logging.getLogger("red.sick-cogs.MTG")
 CONFIG_IDENTIFIER=813604927115
@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.102.0"
+    __version__="0.103.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -210,6 +210,7 @@ class MTG(commands.Cog):
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
                     if not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
+                    elif not item.ability_effect and g.card(item.uid).effect=="natural_selection": label+=" (controller is privately arranging the targeted library)"
                     elif not item.ability_effect and g.card(item.uid).enters_copy_types: label+=" (controller is choosing a permanent to copy)"
                     elif not item.ability_effect and g.card(item.uid).effect=="drain_power": label+=" (target player is choosing land mana)"
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
@@ -301,6 +302,26 @@ class MTG(commands.Cog):
         view=LibrarySearchView(self,game_id,user,page,pages,game)
         if editing: await interaction.edit_original_response(content=text,view=view)
         else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def send_natural_selection(self,interaction,game_id,editing=False):
+        game=self.games.get(game_id); user=interaction.user.id
+        try: _,target,entries=game.natural_selection_decision(user) if game else (_ for _ in ()).throw(GameError("This private library choice is unavailable."))
+        except GameError:
+            content="This private library choice is unavailable."
+            if editing: await interaction.edit_original_response(content=content,view=None)
+            else: await interaction.followup.send(content,ephemeral=True)
+            return
+        text=f"Natural Selection - top of {target.user_id}'s library\n"+"\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in entries)
+        view=NaturalSelectionView(self,game_id,user,entries)
+        if editing: await interaction.edit_original_response(content=text,view=view)
+        else: await interaction.followup.send(text,view=view,ephemeral=True)
+    async def complete_natural_selection(self,interaction,game_id,order,shuffle):
+        game=self.games.get(game_id)
+        if not game: await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
+        async with self.lock(game.game_id):
+            try: game.choose_natural_selection(interaction.user.id,order,shuffle); game.record(interaction.user.id,"natural_selection_shuffle" if shuffle else "natural_selection_order"); advance_solo(game); await self.save(game)
+            except (GameError,ValueError) as error: await interaction.response.send_message(str(error),ephemeral=True); return
+        await interaction.response.edit_message(content="Natural Selection completed.",view=None); await self.refresh_message(game)
+
     async def send_private_hand_decision(self,interaction,game_id,page,editing=False):
         game=self.games.get(game_id); user=interaction.user.id
         try: item,entries=game.private_hand_decision(user) if game else (_ for _ in ()).throw(GameError("This private hand decision is unavailable."))
@@ -600,6 +621,13 @@ class MTG(commands.Cog):
     async def leak(self,ctx,amount:int):
         """Choose how much mana to pay for a resolving Power Leak trigger."""
         await self.mutate_ctx(ctx,lambda g:g.choose_power_leak(ctx.author.id,amount),"power_leak")
+    @mtg.command(name="selection")
+    async def selection(self,ctx,*choices:str):
+        """Resolve Natural Selection with `shuffle` or a top-to-bottom position order."""
+        if len(choices)==1 and choices[0].casefold()=="shuffle": await self.mutate_ctx(ctx,lambda g:g.choose_natural_selection(ctx.author.id,shuffle=True),"natural_selection_shuffle"); return
+        try: order=tuple(int(value) for value in choices)
+        except ValueError: await ctx.send("Use `mtg selection shuffle` or `mtg selection 2 1 3`."); return
+        await self.mutate_ctx(ctx,lambda g:g.choose_natural_selection(ctx.author.id,order),"natural_selection_order")
     @mtg.command(name="copy")
     async def copy(self,ctx,controller_id:str="none",position:int=None):
         """Choose a permanent for Clone or Copy Artifact, or use `none`."""

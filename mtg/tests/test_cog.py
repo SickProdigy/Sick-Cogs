@@ -740,5 +740,16 @@ class TimeVaultRenderingTests(unittest.TestCase):
         view=GameView(cog,1); take=next(item for item in view.children if item.custom_id.endswith(":vault_take")); select=next(item for item in view.children if item.custom_id.endswith(":vault_skip")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
         self.assertFalse(take.disabled); self.assertEqual({option.value for option in select.options},{"1","2"}); self.assertTrue(passing.disabled); self.assertIn("must take their extra turn",str(cog.game_embed(game).to_dict()))
 
+class NaturalSelectionRenderingTests(unittest.IsolatedAsyncioTestCase):
+    async def test_private_order_controls_hide_library_from_public_state(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None)
+        game=Game(1,[10,20],1); game.player(20).library=[]
+        for key in ("mountain","bear","giant"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(20).library.append(uid)
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:212"; game.stack=[spell_type(10,spell,"lea:212","20",decision_pending=True,choice_owner=10)]; game.priority_user=10; cog.games={1:game}
+        view=GameView(cog,1); private=next(item for item in view.children if item.custom_id.endswith(":natural_selection")); self.assertFalse(private.disabled)
+        interaction=SimpleNamespace(user=SimpleNamespace(id=10),followup=SimpleNamespace(send=AsyncMock())); await cog.send_natural_selection(interaction,1); kwargs=interaction.followup.send.await_args.kwargs; self.assertTrue(kwargs["ephemeral"]); self.assertIn("Hill Giant",interaction.followup.send.await_args.args[0]); self.assertEqual(len(next(item for item in kwargs["view"].children if hasattr(item,"options")).options),7)
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("privately arranging",rendered); self.assertNotIn("Hill Giant",rendered); self.assertNotIn("Bear Cub",rendered)
+
 if __name__ == "__main__":
     unittest.main()

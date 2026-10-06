@@ -804,6 +804,10 @@ def advance_solo(game: Game):
                 choices=game.library_search(user)
                 position,_=max(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]))
                 game.choose_library(user,position); game.record(user,"ai_search_library"); changed=True; continue
+            if not trigger.ability_effect and game.card(trigger.uid).effect=="natural_selection":
+                _,target,entries=game.natural_selection_decision(user)
+                valued=sorted(entries,key=lambda item:(item[1].cost+item[1].power+item[1].toughness+2*len(item[1].keywords),-item[0]),reverse=target.user_id==user)
+                game.choose_natural_selection(user,tuple(position for position,_ in valued)); game.record(user,"ai_natural_selection"); changed=True; continue
             if trigger.ability_effect=="vesuvan_copy":
                 if trigger.choice_value==0:
                     owner,position,_=max(game.vesuvan_choices(trigger),key=lambda item:(sum(game.current_stats(item[2])),item[0]==user,-item[1])); game.choose_vesuvan_copy(user,owner,position); action="ai_vesuvan_target"

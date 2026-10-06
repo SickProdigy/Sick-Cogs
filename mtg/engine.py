@@ -1217,7 +1217,7 @@ class Game:
             target_user,permanent=self._target_creature(target)
             if target_user!=user: raise GameError("Simulacrum must target a creature you control.")
             return f"{target_user}:{permanent.uid}"
-        if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short","drain_power"):
+        if c.effect in ("draw_target","draw_target_x","life_target_x","discard_random_x","mana_short","drain_power","natural_selection"):
             try: target_user=int(target)
             except (TypeError,ValueError) as e: raise GameError("Target must be a player ID.") from e
             self.player(target_user); return str(target_user)
@@ -1276,6 +1276,8 @@ class Game:
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
                     s.decision_pending=True; self.priority_user=s.owner; return
+                if not s.ability_effect and self.card(s.uid).effect=="natural_selection" and self.player(int(s.target)).library:
+                    s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="drain_power" and self._drain_power_lands(s):
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="power_sink" and self._power_sink_target(s) is not None:
@@ -1358,6 +1360,28 @@ class Game:
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user
         self.log.append(f"{user} searched their library with {self.card(spell.uid).name}, put a card into their hand, then shuffled.")
+
+    def natural_selection_decision(self,user):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect or self.card(self.stack[-1].uid).effect!="natural_selection":
+            raise GameError("You do not have a Natural Selection choice to make.")
+        spell=self.stack[-1]; target=self.player(int(spell.target)); top=list(reversed(target.library[-3:]))
+        return spell,target,[(position,self.card(uid)) for position,uid in enumerate(top,1)]
+
+    def choose_natural_selection(self,user,order=None,shuffle=False):
+        spell,target,entries=self.natural_selection_decision(user); size=len(entries)
+        if bool(shuffle)==(order is not None): raise GameError("Choose either an ordering or shuffle.")
+        if shuffle: random.SystemRandom().shuffle(target.library); result=f"{user} had {target.user_id} shuffle their library with Natural Selection."
+        else:
+            try: order=tuple(int(value) for value in order)
+            except (TypeError,ValueError) as error: raise GameError(f"Order must contain each position from 1 to {size} exactly once.") from error
+            if len(order)!=size or set(order)!=set(range(1,size+1)): raise GameError(f"Order must contain each position from 1 to {size} exactly once.")
+            top=list(reversed(target.library[-size:])); target.library[-size:]=list(reversed([top[position-1] for position in order])); result=f"{user} arranged the top {size} cards of {target.user_id}'s library with Natural Selection."
+        self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0
+        if not self.finished: self.priority_user=self.active_user
+        self.log.append(result)
 
     def private_hand_decision(self,user):
         if self.finished: raise GameError("Game is over.")
@@ -2286,6 +2310,8 @@ class Game:
             if s.choice_value: p.mana_pool[c.sacrifice_mana_color]=p.mana_pool.get(c.sacrifice_mana_color,0)+s.choice_value
             p.graveyard.append(s.uid)
         elif c.effect=="search_library":
+            p.graveyard.append(s.uid)
+        elif c.effect=="natural_selection":
             p.graveyard.append(s.uid)
         elif c.effect=="siren_call":
             active=self.player(self.active_user)

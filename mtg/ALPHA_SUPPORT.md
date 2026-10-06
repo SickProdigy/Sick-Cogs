@@ -7,8 +7,8 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 73 creatures playable through 0.102.0; 4 remain |
-| Instants and sorceries | 70 | 59 spells playable through 0.95.0; 11 remain |
+| Creatures with abilities | 77 | 73 creatures playable through 0.103.0; 4 remain |
+| Instants and sorceries | 70 | 60 spells playable through 0.103.0; 10 remain |
 | Enchantments | 68 | 63 enchantments playable through 0.101.0; 5 remain |
 | Artifacts | 42 | 39 artifacts playable through 0.99.0; 3 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
@@ -226,3 +226,6 @@ The 0.100.0 variable-payment promotion adds Power Leak. It enchants an enchantme
 The 0.101.0 copy-permanent promotion adds Clone and Copy Artifact. After both players respond, their controller makes a persisted optional choice from the current battlefield without targeting. A shared effective-card layer copies printed characteristics and copy effects while keeping the physical card's identity for later zones; Copy Artifact remains an enchantment in addition to the copied artifact types. Copied entry characteristics, copied activations, copy-of-copy flattening, reload recovery, Discord controls and rendering, and solo AI all use the same layer.
 
 The 0.102.0 recurring-copy promotion adds Vesuvan Doppelganger. Its entry choice shares the nontargeting copy layer while preserving blue and retaining its upkeep ability. Each upkeep now requires a legal target before the response window, then offers the optional become-or-keep decision at resolution; protection, target loss, source loss, copied added types, copy-of-copy propagation, reload recovery, Discord controls and rendering, and solo AI use the same persisted stages.
+
+
+The 0.103.0 private-library ordering promotion adds Natural Selection. Its target is fixed while players respond, then its controller privately sees the top three cards and chooses an exact top-to-bottom permutation or has that player shuffle. The requester-bound ephemeral selector and text command expose no card names publicly; persistence, stale or foreign rejection, atomic validation, empty libraries, and solo AI use the same resolution-time choice. Catalog verification remains aggregate across all 295 printings rather than duplicating a test for every card row.

@@ -1,4 +1,5 @@
 import asyncio
+from itertools import permutations
 import discord
 from .engine import GameError
 
@@ -117,6 +118,8 @@ class GameView(discord.ui.View):
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand"))
+            if game and action=="natural_selection":
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
             if game and action in ("sanctuary_draw","sanctuary_skip"): item.disabled=not game.sanctuary_draw_pending or game.active_user is None
             if game and action=="concede": item.disabled=game.finished
@@ -150,6 +153,10 @@ class GameView(discord.ui.View):
     async def private_hand(self,i,b):
         await i.response.defer(ephemeral=True,thinking=True)
         await self.cog.send_private_hand_decision(i,self.game_id,0,editing=False)
+    @discord.ui.button(label="Private library choice",style=discord.ButtonStyle.secondary,custom_id="natural_selection")
+    async def natural_selection(self,i,b):
+        await i.response.defer(ephemeral=True,thinking=True)
+        await self.cog.send_natural_selection(i,self.game_id,editing=False)
     @discord.ui.button(label="Keep hand",style=discord.ButtonStyle.success,custom_id="keep")
     async def keep(self,i,b): await self.cog.act(i,self.game_id,lambda g:g.mulligan(i.user.id,True),"keep")
     @discord.ui.button(label="Mulligan",style=discord.ButtonStyle.secondary,custom_id="mulligan")
@@ -211,6 +218,26 @@ class LibrarySearchView(discord.ui.View):
     @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
     async def next(self,interaction,button):
         await interaction.response.defer(); await self.cog.send_library_search(interaction,self.game_id,self.page+1,editing=True)
+
+class NaturalSelectionSelect(discord.ui.Select):
+    def __init__(self,browser,entries):
+        options=[]; size=len(entries)
+        for order in permutations(range(1,size+1)):
+            names=" / ".join(entries[position-1][1].name for position in order)
+            options.append(discord.SelectOption(label=("Order "+"-".join(map(str,order)))[:100],description=names[:100],value=",".join(map(str,order))))
+        options.append(discord.SelectOption(label="Shuffle the library",description="Use Natural Selection's optional shuffle",value="shuffle"))
+        super().__init__(placeholder="Choose the new top-to-bottom order or shuffle",min_values=1,max_values=1,options=options)
+        self.browser=browser
+    async def callback(self,interaction):
+        value=self.values[0]; order=None if value=="shuffle" else tuple(int(item) for item in value.split(","))
+        await self.browser.cog.complete_natural_selection(interaction,self.browser.game_id,order,value=="shuffle")
+
+class NaturalSelectionView(discord.ui.View):
+    def __init__(self,cog,game_id,user_id,entries):
+        super().__init__(timeout=300); self.cog,self.game_id,self.user_id=cog,game_id,user_id; self.add_item(NaturalSelectionSelect(self,entries))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id: return True
+        await interaction.response.send_message("This private library choice belongs to another player.",ephemeral=True); return False
 
 class PrivateHandSelect(discord.ui.Select):
     def __init__(self,browser,entries):

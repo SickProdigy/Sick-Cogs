@@ -3957,4 +3957,27 @@ class AlphaCopyPermanentTests(unittest.TestCase):
         self.assertEqual(game.stack[-1].choice_value,2); game.choose_vesuvan_copy(10,accept=False); self.assertFalse(game.stack); self.assertEqual(game.card(source.uid).name,"Hill Giant")
         no_target=ready(); blocked=self.add(no_target,10,"lea:87",copy_key="giant",copy_colors=["U"],copy_upkeep_creature=True); blue_ward=self.add(no_target,10,"lea:8"); blue_ward.attached_to=blocked.uid; no_target.active_index=0; no_target._begin_upkeep(); self.assertFalse(no_target.stack)
 
+class AlphaNaturalSelectionTests(unittest.TestCase):
+    def pending(self,target=20):
+        game=ready(); player=game.player(target); player.library=[]
+        for key in ("mountain","bear","giant"):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; player.library.append(uid)
+        spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:212"; game.stack=[Spell(10,spell,"lea:212",str(target))]; game.phase="precombat_main"; game.priority_user=10
+        game.pass_priority(10); game.pass_priority(20); return game,spell
+
+    def test_target_resolution_private_order_and_atomic_validation(self):
+        game,spell=self.pending(); self.assertEqual(game._target_for_cast(CARDS["lea:212"],10,"20"),"20"); self.assertTrue(game.stack[-1].decision_pending)
+        restored=Game.from_raw(game.to_raw()); _,target,entries=restored.natural_selection_decision(10); self.assertEqual([card.name for _,card in entries],["Hill Giant","Bear Cub","Mountain"])
+        before=list(target.library)
+        with self.assertRaisesRegex(GameError,"exactly once"): restored.choose_natural_selection(10,(1,1,2))
+        self.assertEqual(target.library,before); restored.choose_natural_selection(10,(2,3,1)); self.assertEqual([restored.card(uid).name for uid in reversed(target.library)],["Bear Cub","Mountain","Hill Giant"]); self.assertIn(spell,restored.player(10).graveyard)
+        self.assertNotIn("Bear Cub",restored.log[-1]); self.assertNotIn("Mountain",restored.log[-1])
+
+    def test_foreign_shuffle_and_empty_library_paths(self):
+        game,spell=self.pending(10)
+        with self.assertRaisesRegex(GameError,"do not have"): game.natural_selection_decision(20)
+        original=set(game.player(10).library); game.choose_natural_selection(10,shuffle=True); self.assertEqual(set(game.player(10).library),original); self.assertIn(spell,game.player(10).graveyard)
+        empty=ready(); empty.player(20).library=[]; uid=empty.next_uid; empty.next_uid+=1; empty.cards[uid]="lea:212"; empty.stack=[Spell(10,uid,"lea:212","20")]; empty.phase="precombat_main"; empty.priority_user=10; empty.pass_priority(10); empty.pass_priority(20)
+        self.assertFalse(empty.stack); self.assertIn(uid,empty.player(10).graveyard)
+
 if __name__=="__main__": unittest.main()
