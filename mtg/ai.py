@@ -871,12 +871,39 @@ def advance_solo(game: Game):
             game.choose_camouflage(user,piles); game.record(user,"ai_camouflage_piles"); changed=True; continue
         if game.phase == "blockers":
             if game.opponent(game.active_user) != user:
+                defender = game.player(game.opponent(game.active_user))
+                if (
+                    game.turn == 1
+                    and all(game.card(permanent.uid).land for permanent in game.player(user).battlefield)
+                    and not any(
+                        game.is_creature(permanent) and not permanent.tapped
+                        for permanent in defender.battlefield
+                    )
+                ):
+                    game.declare_blockers(defender.user_id, {})
+                    game.record(defender.user_id, "auto_no_blocks")
+                    changed = True
+                    continue
                 return changed
             game.declare_blockers(user, _blocks(game, user, difficulty))
             game.record(user, "ai_block")
             changed = True
             continue
         if game.priority_user != user:
+            human = game.priority_user
+            if (
+                game.turn == 1
+                and game.active_user == user
+                and human is not None
+                and all(game.card(permanent.uid).land for permanent in game.player(user).battlefield)
+                and not game.stack
+                and not game.player(human).battlefield
+                and not game.player(human).mana_pool
+            ):
+                game.pass_priority(human)
+                game.record(human, "auto_pass", "No legal opening-turn response.")
+                changed = True
+                continue
             return changed
         if _assign_attacker_damage(game,user): game.record(user,"ai_attacker_damage"); changed=True; continue
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue

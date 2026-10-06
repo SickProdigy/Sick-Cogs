@@ -71,7 +71,7 @@ class SoloAITests(unittest.TestCase):
         self.assertIn(uid,[permanent.uid for permanent in player.battlefield])
         self.assertTrue(any(event["action"]=="ai_play_land" for event in game.history))
 
-    def test_ai_uses_normal_game_actions_until_human_priority(self):
+    def test_ai_opening_turn_advances_to_humans_first_turn(self):
         game = solo(order=(AI, HUMAN))
         advance_solo(game)
         player = game.player(AI)
@@ -81,8 +81,11 @@ class SoloAITests(unittest.TestCase):
         game.mulligan(HUMAN, True)
         advance_solo(game)
         self.assertTrue(any(game.card(permanent.uid).land for permanent in player.battlefield))
+        self.assertEqual(game.active_user, HUMAN)
+        self.assertEqual(game.phase, "precombat_main")
         self.assertEqual(game.priority_user, HUMAN)
         self.assertTrue(any(event["action"] == "ai_play_land" for event in game.history))
+        self.assertTrue(any(event["action"] == "auto_pass" for event in game.history))
 
     def test_solo_ai_can_finish_a_complete_match_through_public_actions(self):
         game = solo(order=(AI, HUMAN))
