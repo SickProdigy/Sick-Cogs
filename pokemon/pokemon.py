@@ -19,7 +19,7 @@ from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightV
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
 GUILD={"enabled":False,"channels":[],"activity":0,"threshold":12,"threshold_min":8,"threshold_max":15,"active_encounter":None,"encounter_timeout":900,"battle_timeout":1800,"spawn_cooldown":120,"last_spawn_at":None,"generations":[1],"pace":"normal","center_channel":None}
-USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
+USER={"collection":[],"party":[],"balls":10,"starter_chosen":False,"transactions":{},"pokedex_seen":[],"pokedex_caught":[],"pokedex_style":"default","trainer_card_style":"retro","badges":[],"items":{"potion":5,"revive":2},"center_last_at":None}
 GLOBAL={"schema":5,"next_encounter":1,"encounters":{},"pokedex_default_style":"retro","encounter_timeout":900,"allowed_generations":[1],"minimum_threshold":8,"minimum_cooldown":120,"rarity_profile":"friendly","allow_special_species":False}
 BOX_SIZE=30
 MAX_BOXES=10
@@ -58,6 +58,9 @@ def rarity_tier(species):
     if species.catch_rate>=45:return "rare"
     return "very_rare"
 
+def first_pokedex_registration(conf,species_id):
+    return int(species_id) not in {int(value) for value in conf.get("pokedex_caught",[]) if str(value).isdigit()}
+
 def spawn_weight(species,profile="friendly"):
     weights=RARITY_PROFILES.get(profile,RARITY_PROFILES["friendly"])
     return weights[rarity_tier(species)]
@@ -91,7 +94,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.23.0";__author__="SickProdigy"
+    __version__="0.24.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -292,6 +295,25 @@ class Pokemon(commands.Cog):
         except RenderError:
             log.exception("Progression rendering failed");return embed,[]
 
+    async def rendered_pokedex_registration(self,pokemon):
+        species=SPECIES[pokemon.species_id]
+        embed=discord.Embed(title=f"{species.name} was registered!",description="New Pokémon data was added to your Pokédex.",color=discord.Color.red())
+        try:
+            image=await self.renderer.pokedex_registration(pokemon);embed.set_image(url="attachment://pokedex-registration.png")
+            return embed,[discord.File(image,filename="pokedex-registration.png")]
+        except RenderError:
+            log.exception("Pokédex registration rendering failed");return embed,[]
+
+    async def rendered_trainer_card(self,user,conf):
+        style=conf.get("trainer_card_style","retro")
+        if style not in {"retro","gold"}:style="retro"
+        embed=trainer_profile_embed(user,conf,MAX_COLLECTION)
+        try:
+            image=await self.renderer.trainer_card(user.display_name,conf,style);embed.set_image(url="attachment://trainer-card.png")
+            return embed,[discord.File(image,filename="trainer-card.png")]
+        except RenderError:
+            log.exception("Trainer card rendering failed");return embed,[]
+
     async def send_progression(self,interaction,battle):
         if battle.evolved_from:
             embed,files=await self.rendered_progression(battle.player,evolved_from=battle.evolved_from)
@@ -415,6 +437,7 @@ class Pokemon(commands.Cog):
             if conf["balls"]<1 and not tx.get("ball_charged"):await i.response.send_message("You have no Poké Balls.",ephemeral=True);return
             if not tx.get("ball_charged"):
                 conf["balls"]-=1;tx["ball_charged"]=True;conf["transactions"][tx_key]=tx
+            first_registration=False
             try:caught=battle.throw_ball()
             except BattleError as e:await i.response.send_message(str(e),ephemeral=True);return
             if caught:
@@ -423,6 +446,7 @@ class Pokemon(commands.Cog):
                 if not any(p["instance_id"]==identity for p in conf["collection"]):conf["collection"].append(pokemon.raw())
                 seen={int(value) for value in conf.get("pokedex_seen",[])}
                 caught_ids={int(value) for value in conf.get("pokedex_caught",[])}
+                first_registration=first_pokedex_registration(conf,pokemon.species_id)
                 seen.add(pokemon.species_id);caught_ids.add(pokemon.species_id)
                 conf["pokedex_seen"]=sorted(seen);conf["pokedex_caught"]=sorted(caught_ids)
                 if len(conf["party"])<6 and identity not in conf["party"]:conf["party"].append(identity)
@@ -432,6 +456,9 @@ class Pokemon(commands.Cog):
             if battle.state!="active":await self.clear_guild(battle.guild_id,eid)
             embed,files=await self.rendered_battle(battle)
             await i.response.edit_message(embed=embed,attachments=files,view=None if battle.state!="active" else BattleView(self,eid))
+            if first_registration:
+                registration,registration_files=await self.rendered_pokedex_registration(pokemon)
+                await i.followup.send(embed=registration,files=registration_files)
             if battle.state!="active":await self.send_progression(i,battle)
     async def save_battle(self,b):
         seconds=await self.config.guild_from_id(b.guild_id).battle_timeout()
@@ -803,10 +830,23 @@ class Pokemon(commands.Cog):
                 raise
 
     @pokemon.command(name="profile")
-    async def profile(self,ctx):
-        """View your trainer profile and Kanto badge case."""
-        conf=await self.config.user(ctx.author).all()
-        await ctx.send(embed=trainer_profile_embed(ctx.author,conf,MAX_COLLECTION))
+    async def profile(self,ctx,user:discord.Member=None):
+        """View your or another member’s trainer card and badge case."""
+        target=user or ctx.author;conf=await self.config.user(target).all()
+        embed,files=await self.rendered_trainer_card(target,conf)
+        await ctx.send(embed=embed,files=files)
+
+    @pokemon.command(name="profilestyle",aliases=["cardstyle"])
+    async def profile_style(self,ctx,style:str=None):
+        """Choose the Retro or Gold style for your trainer card."""
+        current=await self.config.user(ctx.author).trainer_card_style()
+        if style is None:
+            await ctx.send(f"Trainer-card style: **{current}**. Choices: retro, gold.");return
+        style=style.casefold()
+        if style not in {"retro","gold"}:
+            await ctx.send("Unknown style. Choose: retro or gold.");return
+        await self.config.user(ctx.author).trainer_card_style.set(style)
+        await ctx.send(f"Trainer-card style set to **{style}**.")
     @commands.group(name="pokemonset",aliases=["pokeset","pkmnset"],invoke_without_command=True)
     @commands.guild_only()
     @commands.admin_or_permissions(manage_guild=True)

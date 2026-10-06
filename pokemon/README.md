@@ -31,7 +31,7 @@ Collections are global only within one bot installation. Separate bots do not sh
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemonset spawn` while testing.
 7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
 
-Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `moves`, `profile`, `bag`, `use potion <slot-or-name>`, `use revive <slot-or-name>`, and `center`. Defeating a wild Pokémon awards full XP; catching it awards half that XP and adds the encountered Pokémon at its wild level. When a Pokémon already knows four moves, its next species-authentic level-up move pauses for the trainer to choose a move to forget or give up learning it; use `[p]pokemon moves` to reopen an interrupted choice. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemonset catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `moves`, `profile [@member]`, `profilestyle retro|gold`, `bag`, `use potion <slot-or-name>`, `use revive <slot-or-name>`, and `center`. Defeating a wild Pokémon awards full XP; catching it awards half that XP and adds the encountered Pokémon at its wild level. When a Pokémon already knows four moves, its next species-authentic level-up move pauses for the trainer to choose a move to forget or give up learning it; use `[p]pokemon moves` to reopen an interrupted choice. The first successful catch of each species displays a dedicated Pokédex registration card; repeat catches skip it. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemonset catalogsync <1-9>`.
 
 
 ## Encounter fairness and control
@@ -46,7 +46,7 @@ Battle HP and supported status now persist on owned Pokémon. Use `[p]pokemon ce
 
 ## Trainer profile and Kanto Gyms
 
-`[p]pokemon profile` displays the trainer's badge case, Pokédex progress, collection, bag, partner level/XP, and next Gym. Trainers challenge Brock through Giovanni in order. Each first victory awards that leader's badge exactly once; rematches are not required for progression. Gym battles award ordinary Pokémon battle XP, cannot award or consume a caught Gym Pokémon, and occupy the server's encounter slot until victory, defeat, forfeit, or expiry.
+`[p]pokemon profile [@member]` displays your or another server member's generated trainer card, badge case, Pokédex progress, collection, bag, partner level/XP, and next Gym. Trainers challenge Brock through Giovanni in order. Members choose their own Retro or Gold card with `[p]pokemon profilestyle retro|gold`; viewers see the trainer's saved style. Each first victory awards that leader's badge exactly once; rematches are not required for progression. Gym battles award ordinary Pokémon battle XP, cannot award or consume a caught Gym Pokémon, and occupy the server's encounter slot until victory, defeat, forfeit, or expiry.
 
 The initial Gym milestone uses each leader's signature Pokémon as a restart-safe ace challenge. Full leader teams are deliberately deferred until opponent-party support is added to the battle engine; badge storage and ordering do not need to change for that expansion.
 
