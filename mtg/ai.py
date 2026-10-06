@@ -559,6 +559,10 @@ def advance_solo(game: Game):
             return changed
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]; source=game.find_permanent(trigger.source_uid)[1]
+            if trigger.ability_effect=="upkeep_sacrifice":
+                choices=game.trigger_sacrifice_choices(trigger)
+                position,_=min(choices,key=lambda item:(game.card(item[1].uid).cost+sum(game.current_stats(item[1])),item[0]))
+                game.choose_trigger(user,True,position); game.record(user,"ai_trigger_sacrifice"); changed=True; continue
             if trigger.ability_effect=="upkeep_untap":
                 useful=source is not None and source.tapped
             elif trigger.ability_effect=="upkeep_cost":

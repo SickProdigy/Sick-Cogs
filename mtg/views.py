@@ -19,6 +19,16 @@ class ChallengeView(discord.ui.View):
     @discord.ui.button(label="Decline",style=discord.ButtonStyle.secondary)
     async def decline(self,i,b): self.stop(); await i.response.edit_message(content="Challenge declined.",view=None)
 
+class SacrificeSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game,trigger):
+        self.cog,self.game_id=cog,game_id
+        choices=game.trigger_sacrifice_choices(trigger)[:25]
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description="Sacrifice this creature"[:100],value=str(position)) for position,permanent in choices]
+        super().__init__(placeholder="Choose a creature to sacrifice",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:sacrifice")
+    async def callback(self,i):
+        position=int(self.values[0])
+        await self.cog.act(i,self.game_id,lambda g:g.choose_trigger(i.user.id,True,position),"trigger_sacrifice")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -30,9 +40,12 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending)
-                item.disabled=not pending
+                mandatory=bool(pending and game.stack[-1].ability_effect=="upkeep_sacrifice")
+                item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
             if game and action=="concede": item.disabled=game.finished
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="upkeep_sacrifice" and game.trigger_sacrifice_choices(game.stack[-1]):
+            self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
         if game and game.finished:

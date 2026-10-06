@@ -2380,6 +2380,38 @@ class AlphaCreatureUpkeepTests(unittest.TestCase):
         restored=Game.from_raw(damaged.to_raw()); restored.choose_trigger(10,False)
         self.assertEqual(restored.player(10).life,15); self.assertEqual(restored.player(10).damage_prevention,0)
 
+    def test_lord_of_the_pit_requires_an_explicit_other_creature_sacrifice(self):
+        game=ready(); lord=self.add(game,10,"lea:114"); victim=self.add(game,10,"bear"); victim.regeneration_shields=1
+        game._start_turn(); self.resolve_top(game); trigger=game.stack[-1]
+        self.assertTrue(trigger.decision_pending); self.assertEqual(game.trigger_accept_label(trigger),"Choose a creature")
+        self.assertEqual([(position,permanent.uid) for position,permanent in game.trigger_sacrifice_choices(trigger)],[(2,victim.uid)])
+        with self.assertRaisesRegex(GameError,"requires you"): game.choose_trigger(10,False)
+        with self.assertRaisesRegex(GameError,"another creature"): game.choose_trigger(10,True,1)
+        restored=Game.from_raw(game.to_raw()); restored.choose_trigger(10,True,2)
+        self.assertIsNotNone(restored.find_permanent(lord.uid)[1]); self.assertIsNone(restored.find_permanent(victim.uid)[1]); self.assertIn(victim.uid,restored.player(10).graveyard)
+
+    def test_lord_can_sacrifice_a_token_that_then_ceases_to_exist(self):
+        game=ready(); self.add(game,10,"lea:114"); token=self.add(game,10,"token:wasp")
+        game._start_turn(); self.resolve_top(game); game.choose_trigger(10,True,2)
+        self.assertNotIn(token.uid,game.cards); self.assertNotIn(token.uid,game.player(10).graveyard); self.assertIn("sacrificed Wasp",game.log[-1])
+
+    def test_lord_trigger_survives_source_removal_and_sacrifice_feeds_death_triggers(self):
+        game=ready(); lord=self.add(game,10,"lea:114"); net=self.add(game,10,"lea:270"); victim=self.add(game,10,"bear")
+        game._start_turn(); game._remember_source_power(lord); game.player(10).battlefield.remove(lord); game.player(10).graveyard.append(lord.uid)
+        self.resolve_top(game); game.choose_trigger(10,True,2)
+        self.assertIn(victim.uid,game.player(10).graveyard); self.assertEqual(game.stack[-1].ability_effect,"death_life")
+
+    def test_lord_deals_preventable_damage_when_no_other_creature_exists(self):
+        game=ready(); lord=self.add(game,10,"lea:114"); game._start_turn()
+        game.player(10).damage_prevention=3; self.resolve_top(game)
+        self.assertEqual(game.player(10).life,16); self.assertEqual(game.player(10).damage_prevention,0); self.assertIsNotNone(game.find_permanent(lord.uid)[1]); self.assertFalse(game.stack)
+
+    def test_lord_sacrifice_choices_use_current_battlefield_positions(self):
+        game=ready(); self.add(game,10,"lea:114"); first=self.add(game,10,"bear"); second=self.add(game,10,"giant")
+        game._start_turn(); self.resolve_top(game); game.player(10).battlefield.remove(first); game.player(10).graveyard.append(first.uid)
+        with self.assertRaisesRegex(GameError,"another creature"): game.choose_trigger(10,True,3)
+        game.choose_trigger(10,True,2); self.assertIn(second.uid,game.player(10).graveyard)
+
     def test_upkeep_creatures_trigger_only_for_their_controller(self):
         game=ready(); self.add(game,20,"lea:194"); game._start_turn()
         self.assertFalse(any(x.key=="lea:194" for x in game.stack))

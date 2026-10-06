@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 63 creatures playable through 0.68.0; 14 remain |
+| Creatures with abilities | 77 | 64 creatures playable through 0.69.0; 13 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -158,3 +158,5 @@ The 0.66.0 turn-death-counter promotion adds Scavenging Ghoul. A persisted turn-
 The 0.67.0 graveyard-upkeep promotion adds Nether Shadow. Graveyards retain their stable bottom-to-top order, and the public graveyard command now states that orientation explicitly. At its controller’s upkeep, each Nether Shadow with at least three creature cards above it creates a persisted optional trigger. The intervening condition is checked both when the trigger would be created and again after responses before the Return or Decline choice appears; accepting moves the same card UID from the graveyard to the battlefield. Haste is now honored through the shared keyword layer across attack, mana/tap activation, and solo-AI legality while retaining legacy base-card haste flags. Discord presents a dedicated Return to battlefield action, and solo AI accepts eligible returns.
 
 The 0.68.0 delayed-end-step promotion adds Stone Giant. Its tap ability targets only a creature its controller controls whose live toughness is less than Stone Giant’s live power, checks that restriction again on resolution, and uses last-known source power if Stone Giant has left the battlefield. A successful ability grants flying until cleanup and schedules a separate persisted beginning-of-the-next-end-step destruction trigger. That trigger survives source removal, grants both players a response window, allows regeneration, and safely fizzles if its target leaves. Public Discord state shows upcoming destruction, and solo AI selects useful eligible attackers without duplicating pending effects.
+
+The 0.69.0 mandatory-upkeep-sacrifice promotion adds Lord of the Pit. Its persisted upkeep trigger gives both players a response window before the controller must choose another currently controlled creature to sacrifice. Sacrifice bypasses regeneration, removes tokens correctly, feeds existing creature-death triggers, and remains mandatory if the Lord leaves after triggering. If no eligible creature exists when the trigger resolves, the Lord deals seven preventable damage to its controller. Discord supplies a bounded creature select plus an unrestricted `mtg trigger sacrifice POSITION` fallback, public rendering distinguishes the mandatory choice from optional triggers, and solo AI sacrifices its least valuable legal creature.

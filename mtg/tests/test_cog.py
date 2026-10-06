@@ -379,6 +379,23 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Wanderlust",rendered); self.assertIn("deals 1 damage",rendered); self.assertIn("Wanderlust ability",rendered)
 
+    async def test_lord_of_the_pit_choice_uses_mandatory_sacrifice_select(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        lord=game.next_uid; game.next_uid+=1; game.cards[lord]="lea:114"
+        victim=game.next_uid; game.next_uid+=1; game.cards[victim]="bear"
+        game.player(10).battlefield=[permanent_type(lord,"lea:114",sick=False),permanent_type(victim,"bear",sick=False)]
+        game._start_turn(); game.pass_priority(10); game.pass_priority(20); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("must Choose a creature",rendered)
+        view=GameView(cog,1); pay=next(item for item in view.children if item.custom_id.endswith(":pay")); decline=next(item for item in view.children if item.custom_id.endswith(":decline_trigger")); select=next(item for item in view.children if item.custom_id.endswith(":sacrifice"))
+        self.assertTrue(pay.disabled); self.assertTrue(decline.disabled); self.assertEqual(select.options[0].value,"2"); self.assertIn("Bear Cub",select.options[0].label)
+
+    async def test_trigger_command_accepts_a_sacrifice_position(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.trigger.callback(cog,ctx,choice="sacrifice",position=3)
+        _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(choose_trigger=Mock()); mutation(game)
+        game.choose_trigger.assert_called_once_with(10,True,3); self.assertEqual(action,"trigger_sacrifice")
+
     async def test_creature_upkeep_pending_choice_shows_colored_cost(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -706,6 +706,13 @@ class SoloAITests(unittest.TestCase):
         karma.active_index=0; karma.phase="precombat_main"; karma.priority_user=AI; karma.player(AI).land_played=True
         advance_solo(karma); self.assertEqual(karma.stack[-1].uid,spell)
 
+    def test_ai_sacrifices_its_least_valuable_creature_to_lord_of_the_pit(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=True; game.player(HUMAN).kept=True; game.player(AI).hand=[]
+        lord=self.add(game,AI,"lea:114"); bear=self.add(game,AI,"bear"); giant=self.add(game,AI,"giant")
+        game.active_index=0; game._start_turn(); advance_solo(game); game.pass_priority(HUMAN); advance_solo(game)
+        self.assertIn(bear.uid,game.player(AI).graveyard); self.assertIsNotNone(game.find_permanent(lord.uid)[1]); self.assertIsNotNone(game.find_permanent(giant.uid)[1])
+        self.assertTrue(any(event["action"]=="ai_trigger_sacrifice" for event in game.history))
+
     def test_ai_pays_creature_upkeep_costs_including_source_independent_damage(self):
         sacrifice=solo(order=(AI,HUMAN)); sacrifice.player(AI).kept=True; sacrifice.player(HUMAN).kept=True; sacrifice.player(AI).hand=[]
         forces=self.add(sacrifice,AI,"lea:67"); self.add(sacrifice,AI,"island")

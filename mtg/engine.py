@@ -266,6 +266,7 @@ class Game:
                 card=self.card(source.uid); effect=""
                 if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
                 elif step=="upkeep" and card.upkeep_cost and active==controller.user_id: effect="upkeep_cost"
+                elif step=="upkeep" and card.upkeep_sacrifice_other and active==controller.user_id: effect="upkeep_sacrifice"
                 elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
                 elif step=="upkeep" and card.upkeep_land_type_damage: effect="upkeep_land_type_damage"
                 elif step=="upkeep" and card.aura_upkeep_damage:
@@ -775,7 +776,12 @@ class Game:
                     self.stack.pop(); self.cards.pop(s.uid,None); self.log.append(f"{self.card(s.source_uid).name} did not return because its graveyard condition was no longer true.")
                     if self.stack: self.stack[-1].passes=0
                     self.priority_user=self.active_user; return
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost","graveyard_return"):
+                if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
+                    self.stack.pop(); self._resolve(s)
+                    if self.stack: self.stack[-1].passes=0
+                    if not self.finished: self.priority_user=self.active_user
+                    return
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","upkeep_cost","graveyard_return","upkeep_sacrifice"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -792,6 +798,10 @@ class Game:
                 else:
                     self._empty_mana(); self._advance()
 
+    def trigger_sacrifice_choices(self,trigger):
+        if trigger.ability_effect!="upkeep_sacrifice": return []
+        return [(position,permanent) for position,permanent in enumerate(self.player(trigger.owner).battlefield,1) if permanent.uid!=trigger.source_uid and self.is_creature(permanent)]
+
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
         if trigger.ability_effect in ("cast_draw","graveyard_return"): return ""
@@ -802,13 +812,24 @@ class Game:
     def trigger_accept_label(self,trigger):
         if trigger.ability_effect=="cast_draw": return "Draw a card"
         if trigger.ability_effect=="graveyard_return": return "Return to battlefield"
+        if trigger.ability_effect=="upkeep_sacrifice": return "Choose a creature"
         return f"Pay {self.trigger_cost(trigger)}"
 
-    def choose_trigger(self,user,pay):
+    def choose_trigger(self,user,pay,sacrifice_position=None):
         if self.finished: raise GameError("Game is over.")
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user:
             raise GameError("You do not have a trigger choice to make.")
-        trigger=self.stack.pop(); card=self.card(trigger.uid); pending=[]; cost=self.trigger_cost(trigger)
+        trigger=self.stack[-1]; card=self.card(trigger.uid)
+        if trigger.ability_effect=="upkeep_sacrifice":
+            if not pay: raise GameError(f"{card.name} requires you to sacrifice another creature if able.")
+            choices=dict(self.trigger_sacrifice_choices(trigger))
+            if sacrifice_position not in choices: raise GameError("Choose the battlefield position of another creature you control.")
+            permanent=choices[sacrifice_position]; player=self.player(user); sacrificed_name=self.card(permanent.uid).name; self.stack.pop()
+            self._remember_source_power(permanent); self._remove_from_combat(permanent.uid); player.battlefield.remove(permanent); self._dies(player,permanent)
+            self.cards.pop(trigger.uid,None); self.log.append(f"{user} sacrificed {sacrificed_name} for {card.name}.")
+            if self.stack: self.stack[-1].passes=0
+            self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life(); return
+        trigger=self.stack.pop(); pending=[]; cost=self.trigger_cost(trigger)
         if pay:
             player=self.player(user)
             if cost:
@@ -1159,6 +1180,8 @@ class Game:
             self._damage_player(target_player.user_id,amount)
         elif effect=="aura_upkeep_damage":
             self._damage_player(int(s.target),card.aura_upkeep_damage)
+        elif effect=="upkeep_sacrifice":
+            self._damage_player(s.owner,card.upkeep_sacrifice_damage)
         elif effect=="upkeep_hand_damage":
             target_player=self.player(int(s.target)); self._damage_player(target_player.user_id,max(0,len(target_player.hand)-4))
         elif effect=="draw_step_draw":

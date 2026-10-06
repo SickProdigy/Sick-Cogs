@@ -99,6 +99,8 @@ class Card:
     upkeep_cost: str = ""
     upkeep_unpaid_effect: str = ""
     upkeep_unpaid_damage: int = 0
+    upkeep_sacrifice_other: bool = False
+    upkeep_sacrifice_damage: int = 0
     draw_tapped_damage: int = 0
     death_life: bool = False
     animate_combat: bool = False
@@ -182,6 +184,7 @@ class Card:
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="sacrifice": abilities.append(f"At your upkeep, sacrifice this creature unless you pay {self.upkeep_cost}")
         if self.upkeep_cost and self.upkeep_unpaid_effect=="damage": abilities.append(f"At your upkeep, this creature deals {self.upkeep_unpaid_damage} damage to you unless you pay {self.upkeep_cost}")
+        if self.upkeep_sacrifice_other: abilities.append(f"At your upkeep, sacrifice another creature or this creature deals {self.upkeep_sacrifice_damage} damage to you")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
@@ -454,6 +457,7 @@ ALPHA_COMBAT_TRIGGERS = {
 }
 
 ALPHA_UPKEEP_CREATURES = {
+    "lea:114": {"upkeep_sacrifice_other":True, "upkeep_sacrifice_damage":7},
     "lea:67": {"upkeep_cost":"{U}", "upkeep_unpaid_effect":"sacrifice"},
     "lea:194": {"upkeep_cost":"{G}{G}{G}{G}", "upkeep_unpaid_effect":"damage", "upkeep_unpaid_damage":8},
 }
@@ -472,6 +476,7 @@ ALPHA_KEYWORDS = {
     "lea:141": ("flying",),
     "lea:95": ("swampwalk",),
     "lea:112": ("flying",),
+    "lea:114": ("flying", "trample"),
     "lea:116": ("haste",),
     "lea:118": ("flying",),
     "lea:155": ("flying",),
@@ -589,6 +594,8 @@ for reference in PLAYABLE_ALPHA:
         upkeep_cost=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_cost",""),
         upkeep_unpaid_effect=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_effect",""),
         upkeep_unpaid_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_damage",0),
+        upkeep_sacrifice_other=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_sacrifice_other",False),
+        upkeep_sacrifice_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_sacrifice_damage",0),
         draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
