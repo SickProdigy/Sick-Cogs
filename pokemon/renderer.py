@@ -148,12 +148,21 @@ class BattleRenderer:
         try:return await self._render(self._pokedex_registration_sync,pokemon,data,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Pokédex registration rendering failed.") from exc
 
+    @staticmethod
+    def trainer_party(conf):
+        owned={item["instance_id"]:item for item in conf.get("collection",[]) if "instance_id" in item}
+        result=[]
+        for identity in conf.get("party",[])[:6]:
+            raw=owned.get(identity)
+            if raw:
+                try:result.append(OwnedPokemon.from_raw(raw))
+                except (KeyError,TypeError,ValueError):continue
+        return result
+
     async def trainer_card(self,user_name,conf,style="retro"):
-        owned={item["instance_id"]:item for item in conf.get("collection",[])}
-        lead=owned.get(conf.get("party",[None])[0]) if conf.get("party") else None
-        pokemon=OwnedPokemon.from_raw(lead) if lead else None
-        data=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny) if pokemon else None
-        try:return await self._render(self._trainer_card_sync,user_name,conf,pokemon,data,style)
+        party=self.trainer_party(conf)
+        data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in party))
+        try:return await self._render(self._trainer_card_sync,user_name,conf,party,data,style)
         except (OSError,ValueError) as exc:raise RenderError("Trainer card rendering failed.") from exc
 
     async def progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
@@ -442,22 +451,28 @@ class BattleRenderer:
         draw.rectangle((0,350,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,f"{species.name} was registered in {trainer}'s Pokedex.",(25,382),width=84,size=19)
         return self._save(canvas)
 
-    def _trainer_card_sync(self,user_name,conf,pokemon,data,style):
+    def _trainer_card_sync(self,user_name,conf,party,data,style):
         gold=style=="gold";paper=(247,225,153) if gold else RETRO[4];panel=(255,241,190) if gold else RETRO[5];ink=(91,60,27) if gold else RETRO[0]
-        canvas=Image.new("RGB",(800,450),paper);draw=ImageDraw.Draw(canvas)
-        draw.rounded_rectangle((24,24,776,426),22,fill=panel,outline=ink,width=7)
-        draw.text((55,48),"TRAINER CARD",fill=ink,font=ImageFont.load_default(size=32));draw.text((55,100),user_name[:28],fill=ink,font=ImageFont.load_default(size=27))
-        draw.text((55,158),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
+        canvas=Image.new("RGB",(800,610),paper);draw=ImageDraw.Draw(canvas)
+        draw.rounded_rectangle((24,24,776,586),22,fill=panel,outline=ink,width=7)
+        draw.text((55,48),"TRAINER CARD",fill=ink,font=ImageFont.load_default(size=32));draw.text((55,96),user_name[:28],fill=ink,font=ImageFont.load_default(size=27))
+        draw.text((55,150),f"BADGES  {len(conf.get('badges',[]))}/8",fill=ink,font=ImageFont.load_default(size=20))
         badge_keys=("boulder","cascade","thunder","rainbow","soul","marsh","volcano","earth")
         for index,key in enumerate(badge_keys):
             x=62+index*65;color=(214,165,52) if key in conf.get("badges",[]) else (170,174,151)
-            draw.ellipse((x,195,x+40,235),fill=color,outline=ink,width=3)
-        draw.text((55,270),f"POKEDEX  {len(conf.get('pokedex_caught',[]))} caught / {len(conf.get('pokedex_seen',[]))} seen",fill=ink,font=ImageFont.load_default(size=19))
-        draw.text((55,308),f"COLLECTION  {len(conf.get('collection',[]))}    PARTY  {len(conf.get('party',[]))}/6",fill=ink,font=ImageFont.load_default(size=19))
-        if pokemon and data:
-            image=self._retro(self._open(data,(230,220),trim=True,upscale=True));canvas.paste(image,(650-image.width//2,330-image.height),image)
-            draw.text((530,350),f"PARTNER  {SPECIES[pokemon.species_id].name}",fill=ink,font=ImageFont.load_default(size=18));draw.text((530,380),f"Lv. {pokemon.level}",fill=ink,font=ImageFont.load_default(size=18))
-        else:draw.text((530,350),"NO PARTNER",fill=ink,font=ImageFont.load_default(size=18))
+            draw.ellipse((x,185,x+40,225),fill=color,outline=ink,width=3)
+        draw.text((55,252),f"POKEDEX  {len(conf.get('pokedex_caught',[]))} caught / {len(conf.get('pokedex_seen',[]))} seen",fill=ink,font=ImageFont.load_default(size=19))
+        draw.text((55,284),f"COLLECTION  {len(conf.get('collection',[]))}    PARTY  {len(party)}/6",fill=ink,font=ImageFont.load_default(size=19))
+        draw.line((48,322,752,322),fill=ink,width=3);draw.text((55,333),"CURRENT PARTY",fill=ink,font=ImageFont.load_default(size=20))
+        slot_width=112;gap=8;left=44
+        for index in range(6):
+            x=left+index*(slot_width+gap);draw.rounded_rectangle((x,370,x+slot_width,550),12,fill=paper,outline=ink,width=3)
+            if index>=len(party):
+                label="EMPTY";font=ImageFont.load_default(size=14);draw.text((x+(slot_width-int(draw.textlength(label,font=font)))//2,447),label,fill=ink,font=font);continue
+            pokemon=party[index];image=self._retro(self._open(data[index],(96,100),trim=True,upscale=True));canvas.paste(image,(x+slot_width//2-image.width//2,474-image.height),image)
+            name=pokemon.nickname or SPECIES[pokemon.species_id].name;font=ImageFont.load_default(size=14);name=name[:13]
+            draw.text((x+(slot_width-int(draw.textlength(name,font=font)))//2,486),name,fill=ink,font=font)
+            level=f"Lv. {pokemon.level}";small=ImageFont.load_default(size=12);draw.text((x+(slot_width-int(draw.textlength(level,font=small)))//2,516),level,fill=ink,font=small)
         return self._save(canvas)
 
     def _progression_sync(self,pokemon,current_data,previous_data,evolved_from,move_key,pending):
