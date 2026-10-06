@@ -3887,4 +3887,27 @@ class AlphaTimeVaultTests(unittest.TestCase):
         raw=ready().to_raw(); raw.pop("turn_start_pending_user"); raw.pop("turn_start_pending_extra"); restored=Game.from_raw(raw)
         self.assertIsNone(restored.turn_start_pending_user); self.assertFalse(restored.turn_start_pending_extra)
 
+class AlphaPowerLeakTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def pending(self,game):
+        game.stack=game._turn_step_triggers("upkeep"); game.phase="upkeep"; game.priority_user=game.active_user
+        game.pass_priority(game.active_user); game.pass_priority(game.opponent(game.active_user))
+        return game.stack[-1]
+
+    def test_controller_chooses_persisted_amount_and_payment_is_atomic(self):
+        game=ready(); aura=self.add(game,10,"lea:71"); host=self.add(game,20,"lea:25"); aura.attached_to=host.uid; game.active_index=1
+        trigger=self.pending(game); self.assertEqual((trigger.owner,trigger.choice_owner),(20,20)); restored=Game.from_raw(game.to_raw())
+        with self.assertRaisesRegex(GameError,"cannot pay"): restored.choose_power_leak(20,1)
+        self.assertTrue(restored.stack[-1].decision_pending); self.assertEqual(restored.player(20).life,20)
+        restored.choose_power_leak(20,0); self.assertEqual(restored.player(20).life,18); self.assertFalse(restored.stack)
+
+    def test_payment_prevents_damage_and_trigger_survives_aura_departure(self):
+        game=ready(); aura=self.add(game,10,"lea:71"); host=self.add(game,20,"lea:25"); aura.attached_to=host.uid; lands=[self.add(game,20,"island") for _ in range(3)]; game.active_index=1
+        trigger=self.pending(game); game.player(10).battlefield.remove(aura); game.player(10).graveyard.append(aura.uid)
+        self.assertEqual(game.power_leak_amounts(trigger,4),[0,1,2,3]); game.choose_power_leak(20,2)
+        self.assertEqual(game.player(20).life,20); self.assertEqual(sum(land.tapped for land in lands),2)
+
 if __name__=="__main__": unittest.main()

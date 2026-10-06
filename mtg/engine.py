@@ -403,6 +403,9 @@ class Game:
                 elif step=="upkeep" and card.upkeep_sacrifice_other and active==controller.user_id: effect="upkeep_sacrifice"
                 elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
                 elif step=="upkeep" and card.upkeep_land_type_damage: effect="upkeep_land_type_damage"
+                elif step=="upkeep" and card.aura_power_leak:
+                    attached_controller,attached=self.find_permanent(source.attached_to)
+                    if attached is not None and active==attached_controller.user_id: effect="power_leak"; trigger_owner=active; choice_owner=active
                 elif step=="upkeep" and card.aura_upkeep_damage:
                     attached_controller,attached=self.find_permanent(source.attached_to)
                     if attached is not None and active==attached_controller.user_id: effect="aura_upkeep_damage"
@@ -1240,7 +1243,7 @@ class Game:
                     return
                 if s.ability_effect in ("discard_choice","look_hand") and (s.ability_effect=="look_hand" or self.player(int(s.target)).hand):
                     s.decision_pending=True; self.priority_user=s.choice_owner; return
-                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_vitality","upkeep_cost","graveyard_return","upkeep_sacrifice","tomb_cleanup"):
+                if s.ability_effect in ("cast_life","cast_draw","death_life","upkeep_untap","aura_upkeep_untap","aura_upkeep_life","upkeep_vitality","upkeep_cost","graveyard_return","upkeep_sacrifice","tomb_cleanup","power_leak"):
                     s.decision_pending=True; self.priority_user=s.choice_owner if s.choice_owner is not None else s.owner; return
                 if not s.ability_effect and self.card(s.uid).effect=="search_library" and self.player(s.owner).library:
                     s.decision_pending=True; self.priority_user=s.owner; return
@@ -1388,7 +1391,7 @@ class Game:
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
         if not trigger.ability_effect and card.effect=="power_sink": return f"{{{trigger.x_value}}}"
-        if trigger.ability_effect in ("cast_draw","graveyard_return","upkeep_vitality"): return ""
+        if trigger.ability_effect in ("cast_draw","graveyard_return","upkeep_vitality","power_leak"): return ""
         if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
         if trigger.ability_effect=="aura_upkeep_untap": return card.aura_upkeep_untap_cost
         if trigger.ability_effect=="aura_upkeep_life": return card.aura_controller_upkeep_cost
@@ -1403,13 +1406,46 @@ class Game:
         if trigger.ability_effect=="upkeep_sacrifice": return "Choose a creature"
         if trigger.ability_effect=="opponent_land_sacrifice": return "Choose a land"
         if trigger.ability_effect=="tomb_cleanup": return "Choose a mire-counter land"
+        if trigger.ability_effect=="power_leak": return "Choose a mana amount"
         return f"Pay {self.trigger_cost(trigger)}"
+
+    def power_leak_amounts(self,trigger=None,limit=24):
+        trigger=trigger or (self.stack[-1] if self.stack else None)
+        if trigger is None or trigger.ability_effect!="power_leak" or trigger.choice_owner is None: return []
+        player=self.player(trigger.choice_owner); card=self.card(trigger.uid); amounts=[]
+        for amount in range(max(0,int(limit))+1):
+            if amount and self._mana_payment(player,card,mana_cost=f"{{{amount}}}") is None: break
+            amounts.append(amount)
+        return amounts
+
+    def choose_power_leak(self,user,amount):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].ability_effect!="power_leak" or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Power Leak choice to make.")
+        try: amount=int(amount)
+        except (TypeError,ValueError) as error: raise GameError("Choose a nonnegative mana amount.") from error
+        if amount<0: raise GameError("Choose a nonnegative mana amount.")
+        trigger=self.stack[-1]; card=self.card(trigger.uid); player=self.player(user); pending=[]
+        if amount:
+            cost=f"{{{amount}}}"; payment=self._mana_payment(player,card,mana_cost=cost)
+            if payment is None: raise GameError(f"You cannot pay {cost} for Power Leak.")
+            sources,remaining,choices=payment
+            for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
+            player.mana_pool=remaining
+        self.stack.pop(); self.cards.pop(trigger.uid,None)
+        damage=max(0,card.aura_power_leak-amount)
+        if damage: self._damage_player(user,damage,source_uid=trigger.source_uid)
+        self.log.append(f"{user} paid {{{amount}}} for {card.name} and was dealt {damage} damage.")
+        self.stack.extend(pending)
+        if self.stack: self.stack[-1].passes=0
+        self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
 
     def choose_trigger(self,user,pay,sacrifice_position=None):
         if self.finished: raise GameError("Game is over.")
         if not self.stack or not self.stack[-1].decision_pending or (self.stack[-1].choice_owner if self.stack[-1].choice_owner is not None else self.stack[-1].owner)!=user:
             raise GameError("You do not have a trigger choice to make.")
         trigger=self.stack[-1]; card=self.card(trigger.uid)
+        if trigger.ability_effect=="power_leak": raise GameError("Choose a mana amount for Power Leak.")
         if not trigger.ability_effect and card.effect=="power_sink":
             self.choose_power_sink(user,pay); return
         if trigger.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice"):

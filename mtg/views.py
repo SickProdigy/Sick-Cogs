@@ -59,6 +59,15 @@ class TimeVaultSelect(discord.ui.Select):
     async def callback(self,i):
         await self.cog.act(i,self.game_id,lambda g:g.choose_time_vault_turn(i.user.id,True,int(self.values[0])),"vault_skip")
 
+class PowerLeakSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id
+        options=[discord.SelectOption(label=f"Pay {{{amount}}}",description=f"Power Leak deals {max(0,2-amount)} damage",value=str(amount)) for amount in game.power_leak_amounts(game.stack[-1])]
+        super().__init__(placeholder="Choose mana to pay for Power Leak",min_values=1,max_values=1,options=options,custom_id=f"mtg:{game_id}:power_leak")
+    async def callback(self,i):
+        amount=int(self.values[0])
+        await self.cog.act(i,self.game_id,lambda g:g.choose_power_leak(i.user.id,amount),"power_leak")
+
 class GameView(discord.ui.View):
     def __init__(self,cog,game_id):
         super().__init__(timeout=None); self.cog=cog; self.game_id=game_id
@@ -70,7 +79,7 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
@@ -86,6 +95,8 @@ class GameView(discord.ui.View):
             self.add_item(SacrificeSelect(self.cog,self.game_id,game,game.stack[-1]))
         if game and game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="drain_power":
             self.add_item(DrainPowerSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="power_leak":
+            self.add_item(PowerLeakSelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

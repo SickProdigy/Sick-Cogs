@@ -105,6 +105,7 @@ class Card:
     upkeep_each_damage: int = 0
     upkeep_land_type_damage: str = ""
     aura_upkeep_damage: int = 0
+    aura_power_leak: int = 0
     aura_enters_tapped: bool = False
     aura_skip_untap: bool = False
     aura_upkeep_untap_cost: str = ""
@@ -260,6 +261,7 @@ class Card:
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
         if self.upkeep_land_type_damage: abilities.append(f"At each player's upkeep, deals damage equal to that player's {self.upkeep_land_type_damage.title()}s")
+        if self.aura_power_leak: abilities.append(f"At enchanted enchantment controller's upkeep, they may pay any amount; deals {self.aura_power_leak} damage minus the amount paid")
         if self.aura_upkeep_damage: abilities.append(f"At enchanted permanent controller's upkeep, deals {self.aura_upkeep_damage} damage to that player")
         if self.aura_enters_tapped: abilities.append("When this Aura enters, tap enchanted creature")
         if self.aura_skip_untap: abilities.append("Enchanted creature does not untap during its controller's untap step")
@@ -359,6 +361,7 @@ ALPHA_ENCHANTMENTS = {
     "lea:213": {"aura_target_types":("Creature",), "activation_cost":"{G}", "activation_effect":"regenerate", "activation_attached":True, "activation_text":"Regenerate enchanted creature"},
     "lea:228": {"aura_target_types":("Creature",), "aura_toughness":2, "aura_keyword":"reach"},
     "lea:57": {"aura_target_types":("Enchantment",), "aura_upkeep_damage":1, "aura_hostile":True},
+    "lea:71": {"aura_target_types":("Enchantment",), "aura_power_leak":2, "aura_hostile":True},
     "lea:97": {"aura_target_types":("Land",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:133": {"aura_target_types":("Artifact",), "aura_upkeep_damage":1, "aura_hostile":True},
     "lea:226": {"aura_target_types":("Creature",), "aura_upkeep_damage":1, "aura_hostile":True},
@@ -728,6 +731,7 @@ for reference in PLAYABLE_ALPHA:
         upkeep_each_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_each_damage",0),
         upkeep_land_type_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("upkeep_land_type_damage",""),
         aura_upkeep_damage=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_damage",0),
+        aura_power_leak=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_power_leak",0),
         aura_enters_tapped=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_enters_tapped",False),
         aura_skip_untap=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_skip_untap",False),
         aura_upkeep_untap_cost=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_upkeep_untap_cost",""),

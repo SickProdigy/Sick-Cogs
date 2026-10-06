@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.99.0"
+    __version__="0.100.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -214,6 +214,7 @@ class MTG(commands.Cog):
                     elif not item.ability_effect and g.card(item.uid).effect=="power_sink": label+=f" (targeted spell's controller may {g.trigger_accept_label(item)} or decline)"
                     elif item.ability_effect=="discard_choice": label+=" (target player is choosing a card privately)"
                     elif item.ability_effect=="look_hand": label+=" (controller is viewing the targeted hand privately)"
+                    elif item.ability_effect=="power_leak": label+=" (enchanted enchantment's controller must choose how much mana to pay)"
                     else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
@@ -593,6 +594,10 @@ class MTG(commands.Cog):
         if normalized not in ("pay","draw","decline","sacrifice"): await ctx.send("Choose `pay`, `draw`, `decline`, or `sacrifice POSITION`."); return
         if normalized=="sacrifice" and position is None: await ctx.send("Provide the battlefield position to sacrifice."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_trigger(ctx.author.id,normalized!="decline",position if normalized=="sacrifice" else None),f"trigger_{normalized}")
+    @mtg.command(name="leak")
+    async def leak(self,ctx,amount:int):
+        """Choose how much mana to pay for a resolving Power Leak trigger."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_power_leak(ctx.author.id,amount),"power_leak")
     @mtg.command(name="concede")
     async def concede(self,ctx): await self.mutate_ctx(ctx,lambda g:g.concede(ctx.author.id),"concede")
     async def red_delete_data_for_user(self,*,requester,user_id):
