@@ -119,9 +119,17 @@ class BattleRenderer:
             raise RenderError("Battle rendering failed.") from exc
 
     @staticmethod
-    def _open(data, size):
+    def _open(data, size, *, trim=False, upscale=False):
         image = Image.open(io.BytesIO(data)).convert("RGBA")
-        image.thumbnail(size, Image.Resampling.NEAREST)
+        if trim:
+            bounds=image.getchannel("A").getbbox()
+            if bounds:image=image.crop(bounds)
+        maximum_width,maximum_height=size
+        scale=min(maximum_width/max(1,image.width),maximum_height/max(1,image.height))
+        if not upscale:scale=min(1.0,scale)
+        else:scale=min(3.5,scale)
+        target=(max(1,round(image.width*scale)),max(1,round(image.height*scale)))
+        if target!=image.size:image=image.resize(target,Image.Resampling.NEAREST)
         return image
 
     @staticmethod
@@ -141,10 +149,8 @@ class BattleRenderer:
             draw.line((0, y, 800, y), fill=(90 + int(80 * ratio), 165 + int(45 * ratio), 220))
         draw.ellipse((90, 310, 710, 470), fill=(72, 139, 74))
         draw.ellipse((400, 285, 730, 375), fill=(198, 222, 165))
-        pokemon = self._open(data, (280, 280))
-        canvas.paste(pokemon, (500 - pokemon.width // 2, 290 - pokemon.height), pokemon)
-        draw.rounded_rectangle((30, 25, 470, 100), 18, fill=(250, 250, 240), outline=(35, 70, 40), width=4)
-        draw.text((55, 48), f"A wild {SPECIES[species_id].name} appeared!", fill=(20, 35, 20), font=ImageFont.load_default(size=24))
+        pokemon = self._open(data,(240,210),trim=True,upscale=True)
+        canvas.paste(pokemon,(565-pokemon.width//2,300-pokemon.height),pokemon)
         return self._save(canvas)
 
     def _battle_sync(self, battle, front_data, back_data):
@@ -155,8 +161,8 @@ class BattleRenderer:
             draw.line((0, y, 800, y), fill=RETRO[4])
         draw.ellipse((465, 190, 750, 255), fill=RETRO[2], outline=RETRO[0], width=4)
         draw.ellipse((55, 300, 390, 390), fill=RETRO[2], outline=RETRO[0], width=4)
-        front = self._retro(self._open(front_data, (230, 230)))
-        back = self._retro(self._open(back_data, (260, 260)))
+        front = self._retro(self._open(front_data,(210,185),trim=True,upscale=True))
+        back = self._retro(self._open(back_data,(250,220),trim=True,upscale=True))
         canvas.paste(front, (595 - front.width // 2, 220 - front.height), front)
         canvas.paste(back, (205 - back.width // 2, 350 - back.height), back)
         wild = SPECIES[battle.wild_species_id]
