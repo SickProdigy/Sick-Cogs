@@ -10,7 +10,7 @@ from .catalog_versions import CATALOG_VERSIONS, CatalogVersionError
 from .data import MOVES, SPECIES, Species
 
 API_ROOT = "https://pokeapi.co/api/v2"
-USER_AGENT = "Sick-Cogs-Pokemon/0.32.1 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-Pokemon/0.32.2 (+https://gitea.rcs1.top/sickprodigy/Sick-Cogs)"
 MAX_SPECIES = 1025
 VERSION_GROUPS={1:{"red-blue","yellow"},2:{"gold-silver","crystal"},3:{"ruby-sapphire","emerald","firered-leafgreen"},4:{"diamond-pearl","platinum","heartgold-soulsilver"},5:{"black-white","black-2-white-2"},6:{"x-y","omega-ruby-alpha-sapphire"},7:{"sun-moon","ultra-sun-ultra-moon"},8:{"sword-shield","brilliant-diamond-and-shining-pearl"},9:{"scarlet-violet"}}
 

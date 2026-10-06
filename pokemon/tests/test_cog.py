@@ -276,6 +276,20 @@ class PokedexTests(unittest.TestCase):
 
 
 class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_completed_member_commands_count_as_activity_without_repeat_farming(self):
+        conf={"enabled":True,"spawn_mode":"activity","channels":[10],"active_encounter":None,"threshold_min":8,"threshold_max":15,"threshold":12,"spawn_cooldown":120,"last_spawn_at":None,"activity":0}
+        policy={"minimum_threshold":8,"minimum_cooldown":120}
+        cog=Pokemon.__new__(Pokemon);cog.activity={};cog.recent_users={};cog.recent_content={}
+        cog.config=SimpleNamespace(guild=lambda guild:StoredSection(conf),all=AsyncMock(return_value=policy))
+        message=SimpleNamespace(guild=SimpleNamespace(id=42),channel=SimpleNamespace(id=10),author=SimpleNamespace(id=7,bot=False),content="!poke profile")
+        await cog.on_command_completion(SimpleNamespace(message=message))
+        self.assertEqual(cog.activity[42],1)
+        await cog.on_command_completion(SimpleNamespace(message=message))
+        self.assertEqual(cog.activity[42],1)
+        message.author.bot=True;message.content="A bot response"
+        await cog.on_command_completion(SimpleNamespace(message=message))
+        self.assertEqual(cog.activity[42],1)
+
     async def test_bare_pokemon_onboards_new_trainers_then_uses_help(self):
         section=StoredSection({"collection":[],"starter_chosen":False})
         cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section)

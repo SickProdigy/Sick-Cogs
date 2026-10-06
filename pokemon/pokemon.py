@@ -99,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.32.1";__author__="SickProdigy"
+    __version__="0.32.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -216,6 +216,12 @@ class Pokemon(commands.Cog):
     @commands.Cog.listener()
     async def on_message_without_command(self,message):
         if not message.guild or message.author.bot or len((message.content or "").strip())<3:return
+        await self.record_activity(message)
+    @commands.Cog.listener()
+    async def on_command_completion(self,ctx):
+        await self.record_activity(ctx.message)
+    async def record_activity(self,message):
+        if not message.guild or message.author.bot:return
         conf=await self.config.guild(message.guild).all()
         if not conf["enabled"] or conf.get("spawn_mode","timed")!="activity" or message.channel.id not in conf["channels"] or conf["active_encounter"]:return
         policy=await self.config.all();minimum,maximum,cooldown=bounded_pace(conf["threshold_min"],conf["threshold_max"],conf["spawn_cooldown"],policy)
