@@ -14,7 +14,7 @@ from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
 from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
-from .views import BagView,BattleView,EncounterView,FightView,PartyView,StarterView
+from .views import BagView,BattleView,CollectionBrowserView,EncounterView,FightView,PartyPlacementView,PartyView,StarterView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
 CONFIG_IDENTIFIER=813604927242
@@ -24,6 +24,7 @@ GLOBAL={"schema":4,"next_encounter":1,"encounters":{},"pokedex_default_style":"r
 BOX_SIZE=30
 MAX_BOXES=10
 MAX_COLLECTION=BOX_SIZE*MAX_BOXES
+COLLECTION_PAGE_SIZE=9
 PACE={"active":(5,9,60),"normal":(8,15,120),"relaxed":(18,30,300)}
 SPECIAL_SPECIES={144,145,146,150,151}
 RARITY_PROFILES={
@@ -84,7 +85,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.18.0";__author__="SickProdigy"
+    __version__="0.19.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -446,36 +447,83 @@ class Pokemon(commands.Cog):
         if pokemon is None:await ctx.send("You already chose a starter.");return
         trainer_name=getattr(ctx.author,"display_name",getattr(ctx.author,"name","Trainer"))
         embed,files=await self.rendered_starter(pokemon,trainer_name);await ctx.send(embed=embed,files=files)
+
+    @staticmethod
+    def sorted_collection(conf):
+        return sorted(conf.get("collection",[]),key=lambda raw:((raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold(),raw["species_id"],raw["instance_id"]))
+
+    async def rendered_collection(self,user,page=1):
+        conf=await self.config.user(user).all();ordered=self.sorted_collection(conf);total=len(ordered)
+        pages=max(1,(total+COLLECTION_PAGE_SIZE-1)//COLLECTION_PAGE_SIZE);page=max(1,min(int(page),pages));start=(page-1)*COLLECTION_PAGE_SIZE
+        raw_items=ordered[start:start+COLLECTION_PAGE_SIZE];items=[OwnedPokemon.from_raw(raw) for raw in raw_items]
+        numbered=list(enumerate(raw_items,start+1));lines=[]
+        for number,raw in numbered:
+            species=SPECIES[raw["species_id"]];marker="Shiny " if raw.get("shiny") else ""
+            lines.append(f"{number}. {marker}{raw.get('nickname') or species.name} · Lv. {raw['level']}")
+        embed=discord.Embed(title=f"Global Collection · {page}/{pages}",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        embed.set_footer(text=f"{total}/{MAX_COLLECTION} Pokémon · Select one below to manage your party")
+        try:
+            image=await self.renderer.collection_card(items,page,pages,total);embed.set_image(url="attachment://collection.png")
+            files=[discord.File(image,filename="collection.png")]
+        except RenderError:
+            log.exception("Collection card rendering failed");files=[]
+        return embed,files,page,pages,numbered
+
     @pokemon.command(name="collection",aliases=["box"])
     async def collection(self,ctx,page:int=1):
-        """Browse the Pokémon stored in your global boxes."""
+        """Browse and manage Pokémon in your global collection."""
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
-        pages=max(1,(len(conf["collection"])+BOX_SIZE-1)//BOX_SIZE);page=max(1,min(page,pages));start=(page-1)*BOX_SIZE
-        lines=[]
-        for n,pokemon in enumerate(conf["collection"][start:start+BOX_SIZE],start+1):
-            species=SPECIES[pokemon["species_id"]];marker="⭐ " if pokemon.get("shiny") else ""
-            lines.append(f"{n}. {marker}{pokemon.get('nickname') or species.name} · Lv. {pokemon['level']} · {pokemon['instance_id'][:8]}")
-        await ctx.send(f"**Global boxes · {page}/{pages} · {len(conf['collection'])}/{MAX_COLLECTION}**\n"+"\n".join(lines))
+        embed,files,page,pages,items=await self.rendered_collection(ctx.author,page)
+        await ctx.send(embed=embed,files=files,view=CollectionBrowserView(self,ctx.author.id,page,pages,items))
+
+    async def collection_party_choice(self,interaction,identity):
+        conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])};raw=owned.get(identity)
+        if not raw:await interaction.response.send_message("That Pokémon is no longer in your collection.",ephemeral=True);return
+        name=raw.get("nickname") or SPECIES[raw["species_id"]].name
+        await interaction.response.send_message(f"Where should **{name}** go?",view=PartyPlacementView(self,interaction.user.id,identity,list(conf.get("party",[])),owned),ephemeral=True)
+
+    async def place_collection_pokemon(self,interaction,identity,target=None):
+        async with self.lock(("user",interaction.user.id)):
+            conf=await self.config.user(interaction.user).all();owned={raw["instance_id"]:raw for raw in conf.get("collection",[])}
+            if identity not in owned:await interaction.response.edit_message(content="That Pokémon is no longer in your collection.",view=None);return
+            party=list(conf.get("party",[]));name=owned[identity].get("nickname") or SPECIES[owned[identity]["species_id"]].name
+            if target==identity:await interaction.response.edit_message(content=f"**{name}** already occupies that slot.",view=None);return
+            party=[value for value in party if value!=identity]
+            if target is None:
+                if len(party)>=6:await interaction.response.edit_message(content="Your party is full. Choose a slot to replace.",view=None);return
+                party.append(identity);message=f"Added **{name}** to party slot {len(party)}."
+            elif target in party:
+                slot=party.index(target);party[slot]=identity;message=f"Placed **{name}** in party slot {slot+1}."
+            else:await interaction.response.edit_message(content="That party slot is no longer available.",view=None);return
+            conf["party"]=party;await self.config.user(interaction.user).set(conf)
+        await interaction.response.edit_message(content=message,view=None)
+
     @pokemon.group(name="party",invoke_without_command=True)
     async def party(self,ctx):
         """View the Pokémon in your active party."""
-        conf=await self.config.user(ctx.author).all();owned={p["instance_id"]:p for p in conf["collection"]}
+        conf=await self.config.user(ctx.author).all();owned={p["instance_id"]:p for p in conf.get("collection",[])};party=[OwnedPokemon.from_raw(owned[identity]) for identity in conf.get("party",[]) if identity in owned]
         lines=[]
-        for slot,identity in enumerate(conf["party"],1):
-            pokemon=owned.get(identity)
-            if pokemon:
-                owned_pokemon=OwnedPokemon.from_raw(pokemon);maximum=pokemon_max_hp(owned_pokemon)
-                current=maximum if owned_pokemon.current_hp is None else owned_pokemon.current_hp
-                lines.append(f"{slot}. {SPECIES[pokemon['species_id']].name} · Lv. {pokemon['level']} · HP {current}/{maximum} · {identity[:8]}")
-        await ctx.send("**Party**\n"+("\n".join(lines) or "Empty"))
+        for slot,item in enumerate(party,1):
+            maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp;name=item.nickname or SPECIES[item.species_id].name
+            lines.append(f"{slot}. {name} · Lv. {item.level} · HP {current}/{maximum}")
+        embed=discord.Embed(title="Party",description="\n".join(lines) or "Empty",color=discord.Color.gold())
+        try:
+            image=await self.renderer.party_card(party);embed.set_image(url="attachment://party.png");files=[discord.File(image,filename="party.png")]
+        except RenderError:
+            log.exception("Party card rendering failed");files=[]
+        await ctx.send(embed=embed,files=files)
+
     @party.command(name="add")
     async def party_add(self,ctx,identifier:str,slot:int=None):
         """Add a caught Pokémon to your active party."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
-            matches=[p["instance_id"] for p in conf["collection"] if p["instance_id"].startswith(identifier)]
-            if len(matches)!=1:await ctx.send("Use a unique collection ID prefix.");return
+            ordered=self.sorted_collection(conf);matches=[]
+            if identifier.isdigit() and 1<=int(identifier)<=len(ordered):matches=[ordered[int(identifier)-1]["instance_id"]]
+            else:
+                wanted=identifier.casefold();matches=[raw["instance_id"] for raw in ordered if (raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold()==wanted]
+            if len(matches)!=1:await ctx.send("Use a collection number or unique Pokémon name.");return
             identity=matches[0];party=[value for value in conf["party"] if value!=identity]
             if slot is None:party.append(identity)
             elif 1<=slot<=6:
@@ -497,7 +545,7 @@ class Pokemon(commands.Cog):
         if str(identifier).isdigit():
             slot=int(identifier)
             if 1<=slot<=len(conf["party"]):return owned.get(conf["party"][slot-1])
-        matches=[raw for key,raw in owned.items() if key.startswith(str(identifier))]
+        wanted=str(identifier).casefold();matches=[raw for key,raw in owned.items() if key.startswith(str(identifier)) or (raw.get("nickname") or SPECIES[raw["species_id"]].name).casefold()==wanted]
         return matches[0] if len(matches)==1 else None
 
     @pokemon.command(name="bag")
@@ -516,7 +564,7 @@ class Pokemon(commands.Cog):
         """Use a Potion to restore a Pokémon’s HP."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
+            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
             pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
             current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
             if current<=0:await ctx.send("That Pokémon has fainted. Use a Revive first.");return
@@ -533,7 +581,7 @@ class Pokemon(commands.Cog):
         """Use a Revive on a fainted Pokémon."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
-            if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
+            if not raw:await ctx.send("Choose a party slot or unique Pokémon name.");return
             pokemon=OwnedPokemon.from_raw(raw);maximum=pokemon_max_hp(pokemon)
             current=maximum if pokemon.current_hp is None else int(pokemon.current_hp)
             if current>0:await ctx.send("That Pokémon has not fainted.");return

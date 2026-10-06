@@ -15,7 +15,7 @@ from pokemon.models import Battle,OwnedPokemon
 from pokemon.pokemon import PACE, Pokemon, activity_weight, available_species, bounded_pace, effective_generations, encounter_gender, encounter_is_expired, encounter_level, encounter_returns_after_timeout, pace_for_settings, rarity_tier, scaled_wild_level, spawn_weight
 from pokemon.pokedex import POKEDEX_STYLES, PokedexSession, PokedexView, generation_entries, render_pokedex, resolve_style
 from pokemon.tests.test_models import battle
-from pokemon.views import BagView, BattleView, FightView, PartyView, StarterView
+from pokemon.views import BagView, BattleView, CollectionBrowserView, FightView, PartyPlacementView, PartyView, StarterView
 
 
 class StoredValue:
@@ -282,6 +282,22 @@ class CogAsyncTests(unittest.IsolatedAsyncioTestCase):
         cog.rendered_starter.assert_awaited_once_with(unittest.mock.ANY,"Trainer",9)
         self.assertIsNone(await cog.grant_starter(interaction.user,7))
         self.assertEqual(len(section.value["collection"]),1)
+
+    async def test_collection_sort_and_party_replacement_hide_instance_ids(self):
+        PokemonCatalog(Path(__file__).parents[1] / "gen1.json").load()
+        tentacool=OwnedPokemon.create("catch-22",72,5,seed=2);charmander=OwnedPokemon.create("377af4fb",4,1,seed=1)
+        conf={"collection":[tentacool.raw(),charmander.raw()],"party":["377af4fb"]};section=StoredSection(conf)
+        self.assertEqual([raw["instance_id"] for raw in Pokemon.sorted_collection(conf)],["377af4fb","catch-22"])
+        browser=CollectionBrowserView(SimpleNamespace(),42,1,1,[(1,charmander.raw()),(2,tentacool.raw())])
+        selector=next(item for item in browser.children if isinstance(item,discord.ui.Select))
+        self.assertEqual([option.label for option in selector.options],["1. Charmander · Lv.1","2. Tentacool · Lv.5"])
+        self.assertNotIn("377af4fb"," ".join(option.label for option in selector.options))
+        cog=Pokemon.__new__(Pokemon);cog.config=SimpleNamespace(user=lambda user:section);cog.locks={}
+        response=SimpleNamespace(edit_message=AsyncMock());interaction=SimpleNamespace(user=SimpleNamespace(id=42),response=response)
+        await cog.place_collection_pokemon(interaction,"catch-22","377af4fb")
+        self.assertEqual(section.value["party"],["catch-22"])
+        message=response.edit_message.await_args.kwargs["content"]
+        self.assertIn("Tentacool",message);self.assertNotIn("catch-22",message)
 
     async def test_owner_reset_requires_confirmation_and_releases_battle(self):
         section=StoredSection({"collection":[{"instance_id":"starter"}],"starter_chosen":True})
