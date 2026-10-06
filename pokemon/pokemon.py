@@ -99,7 +99,7 @@ def authentic_moves_raw(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.32.2";__author__="SickProdigy"
+    __version__="0.32.3";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -143,7 +143,13 @@ class Pokemon(commands.Cog):
             channel=self.bot.get_channel(int(raw["channel_id"]))
             if channel:
                 try:
-                    message=await channel.fetch_message(int(raw["message_id"]));await message.edit(content="This wild encounter expired.",view=None)
+                    message=await channel.fetch_message(int(raw["message_id"]))
+                    if raw.get("battle"):
+                        species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+                        await message.edit(content=f"The wild {name} escaped.",view=None)
+                    else:
+                        embed,files=await self.rendered_expired_encounter(raw)
+                        await message.edit(content=None,embed=embed,attachments=files,view=None)
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException):pass
         await self.process_timed_spawns(now)
     async def process_timed_spawns(self,now=None):
@@ -318,6 +324,17 @@ class Pokemon(commands.Cog):
             return embed,[discord.File(image,filename="battle.png")]
         except RenderError:
             log.exception("Battle rendering failed")
+            return embed,[]
+    async def rendered_expired_encounter(self,raw):
+        species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+        embed=discord.Embed(title=f"The wild {name} got away!",description="No trainer encountered it in time.",color=discord.Color.light_grey())
+        try:
+            image=await self.renderer.encounter(int(raw["species_id"]),int(raw.get("level",1)),raw.get("gender","unknown"),int(raw.get("backdrop",0)),expired=True)
+            embed.set_image(url="attachment://encounter-expired.png")
+            return embed,[discord.File(image,filename="encounter-expired.png")]
+        except (RenderError,KeyError,TypeError,ValueError):
+            log.exception("Expired encounter rendering failed")
+            if species:embed.set_image(url=sprite(species.id))
             return embed,[]
     async def rendered_progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
         species=SPECIES[pokemon.species_id]
@@ -1153,11 +1170,13 @@ class Pokemon(commands.Cog):
                 try:
                     message=await channel.fetch_message(int(raw["message_id"]))
                     if raw.get("kind")=="gym":
-                        content="This Gym challenge was ended by server staff."
+                        await message.edit(content="This Gym challenge was ended by server staff.",view=None)
+                    elif raw.get("battle"):
+                        species=SPECIES.get(int(raw.get("species_id",0)));name=species.name if species else "Pokemon"
+                        await message.edit(content=f"The wild {name} escaped.",view=None)
                     else:
-                        species=SPECIES.get(int(raw.get("species_id",0)))
-                        content=f"The wild {species.name} got away." if species else "The wild Pokémon got away."
-                    await message.edit(content=content,view=None)
+                        embed,files=await self.rendered_expired_encounter(raw)
+                        await message.edit(content=None,embed=embed,attachments=files,view=None)
                 except (discord.Forbidden,discord.NotFound,discord.HTTPException,KeyError,TypeError,ValueError):
                     pass
         await ctx.send("Active encounter cleared.")

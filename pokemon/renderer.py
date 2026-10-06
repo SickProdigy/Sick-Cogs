@@ -112,10 +112,10 @@ class BattleRenderer:
         async with self.render_slots:
             return await asyncio.to_thread(callback, *args)
 
-    async def encounter(self,species_id:int,level:int=5,gender:str="unknown",backdrop:int=0):
+    async def encounter(self,species_id:int,level:int=5,gender:str="unknown",backdrop:int=0,expired:bool=False):
         data=await self.get_sprite(species_id)
         try:
-            return await self._render(self._encounter_sync,species_id,data,level,gender,backdrop)
+            return await self._render(self._encounter_sync,species_id,data,level,gender,backdrop,expired)
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
@@ -386,15 +386,18 @@ class BattleRenderer:
         self._dialogue(draw,message,(70,360),width=76,size=16)
         return self._save(canvas)
 
-    def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
+    def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0,expired=False):
         canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
         self._encounter_backdrop(draw,backdrop)
         pokemon=self._open(data,(250,220),trim=True,upscale=True)
         canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
         maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
         self._status_box(draw,(30,28),SPECIES[species_id].name,level,maximum,maximum,"",gender)
+        if expired:
+            canvas=Image.blend(canvas,Image.new("RGB",canvas.size,(105,105,105)),0.42);draw=ImageDraw.Draw(canvas)
         draw.rounded_rectangle((20,360,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
-        draw.text((45,385),f"A wild {SPECIES[species_id].name} appeared!",fill=RETRO[0],font=ImageFont.load_default(size=24))
+        message=f"The wild {SPECIES[species_id].name} got away!" if expired else f"A wild {SPECIES[species_id].name} appeared!"
+        draw.text((45,385),message,fill=RETRO[0],font=ImageFont.load_default(size=24))
         return self._save(canvas)
 
     @staticmethod
