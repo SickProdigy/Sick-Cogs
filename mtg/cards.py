@@ -97,6 +97,7 @@ class Card:
     animate_combat: bool = False
     creates_token: str = ""
     opponent_damage_discard_random: bool = False
+    combat_destroy_nonwall: bool = False
     type_line: str = ""
     set_code: str = ""
 
@@ -163,6 +164,7 @@ class Card:
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
+        if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
@@ -377,6 +379,11 @@ ALPHA_DAMAGE_TRIGGERS = {
     "lea:112": {"opponent_damage_discard_random":True},
 }
 
+ALPHA_COMBAT_TRIGGERS = {
+    "lea:189": {"combat_destroy_nonwall":True},
+    "lea:218": {"combat_destroy_nonwall":True},
+}
+
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
@@ -408,6 +415,7 @@ ALPHA_KEYWORDS = {
     "lea:225": ("defender",),
     "lea:227": ("trample",),
     "lea:186": ("flying",),
+    "lea:189": ("flying",),
 }
 
 CARDS = dict(BASE_CARDS)
@@ -502,6 +510,7 @@ for reference in PLAYABLE_ALPHA:
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
         creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         opponent_damage_discard_random=ALPHA_DAMAGE_TRIGGERS.get(reference.key,{}).get("opponent_damage_discard_random",False),
+        combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -522,7 +531,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

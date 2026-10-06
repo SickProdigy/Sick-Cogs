@@ -48,13 +48,13 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
+        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
         self.assertTrue(all(player.damage_prevention==0 for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
@@ -333,6 +333,54 @@ class StaticKeywordCombatTests(unittest.TestCase):
         game.pass_priority(10); game.pass_priority(20)
         self.assertNotIn(archer,game.players[20].battlefield)
         self.assertIn(giant,game.players[10].battlefield)
+
+
+class AlphaBasiliskCombatTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def combat(self,source_key,target_key,source_attacks=True):
+        game=ready(); game.active_index=0
+        source=self.add(game,10 if source_attacks else 20,source_key)
+        target=self.add(game,20 if source_attacks else 10,target_key)
+        attacker,blocker=(source,target) if source_attacks else (target,source)
+        game.phase="blockers"; game.attackers=[attacker.uid]; game.priority_user=None
+        game.declare_blockers(20,{1:1})
+        return game,source,target
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_attacking_cockatrice_schedules_persisted_end_combat_destruction(self):
+        game,source,target=self.combat("lea:189","lea:46")
+        self.assertEqual(len(game.end_combat_destroys),1); pending=game.end_combat_destroys[0]
+        self.assertEqual((pending.owner,pending.target),(10,f"20:{target.uid}"))
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw())
+        restored.pass_priority(10); restored.pass_priority(20)
+        self.assertEqual(restored.phase,"end_combat"); self.assertEqual(restored.stack[-1].ability_effect,"end_combat_destroy")
+        self.resolve_top(restored)
+        self.assertIn(target.uid,restored.player(20).graveyard); self.assertEqual(restored.phase,"end_combat")
+        restored.pass_priority(10); restored.pass_priority(20); self.assertEqual(restored.phase,"postcombat_main")
+
+    def test_blocking_basilisk_trigger_survives_source_removal(self):
+        game,source,target=self.combat("lea:218","giant",source_attacks=False)
+        game.player(20).battlefield.remove(source); game.player(20).graveyard.append(source.uid)
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertEqual(game.phase,"end_combat"); self.resolve_top(game)
+        self.assertIn(target.uid,game.player(10).graveyard)
+
+    def test_end_combat_destruction_allows_regeneration(self):
+        game,_,target=self.combat("lea:218","giant",source_attacks=False); target.regeneration_shields=1
+        game.pass_priority(10); game.pass_priority(20); self.resolve_top(game)
+        saved=game.find_permanent(target.uid)[1]
+        self.assertIsNotNone(saved); self.assertTrue(saved.tapped); self.assertEqual((saved.damage,saved.regeneration_shields),(0,0))
+
+    def test_walls_do_not_schedule_and_two_basilisks_schedule_apnap(self):
+        wall_game,_,_=self.combat("lea:218","lea:224",source_attacks=False)
+        self.assertEqual(wall_game.end_combat_destroys,[])
+        both,attacker,blocker=self.combat("lea:189","lea:189")
+        self.assertEqual([(item.owner,item.target) for item in both.end_combat_destroys],[(10,f"20:{blocker.uid}"),(20,f"10:{attacker.uid}")])
 
 
 class AlphaTrampleTests(unittest.TestCase):

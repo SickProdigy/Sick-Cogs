@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.53.0"
+    __version__="0.54.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -159,6 +159,11 @@ class MTG(commands.Cog):
                 if item.decision_pending: label+=f" (controller must Pay {g.trigger_cost(item)} or Decline)"
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
+        if g.end_combat_destroys:
+            pending=[]
+            for item in g.end_combat_destroys:
+                _,target=g.find_permanent(int(item.target.split(":")[1])); pending.append(f"{g.card(item.uid).name} → "+(g.card(target.uid).name if target else "departed creature"))
+            e.add_field(name="Pending end-of-combat destruction",value="\n".join(pending),inline=False)
         if g.end_step_sacrifices:
             e.add_field(name="Pending end-step trigger",value="Sacrifice "+", ".join(g.card(uid).name for uid in g.end_step_sacrifices)+" · players may respond",inline=False)
         if g.finished: e.description=f"Winner: **{names[g.winner]}** - {g.finished_reason}." if g.winner else f"Match ended - {g.finished_reason}."

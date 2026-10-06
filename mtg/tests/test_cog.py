@@ -306,6 +306,15 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Damage prevention remaining: 1",rendered)
 
+    async def test_public_embed_shows_pending_end_combat_destruction(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        source_uid=game.next_uid; game.next_uid+=1; game.cards[source_uid]="lea:218"; source=permanent_type(source_uid,"lea:218",sick=False); game.player(10).battlefield=[source]
+        target_uid=game.next_uid; game.next_uid+=1; game.cards[target_uid]="giant"; target=permanent_type(target_uid,"giant",sick=False); game.player(20).battlefield=[target]
+        trigger_uid=game.next_uid; game.next_uid+=1; game.cards[trigger_uid]="lea:218"; game.end_combat_destroys=[spell_type(10,trigger_uid,"lea:218",f"20:{target_uid}",ability_effect="end_combat_destroy",source_uid=source_uid)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Pending end-of-combat destruction",rendered); self.assertIn("Thicket Basilisk → Hill Giant",rendered)
+
     async def test_public_embed_shows_queued_extra_turns_in_order(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); game.extra_turns=[20,10]

@@ -319,8 +319,14 @@ def _blocks(game, user, difficulty):
         if not legal:
             continue
         attacker_power = game.current_stats(attacker_perm)[0]
-        survivable = [item for item in legal if game.current_stats(item[1])[1] > attacker_power]
-        choice = min(survivable or legal, key=lambda item: sum(game.current_stats(item[1])))
+        attacker_card=game.card(attacker_uid)
+        def block_score(item):
+            blocker=item[1]; blocker_card=game.card(blocker.uid)
+            delayed_loss=attacker_card.combat_destroy_nonwall and not game._has_subtype(blocker_card,"Wall")
+            delayed_kill=blocker_card.combat_destroy_nonwall and not game._has_subtype(attacker_card,"Wall")
+            survives=game.current_stats(blocker)[1]>attacker_power
+            return (2*delayed_kill-2*delayed_loss+survives,-sum(game.current_stats(blocker)))
+        choice=max(legal,key=block_score)
         assignments[attacker_position] = choice[0]
         blockers.remove(choice)
     return assignments

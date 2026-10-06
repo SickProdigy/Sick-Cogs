@@ -75,6 +75,17 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.winner, AI)
         self.assertIn(game.finished_reason, {"zero life", "empty library"})
 
+    def test_ai_accounts_for_basilisk_end_combat_destruction_when_blocking(self):
+        hunting=solo(); hunting.player(HUMAN).kept=True; hunting.player(AI).kept=True
+        giant=self.add(hunting,HUMAN,"giant"); basilisk=self.add(hunting,AI,"lea:218"); bear=self.add(hunting,AI,"bear")
+        hunting.active_index=0; hunting.attackers=[giant.uid]; hunting.phase="blockers"; hunting.priority_user=None
+        advance_solo(hunting); self.assertEqual(hunting.blocks,{giant.uid:basilisk.uid})
+
+        avoiding=solo(); avoiding.player(HUMAN).kept=True; avoiding.player(AI).kept=True
+        basilisk_attacker=self.add(avoiding,HUMAN,"lea:218"); bear=self.add(avoiding,AI,"bear"); wall=self.add(avoiding,AI,"lea:224")
+        avoiding.active_index=0; avoiding.attackers=[basilisk_attacker.uid]; avoiding.phase="blockers"; avoiding.priority_user=None
+        advance_solo(avoiding); self.assertEqual(avoiding.blocks,{basilisk_attacker.uid:wall.uid})
+
     def test_ai_declares_legal_attacks_and_blocks(self):
         attack = solo(order=(AI, HUMAN))
         advance_solo(attack)
