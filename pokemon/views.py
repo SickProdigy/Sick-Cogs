@@ -154,7 +154,7 @@ class BattleView(BattleMenu):
 
     @discord.ui.button(label="Bag", emoji="🎒", style=discord.ButtonStyle.success, custom_id="bag")
     async def bag(self, interaction, button):
-        await interaction.response.edit_message(view=BagView(self.cog, self.encounter_id))
+        await self.cog.open_battle_bag(interaction,self.encounter_id)
 
     @discord.ui.button(label="Run", style=discord.ButtonStyle.secondary, custom_id="run")
     async def run(self, interaction, button):
@@ -233,30 +233,47 @@ class PartyView(BattleMenu):
         self.add_item(BackButton(cog, encounter_id, row=3))
 
 
+class MedicineSelect(discord.ui.Select):
+    def __init__(self,cog,encounter_id,item_key,battle):
+        options=[]
+        for index,pokemon in enumerate(battle.party[:6]):
+            hp=int(battle.party_hp.get(pokemon.instance_id,0));maximum=battle.max_hp(pokemon)
+            eligible=(item_key=="potion" and 0<hp<maximum) or (item_key=="revive" and hp<=0)
+            if eligible:options.append(discord.SelectOption(label=f"{index+1}. {SPECIES[pokemon.species_id].name}",value=str(index),description=f"HP {hp}/{maximum}"))
+        available=bool(options)
+        if not options:options=[discord.SelectOption(label="No eligible Pokemon",value="none")]
+        super().__init__(placeholder=f"Choose a Pokemon for {item_key.title()}...",options=options,custom_id=f"pokemon:{encounter_id}:medicine:{item_key}",disabled=not available)
+        self.cog=cog;self.encounter_id=encounter_id;self.item_key=item_key
+    async def callback(self,interaction):
+        await self.cog.use_battle_item(interaction,self.encounter_id,self.item_key,int(self.values[0]))
+
+class MedicineView(BattleMenu):
+    def __init__(self,cog,encounter_id,item_key):
+        super().__init__(cog,encounter_id);battle=cog.battles.get(encounter_id)
+        if battle:self.add_item(MedicineSelect(cog,encounter_id,item_key,battle))
+        self.add_item(BackButton(cog,encounter_id,row=1))
+
 class BagView(BattleMenu):
-    def __init__(self, cog, encounter_id):
-        super().__init__(cog, encounter_id)
-        self.ball.custom_id = f"pokemon:{encounter_id}:bag:ball"
-        self.great_ball.custom_id = f"pokemon:{encounter_id}:bag:great"
-        self.ultra_ball.custom_id = f"pokemon:{encounter_id}:bag:ultra"
-        self.back.custom_id = f"pokemon:{encounter_id}:bag:back"
+    def __init__(self,cog,encounter_id,inventory=None):
+        super().__init__(cog,encounter_id)
+        if inventory is not None:
+            counts={"poke_ball":int(inventory.get("balls",0)),"great_ball":int(inventory.get("great_ball",0)),"ultra_ball":int(inventory.get("ultra_ball",0)),"potion":int(inventory.get("potion",0)),"revive":int(inventory.get("revive",0))}
+            for button,key in ((self.ball,"poke_ball"),(self.great_ball,"great_ball"),(self.ultra_ball,"ultra_ball"),(self.potion,"potion"),(self.revive,"revive")):
+                button.label=f"{button.label} x{counts[key]}";button.disabled=counts[key]<1
+        self.ball.custom_id=f"pokemon:{encounter_id}:bag:ball";self.great_ball.custom_id=f"pokemon:{encounter_id}:bag:great";self.ultra_ball.custom_id=f"pokemon:{encounter_id}:bag:ultra";self.potion.custom_id=f"pokemon:{encounter_id}:bag:potion";self.revive.custom_id=f"pokemon:{encounter_id}:bag:revive";self.back.custom_id=f"pokemon:{encounter_id}:bag:back"
 
-    @discord.ui.button(label="Poké Ball", emoji="🔴", style=discord.ButtonStyle.success, custom_id="ball")
-    async def ball(self, interaction, button):
-        await self.cog.throw_ball(interaction,self.encounter_id,"poke_ball")
-
-    @discord.ui.button(label="Great Ball",emoji="🔵",style=discord.ButtonStyle.primary,custom_id="great")
-    async def great_ball(self,interaction,button):
-        await self.cog.throw_ball(interaction,self.encounter_id,"great_ball")
-
-    @discord.ui.button(label="Ultra Ball",emoji="🟡",style=discord.ButtonStyle.primary,custom_id="ultra")
-    async def ultra_ball(self,interaction,button):
-        await self.cog.throw_ball(interaction,self.encounter_id,"ultra_ball")
-
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, custom_id="back")
-    async def back(self, interaction, button):
-        await interaction.response.edit_message(view=BattleView(self.cog, self.encounter_id))
-
+    @discord.ui.button(label="Poké Ball",emoji="🔴",style=discord.ButtonStyle.success,custom_id="ball",row=0)
+    async def ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"poke_ball")
+    @discord.ui.button(label="Great Ball",emoji="🔵",style=discord.ButtonStyle.primary,custom_id="great",row=0)
+    async def great_ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"great_ball")
+    @discord.ui.button(label="Ultra Ball",emoji="🟡",style=discord.ButtonStyle.primary,custom_id="ultra",row=0)
+    async def ultra_ball(self,interaction,button):await self.cog.throw_ball(interaction,self.encounter_id,"ultra_ball")
+    @discord.ui.button(label="Potion",emoji="🧪",style=discord.ButtonStyle.success,custom_id="potion",row=1)
+    async def potion(self,interaction,button):await self.cog.open_battle_medicine(interaction,self.encounter_id,"potion")
+    @discord.ui.button(label="Revive",emoji="✨",style=discord.ButtonStyle.success,custom_id="revive",row=1)
+    async def revive(self,interaction,button):await self.cog.open_battle_medicine(interaction,self.encounter_id,"revive")
+    @discord.ui.button(label="Back",style=discord.ButtonStyle.secondary,custom_id="back",row=1)
+    async def back(self,interaction,button):await interaction.response.edit_message(view=BattleView(self.cog,self.encounter_id))
 
 class BackButton(discord.ui.Button):
     def __init__(self, cog, encounter_id, row):
