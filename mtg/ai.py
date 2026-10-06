@@ -677,6 +677,15 @@ def _activate_untap_aura(game,user):
             game.activate_ability(user,position); return "activate"
     return None
 
+def _choose_bodyguard(game,user):
+    if game.active_user==user or game.phase not in ("after_blockers","after_first_strike"): return None
+    player=game.player(user); choices=[(game.current_stats(permanent)[1]-permanent.damage,position,permanent) for position,permanent in enumerate(player.battlefield,1) if game.card(permanent.uid).redirects_unblocked_combat_damage and not permanent.tapped]
+    if not choices: return None
+    _,position,chosen=max(choices)
+    if player.bodyguard_choice==chosen.uid: return None
+    game.choose_bodyguard(user,position); return "choose_bodyguard"
+
+
 def _activate_owned_incarnation(game,user):
     for controller in game.players.values():
         if controller.user_id==user: continue
@@ -786,7 +795,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _choose_bodyguard(game,user) or _activate_owned_incarnation(game,user) or _activate_guardian_angel(game,user) or _activate_clockwork(game,user) or _activate_untap_aura(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

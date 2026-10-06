@@ -153,6 +153,7 @@ class Card:
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
     attacks_each_combat: bool = False
+    redirects_unblocked_combat_damage: bool = False
     cant_be_blocked_by_subtype: str = ""
     type_line: str = ""
     set_code: str = ""
@@ -244,6 +245,7 @@ class Card:
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
         if self.attacks_each_combat: abilities.append("Attacks each combat if able")
+        if self.redirects_unblocked_combat_damage: abilities.append("While untapped, unblocked-creature damage to you is dealt to this creature instead")
         if self.cant_be_blocked_by_subtype: abilities.append(f"Can't be blocked by {self.cant_be_blocked_by_subtype}s")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
@@ -422,6 +424,7 @@ ALPHA_MANA_CREATURES = {
 }
 
 ALPHA_ACTIVATED_CREATURES = {
+    "lea:41": {"redirects_unblocked_combat_damage":True},
     "lea:31": {"activation_cost":"{0}", "activation_effect":"redirect_one_to_owner", "activation_owner_only":True, "death_owner_half_life":True, "activation_text":"The next 1 damage to this creature is dealt to its owner instead"},
     "lea:37": {"activation_tap":True, "activation_effect":"prevent_any_damage", "activation_amount":1, "activation_text":"Prevent the next 1 damage that would be dealt to any target this turn"},
     "lea:106": {"activation_cost":"{B}", "activation_effect":"regenerate", "activation_text":"Regenerate this creature"},
@@ -682,6 +685,7 @@ for reference in PLAYABLE_ALPHA:
         activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
         activation_controller_turn_only=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_controller_turn_only",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_controller_turn_only",False)),
         activation_owner_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_owner_only",False),
+        redirects_unblocked_combat_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("redirects_unblocked_combat_damage",False),
         activation_once_per_turn=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_once_per_turn",False),
         activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         prevent_source_color=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("prevent_source_color",""),

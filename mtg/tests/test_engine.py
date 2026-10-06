@@ -50,12 +50,12 @@ class TurnTests(unittest.TestCase):
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("untap_pending"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("attacked_this_turn"); raw.pop("trample_assignments")
         for player in raw["players"].values():
-            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("lands_played_this_turn"); player.pop("channel_active")
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("source_damage_prevention"); player.pop("source_damage_lifegain"); player.pop("source_damage_caps"); player.pop("guardian_angel_active"); player.pop("bodyguard_choice"); player.pop("lands_played_this_turn"); player.pop("channel_active")
             for permanent in player["battlefield"]: permanent.pop("owner",None); permanent.pop("damage_prevention"); permanent.pop("redirect_damage_to_owner"); permanent.pop("redirect_source_damage_to_player"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertEqual(restored.untap_pending,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
-        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and player.source_damage_caps=={} and not player.guardian_angel_active and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
+        self.assertTrue(all(player.damage_prevention==0 and player.source_damage_prevention==[] and player.source_damage_lifegain==[] and player.source_damage_caps=={} and not player.guardian_angel_active and player.bodyguard_choice==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 and permanent.redirect_damage_to_owner==0 and permanent.redirect_source_damage_to_player=={} and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] and permanent.owner==player.user_id for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
@@ -3731,5 +3731,18 @@ class AlphaJadeMonolithTests(unittest.TestCase):
     def test_jade_monolith_target_removal_fizzles_without_redirect(self):
         game=ready(); monolith=Permanent(game.next_uid,"lea:252",owner=10,sick=False); game.cards[monolith.uid]="lea:252"; game.next_uid+=1; land=Permanent(game.next_uid,"plains",owner=10,sick=False); game.cards[land.uid]="plains"; game.next_uid+=1; target=Permanent(game.next_uid,"bear",owner=10,sick=False); game.cards[target.uid]="bear"; game.next_uid+=1; game.player(10).battlefield=[monolith,land,target]; source=game.next_uid; game.next_uid+=1; game.cards[source]="lea:161"; game.stack=[Spell(20,source,"lea:161",f"10:{target.uid}")]; game.phase="precombat_main"; game.priority_user=10
         game.activate_ability(10,1,"S:1>10:3"); ability=game.stack.pop(); game.player(10).battlefield.remove(target); game._resolve_ability(ability); self.assertNotIn(source,target.redirect_source_damage_to_player)
+
+class AlphaVeteranBodyguardTests(unittest.TestCase):
+    def test_unblocked_damage_redirects_to_untapped_bodyguard_not_player(self):
+        game=ready(); attacker=Permanent(game.next_uid,"giant",owner=10,sick=False); game.cards[attacker.uid]="giant"; game.next_uid+=1; bodyguard=Permanent(game.next_uid,"lea:41",owner=20,sick=False); game.cards[bodyguard.uid]="lea:41"; game.next_uid+=1; game.player(10).battlefield=[attacker]; game.player(20).battlefield=[bodyguard]; game.attackers=[attacker.uid]; game.phase="after_blockers"
+        before=game.player(20).life; game._combat_damage(False); self.assertEqual(game.player(20).life,before); self.assertEqual(bodyguard.damage,3)
+
+    def test_blocked_trample_and_tapped_bodyguard_do_not_redirect(self):
+        game=ready(); attacker=Permanent(game.next_uid,"lea:227",owner=10,sick=False); game.cards[attacker.uid]="lea:227"; game.next_uid+=1; blocker=Permanent(game.next_uid,"bear",owner=20,sick=False,damage=1); game.cards[blocker.uid]="bear"; game.next_uid+=1; bodyguard=Permanent(game.next_uid,"lea:41",owner=20,sick=False,tapped=True); game.cards[bodyguard.uid]="lea:41"; game.next_uid+=1; game.player(10).battlefield=[attacker]; game.player(20).battlefield=[blocker,bodyguard]; game.attackers=[attacker.uid]; game.blocks={attacker.uid:blocker.uid}; game.blocked_attackers=[attacker.uid]; game.phase="after_blockers"
+        game._combat_damage(False); self.assertEqual(game.player(20).life,18); self.assertEqual(bodyguard.damage,0)
+
+    def test_duplicate_choice_persists_and_controls_redirect_destination(self):
+        game=ready(); attacker=Permanent(game.next_uid,"giant",owner=10,sick=False); game.cards[attacker.uid]="giant"; game.next_uid+=1; first=Permanent(game.next_uid,"lea:41",owner=20,sick=False); game.cards[first.uid]="lea:41"; game.next_uid+=1; second=Permanent(game.next_uid,"lea:41",owner=20,sick=False); game.cards[second.uid]="lea:41"; game.next_uid+=1; game.player(10).battlefield=[attacker]; game.player(20).battlefield=[first,second]; game.attackers=[attacker.uid]; game.phase="after_blockers"; game.priority_user=20
+        game.choose_bodyguard(20,2); restored=Game.from_raw(game.to_raw()); restored._combat_damage(False); self.assertEqual(restored.find_permanent(first.uid)[1].damage,0); self.assertEqual(restored.find_permanent(second.uid)[1].damage,3)
 
 if __name__=="__main__": unittest.main()

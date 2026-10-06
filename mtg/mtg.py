@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.93.0"
+    __version__="0.94.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -166,6 +166,8 @@ class MTG(commands.Cog):
             if p.source_damage_caps:
                 sources=[g.card(uid).name if uid in g.cards else f"source {uid}" for uid in p.source_damage_caps]
                 value+="\nForcefield awaiting: "+", ".join(sources)
+            if p.bodyguard_choice:
+                value+="\nVeteran Bodyguard choice: "+(g.card(p.bodyguard_choice).name if p.bodyguard_choice in g.cards else f"source {p.bodyguard_choice}")
             e.add_field(name=f"{names[user]} · {p.life} life · {len(p.hand)} cards",value=value,inline=False)
         if g.phase=="untap" and g.untap_pending:
             pending=set(g.untap_pending); player=g.player(g.active_user)
@@ -528,6 +530,10 @@ class MTG(commands.Cog):
     async def attack(self,ctx,*positions:int):
         """Declare battlefield positions as attackers; no positions skips combat."""
         await self.mutate_ctx(ctx,lambda g:g.declare_attackers(ctx.author.id,positions),"attack")
+    @mtg.command(name="bodyguard")
+    async def bodyguard(self,ctx,position:int):
+        """Choose which untapped Veteran Bodyguard receives unblocked-creature combat damage."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_bodyguard(ctx.author.id,position),"choose_bodyguard")
     @mtg.command(name="trample")
     async def trample(self,ctx,position:int,damage_to_blocker:int):
         """Choose how much trample damage an attacker assigns to its blocker; defaults to lethal."""
