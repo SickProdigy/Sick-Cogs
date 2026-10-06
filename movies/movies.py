@@ -592,8 +592,12 @@ class MovieReleases(commands.Cog):
     @movieset.command(name="maxperday")
     async def movieset_maxperday(self, ctx: commands.Context, amount: commands.Range[int, 1, 25]):
         """Set the maximum automatic release posts per day."""
-        await self.config.guild(ctx.guild).max_per_day.set(amount)
-        await ctx.send(f"Movie release posts are limited to {amount} per day.")
+        guild_config = self.config.guild(ctx.guild)
+        previous_amount = await guild_config.max_per_day()
+        await guild_config.max_per_day.set(amount)
+        await ctx.send(
+            f"Movie release post limit changed from {previous_amount} to {amount} per day."
+        )
 
     @movieset.command(name="window")
     async def movieset_window(
