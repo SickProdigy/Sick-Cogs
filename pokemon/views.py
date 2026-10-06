@@ -89,6 +89,24 @@ class PartyPlacementView(discord.ui.View):
         await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False
 
 
+class MoveForgetSelect(discord.ui.Select):
+    def __init__(self,cog,user_id,pokemon,new_move):
+        options=[discord.SelectOption(label=f"Forget {MOVES[key].name}",value=key,description=f"Replace it with {MOVES[new_move].name}") for key in pokemon.moves]
+        super().__init__(placeholder=f"Choose a move to forget for {MOVES[new_move].name}…",options=options,custom_id=f"pokemon:learn:{new_move}:replace")
+        self.cog=cog;self.user_id=user_id;self.identity=pokemon.instance_id;self.new_move=new_move
+    async def callback(self,interaction):await self.cog.resolve_move_choice(interaction,self.identity,self.new_move,self.values[0])
+
+class MoveLearnView(discord.ui.View):
+    def __init__(self,cog,user_id,pokemon,new_move):
+        super().__init__(timeout=300);self.cog=cog;self.user_id=user_id;self.identity=pokemon.instance_id;self.new_move=new_move
+        self.add_item(MoveForgetSelect(cog,user_id,pokemon,new_move))
+        self.give_up.custom_id=f"pokemon:learn:{new_move}:cancel"
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This move choice belongs to another trainer.",ephemeral=True);return False
+    @discord.ui.button(label="Give up learning it",style=discord.ButtonStyle.secondary,row=1)
+    async def give_up(self,interaction,button):await self.cog.resolve_move_choice(interaction,self.identity,self.new_move,None)
+
 class EncounterView(discord.ui.View):
     def __init__(self, cog, encounter_id):
         super().__init__(timeout=None)

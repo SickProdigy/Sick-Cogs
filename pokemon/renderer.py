@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
-from .data import SPECIES, sprite
+from .data import MOVES, SPECIES, sprite
 from .models import pokemon_max_hp
 
 SPRITE_HOST = "raw.githubusercontent.com"
@@ -142,6 +142,12 @@ class BattleRenderer:
         data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
         try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total,trainer_name)
         except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
+
+    async def progression(self,pokemon,evolved_from=None,move_key=None,pending=False):
+        current=await self.get_sprite(pokemon.species_id,shiny=pokemon.shiny)
+        previous=await self.get_sprite(evolved_from,shiny=pokemon.shiny) if evolved_from else None
+        try:return await self._render(self._progression_sync,pokemon,current,previous,evolved_from,move_key,pending)
+        except (OSError,ValueError) as exc:raise RenderError("Progression rendering failed.") from exc
 
     async def battle(self, battle):
         if battle.state!="active":
@@ -398,6 +404,26 @@ class BattleRenderer:
         draw.ellipse((255,267,630,352),fill=RETRO[2],outline=RETRO[0],width=4)
         draw.ellipse((275,280,612,341),fill=(183,205,112),outline=RETRO[1],width=2)
         for x in range(280,615,28):draw.line((x,289,x+7,275),fill=RETRO[0],width=3)
+
+    def _progression_sync(self,pokemon,current_data,previous_data,evolved_from,move_key,pending):
+        canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
+        for y in range(0,360,12):draw.line((0,y,800,y),fill=RETRO[5])
+        if evolved_from:
+            old=SPECIES[evolved_from];new=SPECIES[pokemon.species_id]
+            draw.text((400-int(draw.textlength("EVOLUTION!",font=ImageFont.load_default(size=34)))//2,28),"EVOLUTION!",fill=RETRO[0],font=ImageFont.load_default(size=34))
+            left=self._retro(self._open(previous_data,(230,210),trim=True,upscale=True));right=self._retro(self._open(current_data,(250,225),trim=True,upscale=True))
+            canvas.paste(left,(205-left.width//2,290-left.height),left);canvas.paste(right,(595-right.width//2,290-right.height),right)
+            draw.line((340,205,455,205),fill=RETRO[0],width=7);draw.polygon(((455,205),(430,188),(430,222)),fill=RETRO[0])
+            message=f"What? {old.name} evolved into {new.name}!"
+        else:
+            species=SPECIES[pokemon.species_id];image=self._retro(self._open(current_data,(245,220),trim=True,upscale=True));canvas.paste(image,(205-image.width//2,300-image.height),image)
+            draw.rounded_rectangle((355,40,755,315),14,fill=RETRO[7],outline=RETRO[0],width=5)
+            draw.text((380,60),f"{species.name}'s moves",fill=RETRO[0],font=ImageFont.load_default(size=24))
+            for index,key in enumerate(pokemon.moves):draw.text((390,110+38*index),f"{index+1}. {MOVES[key].name}  PP {pokemon.move_pp.get(key,MOVES[key].pp)}",fill=RETRO[1],font=ImageFont.load_default(size=19))
+            move=MOVES[move_key].name if move_key else "a new move"
+            message=f"{species.name} is trying to learn {move}!" if pending else f"{species.name} learned {move}!"
+        draw.rectangle((0,360,800,450),fill=RETRO[5],outline=RETRO[0],width=5);self._dialogue(draw,message,(25,382),width=84,size=19)
+        return self._save(canvas)
 
     def _battle_sync(self, battle, front_data, back_data):
         canvas = Image.new("RGB", (800, 450), RETRO[4])
