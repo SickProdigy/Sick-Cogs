@@ -164,9 +164,14 @@ def render_battlefield(game, names, paths, background_path):
     draw.text((640, 384), f"Turn {game.turn} - {phase}", fill=(250, 240, 215), font=title_font, anchor="mm")
     priority = names.get(game.priority_user, "Declaration step") if game.priority_user else "Declaration step"
     draw.text((640, 425), f"Priority: {priority}", fill=(218, 210, 188), font=label_font, anchor="mm")
+    public_status=[]
     if game.stack:
         stack_names = " -> ".join(game.card(spell.uid).name for spell in reversed(game.stack))
-        draw.text((640, 462), f"Stack: {stack_names}", fill=(255, 215, 132), font=small_font, anchor="mm")
+        public_status.append(f"Stack: {stack_names}")
+    if game.extra_turns:
+        public_status.append("Extra turns: "+" -> ".join(names[user] for user in game.extra_turns))
+    if public_status:
+        draw.text((640, 462), " | ".join(public_status), fill=(255, 215, 132), font=small_font, anchor="mm")
 
     def draw_player(user, top):
         player = game.players[user]

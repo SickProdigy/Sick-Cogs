@@ -326,6 +326,7 @@ ALPHA_CHARACTERISTIC_CREATURES = {
 ALPHA_SPELLS = {
     "lea:32": {"effect":"set_color", "color_change":"W"},
     "lea:82": {"effect":"set_color", "color_change":"U"},
+    "lea:83": {"effect":"extra_turn"},
     "lea:101": {"effect":"set_color", "color_change":"B"},
     "lea:139": {"effect":"set_color", "color_change":"R"},
     "lea:207": {"effect":"set_color", "color_change":"G"},

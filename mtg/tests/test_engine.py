@@ -48,16 +48,39 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
+        self.assertEqual(restored.history,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
         self.assertTrue(all(player.damage_prevention==0 for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
+
+    def test_time_walk_queue_persists_and_gives_a_full_extra_turn(self):
+        game=ready(); player=game.player(10); before=len(player.hand)
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:83"
+        game._resolve(Spell(10,uid,"lea:83"))
+        self.assertEqual(game.extra_turns,[10]); self.assertIn(uid,player.graveyard)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.extra_turns,[10])
+        land_uid=game.next_uid; game.next_uid+=1; game.cards[land_uid]="forest"
+        permanent=Permanent(land_uid,"forest",tapped=True,sick=False); player.battlefield=[permanent]; player.land_played=True
+        restored=Game.from_raw(game.to_raw()); restored.phase="ending"; restored._advance()
+        self.assertEqual((restored.active_user,restored.turn),(10,2)); self.assertEqual(restored.extra_turns,[])
+        self.assertFalse(restored.player(10).battlefield[0].tapped); self.assertFalse(restored.player(10).land_played)
+        self.assertEqual(len(restored.player(10).hand),before+1)
+        restored.phase="ending"; restored._advance(); self.assertEqual((restored.active_user,restored.turn),(20,3))
+
+    def test_extra_turns_use_newest_created_first(self):
+        game=ready()
+        for owner in (10,20):
+            uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:83"; game._resolve(Spell(owner,uid,"lea:83"))
+        self.assertEqual(game.extra_turns,[20,10])
+        game.phase="ending"; game._advance(); self.assertEqual(game.active_user,20)
+        game.phase="ending"; game._advance(); self.assertEqual(game.active_user,10)
+        game.phase="ending"; game._advance(); self.assertEqual(game.active_user,20)
 
     def test_declaration_steps_do_not_grant_spell_priority(self):
         g=ready(); p=g.players[10]

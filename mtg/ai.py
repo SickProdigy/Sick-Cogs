@@ -232,6 +232,8 @@ def _play_one(game, user, difficulty):
             score=14 if target and target.startswith("prevent:") else 7
         elif card.effect=="life_target_x":
             score=4+(x_value or 0)
+        elif card.effect=="extra_turn":
+            score=24
         elif card.effect=="mana_short":
             opponent=game.player(game.opponent(user)); score=8+sum(opponent.mana_pool.values())+sum(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield)
         elif card.effect == "destroy_land":

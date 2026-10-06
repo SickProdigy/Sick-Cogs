@@ -306,6 +306,12 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Damage prevention remaining: 1",rendered)
 
+    async def test_public_embed_shows_queued_extra_turns_in_order(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); game.extra_turns=[20,10]
+        field=next(field for field in cog.game_embed(game).fields if field.name=="Extra turns queued")
+        self.assertEqual(field.value,"20 → 10")
+
     async def test_public_embed_shows_fog_turn_effect(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); game.prevent_combat_damage=True
