@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 import logging
 import random
@@ -22,7 +23,9 @@ TMDB_DETAILS_URL = "https://api.themoviedb.org/3/movie/{movie_id}"
 TMDB_POPULAR_URL = "https://api.themoviedb.org/3/movie/popular"
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w500"
 TMDB_MOVIE_URL = "https://www.themoviedb.org/movie/{movie_id}"
-USER_AGENT = "Sick-Cogs-MovieReleases/1.1.1 (+https://github.com/SickProdigy/Sick-Cogs)"
+USER_AGENT = "Sick-Cogs-MovieReleases/1.2.0 (+https://github.com/SickProdigy/Sick-Cogs)"
+CHECK_INTERVAL = datetime.timedelta(hours=1)
+CONFIG_SCHEMA_VERSION = 1
 GuildMessageable = Union[discord.TextChannel, discord.VoiceChannel, discord.StageChannel, discord.Thread]
 
 
@@ -34,7 +37,7 @@ class MovieReleases(commands.Cog):
     """Post new movie release announcements from TMDb."""
 
     __author__ = ["SickProdigy"]
-    __version__ = "1.1.1"
+    __version__ = "1.2.0"
 
     default_guild = {
         "enabled": False,
@@ -45,6 +48,7 @@ class MovieReleases(commands.Cog):
         "days_ahead": 7,
         "min_vote_count": 5,
         "last_checked": None,
+        "next_check_at": None,
         "posted_ids": [],
         "posted_today": {"date": None, "count": 0},
     }
@@ -53,6 +57,7 @@ class MovieReleases(commands.Cog):
         self.bot = bot
         self.config = Config.get_conf(self, identifier=CONFIG_IDENTIFIER, force_registration=True)
         self.config.register_guild(**self.default_guild)
+        self.config.register_global(schema_version=0)
         self.session: Optional[aiohttp.ClientSession] = None
         self.release_loop.start()
 
@@ -77,7 +82,7 @@ class MovieReleases(commands.Cog):
         api_key = str(tokens.get("api_key") or "").strip()
         return api_key or None
 
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=1)
     async def release_loop(self):
         await self.bot.wait_until_red_ready()
         for guild in list(self.bot.guilds):
@@ -93,12 +98,55 @@ class MovieReleases(commands.Cog):
     @release_loop.before_loop
     async def before_release_loop(self):
         await self.bot.wait_until_red_ready()
+        await self.migrate_config()
+
+    @staticmethod
+    def utc_now() -> datetime.datetime:
+        return datetime.datetime.now(datetime.timezone.utc)
+
+    @classmethod
+    def parse_timestamp(cls, value: Optional[str]) -> Optional[datetime.datetime]:
+        if not value:
+            return None
+        try:
+            parsed = datetime.datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+        return parsed.astimezone(datetime.timezone.utc)
+
+    async def migrate_config(self) -> None:
+        """Repair legacy guild records without changing their Config namespace."""
+        if await self.config.schema_version() >= CONFIG_SCHEMA_VERSION:
+            return
+
+        next_check = (self.utc_now() + CHECK_INTERVAL).isoformat()
+        for guild_id, stored in (await self.config.all_guilds()).items():
+            guild_config = self.config.guild_from_id(int(guild_id))
+            for key, default in self.default_guild.items():
+                if stored.get(key) is None and default is not None:
+                    await guild_config.set_raw(key, value=copy.deepcopy(default))
+            if stored.get("enabled") and not stored.get("next_check_at"):
+                await guild_config.next_check_at.set(next_check)
+
+        await self.config.schema_version.set(CONFIG_SCHEMA_VERSION)
 
     async def check_guild(self, guild: discord.Guild, *, force: bool = False) -> int:
         settings = await self.config.guild(guild).all()
-        api_key = await self.get_api_key()
         if not settings["enabled"] and not force:
             return 0
+
+        now = self.utc_now()
+        if not force:
+            next_check = self.parse_timestamp(settings.get("next_check_at"))
+            if next_check and next_check > now:
+                return 0
+            # Reserve the next slot before network or Discord work. A cog reload
+            # therefore cannot turn a release backlog into rapid-fire posts.
+            await self.config.guild(guild).next_check_at.set((now + CHECK_INTERVAL).isoformat())
+
+        api_key = await self.get_api_key()
         if not api_key or not settings["channel_id"]:
             return 0
 
@@ -119,7 +167,7 @@ class MovieReleases(commands.Cog):
         posted_ids = [int(movie_id) for movie_id in settings.get("posted_ids", [])]
         new_movies = [movie for movie in movies if int(movie["id"]) not in posted_ids]
         if not new_movies:
-            await self.config.guild(guild).last_checked.set(datetime.datetime.now(datetime.timezone.utc).isoformat())
+            await self.config.guild(guild).last_checked.set(now.isoformat())
             return 0
 
         # Publish at most one release per check so the hourly polling cadence also
@@ -136,7 +184,7 @@ class MovieReleases(commands.Cog):
         posted_ids = posted_ids[-500:]
         await self.config.guild(guild).posted_ids.set(posted_ids)
         await self.config.guild(guild).posted_today.set(posted_today)
-        await self.config.guild(guild).last_checked.set(datetime.datetime.now(datetime.timezone.utc).isoformat())
+        await self.config.guild(guild).last_checked.set(now.isoformat())
         return sent
 
     async def get_channel(self, guild: discord.Guild, channel_id: int) -> Optional[GuildMessageable]:
@@ -167,7 +215,9 @@ class MovieReleases(commands.Cog):
             "primary_release_date.gte": start.isoformat(),
             "primary_release_date.lte": end.isoformat(),
             "vote_count.gte": max(0, int(settings.get("min_vote_count", 5))),
-            "with_release_type": "2|3",
+            # TMDb returns the first matching release type, so prefer a standard
+            # theatrical date (3) over a limited theatrical date (2).
+            "with_release_type": "3|2",
         }
         session = await self.get_session()
         async with session.get(TMDB_API_URL, params=params) as response:
@@ -518,11 +568,14 @@ class MovieReleases(commands.Cog):
                 f"`{ctx.clean_prefix}set api tmdb api_key,YOUR_KEY` first."
             )
             return
+        next_check = self.utc_now() + CHECK_INTERVAL
         await self.config.guild(ctx.guild).enabled.set(True)
+        await self.config.guild(ctx.guild).next_check_at.set(next_check.isoformat())
         settings = await self.config.guild(ctx.guild).all()
         await ctx.send(
             "Movie release checks are now **enabled**. I’ll check hourly and post "
-            f"at most one release per check, up to **{settings['max_per_day']} per UTC day**."
+            f"at most one release per check, up to **{settings['max_per_day']} per UTC day**. "
+            f"The first automatic check is <t:{int(next_check.timestamp())}:R>."
         )
 
     @movieset.command(name="disable", aliases=["disabled"])
@@ -533,6 +586,7 @@ class MovieReleases(commands.Cog):
         lookups remain available.
         """
         await self.config.guild(ctx.guild).enabled.set(False)
+        await self.config.guild(ctx.guild).next_check_at.set(None)
         await ctx.send("Hourly automatic movie release posts are now **disabled**.")
 
     @movieset.command(name="maxperday")
@@ -610,6 +664,11 @@ class MovieReleases(commands.Cog):
         settings = await self.config.guild(ctx.guild).all()
         api_key = await self.get_api_key()
         channel = ctx.guild.get_channel_or_thread(settings["channel_id"]) if settings["channel_id"] else None
+        sendable_channel = (
+            await self.get_channel(ctx.guild, int(settings["channel_id"]))
+            if settings["channel_id"]
+            else None
+        )
         role = ctx.guild.get_role(settings["role_id"]) if settings["role_id"] else None
         embed = discord.Embed(title="Movie release settings", colour=discord.Colour.blurple())
         embed.add_field(name="Enabled", value=str(settings["enabled"]), inline=True)
@@ -624,5 +683,16 @@ class MovieReleases(commands.Cog):
         embed.add_field(name="Window", value=f"-{settings['days_back']} / +{settings['days_ahead']} days", inline=True)
         embed.add_field(name="Minimum votes", value=str(settings["min_vote_count"]), inline=True)
         embed.add_field(name="API key", value="Set" if api_key else "Not set", inline=True)
-        embed.add_field(name="Last checked", value=settings["last_checked"] or "Never", inline=False)
+        next_check = self.parse_timestamp(settings.get("next_check_at"))
+        next_check_text = f"<t:{int(next_check.timestamp())}:R>" if next_check else "Not scheduled"
+        readiness = "Ready"
+        if not settings["enabled"]:
+            readiness = "Disabled"
+        elif not sendable_channel:
+            readiness = "Blocked: channel missing or I cannot send there"
+        elif not api_key:
+            readiness = "Blocked: TMDb API key missing"
+        embed.add_field(name="Status", value=readiness, inline=False)
+        embed.add_field(name="Next check", value=next_check_text, inline=True)
+        embed.add_field(name="Last checked", value=settings["last_checked"] or "Never", inline=True)
         await ctx.send(embed=embed)
