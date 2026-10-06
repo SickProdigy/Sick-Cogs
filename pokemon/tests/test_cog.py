@@ -167,22 +167,22 @@ class CogPolicyTests(unittest.TestCase):
             self.assertEqual(SPECIES[25], item)
 
     def test_terminal_battle_embed_hides_active_controls(self):
-        current=battle();current.state="won";current.result="The wild Pokémon fainted. Gained 80 XP."
+        current=battle();current.trainer_name="SickProdigy";current.state="won";current.result="The wild Pokémon fainted. Gained 80 XP."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
-        self.assertIn("Victory",embed.title)
+        self.assertIn("SickProdigy defeated",embed.title)
         self.assertNotIn("Moves",[field.name for field in embed.fields])
         self.assertIsNone(embed.footer.text)
 
     def test_terminal_battle_embed_uses_state_specific_titles(self):
-        current=battle();wild=SPECIES[current.wild_species_id]
+        current=battle();current.trainer_name="SickProdigy";wild=SPECIES[current.wild_species_id]
         current.state="caught"
-        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"Gotcha! {wild.name} was caught!")
+        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"Gotcha! {wild.name} was caught by SickProdigy!")
         current.state="ran"
-        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped!")
+        self.assertEqual(Pokemon.battle_embed(Pokemon.__new__(Pokemon),current).title,f"{wild.name} escaped from SickProdigy!")
         current.state="lost"
         current.result=f"{wild.name} escaped! Your party has no conscious Pokémon. Go to a Pokémon Center to heal."
         embed=Pokemon.battle_embed(Pokemon.__new__(Pokemon),current)
-        self.assertEqual(embed.title,f"{wild.name} escaped!")
+        self.assertEqual(embed.title,f"{wild.name} escaped from SickProdigy!")
         self.assertIn("Pokémon Center",embed.description)
 
     def test_expected_command_surfaces_are_separate_and_documented(self):

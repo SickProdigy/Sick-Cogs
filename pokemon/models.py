@@ -183,6 +183,7 @@ class Battle:
     experience_awards: dict = field(default_factory=dict)
     progression_events: list = field(default_factory=list)
     player_status_turns: int = 0
+    trainer_name: str = "Trainer"
     wild_status_turns: int = 0
     player_confusion_turns: int = 0
     wild_confusion_turns: int = 0
@@ -682,6 +683,7 @@ class Battle:
         data.setdefault("experience_awards",{})
         data.setdefault("progression_events",[])
         data.setdefault("player_status_turns",0)
+        data.setdefault("trainer_name","Trainer")
         data.setdefault("wild_status_turns",0)
         data.setdefault("player_confusion_turns",0)
         data.setdefault("wild_confusion_turns",0)

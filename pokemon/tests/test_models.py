@@ -223,10 +223,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(b.state,"ran")
         with self.assertRaises(BattleError):b.run()
     def test_round_trip(self):
-        b=battle();b.use_move(0)
+        b=battle();b.trainer_name="SickProdigy";b.use_move(0)
         self.assertEqual(Battle.from_raw(b.raw()).raw(),b.raw())
         self.assertEqual(b.action_history[-1]["action"],"move:scratch")
         self.assertEqual(b.action_count,1)
+        self.assertEqual(Battle.from_raw(b.raw()).trainer_name,"SickProdigy")
 
     def test_gym_battle_metadata_round_trip(self):
         b=battle();b.battle_kind="gym";b.gym_key="boulder"
@@ -382,13 +383,15 @@ class BattleTests(unittest.TestCase):
             self.assertEqual(image.getpixel((10,410)),RETRO[5])
 
     def test_result_text_uses_named_bottom_box_messages(self):
-        b=battle();wild=SPECIES[b.wild_species_id]
+        b=battle();b.trainer_name="SickProdigy";wild=SPECIES[b.wild_species_id]
         b.state="caught"
-        self.assertEqual(BattleRenderer.battle_result_text(b),f"Gotcha! {wild.name} was caught!")
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"Gotcha! {wild.name} was caught by SickProdigy!")
+        b.state="won"
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"SickProdigy defeated {wild.name}!")
         b.state="ran"
-        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped!")
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy!")
         b.state="lost"
-        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
+        self.assertEqual(BattleRenderer.battle_result_text(b),f"{wild.name} escaped from SickProdigy! Your party has no conscious Pokemon. Go to a Pokemon Center to heal.")
 
 
 class CatalogVersionTests(unittest.TestCase):
