@@ -48,13 +48,13 @@ class TurnTests(unittest.TestCase):
     def test_legacy_state_gets_activity_defaults(self):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
-        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
+        raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("end_step_destroys"); raw.pop("end_combat_destroys"); raw.pop("extra_turns"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("creatures_died_this_turn"); raw.pop("blocked_attackers"); raw.pop("combat_participants"); raw.pop("trample_assignments")
         for player in raw["players"].values():
             player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention"); player.pop("lands_played_this_turn")
             for permanent in player["battlefield"]: permanent.pop("damage_prevention"); permanent.pop("plus_one_counters"); permanent.pop("corpse_counters"); permanent.pop("damage_source_uids")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
-        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
+        self.assertEqual(restored.history,[]); self.assertEqual(restored.end_combat_destroys,[]); self.assertEqual(restored.combat_participants,[]); self.assertEqual(restored.extra_turns,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage); self.assertEqual(restored.creatures_died_this_turn,0)
         self.assertTrue(all(player.damage_prevention==0 and player.lands_played_this_turn==int(player.land_played) for player in restored.players.values()))
         self.assertTrue(all(permanent.damage_prevention==0 and permanent.plus_one_counters==0 and permanent.corpse_counters==0 and permanent.damage_source_uids==[] for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
@@ -3079,6 +3079,40 @@ class AlphaStoneGiantTests(unittest.TestCase):
         game.activate_ability(10,1,"10:2"); self.resolve_top(game); game._begin_end_step()
         game._destroy(game.player(10),target,allow_regeneration=False); self.resolve_top(game)
         self.assertIn("fizzled",game.log[-1])
+
+
+class AlphaClockworkBeastTests(unittest.TestCase):
+    def add(self,game,user,key,power_counters=0):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False,power_counters=power_counters); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_enters_with_seven_power_counters_and_legacy_state_defaults(self):
+        game=ready(); uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:236"
+        game._resolve(Spell(10,uid,"lea:236")); beast=game.find_permanent(uid)[1]
+        self.assertEqual((beast.power_counters,game.current_stats(beast)),(7,(7,4)))
+        raw=game.to_raw(); raw["players"]["10"]["battlefield"][-1].pop("power_counters")
+        self.assertEqual(Game.from_raw(raw).find_permanent(uid)[1].power_counters,0)
+
+    def test_combat_creates_persisted_respondable_counter_removal(self):
+        game=ready(); beast=self.add(game,20,"lea:236",7); attacker=self.add(game,10,"bear"); game.attackers=[attacker.uid]; game.blocks={attacker.uid:beast.uid}; game.combat_participants=[attacker.uid,beast.uid]; game.phase="after_combat_damage"; game.priority_user=10
+        game._destroy(game.player(10),attacker,allow_regeneration=False)
+        self.assertTrue(game._end_combat()); self.assertEqual(game.stack[-1].ability_effect,"end_combat_remove_power_counter")
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.stack[-1].source_uid,beast.uid)
+        self.resolve_top(restored); saved=restored.find_permanent(beast.uid)[1]; self.assertEqual((saved.power_counters,restored.current_stats(saved)),(6,(6,4)))
+
+    def test_upkeep_x_activation_persists_paid_x_and_independent_choice(self):
+        game=ready(); beast=self.add(game,10,"lea:236",3); lands=[self.add(game,10,"plains") for _ in range(4)]
+        game.phase="upkeep"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"zero through X"): game.activate_ability(10,1,x_value=2,choice_value=3)
+        game.activate_ability(10,1,x_value=4,choice_value=2)
+        self.assertTrue(beast.tapped and all(land.tapped for land in lands)); self.assertEqual((game.stack[-1].x_value,game.stack[-1].choice_value),(4,2))
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored); saved=restored.find_permanent(beast.uid)[1]
+        self.assertEqual((saved.power_counters,restored.current_stats(saved)),(5,(5,4)))
+        saved.tapped=False; restored.phase="precombat_main"; restored.priority_user=10
+        with self.assertRaisesRegex(GameError,"only during your upkeep"): restored.activate_ability(10,1,x_value=1,choice_value=1)
 
 
 class CombatTests(unittest.TestCase):

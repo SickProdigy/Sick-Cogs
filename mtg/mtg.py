@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.70.0"
+    __version__="0.71.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -129,6 +129,7 @@ class MTG(commands.Cog):
                 if x.regeneration_shields: ability_parts.append(f"Regeneration shield ×{x.regeneration_shields}")
                 if x.damage_prevention: ability_parts.append(f"Damage prevention remaining: {x.damage_prevention}")
                 if x.plus_one_counters: ability_parts.append(f"+1/+1 counters: {x.plus_one_counters}")
+                if x.power_counters: ability_parts.append(f"+1/+0 counters: {x.power_counters}")
                 if x.corpse_counters: ability_parts.append(f"Corpse counters: {x.corpse_counters}")
                 if x.attached_to:
                     _,target=g.find_permanent(x.attached_to)
@@ -157,7 +158,8 @@ class MTG(commands.Cog):
             for position,item in enumerate(reversed(g.stack),1):
                 label=g.card(item.uid).name+(" ability" if item.ability_effect else "")
                 if item.color_override: label+=f" [{item.color_override}]"
-                if not item.ability_effect and "{X}" in g.card(item.uid).mana_cost: label+=f" (X={item.x_value})"
+                if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
+                if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
                 if item.decision_pending:
                     label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
@@ -165,8 +167,10 @@ class MTG(commands.Cog):
         if g.end_combat_destroys:
             pending=[]
             for item in g.end_combat_destroys:
-                _,target=g.find_permanent(int(item.target.split(":")[1])); pending.append(f"{g.card(item.uid).name} → "+(g.card(target.uid).name if target else "departed creature"))
-            e.add_field(name="Pending end-of-combat destruction",value="\n".join(pending),inline=False)
+                _,target=g.find_permanent(int(item.target.split(":")[1]))
+                action="remove a +1/+0 counter from" if item.ability_effect=="end_combat_remove_power_counter" else "destroy"
+                pending.append(f"{g.card(item.uid).name}: {action} "+(g.card(target.uid).name if target else "departed creature"))
+            e.add_field(name="Pending end-of-combat triggers",value="\n".join(pending),inline=False)
         if g.end_step_sacrifices:
             e.add_field(name="Pending end-step trigger",value="Sacrifice "+", ".join(g.card(uid).name for uid in g.end_step_sacrifices)+" · players may respond",inline=False)
         if g.end_step_destroys:
@@ -410,9 +414,10 @@ class MTG(commands.Cog):
         """Tap a supported mana permanent. Multi-color sources require W/U/B/R/G; sick creatures cannot tap."""
         await self.mutate_ctx(ctx,lambda g:g.activate_mana(ctx.author.id,position,color),"mana")
     @mtg.command(name="activate")
-    async def activate(self,ctx,position:int,target:str=None):
-        """Activate a supported non-mana ability, supplying PLAYER_ID or USER_ID:POSITION when targeted."""
-        await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,target),"activate")
+    async def activate(self,ctx,position:int,target:str=None,x_value:int=None,choice_value:int=None):
+        """Activate an ability. Supply a target when needed; Clockwork Beast uses `- X COUNTERS`."""
+        normalized=None if target and target.casefold() in {"-","none"} else target
+        await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
         """Play/cast a hand position with optional target and X; modal targets include tap:/untap: for Twiddle and life:/prevent: for Healing Salve."""

@@ -313,7 +313,7 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         target_uid=game.next_uid; game.next_uid+=1; game.cards[target_uid]="giant"; target=permanent_type(target_uid,"giant",sick=False); game.player(20).battlefield=[target]
         trigger_uid=game.next_uid; game.next_uid+=1; game.cards[trigger_uid]="lea:218"; game.end_combat_destroys=[spell_type(10,trigger_uid,"lea:218",f"20:{target_uid}",ability_effect="end_combat_destroy",source_uid=source_uid)]
         rendered=str(cog.game_embed(game).to_dict())
-        self.assertIn("Pending end-of-combat destruction",rendered); self.assertIn("Thicket Basilisk → Hill Giant",rendered)
+        self.assertIn("Pending end-of-combat triggers",rendered); self.assertIn("Thicket Basilisk: destroy Hill Giant",rendered)
 
     async def test_public_embed_shows_queued_extra_turns_in_order(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
@@ -527,7 +527,19 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         await MTG.activate.callback(cog,ctx,position=3,target="20:2")
         _,mutation,action=cog.mutate_ctx.await_args.args
         game=SimpleNamespace(activate_ability=Mock()); mutation(game)
-        game.activate_ability.assert_called_once_with(10,3,"20:2"); self.assertEqual(action,"activate")
+        game.activate_ability.assert_called_once_with(10,3,"20:2",None,None); self.assertEqual(action,"activate")
+
+    async def test_activate_command_and_embed_expose_clockwork_x_choice(self):
+        cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))
+        await MTG.activate.callback(cog,ctx,position=2,target="-",x_value=4,choice_value=2)
+        _,mutation,action=cog.mutate_ctx.await_args.args; game=SimpleNamespace(activate_ability=Mock()); mutation(game)
+        game.activate_ability.assert_called_once_with(10,2,None,4,2); self.assertEqual(action,"activate")
+
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:236"; beast=permanent_type(uid,"lea:236",sick=False,power_counters=5); game.player(10).battlefield=[beast]
+        ability=game.next_uid; game.next_uid+=1; game.cards[ability]="lea:236"; game.stack=[spell_type(10,ability,"lea:236",f"10:{uid}",x_value=3,ability_effect="add_power_counters",source_uid=uid,choice_value=2)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("+1/+0 counters: 5",rendered); self.assertIn("X=3",rendered); self.assertIn("add 2",rendered)
 
     async def test_trample_command_uses_shared_game_action(self):
         cog=SimpleNamespace(mutate_ctx=AsyncMock()); ctx=SimpleNamespace(author=SimpleNamespace(id=10))

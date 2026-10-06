@@ -66,6 +66,10 @@ class Card:
     activation_text: str = ""
     activation_amount: int = 0
     activation_self_damage: int = 0
+    enters_power_counters: int = 0
+    end_combat_remove_power_counter: bool = False
+    activation_upkeep_only: bool = False
+    activation_x_choice: bool = False
     conditional_swamp_bonus: bool = False
     lord_subtype: str = ""
     lord_power: int = 0
@@ -135,6 +139,8 @@ class Card:
     def ability_text(self):
         abilities=[self.keyword_text] if self.keyword_text else []
         if self.enters_tapped: abilities.append("Enters tapped")
+        if self.enters_power_counters: abilities.append(f"Enters with {self.enters_power_counters} +1/+0 counters")
+        if self.end_combat_remove_power_counter: abilities.append("At end of combat, remove a +1/+0 counter if this creature attacked or blocked")
         if self.max_block_power is not None: abilities.append(f"Blocks power ≤{self.max_block_power}")
         if self.activation_cost or self.activation_effect:
             effects=[]
@@ -345,6 +351,7 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:165": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":2, "activation_self_damage":3, "activation_text":"Deals 2 damage to any target and 3 damage to you"},
     "lea:176": {"activation_tap":True, "activation_effect":"grant_flying_delayed_destroy", "activation_text":"Target creature you control with toughness less than this creature’s power gains flying until end of turn; destroy it at the beginning of the next end step"},
     "lea:205": {"activation_tap":True, "activation_effect":"untap_land", "activation_text":"Untap target land"},
+    "lea:236": {"activation_cost":"{X}", "activation_tap":True, "activation_effect":"add_power_counters", "activation_text":"Put up to X +1/+0 counters on this creature (maximum seven)", "enters_power_counters":7, "end_combat_remove_power_counter":True, "activation_upkeep_only":True, "activation_x_choice":True},
     "lea:141": {"activation_cost":"{R}", "activated_power":1, "sacrifice_after_activations":4},
     "lea:153": {"activation_cost":"{R}", "activated_keyword":"flying"},
     "lea:90": {"activation_cost":"{U}", "activated_power":1},
@@ -563,6 +570,10 @@ for reference in PLAYABLE_ALPHA:
         activation_text=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_text",ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_text",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_text",""))),
         activation_amount=ALPHA_ACTIVATED_CREATURES.get(reference.key,ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{})).get("activation_amount",ALPHA_ARTIFACTS.get(reference.key,{}).get("activation_amount",0)),
         activation_self_damage=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_self_damage",0),
+        enters_power_counters=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("enters_power_counters",0),
+        end_combat_remove_power_counter=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("end_combat_remove_power_counter",False),
+        activation_upkeep_only=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_upkeep_only",False),
+        activation_x_choice=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("activation_x_choice",False),
         enters_tapped=ALPHA_ARTIFACTS.get(reference.key,{}).get("enters_tapped",False),
         conditional_swamp_bonus=ALPHA_ACTIVATED_CREATURES.get(reference.key,{}).get("conditional_swamp_bonus",False),
         lord_subtype=ALPHA_LORDS.get(reference.key,{}).get("lord_subtype",""),

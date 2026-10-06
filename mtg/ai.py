@@ -500,6 +500,17 @@ def _activate_regeneration(game,user):
     if not candidates: return None
     _,position=max(candidates); game.activate_ability(user,position); return "activate"
 
+def _activate_clockwork(game,user):
+    if game.phase!="upkeep" or game.active_user!=user: return None
+    for position,permanent in enumerate(game.player(user).battlefield,1):
+        card=game.card(permanent.uid)
+        if not card.activation_x_choice or permanent.tapped or permanent.power_counters>=7: continue
+        capacity=7-permanent.power_counters; x_value=0
+        while x_value<capacity and game.can_activate(user,position,x_value=x_value+1,choice_value=x_value+1): x_value+=1
+        if x_value:
+            game.activate_ability(user,position,x_value=x_value,choice_value=x_value); return "activate"
+    return None
+
 def _activate_targeted_ability(game,user):
     candidates=[]
     for position,permanent in enumerate(game.player(user).battlefield,1):
@@ -574,7 +585,7 @@ def advance_solo(game: Game):
             cost=game.trigger_cost(trigger)
             pay=useful and (not cost or game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=cost) is not None)
             game.choose_trigger(user,pay); game.record(user,("ai_trigger_accept" if not cost else "ai_trigger_pay") if pay else "ai_trigger_decline"); changed=True; continue
-        action = _activate_regeneration(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
+        action = _activate_regeneration(game,user) or _activate_clockwork(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:
             game.record(user, f"ai_{action}")
         else:

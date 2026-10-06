@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),276)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),276)
+        self.assertEqual(len(CARDS),277)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),277)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),216)
-        self.assertEqual(len(REFERENCE_ALPHA),79)
+        self.assertEqual(len(PLAYABLE_ALPHA),217)
+        self.assertEqual(len(REFERENCE_ALPHA),78)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -67,6 +67,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(CARDS["lea:116"].graveyard_upkeep_return)
         self.assertEqual(CARDS["lea:103"].activation_effect,"destroy_land"); self.assertEqual(CARDS["lea:103"].upkeep_cost,"{B}{B}{B}")
         self.assertEqual(CARDS["lea:103"].upkeep_unpaid_effect,"tap_opponent_land_sacrifice"); self.assertIn("opponent chooses",CARDS["lea:103"].ability_text)
+        clockwork=CARDS["lea:236"]; self.assertEqual((clockwork.enters_power_counters,clockwork.activation_effect),(7,"add_power_counters")); self.assertTrue(clockwork.end_combat_remove_power_counter and clockwork.activation_upkeep_only and clockwork.activation_x_choice)
         self.assertEqual(CARDS["lea:114"].keywords,("flying","trample"))
         self.assertTrue(CARDS["lea:114"].upkeep_sacrifice_other); self.assertEqual(CARDS["lea:114"].upkeep_sacrifice_damage,7)
         self.assertIn("sacrifice another creature",CARDS["lea:114"].ability_text)
@@ -195,7 +196,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("276 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("277 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 65 creatures playable through 0.70.0; 12 remain |
+| Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -162,3 +162,5 @@ The 0.68.0 delayed-end-step promotion adds Stone Giant. Its tap ability targets 
 The 0.69.0 mandatory-upkeep-sacrifice promotion adds Lord of the Pit. Its persisted upkeep trigger gives both players a response window before the controller must choose another currently controlled creature to sacrifice. Sacrifice bypasses regeneration, removes tokens correctly, feeds existing creature-death triggers, and remains mandatory if the Lord leaves after triggering. If no eligible creature exists when the trigger resolves, the Lord deals seven preventable damage to its controller. Discord supplies a bounded creature select plus an unrestricted `mtg trigger sacrifice POSITION` fallback, public rendering distinguishes the mandatory choice from optional triggers, and solo AI sacrifices its least valuable legal creature.
 
 The 0.70.0 opponent-choice upkeep promotion adds Demonic Hordes. Its tap ability uses the shared stable-target activation stack to destroy a land. At upkeep its controller may pay {B}{B}{B}; declining taps the Hordes through the shared non-mana path and persists a mandatory land choice owned by the opponent. The choice survives source removal and reload, uses current battlefield positions, bypasses regeneration, and creates existing land-to-graveyard triggers such as Dingus Egg. No choice is requested when no land exists. Discord provides the same bounded select and unrestricted sacrifice-position fallback across the cross-player handoff, while solo AI pays for its own Hordes when able and chooses an opponent’s least flexible land.
+
+The 0.71.0 power-counter promotion adds Clockwork Beast. A shared battlefield-entry constructor gives it seven persisted +1/+0 counters on every entry, including reanimation. Persisted combat-participation history creates a normal respondable end-of-combat counter-removal trigger even when the opposing combatant has already died. Its upkeep-only `{X}, {T}` ability stores both X paid and the independently chosen number of counters, enforces the seven-counter ceiling before payment and on resolution, survives reload, and safely fizzles after source removal. Discord exposes X, the chosen count, and current counters; solo AI repairs a depleted Beast with available mana.
