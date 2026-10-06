@@ -800,5 +800,11 @@ class ForkRenderingTests(unittest.TestCase):
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Lightning Bolt copy",rendered); self.assertIn("must choose new targets or keep",rendered); self.assertIn("[R]",rendered)
         view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":fork_target")); self.assertEqual([option.value for option in select.options],["keep"]); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled)
 
+class RagingRiverRenderingTests(unittest.TestCase):
+    def test_pending_division_is_public_and_has_bounded_control(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id))); game=Game(1,[10,20],1); game.player(20).battlefield=[]
+        blocker=Permanent(99,"bear",owner=20,sick=False); flyer=Permanent(100,"lea:46",owner=20,sick=False); game.cards.update({99:"bear",100:"lea:46",101:"lea:168"}); game.player(20).battlefield=[blocker,flyer]; game.stack=[spell_type(10,101,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=20)]; game.priority_user=20; cog.games={1:game}
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("divide nonflying defenders left/right",rendered); view=GameView(cog,1); select=next(item for item in view.children if getattr(item,"custom_id","").endswith(":raging_river")); self.assertEqual({option.value for option in select.options},{"none","1"}); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pass")).disabled); self.assertTrue(next(item for item in view.children if item.custom_id.endswith(":pay")).disabled)
+
 if __name__ == "__main__":
     unittest.main()

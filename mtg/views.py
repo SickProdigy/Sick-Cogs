@@ -139,6 +139,17 @@ class WordChangeSelect(discord.ui.Select):
         source,target=self.values[0].split(":",1)
         await self.cog.act(i,self.game_id,lambda g:g.choose_word_change(i.user.id,source,target),"word_change_choice")
 
+class RagingRiverSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; trigger=game.stack[-1]; choices=game.raging_river_choices(trigger)
+        options=[discord.SelectOption(label="Finish; unselected creatures go right",value="none",description="Put every listed creature on the right")]
+        kind="attacker" if trigger.ability_effect=="raging_river_attackers" else "nonflying creature"
+        options.extend(discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],value=str(position),description=f"Put this {kind} on the left"[:100]) for position,permanent in choices[:24])
+        super().__init__(placeholder="Choose the Raging River left pile",min_values=1,max_values=len(options),options=options,custom_id=f"mtg:{game_id}:raging_river")
+    async def callback(self,i):
+        positions=[int(value) for value in self.values if value!="none"]
+        await self.cog.act(i,self.game_id,lambda g:g.choose_raging_river(i.user.id,positions),"raging_river_choice")
+
 class ForkTargetSelect(discord.ui.Select):
     def __init__(self,cog,game_id):
         self.cog,self.game_id=cog,game_id
@@ -157,7 +168,7 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase in ("untap","cleanup_discard") or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].fork_retarget and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures","raging_river_split","raging_river_attackers"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
@@ -187,6 +198,8 @@ class GameView(discord.ui.View):
             self.add_item(FalseOrdersSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].is_copy and game.stack[-1].fork_retarget:
             self.add_item(ForkTargetSelect(self.cog,self.game_id))
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("raging_river_split","raging_river_attackers") and len(game.raging_river_choices(game.stack[-1]))<=24:
+            self.add_item(RagingRiverSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="kudzu_move":
             self.add_item(KudzuSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("balance_lands","balance_creatures"):

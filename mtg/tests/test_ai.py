@@ -1031,5 +1031,12 @@ class SoloAITests(unittest.TestCase):
         game.pass_priority(HUMAN); advance_solo(game); game.pass_priority(HUMAN); advance_solo(game)
         self.assertTrue(any(event["action"]=="ai_fork_keep_targets" for event in game.history))
 
+    def test_ai_completes_both_raging_river_divisions(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        defending=solo(order=(HUMAN,AI)); attacker=self.add(defending,HUMAN,"bear"); blocker=self.add(defending,AI,"bear"); uid=defending.next_uid; defending.next_uid+=1; defending.cards[uid]="lea:168"; defending.active_index=0; defending.attackers=[attacker.uid]; defending.phase="after_attackers"; defending.stack=[spell_type(HUMAN,uid,"lea:168",ability_effect="raging_river_split",decision_pending=True,choice_owner=AI)]; defending.priority_user=AI
+        advance_solo(defending); self.assertEqual(defending.stack[-1].ability_effect,"raging_river_attackers"); self.assertTrue(any(event["action"]=="ai_raging_river_divide" for event in defending.history))
+        attacking=solo(order=(AI,HUMAN)); attacker=self.add(attacking,AI,"bear"); blocker=self.add(attacking,HUMAN,"bear"); uid=attacking.next_uid; attacking.next_uid+=1; attacking.cards[uid]="lea:168"; attacking.active_index=0; attacking.attackers=[attacker.uid]; attacking.phase="after_attackers"; attacking.stack=[spell_type(AI,uid,"lea:168",ability_effect="raging_river_attackers",decision_pending=True,choice_owner=AI,mana_choices={f"b:{blocker.uid}":"left"})]; attacking.priority_user=AI
+        advance_solo(attacking); self.assertFalse(attacking.stack); self.assertEqual(len(attacking.raging_river_rules),1)
+
 if __name__ == "__main__":
     unittest.main()

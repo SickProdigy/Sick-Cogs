@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.115.0"
+    __version__="0.116.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -197,6 +197,13 @@ class MTG(commands.Cog):
             bands=[" + ".join(g.card(uid).name for uid in band if g.find_permanent(uid)[1] is not None) for band in g.attack_bands]
             bands=[band for band in bands if band]
             if bands: e.add_field(name="Attacking bands",value="\n".join(bands),inline=False)
+        if g.raging_river_rules:
+            lines=[]
+            for index,rule in enumerate(g.raging_river_rules,1):
+                attackers=", ".join(f"{g.card(uid).name}: {side}" for uid,side in rule["attackers"].items() if uid in g.cards) or "No attackers"
+                blockers=", ".join(f"{g.card(uid).name}: {side}" for uid,side in rule["blockers"].items() if uid in g.cards) or "No nonflying blockers"
+                lines.append(f"River {index} — attackers: {attackers}; defenders: {blockers}")
+            e.add_field(name="Raging River divisions",value="\n".join(lines),inline=False)
         if g.trample_assignments:
             choices=[]
             for uid,amount in g.trample_assignments.items():
@@ -238,7 +245,9 @@ class MTG(commands.Cog):
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
                 if item.decision_pending:
-                    if item.is_copy and item.fork_retarget: label+=f" ({item.choice_owner} must choose new targets or keep the originals)"
+                    if item.ability_effect=="raging_river_split": label+=f" ({item.choice_owner} must divide nonflying defenders left/right)"
+                    elif item.ability_effect=="raging_river_attackers": label+=f" ({item.choice_owner} must divide attackers left/right)"
+                    elif item.is_copy and item.fork_retarget: label+=f" ({item.choice_owner} must choose new targets or keep the originals)"
                     elif not item.ability_effect and g.card(item.uid).effect=="search_library": label+=" (controller is searching their library)"
                     elif not item.ability_effect and g.card(item.uid).effect=="natural_selection": label+=" (controller is privately arranging the targeted library)"
                     elif not item.ability_effect and g.card(item.uid).effect in ("text_change_land","text_change_color"): label+=" (controller must choose the word replacement)"

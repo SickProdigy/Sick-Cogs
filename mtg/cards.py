@@ -156,6 +156,7 @@ class Card:
     no_maximum_hand: bool = False
     discard_to_library: bool = False
     combat_destroy_nonwall: bool = False
+    raging_river: bool = False
     enchantment_cast_draw: bool = False
     dealt_damage_plus_counter: bool = False
     damaged_creature_death_counter: bool = False
@@ -357,6 +358,7 @@ ALPHA_TAP_ENCHANTMENTS = {
 }
 
 ALPHA_ENCHANTMENTS = {
+    "lea:168": {"raging_river":True},
     "lea:25": {"draw_step_sanctuary":True},
     "lea:100": {"activation_cost":"{B}{B}", "activation_effect":"counter_color", "target_color":"G", "activation_text":"Counter target green spell"},
     "lea:10": {"activation_cost":"{1}", "activation_effect":"prevent_source_damage", "prevent_source_color":"U", "activation_text":"Prevent the next damage a chosen blue source would deal to you this turn"},
@@ -825,6 +827,7 @@ for reference in PLAYABLE_ALPHA:
         no_maximum_hand=ALPHA_ARTIFACTS.get(reference.key,{}).get("no_maximum_hand",False),
         discard_to_library=ALPHA_ARTIFACTS.get(reference.key,{}).get("discard_to_library",False),
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
+        raging_river=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("raging_river",False),
         enchantment_cast_draw=ALPHA_OPTIONAL_TRIGGERS.get(reference.key,{}).get("enchantment_cast_draw",False),
         dealt_damage_plus_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("dealt_damage_plus_counter",False),
         damaged_creature_death_counter=ALPHA_DAMAGE_COUNTER_CREATURES.get(reference.key,{}).get("damaged_creature_death_counter",False),

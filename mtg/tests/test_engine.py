@@ -4265,6 +4265,25 @@ class LibraryOfLengTests(unittest.TestCase):
         game.choose_cleanup_discard(10,[1]); self.assertEqual(game.phase,"cleanup_discard"); game.choose_cleanup_discard(10,[1]); self.assertNotEqual(game.phase,"cleanup_discard"); self.assertTrue(set(cards[:2])<=set(game.player(10).graveyard))
         exempt=ready(); exempt.player(10).hand=[]; exempt.player(10).battlefield=[]; [self.add(exempt,10,"bear","hand") for _ in range(9)]; self.leng(exempt,10); exempt.phase="ending"; exempt._advance(); self.assertNotEqual(exempt.phase,"cleanup_discard"); self.assertEqual(len(exempt.player(10).hand),9)
 
+class AlphaRagingRiverTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_trigger_choices_persist_and_restrict_nonflying_blockers(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; river=self.add(game,10,"lea:168"); left_attacker=self.add(game,10,"bear"); right_attacker=self.add(game,10,"giant"); left_blocker=self.add(game,20,"bear"); right_blocker=self.add(game,20,"giant"); flyer=self.add(game,20,"lea:46"); game.active_index=0; game.phase="attackers"; game.priority_user=None
+        game.declare_attackers(10,[2,3]); self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].source_uid),("raging_river",river.uid))
+        game.pass_priority(10); game.pass_priority(20); self.assertEqual((game.stack[-1].ability_effect,game.priority_user),("raging_river_split",20))
+        restored=Game.from_raw(game.to_raw()); restored.choose_raging_river(20,[1]); self.assertEqual((restored.stack[-1].ability_effect,restored.priority_user),("raging_river_attackers",10))
+        restored=Game.from_raw(restored.to_raw()); restored.choose_raging_river(10,[2]); self.assertFalse(restored.stack); self.assertEqual(len(restored.raging_river_rules),1)
+        self.assertTrue(restored.can_block(left_attacker.uid,left_blocker.uid)[0]); self.assertFalse(restored.can_block(right_attacker.uid,left_blocker.uid)[0]); self.assertTrue(restored.can_block(right_attacker.uid,right_blocker.uid)[0]); self.assertTrue(restored.can_block(left_attacker.uid,flyer.uid)[0]); self.assertTrue(restored.can_block(right_attacker.uid,flyer.uid)[0])
+
+    def test_trigger_is_source_independent_and_rules_clear_after_combat(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; river=self.add(game,10,"lea:168"); attacker=self.add(game,10,"bear"); blocker=self.add(game,20,"bear"); game.active_index=0; game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[2]); game.player(10).battlefield.remove(river); game.player(10).graveyard.append(river.uid)
+        game.pass_priority(10); game.pass_priority(20); game.choose_raging_river(20,[1]); game.choose_raging_river(10,[1]); self.assertTrue(game.can_block(attacker.uid,blocker.uid)[0]); game._end_combat(); self.assertEqual(game.raging_river_rules,[])
+
+    def test_no_attack_does_not_trigger(self):
+        game=ready(); game.player(10).battlefield=[]; self.add(game,10,"lea:168"); game.phase="attackers"; game.priority_user=None; game.declare_attackers(10,[]); self.assertFalse(game.stack); self.assertEqual(game.phase,"postcombat_main")
+
 class AlphaForkTests(unittest.TestCase):
     def zone(self,game,user,key,zone="hand"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; getattr(game.player(user),zone).append(uid); return uid

@@ -859,6 +859,8 @@ def advance_solo(game: Game):
         if _assign_blocker_damage(game,user): game.record(user,"ai_blocker_damage"); changed=True; continue
         if game.stack and game.stack[-1].decision_pending:
             trigger=game.stack[-1]
+            if trigger.ability_effect in ("raging_river_split","raging_river_attackers"):
+                choices=game.raging_river_choices(trigger); game.choose_raging_river(user,[position for index,(position,_) in enumerate(choices) if index%2==0]); game.record(user,"ai_raging_river_divide"); changed=True; continue
             if trigger.is_copy and trigger.fork_retarget:
                 game.choose_fork_target(user); game.record(user,"ai_fork_keep_targets"); changed=True; continue
             if trigger.ability_effect=="leng_discard":
