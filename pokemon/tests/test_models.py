@@ -141,6 +141,15 @@ class BattleTests(unittest.TestCase):
         b.switch_next()
         self.assertEqual(b.player.instance_id,"second")
         self.assertGreater(b.player_hp,0)
+    def test_renderer_trims_and_upscales_small_padded_sprites(self):
+        source=io.BytesIO();image=Image.new("RGBA",(96,96),(0,0,0,0))
+        for x in range(40,56):
+            for y in range(44,56):image.putpixel((x,y),(200,40,30,255))
+        image.save(source,"PNG")
+        rendered=BattleRenderer._open(source.getvalue(),(240,210),trim=True,upscale=True)
+        self.assertEqual(rendered.size,(56,42))
+        self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
+
     def test_renderer_builds_expected_pngs(self):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
