@@ -1930,6 +1930,48 @@ class AlphaManaVaultTests(unittest.TestCase):
         game.active_index=1; game._start_turn(); self.assertEqual(game.stack[-1].ability_effect,"upkeep_untap")
 
 
+class AlphaCreatureUpkeepTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_phantasmal_forces_pays_blue_or_is_sacrificed(self):
+        game=ready(); forces=self.add(game,10,"lea:67"); island=self.add(game,10,"island")
+        game._start_turn(); self.resolve_top(game)
+        self.assertEqual(game.trigger_cost(game.stack[-1]),"{U}")
+        restored=Game.from_raw(game.to_raw()); restored.choose_trigger(10,True)
+        self.assertIsNotNone(restored.find_permanent(forces.uid)[1]); self.assertTrue(restored.find_permanent(island.uid)[1].tapped)
+
+        declined=ready(); forces=self.add(declined,10,"lea:67"); forces.regeneration_shields=1
+        declined._start_turn(); self.resolve_top(declined); declined.choose_trigger(10,False)
+        self.assertIsNone(declined.find_permanent(forces.uid)[1]); self.assertIn(forces.uid,declined.player(10).graveyard)
+
+    def test_upkeep_sacrifice_is_harmless_after_source_leaves(self):
+        game=ready(); forces=self.add(game,10,"lea:67"); game._start_turn(); self.resolve_top(game)
+        game.player(10).battlefield.remove(forces); game.player(10).graveyard.append(forces.uid)
+        game.choose_trigger(10,False)
+        self.assertEqual(game.player(10).graveyard.count(forces.uid),1)
+
+    def test_force_of_nature_pays_four_green_or_deals_eight(self):
+        paid=ready(); force=self.add(paid,10,"lea:194"); forests=[self.add(paid,10,"forest") for _ in range(4)]
+        paid._start_turn(); self.resolve_top(paid); paid.choose_trigger(10,True)
+        self.assertIsNotNone(paid.find_permanent(force.uid)[1]); self.assertTrue(all(x.tapped for x in forests)); self.assertEqual(paid.player(10).life,20)
+
+        damaged=ready(); force=self.add(damaged,10,"lea:194")
+        damaged._start_turn(); self.resolve_top(damaged); damaged.player(10).damage_prevention=3
+        damaged.player(10).battlefield.remove(force); damaged.player(10).graveyard.append(force.uid)
+        restored=Game.from_raw(damaged.to_raw()); restored.choose_trigger(10,False)
+        self.assertEqual(restored.player(10).life,15); self.assertEqual(restored.player(10).damage_prevention,0)
+
+    def test_upkeep_creatures_trigger_only_for_their_controller(self):
+        game=ready(); self.add(game,20,"lea:194"); game._start_turn()
+        self.assertFalse(any(x.key=="lea:194" for x in game.stack))
+        game.active_index=1; game._start_turn(); self.assertEqual(game.stack[-1].ability_effect,"upkeep_cost")
+
+
 class AlphaSoulNetTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

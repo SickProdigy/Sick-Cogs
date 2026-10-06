@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 52 creatures playable through 0.54.0; 25 remain |
+| Creatures with abilities | 77 | 54 creatures playable through 0.55.0; 23 remain |
 | Instants and sorceries | 70 | 45 spells playable through 0.53.0; 25 remain |
 | Enchantments | 68 | 31 enchantments playable through 0.37.0; 37 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -130,3 +130,5 @@ The 0.52.0 Time Walk promotion adds a persisted extra-turn queue shared by the n
 The 0.53.0 random-discard promotion adds Mind Twist and Hypnotic Specter. A shared server-side action samples stable cards from a player’s private hand without exposing unchosen cards, moves only the chosen cards to the public graveyard, and safely caps oversized discard amounts at the cards available. Mind Twist stores both its player target and X value on the persisted stack; solo AI targets an opponent and caps X at that opponent’s current hand size. Hypnotic Specter creates a unique persisted and respondable discard trigger only when its combat damage actually reaches an opponent, including first-strike timing and after prevention; the trigger remains independent if the Specter leaves play. Disrupting Scepter remains reference-only until a private target-player card-choice flow is implemented.
 
 The 0.54.0 delayed-combat-destruction promotion adds Cockatrice and Thicket Basilisk. Legal block declarations snapshot each non-Wall opposing creature into a persisted delayed trigger with APNAP ordering and source-removal independence. Damage-created triggers finish before the engine enters its explicit end-combat response window; the delayed destruction then appears on the public stack, fizzles safely if the combatant has left, and permits normal regeneration. Walls never create the delayed effect. Discord exposes pending destruction before end combat, and solo AI values a Basilisk blocker’s delayed kill while preferring Walls against an opposing Basilisk when legal.
+
+The 0.55.0 creature-upkeep promotion adds Phantasmal Forces and Force of Nature. Each controller receives a persisted, respondable upkeep trigger followed by an explicit payment decision using the printed colored cost. Declining Phantasmal Forces sacrifices it without allowing regeneration; declining Force of Nature deals eight preventable damage even if its source has left the battlefield. Discord displays the actual Pay {U} or Pay {G}{G}{G}{G} choice, and solo AI preserves a live Forces or avoids Force of Nature damage whenever legal mana is available.

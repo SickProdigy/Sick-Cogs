@@ -237,6 +237,7 @@ class Game:
             for source in controller.battlefield:
                 card=self.card(source.uid); effect=""
                 if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
+                elif step=="upkeep" and card.upkeep_cost and active==controller.user_id: effect="upkeep_cost"
                 elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
                 elif step=="upkeep" and card.upkeep_opponent_hand_damage and active==self.opponent(controller.user_id): effect="upkeep_hand_damage"
                 elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
@@ -706,7 +707,7 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
-                if s.ability_effect in ("cast_life","death_life","upkeep_untap"):
+                if s.ability_effect in ("cast_life","death_life","upkeep_untap","upkeep_cost"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -725,7 +726,9 @@ class Game:
 
     def trigger_cost(self,trigger):
         card=self.card(trigger.uid)
-        return card.upkeep_untap_cost if trigger.ability_effect=="upkeep_untap" else "{1}"
+        if trigger.ability_effect=="upkeep_untap": return card.upkeep_untap_cost
+        if trigger.ability_effect=="upkeep_cost": return card.upkeep_cost
+        return "{1}"
 
     def choose_trigger(self,user,pay):
         if self.finished: raise GameError("Game is over.")
@@ -741,12 +744,19 @@ class Game:
             player.mana_pool=remaining
             if trigger.ability_effect in ("cast_life","death_life"):
                 player.life+=1; result=" and gained 1 life"
-            else:
+            elif trigger.ability_effect=="upkeep_untap":
                 _,source=self.find_permanent(trigger.source_uid)
                 if source is not None: source.tapped=False
                 result=" and untapped it" if source is not None else ""
+            else: result=""
             self.log.append(f"{user} paid {cost} for {card.name}{result}.")
-        else: self.log.append(f"{user} declined {card.name}.")
+        else:
+            self.log.append(f"{user} declined {card.name}.")
+            if trigger.ability_effect=="upkeep_cost":
+                source_controller,source=self.find_permanent(trigger.source_uid)
+                if card.upkeep_unpaid_effect=="sacrifice" and source is not None:
+                    self._remove_from_combat(source.uid); source_controller.battlefield.remove(source); self._dies(source_controller,source)
+                elif card.upkeep_unpaid_effect=="damage": self._damage_player(user,card.upkeep_unpaid_damage)
         self.cards.pop(trigger.uid,None); self.stack.extend(pending)
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()

@@ -92,6 +92,9 @@ class Card:
     white_as_red: bool = False
     cast_life_color: str = ""
     upkeep_untap_cost: str = ""
+    upkeep_cost: str = ""
+    upkeep_unpaid_effect: str = ""
+    upkeep_unpaid_damage: int = 0
     draw_tapped_damage: int = 0
     death_life: bool = False
     animate_combat: bool = False
@@ -162,6 +165,8 @@ class Card:
             color_name={"W":"white","U":"blue","B":"black","R":"red","G":"green"}[self.cast_life_color]
             abilities.append(f"Whenever a player casts a {color_name} spell, you may pay {{1}} to gain 1 life")
         if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
+        if self.upkeep_cost and self.upkeep_unpaid_effect=="sacrifice": abilities.append(f"At your upkeep, sacrifice this creature unless you pay {self.upkeep_cost}")
+        if self.upkeep_cost and self.upkeep_unpaid_effect=="damage": abilities.append(f"At your upkeep, this creature deals {self.upkeep_unpaid_damage} damage to you unless you pay {self.upkeep_cost}")
         if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.opponent_damage_discard_random: abilities.append("Whenever this creature deals damage to an opponent, that player discards a card at random")
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
@@ -384,12 +389,18 @@ ALPHA_COMBAT_TRIGGERS = {
     "lea:218": {"combat_destroy_nonwall":True},
 }
 
+ALPHA_UPKEEP_CREATURES = {
+    "lea:67": {"upkeep_cost":"{U}", "upkeep_unpaid_effect":"sacrifice"},
+    "lea:194": {"upkeep_cost":"{G}{G}{G}{G}", "upkeep_unpaid_effect":"damage", "upkeep_unpaid_damage":8},
+}
+
 ALPHA_KEYWORDS = {
     "lea:39": ("flying", "vigilance"),
     "lea:42": ("defender", "flying"),
     "lea:43": ("first_strike",),
     "lea:46": ("flying",),
     "lea:64": ("flying",),
+    "lea:67": ("flying",),
     "lea:69": ("flying",),
     "lea:89": ("defender", "flying"),
     "lea:90": ("defender",),
@@ -408,6 +419,7 @@ ALPHA_KEYWORDS = {
     "lea:258": ("defender",),
     "lea:182": ("defender",),
     "lea:191": ("first_strike",),
+    "lea:194": ("trample",),
     "lea:198": ("reach",),
     "lea:215": ("flying",),
     "lea:216": ("forestwalk",),
@@ -505,6 +517,9 @@ for reference in PLAYABLE_ALPHA:
         white_as_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("white_as_red",False),
         cast_life_color=ALPHA_ARTIFACTS.get(reference.key,{}).get("cast_life_color",""),
         upkeep_untap_cost=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_untap_cost",""),
+        upkeep_cost=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_cost",""),
+        upkeep_unpaid_effect=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_effect",""),
+        upkeep_unpaid_damage=ALPHA_UPKEEP_CREATURES.get(reference.key,{}).get("upkeep_unpaid_damage",0),
         draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
@@ -531,7 +546,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

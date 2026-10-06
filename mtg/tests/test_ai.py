@@ -606,6 +606,19 @@ class SoloAITests(unittest.TestCase):
         advance_solo(declined); declined.pass_priority(HUMAN); advance_solo(declined)
         self.assertTrue(vault.tapped); self.assertTrue(any(event["action"]=="ai_trigger_decline" for event in declined.history))
 
+    def test_ai_pays_creature_upkeep_costs_including_source_independent_damage(self):
+        sacrifice=solo(order=(AI,HUMAN)); sacrifice.player(AI).kept=True; sacrifice.player(HUMAN).kept=True; sacrifice.player(AI).hand=[]
+        forces=self.add(sacrifice,AI,"lea:67"); self.add(sacrifice,AI,"island")
+        sacrifice.active_index=0; sacrifice._start_turn(); advance_solo(sacrifice); sacrifice.pass_priority(HUMAN); advance_solo(sacrifice)
+        self.assertIsNotNone(sacrifice.find_permanent(forces.uid)[1]); self.assertTrue(any(event["action"]=="ai_trigger_pay" for event in sacrifice.history))
+
+        damage=solo(order=(AI,HUMAN)); damage.player(AI).kept=True; damage.player(HUMAN).kept=True; damage.player(AI).hand=[]
+        force=self.add(damage,AI,"lea:194"); [self.add(damage,AI,"forest") for _ in range(4)]
+        damage.active_index=0; damage._start_turn(); advance_solo(damage); damage.pass_priority(HUMAN)
+        damage.player(AI).battlefield.remove(force); damage.player(AI).graveyard.append(force.uid)
+        advance_solo(damage)
+        self.assertEqual(damage.player(AI).life,20); self.assertTrue(any(event["action"]=="ai_trigger_pay" for event in damage.history))
+
     def test_ai_casts_turn_step_artifacts_but_avoids_lethal_copper_tablet(self):
         for key in ("lea:233","lea:247"):
             with self.subTest(key=key):
