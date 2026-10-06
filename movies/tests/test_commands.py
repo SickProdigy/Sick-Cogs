@@ -113,6 +113,22 @@ class MovieReleaseTests(unittest.IsolatedAsyncioTestCase):
         cog.send_movie.assert_awaited_once()
         group.next_check_at.set.assert_not_awaited()
 
+    async def test_maxperday_reports_previous_and_new_limit(self):
+        max_per_day = AsyncMock(return_value=3)
+        max_per_day.set = AsyncMock()
+        cog = object.__new__(MovieReleases)
+        cog.config = SimpleNamespace(
+            guild=MagicMock(return_value=SimpleNamespace(max_per_day=max_per_day))
+        )
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), send=AsyncMock())
+
+        await MovieReleases.movieset_maxperday.callback(cog, ctx, 6)
+
+        max_per_day.set.assert_awaited_once_with(6)
+        ctx.send.assert_awaited_once_with(
+            "Movie release post limit changed from 3 to 6 per day."
+        )
+
     async def test_daily_cap_still_prevents_scheduled_post(self):
         settings = {
             "enabled": True,
