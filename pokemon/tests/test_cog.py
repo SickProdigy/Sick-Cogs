@@ -159,6 +159,12 @@ class CogPolicyTests(unittest.TestCase):
         self.assertIn("pokemonset resetplayer",admin_names)
         self.assertIn("Server administration",Pokemon.pokemon.help)
         self.assertEqual(Pokemon.pokemon_set.get_command("channel").help,"Enable wild encounters in a channel.")
+        player_commands=list(Pokemon.pokemon.walk_commands())
+        self.assertEqual([command.qualified_name for command in player_commands if not command.help],[])
+        for command in player_commands:
+            summary=command.help.strip().splitlines()[0]
+            self.assertLessEqual(len(summary),70,command.qualified_name)
+            self.assertTrue(summary.endswith("."),command.qualified_name)
 
 
 class GymProgressionTests(unittest.TestCase):
