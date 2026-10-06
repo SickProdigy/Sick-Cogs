@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.15.1";__author__="SickProdigy"
+    __version__="0.15.2";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -421,6 +421,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="starter")
     async def starter(self,ctx,choice:str=None):
+        """Choose or view your first partner Pokémon."""
         choices={"bulbasaur":1,"charmander":4,"squirtle":7}
         if choice is None:
             await ctx.send(embed=self.starter_embed(ctx.author),view=StarterView(self,ctx.author.id))
@@ -434,6 +435,7 @@ class Pokemon(commands.Cog):
         embed,files=await self.rendered_starter(pokemon);await ctx.send(embed=embed,files=files)
     @pokemon.command(name="collection",aliases=["box"])
     async def collection(self,ctx,page:int=1):
+        """Browse the Pokémon stored in your global boxes."""
         conf=await self.config.user(ctx.author).all()
         if not conf["collection"]:await ctx.send("Choose a starter first.");return
         pages=max(1,(len(conf["collection"])+BOX_SIZE-1)//BOX_SIZE);page=max(1,min(page,pages));start=(page-1)*BOX_SIZE
@@ -444,6 +446,7 @@ class Pokemon(commands.Cog):
         await ctx.send(f"**Global boxes · {page}/{pages} · {len(conf['collection'])}/{MAX_COLLECTION}**\n"+"\n".join(lines))
     @pokemon.group(name="party",invoke_without_command=True)
     async def party(self,ctx):
+        """View the Pokémon in your active party."""
         conf=await self.config.user(ctx.author).all();owned={p["instance_id"]:p for p in conf["collection"]}
         lines=[]
         for slot,identity in enumerate(conf["party"],1):
@@ -455,6 +458,7 @@ class Pokemon(commands.Cog):
         await ctx.send("**Party**\n"+("\n".join(lines) or "Empty"))
     @party.command(name="add")
     async def party_add(self,ctx,identifier:str,slot:int=None):
+        """Add a caught Pokémon to your active party."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
             matches=[p["instance_id"] for p in conf["collection"] if p["instance_id"].startswith(identifier)]
@@ -468,6 +472,7 @@ class Pokemon(commands.Cog):
         await ctx.send("Party updated.")
     @party.command(name="remove")
     async def party_remove(self,ctx,slot:int):
+        """Remove a Pokémon from your active party."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all()
             if not 1<=slot<=len(conf["party"]):await ctx.send("That party slot is empty.");return
@@ -484,15 +489,18 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="bag")
     async def pokemon_bag(self,ctx):
+        """View your available medicine and items."""
         conf=await self.config.user(ctx.author).all();items=conf.get("items",{})
         await ctx.send(f"**Medicine**\nPotion: **{int(items.get('potion',0))}** · Revive: **{int(items.get('revive',0))}**")
 
     @pokemon.group(name="use",invoke_without_command=True)
     async def pokemon_use(self,ctx):
+        """Use an item on one of your Pokémon."""
         await ctx.send_help()
 
     @pokemon_use.command(name="potion")
     async def use_potion(self,ctx,identifier:str):
+        """Use a Potion to restore a Pokémon’s HP."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
             if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
@@ -509,6 +517,7 @@ class Pokemon(commands.Cog):
 
     @pokemon_use.command(name="revive")
     async def use_revive(self,ctx,identifier:str):
+        """Use a Revive on a fainted Pokémon."""
         async with self.lock(("user",ctx.author.id)):
             conf=await self.config.user(ctx.author).all();raw=self.find_owned(conf,identifier)
             if not raw:await ctx.send("Choose a party slot or unique collection ID.");return
@@ -525,6 +534,7 @@ class Pokemon(commands.Cog):
     @pokemon.command(name="center")
     @commands.guild_only()
     async def pokemon_center(self,ctx):
+        """Heal your party at this server’s Pokémon Center."""
         center=await self.config.guild(ctx.guild).center_channel()
         if not center:await ctx.send("This server has not configured a Pokémon Center.");return
         if ctx.channel.id!=int(center):await ctx.send(f"Visit <#{center}> to use this server's Pokémon Center.");return
@@ -556,6 +566,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="pokedex",aliases=["dex"])
     async def pokedex(self,ctx,page:int=1):
+        """Browse the Pokémon you have seen and caught."""
         conf=await self.config.user(ctx.author).all()
         session=PokedexSession(
             user_id=ctx.author.id,
@@ -590,7 +601,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.group(name="gym",invoke_without_command=True)
     async def gym(self,ctx):
-        """View and challenge the ordered Kanto Gyms."""
+        """View your ordered Kanto Gym progress."""
         conf=await self.config.user(ctx.author).all()
         await ctx.send(embed=gym_status_embed(ctx.author,conf))
 
@@ -640,6 +651,7 @@ class Pokemon(commands.Cog):
 
     @pokemon.command(name="profile")
     async def profile(self,ctx):
+        """View your trainer profile and Kanto badge case."""
         conf=await self.config.user(ctx.author).all()
         await ctx.send(embed=trainer_profile_embed(ctx.author,conf,MAX_COLLECTION))
     @commands.group(name="pokemonset",aliases=["pkmnset"],invoke_without_command=True)
