@@ -49,11 +49,14 @@ class TurnTests(unittest.TestCase):
         raw=ready().to_raw()
         raw.pop("history"); raw.pop("created_at"); raw.pop("updated_at")
         raw.pop("ai_user"); raw.pop("ai_difficulty"); raw.pop("end_step_sacrifices"); raw.pop("skip_draw_step"); raw.pop("prevent_combat_damage"); raw.pop("blocked_attackers"); raw.pop("trample_assignments")
-        for player in raw["players"].values(): player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
+        for player in raw["players"].values():
+            player.pop("mana_pool"); player.pop("exile"); player.pop("damage_prevention")
+            for permanent in player["battlefield"]: permanent.pop("damage_prevention")
         restored=Game.from_raw(raw)
         self.assertTrue(all(player.mana_pool=={} and player.exile==[] for player in restored.players.values()))
         self.assertEqual(restored.history,[]); self.assertFalse(restored.skip_draw_step); self.assertFalse(restored.prevent_combat_damage)
         self.assertTrue(all(player.damage_prevention==0 for player in restored.players.values()))
+        self.assertTrue(all(permanent.damage_prevention==0 for player in restored.players.values() for permanent in player.battlefield))
         self.assertGreater(restored.updated_at,0)
 
     def test_declaration_steps_do_not_grant_spell_priority(self):
@@ -2005,6 +2008,57 @@ class AlphaHiveTokenTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(10,[len(game.player(10).battlefield)])
         wasp.sick=False; game.declare_attackers(10,[len(game.player(10).battlefield)])
         self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
+
+
+class AlphaSamiteHealerTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield",sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_healer_targets_player_persists_and_survives_source_removal(self):
+        game=ready(); healer=self.add(game,10,"lea:37"); game.activate_ability(10,1,"10")
+        self.assertTrue(healer.tapped); self.assertEqual(game.stack[-1].target,"10"); self.assertEqual(game.player(10).damage_prevention,0)
+        game.player(10).battlefield.remove(healer); game.player(10).graveyard.append(healer.uid)
+        restored=Game.from_raw(game.to_raw()); self.assertEqual(restored.to_raw(),game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(restored.player(10).damage_prevention,1)
+
+    def test_healer_targets_stable_creature_fizzles_and_respects_protection(self):
+        game=ready(); healer=self.add(game,10,"lea:37"); bear=self.add(game,10,"bear")
+        game.activate_ability(10,1,"10:2"); self.assertEqual(game.stack[-1].target,f"10:{bear.uid}")
+        self.resolve_top(game); self.assertEqual(bear.damage_prevention,1)
+        game._cleanup(); self.assertEqual(bear.damage_prevention,0)
+
+        vanished=ready(); healer=self.add(vanished,10,"lea:37"); bear=self.add(vanished,10,"bear"); vanished.activate_ability(10,1,"10:2")
+        vanished.player(10).battlefield.remove(bear); vanished.player(10).graveyard.append(bear.uid); self.resolve_top(vanished); self.assertIn("fizzled",vanished.log[-1])
+
+        protected=ready(); healer=self.add(protected,10,"lea:37"); self.add(protected,20,"lea:94")
+        with self.assertRaisesRegex(GameError,"protection"): protected.activate_ability(10,1,"20:1")
+        self.assertFalse(healer.tapped)
+
+    def test_creature_shield_is_consumed_by_spell_combat_and_mass_damage(self):
+        spell=ready(); bear=self.add(spell,20,"bear"); bear.damage_prevention=1; uid=spell.next_uid; spell.next_uid+=1; spell.cards[uid]="shock"
+        spell.stack.append(Spell(10,uid,"shock",f"20:{bear.uid}")); spell._resolve(spell.stack.pop())
+        self.assertEqual(bear.damage,1); self.assertEqual(bear.damage_prevention,0); self.assertIn(bear,spell.player(20).battlefield)
+        disintegrate=ready(); bear=self.add(disintegrate,20,"bear"); bear.damage_prevention=1; uid=disintegrate.next_uid; disintegrate.next_uid+=1; disintegrate.cards[uid]="lea:140"
+        disintegrate.stack.append(Spell(10,uid,"lea:140",f"20:{bear.uid}",x_value=1)); disintegrate._resolve(disintegrate.stack.pop())
+        self.assertEqual(bear.damage,0); self.assertTrue(bear.exile_on_death); self.assertTrue(bear.cant_regenerate)
+
+        combat=ready(); attacker=self.add(combat,20,"bear"); blocker=self.add(combat,10,"bear"); blocker.damage_prevention=1; combat.active_index=1
+        combat.attackers=[attacker.uid]; combat.blocks={attacker.uid:blocker.uid}; combat.blocked_attackers=[attacker.uid]; combat._combat_damage(False)
+        self.assertEqual(blocker.damage,1); self.assertIn(blocker,combat.player(10).battlefield)
+
+        mass=ready(); grounded=self.add(mass,10,"bear"); grounded.damage_prevention=1; uid=mass.next_uid; mass.next_uid+=1; mass.cards[uid]="lea:146"
+        mass.stack.append(Spell(20,uid,"lea:146",x_value=2)); mass._resolve(mass.stack.pop())
+        self.assertEqual(grounded.damage,1); self.assertIn(grounded,mass.player(10).battlefield)
+
+    def test_healer_tap_obeys_summoning_sickness(self):
+        game=ready(); healer=self.add(game,10,"lea:37",sick=True)
+        with self.assertRaisesRegex(GameError,"summoning sickness"): game.activate_ability(10,1,"10")
+        self.assertFalse(healer.tapped)
 
 
 class AlphaFogTests(unittest.TestCase):

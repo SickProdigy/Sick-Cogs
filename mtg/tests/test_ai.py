@@ -433,6 +433,15 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_uses_samite_healer_for_pending_creature_damage(self):
+        game=solo(order=(HUMAN,AI)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        healer=self.add(game,AI,"lea:37"); bear=self.add(game,AI,"giant"); shock=self.add(game,HUMAN,"lea:161","hand"); self.add(game,HUMAN,"mountain")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=HUMAN; game.player(HUMAN).land_played=True; game.player(AI).land_played=True
+        game.play(HUMAN,1,f"{AI}:2"); advance_solo(game)
+        self.assertEqual(game.stack[-1].source_uid,healer.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
+        game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(bear.damage_prevention,1)
+        game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(bear.damage,2); self.assertIn(bear,game.player(AI).battlefield); self.assertIn(shock,game.player(HUMAN).graveyard)
+
     def test_ai_casts_fog_only_while_defending_against_attackers(self):
         quiet=solo(order=(AI,HUMAN)); quiet.player(HUMAN).kept=True; quiet.player(AI).kept=True; quiet.player(AI).hand=[]
         fog=self.add(quiet,AI,"lea:193","hand"); self.add(quiet,AI,"forest")

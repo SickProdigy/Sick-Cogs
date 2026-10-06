@@ -317,6 +317,24 @@ def _player_damage_threatened(game,user):
         return any(uid not in game.blocks or "trample" in game.current_keywords(next(x for x in game.player(game.active_user).battlefield if x.uid==uid)) for uid in game.attackers)
     return False
 
+def _permanent_damage_threatened(game,user,permanent):
+    stable=f"{user}:{permanent.uid}"
+    for item in game.stack:
+        card=game.card(item.uid)
+        if item.target==stable:
+            if item.ability_effect=="damage_any" and card.activation_amount>0 and not game._protected_from(permanent,card,game.ability_source_colors(item)): return True
+            if not item.ability_effect and card.effect in ("damage","damage_any","damage_x_exile") and (item.x_value if card.effect=="damage_x_exile" else card.amount)>0 and not game._protected_from(permanent,card,game.spell_colors(item)): return True
+        if not item.ability_effect and card.effect in ("earthquake_x","hurricane_x") and item.x_value>0:
+            flying="flying" in game.current_keywords(permanent)
+            if ((card.effect=="earthquake_x" and not flying) or (card.effect=="hurricane_x" and flying)) and not game._protected_from(permanent,card,game.spell_colors(item)): return True
+    if game.phase not in ("after_blockers","after_first_strike"): return False
+    if permanent.uid in game.attackers:
+        blocker_uid=game.blocks.get(permanent.uid); blocker=game.find_permanent(blocker_uid)[1] if blocker_uid is not None else None
+        return blocker is not None and game.current_stats(blocker)[0]>0 and not game._protected_from(permanent,game.card(blocker.uid),game.current_colors(blocker))
+    attacker_uid=next((attacker for attacker,blocker in game.blocks.items() if blocker==permanent.uid),None)
+    attacker=game.find_permanent(attacker_uid)[1] if attacker_uid is not None else None
+    return attacker is not None and game.current_stats(attacker)[0]>0 and not game._protected_from(permanent,game.card(attacker.uid),game.current_colors(attacker))
+
 def _activation_target(game,user,card,source_uid=None):
     opponent=game.opponent(user)
     if card.activation_effect=="counter_color":
@@ -325,6 +343,10 @@ def _activation_target(game,user,card,source_uid=None):
         return None
     if card.activation_effect in ("draw_self","create_token"): return str(user)
     if card.activation_effect=="prevent_player_damage": return str(user) if not game.player(user).damage_prevention and _player_damage_threatened(game,user) else None
+    if card.activation_effect=="prevent_any_damage":
+        if not game.player(user).damage_prevention and _player_damage_threatened(game,user): return str(user)
+        choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent) and not permanent.damage_prevention and _permanent_damage_threatened(game,user,permanent)]
+        return f"{user}:{max(choices)[1]}" if choices else None
     if card.activation_effect=="animate_self":
         _,source=game.find_permanent(source_uid)
         pending=any(item.ability_effect=="animate_self" and item.source_uid==source_uid for item in game.stack)
