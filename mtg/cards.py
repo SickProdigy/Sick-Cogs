@@ -107,6 +107,10 @@ class Card:
     aura_controller_upkeep_life: int = 0
     aura_indestructible: bool = False
     aura_excludes_other_auras: bool = False
+    aura_set_land_type: str = ""
+    aura_choose_land_type: bool = False
+    global_land_from_type: str = ""
+    global_land_to_type: str = ""
     upkeep_opponent_hand_damage: bool = False
     draw_step_extra: int = 0
     untap_power_limit: int = 0
@@ -238,6 +242,9 @@ class Card:
         if self.aura_controller_upkeep_cost: abilities.append(f"Enchanted land has \"At your upkeep, you may pay {self.aura_controller_upkeep_cost} to gain {self.aura_controller_upkeep_life} life\"")
         if self.aura_indestructible: abilities.append("Enchanted land has indestructible")
         if self.aura_excludes_other_auras: abilities.append("Enchanted land cannot be enchanted by other Auras")
+        if self.aura_set_land_type: abilities.append(f"Enchanted land is a {self.aura_set_land_type.title()}")
+        if self.aura_choose_land_type: abilities.append("Choose a basic land type; enchanted land is that type")
+        if self.global_land_from_type: abilities.append(f"All {self.global_land_from_type.title()}s are {self.global_land_to_type.title()}s")
         if self.upkeep_opponent_hand_damage: abilities.append("At your opponent's upkeep, deals damage equal to cards in their hand minus 4")
         if self.draw_step_extra: abilities.append(f"At each draw step while untapped, that player draws {self.draw_step_extra} additional card"+("s" if self.draw_step_extra!=1 else ""))
         if self.untap_power_limit: abilities.append(f"Creatures with power {self.untap_power_limit} or greater don't untap")
@@ -333,6 +340,9 @@ ALPHA_ENCHANTMENTS = {
     "lea:202": {"aura_target_types":("Creature",), "aura_attack_haste":True, "activation_cost":"{0}", "activation_effect":"untap_attached", "activation_attached":True, "activation_controller_turn_only":True, "activation_once_per_turn":True, "activation_text":"Untap enchanted creature; activate only during your turn and only once each turn"},
     "lea:14": {"aura_target_types":("Land",), "aura_indestructible":True, "aura_excludes_other_auras":True},
     "lea:19": {"aura_target_types":("Land",), "aura_controller_upkeep_cost":"{W}{W}", "aura_controller_upkeep_life":1},
+    "lea:15": {"global_land_from_type":"mountain", "global_land_to_type":"plains", "upkeep_cost":"{W}{W}", "upkeep_unpaid_effect":"sacrifice"},
+    "lea:68": {"aura_target_types":("Land",), "aura_choose_land_type":True},
+    "lea:107": {"aura_target_types":("Land",), "aura_hostile":True, "aura_set_land_type":"swamp"},
 }
 
 ALPHA_ARTIFACTS = {
@@ -654,6 +664,10 @@ for reference in PLAYABLE_ALPHA:
         aura_controller_upkeep_life=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_controller_upkeep_life",0),
         aura_indestructible=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_indestructible",False),
         aura_excludes_other_auras=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_excludes_other_auras",False),
+        aura_set_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_set_land_type",""),
+        aura_choose_land_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("aura_choose_land_type",False),
+        global_land_from_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_from_type",""),
+        global_land_to_type=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("global_land_to_type",""),
         upkeep_opponent_hand_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_opponent_hand_damage",False),
         draw_step_extra=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_step_extra",0),
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),

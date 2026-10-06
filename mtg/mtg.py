@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.76.0"
+    __version__="0.77.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -123,6 +123,9 @@ class MTG(commands.Cog):
                 if active: ability_parts.append("Active: "+", ".join(word.title() for word in active))
                 if active_protection: ability_parts.append("Active protection: "+"/".join(active_protection))
                 if x.color_override: ability_parts.append("Color: "+{"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}[x.color_override])
+                live_land_types=g.current_land_types(x)
+                printed_land_types={kind for kind in ("plains","island","swamp","mountain","forest") if c.has_land_type(kind)}
+                if live_land_types!=printed_land_types: ability_parts.append("Land type: "+"/".join(kind.title() for kind in sorted(live_land_types)))
                 if x.animated_until_end_combat: ability_parts.append("Animated: 3/6 Golem artifact creature until end of combat")
                 granted_regeneration=g.granted_regeneration_cost(x)
                 if granted_regeneration: ability_parts.append(f"Granted: {granted_regeneration}: Regenerate this creature")
@@ -429,7 +432,7 @@ class MTG(commands.Cog):
         await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
-        """Play/cast a hand position with optional target and X; modal targets include tap:/untap: for Twiddle and life:/prevent: for Healing Salve."""
+        """Play/cast a hand position with optional target and X; modal targets include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, and TYPE:USER_ID:POSITION for Phantasmal Terrain."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
     @mtg.command(name="attack")

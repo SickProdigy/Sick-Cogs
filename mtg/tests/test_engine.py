@@ -1691,6 +1691,20 @@ class AlphaAuraTests(unittest.TestCase):
         self.assertIn(held,protected.player(10).hand); self.assertFalse(protected._destroy(protected.player(10),land)); self.assertIn(land,protected.player(10).battlefield)
         land.damage=1; protected._sba(); self.assertIn(land,protected.player(10).battlefield); self.assertEqual(consecrate.attached_to,land.uid)
 
+    def test_land_type_setters_share_timestamp_mana_and_persistence_rules(self):
+        cast=ready(); mountain=self.add(cast,20,"mountain"); aura=self.add(cast,10,"lea:68","hand"); self.add(cast,10,"island"); self.add(cast,10,"island")
+        with self.assertRaisesRegex(GameError,"Choose a basic land type"): cast.play(10,1,"20:1")
+        self.assertIn(aura,cast.player(10).hand); cast.play(10,1,"forest:20:1"); self.assertEqual(cast.stack[-1].target,f"forest:20:{mountain.uid}")
+        self.resolve_top(cast); self.assertEqual(cast.current_land_types(mountain),{"forest"}); self.assertEqual(cast.current_mana_choices(mountain),("G",))
+        restored=Game.from_raw(cast.to_raw()); mountain=restored.find_permanent(mountain.uid)[1]; self.assertEqual(restored.current_land_types(mountain),{"forest"})
+
+        layered=ready(); mountain=self.add(layered,10,"mountain"); conversion=self.add(layered,10,"lea:15"); evil=self.add(layered,20,"lea:107",attached_to=mountain.uid); terrain=self.add(layered,20,"lea:68",attached_to=mountain.uid); terrain.chosen_land_type="island"
+        self.assertEqual(layered.current_land_types(mountain),{"island"}); self.assertEqual(layered.current_mana_choices(mountain),("U",))
+        layered.player(20).battlefield.remove(terrain); layered.player(20).graveyard.append(terrain.uid); self.assertEqual(layered.current_land_types(mountain),{"swamp"})
+        layered.player(20).battlefield.remove(evil); layered.player(20).graveyard.append(evil.uid); self.assertEqual(layered.current_land_types(mountain),{"plains"})
+        layered.active_index=0; layered.stack=layered._turn_step_triggers("upkeep"); self.resolve_top(layered); layered.choose_trigger(10,False)
+        self.assertIn(conversion.uid,layered.player(10).graveyard); self.assertEqual(layered.current_land_types(mountain),{"mountain"}); self.assertEqual(layered.current_mana_choices(mountain),("R",))
+
 
 
 class AlphaProtectionTests(unittest.TestCase):

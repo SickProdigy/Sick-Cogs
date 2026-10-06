@@ -32,6 +32,8 @@ class Permanent:
     power_counters: int = 0
     corpse_counters: int = 0
     damage_source_uids: List[int] = field(default_factory=list)
+    chosen_land_type: str = ""
+    layer_timestamp: int = 0
 
 @dataclass
 class Player:
@@ -81,6 +83,7 @@ class Game:
         self.ai_user = int(ai_user) if ai_user is not None else None
         self.ai_difficulty = ai_difficulty
         self.cards, self.next_uid = {}, 1
+        self.next_layer_timestamp = 1
         self.active_index, self.phase, self.turn = 0, "opening", 0
         self.stack, self.attackers, self.blocks = [], [], {}
         self.blocked_attackers=[]
@@ -130,21 +133,42 @@ class Game:
         return CARDS.get(key) or TOKENS[key]
     def is_token(self,uid): return self.cards.get(uid,"").startswith("token:")
     def _make_permanent(self,uid,key,**kwargs):
+        kwargs.setdefault("layer_timestamp",self.next_layer_timestamp); self.next_layer_timestamp+=1
         permanent=Permanent(uid,key,**kwargs)
         permanent.power_counters=self.card(uid).enters_power_counters
         return permanent
     def _global_land_animation(self,permanent):
         card=self.card(permanent.uid)
-        return any(self.card(source.uid).animate_land_type and card.has_land_type(self.card(source.uid).animate_land_type) for player in self.players.values() for source in player.battlefield)
+        return any(self.card(source.uid).animate_land_type and self.has_current_land_type(permanent,self.card(source.uid).animate_land_type) for player in self.players.values() for source in player.battlefield)
     def _aura_artifact_animation(self,permanent):
         return self.card(permanent.uid).has_type("Artifact") and any(self.card(aura.uid).aura_animate_mana_value for aura in self.attached_auras(permanent))
     def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat or self._global_land_animation(permanent) or self._aura_artifact_animation(permanent)
+    def current_land_types(self,permanent):
+        card=self.card(permanent.uid)
+        if not card.land: return set()
+        types={kind for kind in ("plains","island","swamp","mountain","forest") if card.has_land_type(kind)}
+        setters=[]
+        for player in self.players.values():
+            for source in player.battlefield:
+                rule=self.card(source.uid)
+                if rule.global_land_from_type: setters.append((source.layer_timestamp or source.uid,rule.global_land_from_type,rule.global_land_to_type))
+        for aura in self.attached_auras(permanent):
+            rule=self.card(aura.uid); chosen=aura.chosen_land_type if rule.aura_choose_land_type else rule.aura_set_land_type
+            if chosen: setters.append((aura.layer_timestamp or aura.uid,"",chosen))
+        for _,required,replacement in sorted(setters):
+            if not required or required in types: types={replacement}
+        return types
+    def has_current_land_type(self,permanent,land_type): return land_type.casefold() in self.current_land_types(permanent)
+    def current_mana_choices(self,permanent):
+        card=self.card(permanent.uid); mapping={"plains":"W","island":"U","swamp":"B","mountain":"R","forest":"G"}
+        types=self.current_land_types(permanent)
+        return tuple(mapping[kind] for kind in ("plains","island","swamp","mountain","forest") if kind in types) if types else card.produces
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
     def characteristic_stats(self,user,card,entering=False):
         player=self.player(user)
         if card.characteristic_pt=="swamps":
-            value=sum(self.card(x.uid).has_land_type("swamp") for x in player.battlefield)
+            value=sum(self.has_current_land_type(x,"swamp") for x in player.battlefield)
         elif card.characteristic_pt=="plague_rats":
             value=sum(self.card(x.uid).name=="Plague Rats" for p in self.players.values() for x in p.battlefield)+(1 if entering else 0)
         elif card.characteristic_pt=="non_wall_creatures":
@@ -163,7 +187,7 @@ class Game:
         card=self.card(aura.uid)
         if not card.aura_forest_scaling: return card.aura_power,card.aura_toughness
         controller,_=self.find_permanent(aura.uid)
-        forests=sum(self.card(x.uid).has_land_type("forest") for x in controller.battlefield)
+        forests=sum(self.has_current_land_type(x,"forest") for x in controller.battlefield)
         return forests//2,(forests+1)//2
     def continuous_lords(self,permanent):
         controller=next((player for player in self.players.values() if permanent in player.battlefield),None)
@@ -221,7 +245,7 @@ class Game:
         elif self._global_land_animation(permanent): power,toughness=1,1
         elif self._aura_artifact_animation(permanent): power=toughness=card.cost
         else: power,toughness=card.power,card.toughness
-        swamp_bonus=1 if card.conditional_swamp_bonus and any(self.card(x.uid).has_land_type("swamp") for x in self.player(owner).battlefield) else 0
+        swamp_bonus=1 if card.conditional_swamp_bonus and any(self.has_current_land_type(x,"swamp") for x in self.player(owner).battlefield) else 0
         auras=self.attached_auras(permanent)
         lords=[self.card(source.uid) for source in self.continuous_lords(permanent)]
         globals_=[source for source_user,player in self.players.items() for source in player.battlefield if self.global_buff_applies(source,source_user,permanent,owner)]
@@ -248,7 +272,7 @@ class Game:
         attack_haste=any(self.card(aura.uid).aura_attack_haste for aura in auras)
         defender=self.player(self.opponent(self.active_user))
         required=card.attack_requires_defender_land_type
-        has_required=not required or any(self.card(x.uid).has_land_type(required) for x in defender.battlefield)
+        has_required=not required or any(self.has_current_land_type(x,required) for x in defender.battlefield)
         return self.is_creature(permanent) and not permanent.tapped and (not permanent.sick or card.haste or "haste" in keywords or attack_haste) and ("defender" not in keywords or defender_override) and has_required
 
     def _draw(self,p,n=1):
@@ -414,7 +438,7 @@ class Game:
         if card.land:
             flares=sum(self.card(source.uid).mana_flare for player in self.players.values() for source in player.battlefield)
             output[symbol]+=flares
-            if card.has_land_type("mountain"):
+            if self.has_current_land_type(permanent,"mountain"):
                 gauntlets=sum(self.card(source.uid).mountain_extra_red for player in self.players.values() for source in player.battlefield)
                 if gauntlets: output["R"]=output.get("R",0)+gauntlets
             for aura in self.attached_auras(permanent):
@@ -448,7 +472,7 @@ class Game:
         if mana_symbol:
             sources.extend((controller.user_id,source,"tap_damage",str(user)) for controller in self.players.values() for source in controller.battlefield if self.card(source.uid).land_tap_damage)
         sources.extend((controller.user_id,aura,"tap_damage",str(user)) for controller in self.players.values() for aura in controller.battlefield if aura.attached_to==permanent.uid and self.card(aura.uid).aura_tap_damage)
-        if tapped_card.has_land_type("forest"):
+        if self.has_current_land_type(permanent,"forest"):
             sources.extend((controller.user_id,source,"tap_life",str(controller.user_id)) for controller in self.players.values() if controller.user_id!=user for source in controller.battlefield if self.card(source.uid).opponent_forest_tap_life)
         triggers=[]
         for owner,source,effect,target in sources:
@@ -490,8 +514,9 @@ class Game:
         for permanent in player.battlefield:
             source=self.card(permanent.uid)
             if permanent.uid in excluded_uids: continue
-            if source.produces and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste or "haste" in self.current_keywords(permanent)):
-                options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in source.produces)
+            mana_choices=self.current_mana_choices(permanent)
+            if mana_choices and source.mana_amount==1 and not source.mana_activation_cost and not source.sacrifice_for_mana and not permanent.tapped and (not self.is_creature(permanent) or not permanent.sick or source.haste or "haste" in self.current_keywords(permanent)):
+                options=tuple((symbol,self._mana_output(permanent,symbol)) for symbol in mana_choices)
                 items.append(("permanent",str(permanent.uid),permanent,options))
 
         def reduce_requirements(requirements,output):
@@ -660,11 +685,12 @@ class Game:
         self._priority(user); player=self.player(user)
         if not 1<=position<=len(player.battlefield): raise GameError("No permanent at that battlefield position.")
         permanent=player.battlefield[position-1]; card=self.card(permanent.uid)
-        if not card.produces: raise GameError("That permanent has no supported mana ability.")
+        mana_choices=self.current_mana_choices(permanent)
+        if not mana_choices: raise GameError("That permanent has no supported mana ability.")
         if permanent.tapped: raise GameError(f"{card.name} is already tapped.")
         if self.is_creature(permanent) and permanent.sick and not card.haste and "haste" not in self.current_keywords(permanent): raise GameError(f"{card.name} has summoning sickness.")
-        symbol=(color or (card.produces[0] if len(card.produces)==1 else "")).upper()
-        if symbol not in card.produces: raise GameError(f"Choose one of: {', '.join(card.produces)}.")
+        symbol=(color or (mana_choices[0] if len(mana_choices)==1 else "")).upper()
+        if symbol not in mana_choices: raise GameError(f"Choose one of: {', '.join(mana_choices)}.")
         pending_triggers=[]
         if card.mana_activation_cost:
             payment=self._mana_payment(player,card,mana_cost=card.mana_activation_cost,excluded_uids=(permanent.uid,))
@@ -758,6 +784,11 @@ class Game:
 
     def _target_for_cast(self,c,user,target):
         if c.aura_target_types:
+            chosen_land_type=""
+            if c.aura_choose_land_type:
+                parts=(target or "").casefold().split(":")
+                if len(parts)!=3 or parts[0] not in ("plains","island","swamp","mountain","forest"): raise GameError("Choose a basic land type with TYPE:USER_ID:POSITION.")
+                chosen_land_type=parts[0]; target=":".join(parts[1:])
             if not target or ":" not in target: raise GameError("Aura target must be USER_ID:POSITION.")
             try: target_user,pos=(int(x) for x in target.split(":"))
             except (TypeError,ValueError) as error: raise GameError("Aura target must be USER_ID:POSITION.") from error
@@ -765,7 +796,8 @@ class Game:
             if not 1<=pos<=len(battlefield): raise GameError("No permanent at that battlefield position.")
             permanent=battlefield[pos-1]
             if not self._aura_can_attach(c,permanent): raise GameError(f"{c.name} cannot enchant that permanent.")
-            return f"{target_user}:{permanent.uid}"
+            stable=f"{target_user}:{permanent.uid}"
+            return f"{chosen_land_type}:{stable}" if chosen_land_type else stable
         if c.effect=="healing_salve":
             if not target: raise GameError("Healing Salve target must be life:PLAYER_ID, prevent:PLAYER_ID, or prevent:USER_ID:POSITION.")
             parts=target.casefold().split(":")
@@ -1114,7 +1146,7 @@ class Game:
         if "flying" in attacker_keywords and not ({"flying","reach"} & blocker_keywords):
             return False,f"{blocker.name} cannot block a creature with flying."
         for land_type in ("plains","island","swamp","mountain","forest"):
-            if f"{land_type}walk" in attacker_keywords and any(self.card(x.uid).has_land_type(land_type) for x in defender.battlefield):
+            if f"{land_type}walk" in attacker_keywords and any(self.has_current_land_type(x,land_type) for x in defender.battlefield):
                 return False,f"{attacker.name} can't be blocked while the defender controls a {land_type.title()}."
         power=self.current_stats(attacker_perm)[0]
         if blocker.max_block_power is not None and power>blocker.max_block_power:
@@ -1261,7 +1293,7 @@ class Game:
         pending={item.source_uid for item in self.stack if item.ability_effect=="no_land_sacrifice"}
         for controller_id in (self.active_user,self.opponent(self.active_user)):
             controller=self.player(controller_id)
-            land_types={land_type for permanent in controller.battlefield for land_type in ("plains","island","swamp","mountain","forest") if self.card(permanent.uid).has_land_type(land_type)}
+            land_types={land_type for permanent in controller.battlefield for land_type in ("plains","island","swamp","mountain","forest") if self.has_current_land_type(permanent,land_type)}
             for source in controller.battlefield:
                 card=self.card(source.uid); required=card.sacrifice_without_land_type
                 if not required or required in land_types or source.uid in pending: continue
@@ -1328,7 +1360,7 @@ class Game:
         elif effect=="upkeep_damage":
             self._damage_player(int(s.target),card.upkeep_each_damage,source_uid=s.source_uid)
         elif effect=="upkeep_land_type_damage":
-            target_player=self.player(int(s.target)); amount=sum(self.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in target_player.battlefield)
+            target_player=self.player(int(s.target)); amount=sum(self.has_current_land_type(permanent,card.upkeep_land_type_damage) for permanent in target_player.battlefield)
             self._damage_player(target_player.user_id,amount,source_uid=s.source_uid)
         elif effect=="aura_upkeep_damage":
             self._damage_player(int(s.target),card.aura_upkeep_damage,source_uid=s.source_uid)
@@ -1415,10 +1447,10 @@ class Game:
         if protected is not None and self._protected_from(protected,c,self.spell_colors(s)):
             p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target gained protection."); return
         if c.aura_target_types:
-            user,uid=(int(x) for x in s.target.split(":")); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
+            parts=s.target.split(":"); chosen_land_type=parts[0] if len(parts)==3 else ""; user,uid=(int(x) for x in parts[-2:]); target=next((x for x in self.player(user).battlefield if x.uid==uid),None)
             if target is None or not self._aura_can_attach(c,target,colors=self.spell_colors(s)):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
-            p.battlefield.append(self._make_permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override))
+            p.battlefield.append(self._make_permanent(s.uid,c.key,sick=False,attached_to=target.uid,color_override=s.color_override,chosen_land_type=chosen_land_type))
             if c.aura_enters_tapped: self._tap_permanent(user,target)
         elif c.kind in ("Creature","Artifact","Enchantment"): p.battlefield.append(self._make_permanent(s.uid,c.key,tapped=c.enters_tapped,color_override=s.color_override))
         elif c.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
@@ -1589,7 +1621,7 @@ class Game:
             self._destroy(controller,target,allow_regeneration=False); p.graveyard.append(s.uid)
         elif c.effect in ("destroy_all_lands","destroy_land_type"):
             for controller in self.players.values():
-                destroyed=[x for x in controller.battlefield if self.card(x.uid).land and (c.effect=="destroy_all_lands" or self.card(x.uid).has_land_type(c.land_type))]
+                destroyed=[x for x in controller.battlefield if self.card(x.uid).land and (c.effect=="destroy_all_lands" or self.has_current_land_type(x,c.land_type))]
                 for permanent in destroyed: self._destroy(controller,permanent,allow_regeneration=False)
             p.graveyard.append(s.uid)
         self.log.append(f"{c.name} resolved."); self._sba(); self._life()
@@ -1672,12 +1704,12 @@ class Game:
         if user!=self.active_user or self.priority_user!=user: raise GameError("It is not your action window.")
 
     def to_raw(self):
-        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
+        return {"game_id":self.game_id,"order":self.order,"players":{str(k):{**asdict(v),"battlefield":[asdict(x) for x in v.battlefield]} for k,v in self.players.items()},"cards":self.cards,"next_uid":self.next_uid,"next_layer_timestamp":self.next_layer_timestamp,"active_index":self.active_index,"phase":self.phase,"phase_passes":self.phase_passes,"turn":self.turn,"stack":[asdict(x) for x in self.stack],"end_step_sacrifices":self.end_step_sacrifices,"end_step_destroys":[asdict(x) for x in self.end_step_destroys],"end_combat_destroys":[asdict(x) for x in self.end_combat_destroys],"extra_turns":self.extra_turns,"untap_pending":self.untap_pending,"skip_draw_step":self.skip_draw_step,"prevent_combat_damage":self.prevent_combat_damage,"creatures_died_this_turn":self.creatures_died_this_turn,"attackers":self.attackers,"blocks":self.blocks,"blocked_attackers":self.blocked_attackers,"combat_participants":self.combat_participants,"trample_assignments":self.trample_assignments,"priority_user":self.priority_user,"winner":self.winner,"finished_reason":self.finished_reason,"ai_user":self.ai_user,"ai_difficulty":self.ai_difficulty,"log":self.log[-100:],"history":self.history,"created_at":self.created_at,"updated_at":self.updated_at}
     @classmethod
     def from_raw(cls,r):
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
-        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0))})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+        g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

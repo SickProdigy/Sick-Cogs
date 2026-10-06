@@ -24,7 +24,9 @@ def _target(game, user, card):
         for position,permanent in enumerate(game.player(target_user).battlefield,1):
             target=game.card(permanent.uid)
             if game._aura_can_attach(card,permanent) and (not card.aura_animate_mana_value or not game.is_creature(permanent)): choices.append((sum(game.current_stats(permanent)) if game.is_creature(permanent) else target.cost,position))
-        return f"{target_user}:{max(choices)[1]}" if choices else None
+        if not choices: return None
+        stable=f"{target_user}:{max(choices)[1]}"
+        return f"island:{stable}" if card.aura_choose_land_type else stable
     if card.effect in ("counter_spell","counter_mana_value_x","elemental_blast"):
         for position,spell in enumerate(reversed(game.stack),1):
             target=game.card(spell.uid)
@@ -85,12 +87,12 @@ def _target(game, user, card):
     if card.effect == "destroy_permanent":
         targets=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if any(game.has_current_type(permanent,kind) for kind in card.target_types) and _can_target(game,card,permanent)]
         if not targets: return None
-        position,_=max(targets,key=lambda item:(bool(game.card(item[1].uid).produces),game.card(item[1].uid).cost))
+        position,_=max(targets,key=lambda item:(bool(game.current_mana_choices(item[1])),game.card(item[1].uid).cost))
         return f"{game.opponent(user)}:{position}"
     if card.effect == "destroy_land":
         lands=[(position,permanent) for position,permanent in enumerate(game.player(game.opponent(user)).battlefield,1) if game.card(permanent.uid).land and _can_target(game,card,permanent)]
         if not lands: return None
-        position,_=max(lands,key=lambda item:len(game.card(item[1].uid).produces))
+        position,_=max(lands,key=lambda item:len(game.current_mana_choices(item[1])))
         return f"{game.opponent(user)}:{position}"
     if card.effect in ("pump","pump_blocking","pump_power_x"):
         creatures = [
@@ -142,7 +144,7 @@ def _global_enchantment_score(game,user,card):
     enemy=0 if card.global_controller_only else sum(eligible(game.opponent(user),permanent) for permanent in game.player(game.opponent(user)).battlefield)
     mountain_value=0
     if card.mountain_extra_red:
-        mountain_value=sum(game.card(x.uid).has_land_type("mountain") and not x.tapped for x in game.player(user).battlefield)-sum(game.card(x.uid).has_land_type("mountain") and not x.tapped for x in game.player(game.opponent(user)).battlefield)
+        mountain_value=sum(game.has_current_land_type(x,"mountain") and not x.tapped for x in game.player(user).battlefield)-sum(game.has_current_land_type(x,"mountain") and not x.tapped for x in game.player(game.opponent(user)).battlefield)
     return 5+value*(own-enemy)+mountain_value
 
 
@@ -179,7 +181,7 @@ def _play_one(game, user, difficulty):
                 x_value=game.spell_mana_value(target_spell)
         if card.land or (x_value is not None and x_value<1 and card.effect!="counter_mana_value_x") or not game.can_pay(user,card,x_value or 0):
             continue
-        if card.sacrifice_without_land_type and not any(game.card(permanent.uid).has_land_type(card.sacrifice_without_land_type) for permanent in player.battlefield):
+        if card.sacrifice_without_land_type and not any(game.has_current_land_type(permanent,card.sacrifice_without_land_type) for permanent in player.battlefield):
             continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
@@ -195,9 +197,14 @@ def _play_one(game, user, difficulty):
             score = 5
         elif card.global_power or card.global_toughness:
             score=_global_enchantment_score(game,user,card)
+        elif card.global_land_from_type:
+            own=sum(game.has_current_land_type(permanent,card.global_land_from_type) for permanent in player.battlefield)
+            enemy=sum(game.has_current_land_type(permanent,card.global_land_from_type) for permanent in game.player(game.opponent(user)).battlefield)
+            if own>=enemy: continue
+            score=4+enemy-own
         elif card.animate_land_type:
-            own=sum(game.card(permanent.uid).has_land_type(card.animate_land_type) for permanent in player.battlefield)
-            enemy=sum(game.card(permanent.uid).has_land_type(card.animate_land_type) for permanent in game.player(game.opponent(user)).battlefield)
+            own=sum(game.has_current_land_type(permanent,card.animate_land_type) for permanent in player.battlefield)
+            enemy=sum(game.has_current_land_type(permanent,card.animate_land_type) for permanent in game.player(game.opponent(user)).battlefield)
             if own<=enemy: continue
             score=4+2*(own-enemy)
         elif card.mana_flare:
@@ -216,8 +223,8 @@ def _play_one(game, user, difficulty):
             if player.life<=card.upkeep_each_damage: continue
             score=4+player.life-game.player(game.opponent(user)).life
         elif card.upkeep_land_type_damage:
-            own=sum(game.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in player.battlefield)
-            enemy=sum(game.card(permanent.uid).has_land_type(card.upkeep_land_type_damage) for permanent in game.player(game.opponent(user)).battlefield)
+            own=sum(game.has_current_land_type(permanent,card.upkeep_land_type_damage) for permanent in player.battlefield)
+            enemy=sum(game.has_current_land_type(permanent,card.upkeep_land_type_damage) for permanent in game.player(game.opponent(user)).battlefield)
             if own>=player.life or enemy<=own: continue
             score=5+enemy-own
         elif card.draw_step_extra:
@@ -240,17 +247,17 @@ def _play_one(game, user, difficulty):
             if own>enemy: continue
             score=5+2*(enemy-own)
         elif card.white_as_red:
-            white=sum((permanent.uid!=uid and "W" in game.card(permanent.uid).produces and not permanent.tapped) for permanent in player.battlefield)+player.mana_pool.get("W",0)
+            white=sum((permanent.uid!=uid and "W" in game.current_mana_choices(permanent) and not permanent.tapped) for permanent in player.battlefield)+player.mana_pool.get("W",0)
             red_cards=sum("{R}" in game.card(hand_uid).mana_cost for hand_uid in player.hand if hand_uid!=uid)
             score=4+min(white,red_cards)
         elif card.opponent_forest_tap_life:
-            score=5+sum(game.card(permanent.uid).has_land_type("forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
+            score=5+sum(game.has_current_land_type(permanent,"forest") and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
         elif card.land_tap_damage:
             own=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in player.battlefield)
             enemy=sum(game.card(permanent.uid).land and not permanent.tapped for permanent in game.player(game.opponent(user)).battlefield)
             score=5+enemy-own
         elif card.aura_target_types:
-            scaling=sum(game.card(permanent.uid).has_land_type("forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
+            scaling=sum(game.has_current_land_type(permanent,"forest") for permanent in player.battlefield) if card.aura_forest_scaling else 0
             score=10 if card.aura_hostile else 7+card.aura_power+card.aura_toughness+scaling+2*bool(card.aura_keyword or card.aura_attack_override or card.aura_blocked_except_wall)+3*bool(card.aura_animate_mana_value or card.aura_indestructible)+2*bool(card.aura_controller_upkeep_life)
         elif card.effect in ("damage","damage_any"):
             score = 12 + card.amount - card.self_damage
@@ -320,8 +327,8 @@ def _play_one(game, user, difficulty):
         elif card.effect in ("earthquake_x","hurricane_x"):
             score=8+(x_value or 0)
         elif card.effect in ("destroy_all_lands","destroy_land_type"):
-            enemy=sum(1 for permanent in game.player(game.opponent(user)).battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
-            own=sum(1 for permanent in player.battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.card(permanent.uid).has_land_type(card.land_type)))
+            enemy=sum(1 for permanent in game.player(game.opponent(user)).battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.has_current_land_type(permanent,card.land_type)))
+            own=sum(1 for permanent in player.battlefield if game.card(permanent.uid).land and (card.effect=="destroy_all_lands" or game.has_current_land_type(permanent,card.land_type)))
             score=6+2*enemy-2*own
         candidates.append((score, -position, position, target, x_value))
     if not candidates:
