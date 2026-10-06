@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.83.0"
+    __version__="0.84.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -123,10 +123,13 @@ class MTG(commands.Cog):
                 if active: ability_parts.append("Active: "+", ".join(word.title() for word in active))
                 if suppressed: ability_parts.append("Suppressed: "+", ".join(word.title() for word in suppressed))
                 if active_protection: ability_parts.append("Active protection: "+"/".join(active_protection))
-                if x.color_override: ability_parts.append("Color: "+{"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}[x.color_override])
+                current_colors=g.current_colors(x)
+                if current_colors!=c.colors: ability_parts.append("Color: "+"/".join({"W":"White","U":"Blue","B":"Black","R":"Red","G":"Green"}[color] for color in current_colors))
                 live_land_types=g.current_land_types(x)
                 printed_land_types={kind for kind in ("plains","island","swamp","mountain","forest") if c.has_land_type(kind)}
                 if live_land_types!=printed_land_types: ability_parts.append("Land type: "+"/".join(kind.title() for kind in sorted(live_land_types)))
+                live_mana=g.current_mana_choices(x)
+                if c.land and live_mana!=c.produces: ability_parts.append("Mana now: "+"/".join(live_mana))
                 if x.animated_until_end_combat: ability_parts.append("Animated: 3/6 Golem artifact creature until end of combat")
                 granted_regeneration=g.granted_regeneration_cost(x)
                 if granted_regeneration: ability_parts.append(f"Granted: {granted_regeneration}: Regenerate this creature")

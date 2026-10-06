@@ -193,6 +193,8 @@ def _play_one(game, user, difficulty):
             continue
         if card.sacrifice_without_land_type and not any(game.has_current_land_type(permanent,card.sacrifice_without_land_type) for permanent in player.battlefield):
             continue
+        if card.characteristic_pt and min(game.projected_stats(user,card))<=0:
+            continue
         if card.effect=="prevent_combat_damage" and not _fog_useful(game,user):
             continue
         if card.kind != "Instant" and (game.active_user != user or game.phase not in ("precombat_main", "postcombat_main") or game.stack):
@@ -495,6 +497,14 @@ def _activation_target(game,user,card,source_uid=None):
     if card.activation_effect=="damage_any":
         if card.activation_self_damage and game.player(user).life<=card.activation_self_damage: return None
         return str(opponent)
+    if card.activation_effect=="set_land_forest":
+        for target_user in (opponent,user):
+            choices=[]
+            for position,permanent in enumerate(game.player(target_user).battlefield,1):
+                if game.card(permanent.uid).land and not game.has_current_land_type(permanent,"forest") and _can_target(game,card,permanent):
+                    choices.append((len(game.current_mana_choices(permanent)),position))
+            if choices: return f"{target_user}:{max(choices)[1]}"
+        return None
     candidates=[]
     for position,permanent in enumerate(game.player(opponent).battlefield,1):
         target=game.card(permanent.uid)

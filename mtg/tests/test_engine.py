@@ -537,6 +537,29 @@ class AlphaCharacteristicStatsTests(unittest.TestCase):
         game.blocks={}; game._combat_damage(False)
         self.assertEqual(game.player(20).life,19)
 
+    def test_gaea_liege_switches_between_controller_and_defender_forests(self):
+        game=ready(); liege=self.add(game,10,"lea:196"); [self.add(game,10,"forest") for _ in range(3)]; [self.add(game,20,"forest") for _ in range(2)]
+        self.assertEqual(game.current_stats(liege),(3,3)); game.attackers=[liege.uid]; self.assertEqual(game.current_stats(liege),(2,2))
+        game.attackers=[]; game.player(10).battlefield.pop(); self.assertEqual(game.current_stats(liege),(2,2))
+
+    def test_gaea_liege_land_effect_persists_layers_and_expires_with_source(self):
+        game=ready(); liege=self.add(game,10,"lea:196"); liege.layer_timestamp=10; game.next_layer_timestamp=11; self.add(game,10,"forest"); mountain=self.add(game,20,"mountain"); living=self.add(game,20,"lea:209")
+        game.phase="precombat_main"; game.priority_user=10; game.activate_ability(10,1,"20:1")
+        self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].choice_value),("set_land_forest",10)); restored=Game.from_raw(game.to_raw())
+        restored.pass_priority(20); restored.pass_priority(10); saved=restored.find_permanent(mountain.uid)[1]
+        self.assertEqual((restored.current_land_types(saved),restored.current_mana_choices(saved)),({"forest"},("G",))); self.assertTrue(restored.is_creature(saved))
+        terrain=self.add(restored,20,"lea:68"); terrain.attached_to=saved.uid; terrain.chosen_land_type="island"; terrain.layer_timestamp=12
+        self.assertEqual(restored.current_land_types(saved),{"island"}); restored._destroy(restored.player(20),terrain,allow_regeneration=False); self.assertEqual(restored.current_land_types(saved),{"forest"})
+        restored._destroy(restored.player(10),restored.find_permanent(liege.uid)[1],allow_regeneration=False)
+        self.assertEqual((restored.current_land_types(saved),restored.current_mana_choices(saved)),({"mountain"},("R",))); self.assertFalse(restored.is_creature(saved))
+
+    def test_gaea_liege_effect_does_not_outlive_or_reattach_to_returned_source(self):
+        game=ready(); liege=self.add(game,10,"lea:196"); liege.layer_timestamp=5; self.add(game,10,"forest"); mountain=self.add(game,20,"mountain")
+        game.phase="precombat_main"; game.priority_user=10; game.activate_ability(10,1,"20:1"); game.player(10).battlefield.remove(liege); game.player(10).graveyard.append(liege.uid)
+        replacement=Permanent(liege.uid,"lea:196",sick=False,layer_timestamp=9); game.player(10).battlefield.append(replacement)
+        game.pass_priority(20); game.pass_priority(10); self.assertEqual(game.current_land_types(mountain),{"mountain"}); self.assertFalse(mountain.land_type_effects)
+        raw=game.to_raw(); raw["players"]["20"]["battlefield"][0].pop("land_type_effects"); self.assertEqual(Game.from_raw(raw).find_permanent(mountain.uid)[1].land_type_effects,[])
+
     def test_swords_uses_dynamic_power_before_exile(self):
         game=ready(); caster=game.player(10); target_player=game.player(20)
         spell=game.next_uid; game.next_uid+=1; game.cards[spell]="lea:40"; caster.hand.insert(0,spell)

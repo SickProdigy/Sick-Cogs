@@ -306,6 +306,11 @@ class SoloAITests(unittest.TestCase):
         self.assertEqual(game.current_stats(nightmare),(4,4))
         self.assertEqual(_target(game,AI,cards["lea:86"]),f"{HUMAN}:2")
 
+    def test_ai_targets_opposing_nonforest_land_with_gaea_liege(self):
+        game=solo(); liege=self.add(game,AI,"lea:196"); self.add(game,AI,"forest"); own=self.add(game,AI,"mountain"); self.add(game,HUMAN,"forest"); target=self.add(game,HUMAN,"lea:285")
+        self.assertEqual(_activation_target(game,AI,CARDS["lea:196"],liege.uid),f"{HUMAN}:2")
+        game.player(HUMAN).battlefield.remove(target); self.assertEqual(_activation_target(game,AI,CARDS["lea:196"],liege.uid),f"{AI}:3")
+
     def test_ai_activates_color_counter_enchantment_against_matching_spell(self):
         game=solo(); advance_solo(game); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         bear=self.add(game,HUMAN,"bear"); growth=self.add(game,HUMAN,"lea:197","hand"); self.add(game,HUMAN,"forest")

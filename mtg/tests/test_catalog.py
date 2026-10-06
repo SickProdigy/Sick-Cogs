@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),301)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),301)
+        self.assertEqual(len(CARDS),302)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),302)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),241)
-        self.assertEqual(len(REFERENCE_ALPHA),54)
+        self.assertEqual(len(PLAYABLE_ALPHA),242)
+        self.assertEqual(len(REFERENCE_ALPHA),53)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -72,6 +72,8 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(CARDS["lea:114"].upkeep_sacrifice_other); self.assertEqual(CARDS["lea:114"].upkeep_sacrifice_damage,7)
         self.assertIn("sacrifice another creature",CARDS["lea:114"].ability_text)
         self.assertEqual({key:CARDS[key].characteristic_pt for key in ALPHA_CHARACTERISTIC_CREATURES},ALPHA_CHARACTERISTIC_CREATURES)
+        self.assertEqual((CARDS["lea:196"].characteristic_pt,CARDS["lea:196"].activation_effect),("gaea_liege","set_land_forest"))
+        self.assertIn("until this creature leaves",CARDS["lea:196"].ability_text)
         for key,ability in ALPHA_ACTIVATED_CREATURES.items():
             self.assertEqual(CARDS[key].activation_cost,ability.get("activation_cost",""))
             self.assertEqual(CARDS[key].activated_power,ability.get("activated_power",0))
@@ -200,7 +202,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("301 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("302 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))

@@ -37,6 +37,7 @@ class Permanent:
     layer_timestamp: int = 0
     aura_effect_enabled: bool = False
     last_known_toughness: int = 0
+    land_type_effects: List[Dict[str, object]] = field(default_factory=list)
 
 @dataclass
 class Player:
@@ -161,6 +162,10 @@ class Game:
         for aura in self.attached_auras(permanent):
             rule=self.card(aura.uid); chosen=aura.chosen_land_type if rule.aura_choose_land_type else rule.aura_set_land_type
             if chosen: setters.append((aura.layer_timestamp or aura.uid,"",chosen))
+        for effect in permanent.land_type_effects:
+            _,source=self.find_permanent(int(effect.get("source_uid",0)))
+            if source is not None and source.layer_timestamp==int(effect.get("source_timestamp",0)):
+                setters.append((int(effect.get("effect_timestamp",0)),"",str(effect.get("land_type",""))))
         for _,required,replacement in sorted(setters):
             if not required or required in types: types={replacement}
         return types
@@ -171,10 +176,13 @@ class Game:
         return tuple(mapping[kind] for kind in ("plains","island","swamp","mountain","forest") if kind in types) if types else card.produces
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
-    def characteristic_stats(self,user,card,entering=False):
+    def characteristic_stats(self,user,card,entering=False,permanent_uid=None):
         player=self.player(user)
         if card.characteristic_pt=="swamps":
             value=sum(self.has_current_land_type(x,"swamp") for x in player.battlefield)
+        elif card.characteristic_pt=="gaea_liege":
+            forests=self.player(self.opponent(user) if permanent_uid in self.attackers else user)
+            value=sum(self.has_current_land_type(x,"forest") for x in forests.battlefield)
         elif card.characteristic_pt=="plague_rats":
             value=sum(self.card(x.uid).name=="Plague Rats" for p in self.players.values() for x in p.battlefield)+(1 if entering else 0)
         elif card.characteristic_pt=="non_wall_creatures":
@@ -249,7 +257,7 @@ class Game:
         if owner is None: raise GameError("Permanent is not on the battlefield.")
         card=self.card(permanent.uid)
         if permanent.animated_until_end_combat: power,toughness=3,6
-        elif card.creature: power,toughness=self.characteristic_stats(owner,card)
+        elif card.creature: power,toughness=self.characteristic_stats(owner,card,permanent_uid=permanent.uid)
         elif self._global_land_animation(permanent): power,toughness=1,1
         elif self._aura_artifact_animation(permanent): power=toughness=card.cost
         else: power,toughness=card.power,card.toughness
@@ -631,7 +639,7 @@ class Game:
         if card.activation_effect=="destroy_wall" and "Wall" not in target_card.type_line.split(" — ",1)[-1].split(): raise GameError("Target must be a Wall.")
         if card.activation_effect=="unblockable" and (not self.is_creature(permanent) or self.current_stats(permanent)[0]>2): raise GameError("Target must be a creature with power 2 or less.")
         if card.activation_effect=="grant_flying_delayed_destroy" and (target_user!=user or not self.is_creature(permanent) or self.current_stats(permanent)[1]>=self.current_stats(source)[0]): raise GameError("Target must be a creature you control with toughness less than this creature’s power.")
-        if card.activation_effect in ("untap_land","destroy_land") and not target_card.land: raise GameError("Target must be a land.")
+        if card.activation_effect in ("untap_land","destroy_land","set_land_forest") and not target_card.land: raise GameError("Target must be a land.")
         if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
         return f"{target_user}:{permanent.uid}"
 
@@ -691,7 +699,8 @@ class Game:
         if card.sacrifice_after_activations and permanent.activations_this_turn>=card.sacrifice_after_activations:
             permanent.sacrifice_at_end_step=True
         ability_uid=self.next_uid; self.next_uid+=1; self.cards[ability_uid]=card.key
-        self.stack.append(Spell(user,ability_uid,card.key,stable_target,x_value=x_value,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override,source_power=self.current_stats(permanent)[0],choice_value=choice_value)); self.stack.extend(pending_triggers)
+        stored_choice=permanent.layer_timestamp if activation_effect=="set_land_forest" else choice_value
+        self.stack.append(Spell(user,ability_uid,card.key,stable_target,x_value=x_value,ability_effect=activation_effect or "self",source_uid=permanent.uid,color_override=permanent.color_override,source_power=self.current_stats(permanent)[0],choice_value=stored_choice)); self.stack.extend(pending_triggers)
         self._sba(); self._life()
         self.phase_passes=0
         for item in self.stack[:-1]: item.passes=0
@@ -1490,6 +1499,11 @@ class Game:
         elif effect=="untap_land":
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             target.tapped=False
+        elif effect=="set_land_forest":
+            _,source=self.find_permanent(s.source_uid)
+            if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
+            if source is None or source.layer_timestamp!=s.choice_value: fizzle("its source had left the battlefield"); return
+            target.land_type_effects.append({"source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":"forest"}); self.next_layer_timestamp+=1
         elif effect=="tap_permanent":
             if target_card is None or not any(self.has_current_type(target,kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
             target.tapped=True
@@ -1780,6 +1794,6 @@ class Game:
         g=cls.__new__(cls); g.game_id=int(r["game_id"]); g.order=[int(x) for x in r["order"]]
         g.players={}
         for k,v in r["players"].items():
-            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0)})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
+            d=dict(v); d.setdefault("mana_pool",{}); d.setdefault("exile",[]); d.setdefault("damage_prevention",0); d.setdefault("source_damage_prevention",[]); d.setdefault("turn_start_untapped_lands",0); d.setdefault("channel_active",False); d["source_damage_prevention"]=[int(uid) for uid in d["source_damage_prevention"]]; d.setdefault("lands_played_this_turn",int(bool(d.get("land_played",False)))); d["mana_pool"]={str(symbol):int(count) for symbol,count in d["mana_pool"].items()}; d["battlefield"]=[Permanent(**({**x,"damage_prevention":x.get("damage_prevention",0),"plus_one_counters":x.get("plus_one_counters",0),"power_counters":x.get("power_counters",0),"corpse_counters":x.get("corpse_counters",0),"damage_source_uids":[int(uid) for uid in x.get("damage_source_uids",[])],"chosen_land_type":x.get("chosen_land_type",""),"layer_timestamp":x.get("layer_timestamp",x.get("uid",0)),"color_timestamp":x.get("color_timestamp",x.get("layer_timestamp",x.get("uid",0))) if x.get("color_override") else 0,"aura_effect_enabled":x.get("aura_effect_enabled",False),"last_known_toughness":x.get("last_known_toughness",0),"land_type_effects":[dict(effect) for effect in x.get("land_type_effects",[])]})) for x in d["battlefield"]]; g.players[int(k)]=Player(**d)
         g.cards={int(k):v for k,v in r["cards"].items()}; g.next_uid=int(r["next_uid"]); g.next_layer_timestamp=int(r.get("next_layer_timestamp",max((x.layer_timestamp for p in g.players.values() for x in p.battlefield),default=0)+1)); g.active_index=int(r["active_index"]); g.phase=r["phase"]; g.phase_passes=int(r.get("phase_passes",0)); g.turn=int(r["turn"]); g.stack=[Spell(**x) for x in r["stack"]]; g.end_step_sacrifices=[int(x) for x in r.get("end_step_sacrifices",[])]; g.end_step_destroys=[Spell(**x) for x in r.get("end_step_destroys",[])]; g.end_combat_destroys=[Spell(**x) for x in r.get("end_combat_destroys",[])]; g.extra_turns=[int(x) for x in r.get("extra_turns",[])]; g.untap_pending=[int(x) for x in r.get("untap_pending",[])]; g.skip_draw_step=bool(r.get("skip_draw_step",False)); g.prevent_combat_damage=bool(r.get("prevent_combat_damage",False)); g.creatures_died_this_turn=int(r.get("creatures_died_this_turn",0)); g.attackers=[int(x) for x in r["attackers"]]; g.attacked_this_turn=[int(x) for x in r.get("attacked_this_turn",g.attackers)]; g.blocks={int(k):int(v) for k,v in r["blocks"].items()}; g.blocked_attackers=[int(x) for x in r.get("blocked_attackers",g.blocks.keys())]; g.combat_participants=[int(x) for x in r.get("combat_participants",list(g.attackers)+list(g.blocks.values()))]; g.trample_assignments={int(k):int(v) for k,v in r.get("trample_assignments",{}).items()}; g.priority_user=r["priority_user"]; g.winner=r["winner"]; g.finished_reason=r["finished_reason"]; g.ai_user=int(r["ai_user"]) if r.get("ai_user") is not None else None; g.ai_difficulty=r.get("ai_difficulty"); g.log=list(r["log"]); g.history=list(r.get("history",[])); g.created_at=int(r.get("created_at",time.time())); g.updated_at=int(r.get("updated_at",g.created_at))
         return g

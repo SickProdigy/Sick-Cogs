@@ -423,6 +423,7 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:143": {"activation_tap":True, "activation_effect":"unblockable", "activation_text":"Target creature with power 2 or less can't be blocked this turn"},
     "lea:165": {"activation_tap":True, "activation_effect":"damage_any", "activation_amount":2, "activation_self_damage":3, "activation_text":"Deals 2 damage to any target and 3 damage to you"},
     "lea:176": {"activation_tap":True, "activation_effect":"grant_flying_delayed_destroy", "activation_text":"Target creature you control with toughness less than this creature’s power gains flying until end of turn; destroy it at the beginning of the next end step"},
+    "lea:196": {"activation_tap":True, "activation_effect":"set_land_forest", "activation_text":"Target land becomes a Forest until this creature leaves the battlefield"},
     "lea:205": {"activation_tap":True, "activation_effect":"untap_land", "activation_text":"Untap target land"},
     "lea:236": {"activation_cost":"{X}", "activation_tap":True, "activation_effect":"add_power_counters", "activation_text":"Put up to X +1/+0 counters on this creature (maximum seven)", "enters_power_counters":7, "end_combat_remove_power_counter":True, "activation_upkeep_only":True, "activation_x_choice":True},
     "lea:141": {"activation_cost":"{R}", "activated_power":1, "sacrifice_after_activations":4},
@@ -473,6 +474,7 @@ ALPHA_LORDS = {
 
 ALPHA_CHARACTERISTIC_CREATURES = {
     "lea:118": "swamps",
+    "lea:196": "gaea_liege",
     "lea:121": "plague_rats",
     "lea:160": "non_wall_creatures",
 }

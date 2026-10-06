@@ -558,6 +558,14 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.player(20).battlefield=[permanent_type(bell,"lea:256",sick=False),permanent_type(swamp,"swamp",sick=False)]
         rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Kormus Bell",rendered); self.assertIn("Swamp 1/1",rendered)
 
+    async def test_public_embed_renders_gaea_liege_stats_and_changed_land(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        liege=game.next_uid; game.next_uid+=1; game.cards[liege]="lea:196"; forest=game.next_uid; game.next_uid+=1; game.cards[forest]="forest"; mountain=game.next_uid; game.next_uid+=1; game.cards[mountain]="mountain"
+        source=permanent_type(liege,"lea:196",sick=False,layer_timestamp=5); land=permanent_type(mountain,"mountain",sick=False,land_type_effects=[{"source_uid":liege,"source_timestamp":5,"effect_timestamp":6,"land_type":"forest"}])
+        game.player(10).battlefield=[source,permanent_type(forest,"forest",sick=False)]; game.player(20).battlefield=[land]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Gaea\x27s Liege 1/1",rendered); self.assertIn("Land type: Forest",rendered); self.assertIn("Mana now: G",rendered)
+
     async def test_public_embed_labels_activated_abilities_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 66 creatures playable through 0.71.0; 11 remain |
+| Creatures with abilities | 77 | 67 creatures playable through 0.84.0; 10 remain |
 | Instants and sorceries | 70 | 51 spells playable through 0.82.0; 19 remain |
 | Enchantments | 68 | 57 enchantments playable through 0.80.0; 11 remain |
 | Artifacts | 42 | Thirty-three artifacts playable through 0.83.0; 9 remain |
@@ -188,3 +188,5 @@ The 0.81.0 combat-pump promotion adds Berserk. Casting is limited to action wind
 The 0.82.0 life-for-mana promotion adds Channel. Resolution grants its controller a persisted turn-scoped mana ability exposed through `[p]mtg channel [amount]`; each life paid immediately adds one colorless mana without using the stack, may legally reduce the player to zero life, resets priority passes like other mana abilities, and expires at cleanup. Public Discord state identifies the active permission, legacy saves default safely, and solo AI pays only the minimum life that enables an otherwise unpayable legal spell.
 
 The 0.83.0 Swamp-animation promotion adds Kormus Bell. Every land with the current Swamp type becomes a 1/1 black creature while remaining a land, including Alpha dual lands and lands changed by existing type-setting effects. The shared creature layer applies summoning sickness, combat, targeting, state actions, continuous bonuses, Aura legality, and public rendering. A persisted color-effect timestamp orders the Bell correctly against permanent Laces: later effects win and removing the Bell restores the underlying color. Legacy saves retain their existing color overrides, and solo AI casts the symmetric artifact only with a Swamp advantage.
+
+The 0.84.0 source-bound land-type promotion adds Gaea’s Liege. Its live power and toughness count Forests controlled by its controller while it is not attacking and by the defending player while it is attacking. Its tap ability puts a persisted timestamped Forest-setting effect on any target land; current intrinsic mana, landwalk, typed effects, continuous animation, combat, state actions, and public rendering all consume that derived type. The effect remains through reloads, expires when that exact battlefield object leaves, cannot reattach to a returned Liege with the same card UID, and respects later type-setting layers. Discord uses the existing stable-target activation command, while solo AI prefers an opponent’s non-Forest land and avoids casting zero-toughness characteristic creatures.
