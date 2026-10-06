@@ -203,11 +203,24 @@ class BattleRenderer:
         for row_y in (32,79,126,173):
             for column,color in enumerate(((165,168,163),(125,151,158),(172,157,117),(145,148,145))):
                 x=left+14+column*47;draw.rectangle((x,row_y,x+29,row_y+29),fill=color,outline=RETRO[0],width=2)
-        # Simple framed research diagrams behind the presentation table.
-        for left in (285,405):
-            draw.rectangle((left,45,left+95,155),fill=(234,229,197),outline=RETRO[0],width=4)
-            draw.ellipse((left+24,64,left+71,111),outline=(91,148,163),width=4)
-            draw.line((left+18,130,left+77,130),fill=(112,83,58),width=4)
+        # Muted region survey and evolution research displays.
+        panel=(213,222,216);ink=(74,105,108);accent=(111,145,140)
+        draw.rectangle((275,40,390,165),fill=panel,outline=RETRO[0],width=4)
+        draw.text((287,48),"REGION SURVEY",fill=ink,font=ImageFont.load_default(size=11))
+        draw.polygon(((297,83),(315,69),(335,77),(349,67),(371,82),(361,98),(371,111),(351,126),(333,119),(317,137),(295,124),(304,105),(290,96)),fill=(157,178,164),outline=ink)
+        draw.line((301,111,321,101,337,106,354,90,367,93),fill=(224,227,218),width=3)
+        for x,y in ((304,91),(322,119),(347,82),(356,111)):draw.ellipse((x-3,y-3,x+3,y+3),fill=(173,151,99),outline=ink)
+        draw.rectangle((405,40,520,165),fill=panel,outline=RETRO[0],width=4)
+        draw.text((417,48),"EVOLUTION",fill=ink,font=ImageFont.load_default(size=11))
+        draw.line((425,105,497,105),fill=accent,width=3)
+        for x in (449,481):draw.polygon(((x-5,101),(x,105),(x-5,109)),fill=accent)
+        draw.ellipse((416,94,434,112),fill=(139,162,158),outline=ink,width=2)
+        draw.ellipse((443,89,466,113),fill=(126,153,151),outline=ink,width=2)
+        draw.polygon(((447,91),(451,80),(456,90),(462,81),(464,94)),fill=(126,153,151),outline=ink)
+        draw.ellipse((476,84,505,113),fill=(112,142,145),outline=ink,width=2)
+        draw.polygon(((480,87),(484,73),(491,84),(499,74),(502,90)),fill=(112,142,145),outline=ink)
+        draw.line((420,137,506,137),fill=(139,151,148),width=2)
+        draw.line((432,145,493,145),fill=(139,151,148),width=2)
         draw.rectangle((0,235,800,350),fill=(222,226,223))
         for x in range(-160,961,80):draw.line((400,235,x,350),fill=(184,191,188),width=2)
         for y in (270,310):draw.line((0,y,800,y),fill=(184,191,188),width=2)
