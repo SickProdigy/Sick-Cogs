@@ -338,6 +338,11 @@ class BattleTests(unittest.TestCase):
         self.assertEqual(rendered.size,(56,42))
         self.assertEqual(rendered.getchannel("A").getbbox(),(0,0,56,42))
 
+    def test_trainer_party_preserves_saved_order_and_skips_missing_entries(self):
+        first=OwnedPokemon.create("first",4,5,seed=1);second=OwnedPokemon.create("second",7,3,seed=2)
+        conf={"collection":[first.raw(),second.raw()],"party":["second","missing","first"]}
+        self.assertEqual([item.instance_id for item in BattleRenderer.trainer_party(conf)],["second","first"])
+
     def test_pokedex_registration_details_show_types_and_abilities(self):
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[39]),("Type: Normal / Fairy","Abilities: Cute Charm, Competitive"))
         self.assertEqual(BattleRenderer.pokedex_registration_details(SPECIES[25]),("Type: Electric","Abilities: Static"))
@@ -346,7 +351,7 @@ class BattleTests(unittest.TestCase):
         source=io.BytesIO()
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
-        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},starter_pokemon,data,"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
+        b=battle();encounter=renderer._encounter_sync(10,data,backdrop=0);expired=renderer._encounter_sync(10,data,backdrop=0,expired=True);alternate=renderer._encounter_sync(10,data,backdrop=11);starter_pokemon=OwnedPokemon.create("starter-card",7,1,seed=4);starter=renderer._starter_sync(starter_pokemon,data,"SickProdigy");choice=renderer._starter_sync(None,data,"",4);party_card=renderer._party_card_sync([starter_pokemon],[data],"SickProdigy");collection_card=renderer._collection_card_sync([starter_pokemon],[data],1,1,1,"SickProdigy");registration=renderer._pokedex_registration_sync(starter_pokemon,data,"SickProdigy");trainer_card=renderer._trainer_card_sync("SickProdigy",{"collection":[starter_pokemon.raw()],"party":[starter_pokemon.instance_id],"badges":["boulder"],"pokedex_seen":[7],"pokedex_caught":[7]},[starter_pokemon],[data],"gold");evolved=OwnedPokemon.create("evolved",11,7,seed=4);evolution=renderer._progression_sync(evolved,data,data,10,None,False);move_card=renderer._progression_sync(starter_pokemon,data,None,None,"bubble",True);scene=renderer._battle_sync(b,data,data);b.state="won";b.experience_award=80;victory=renderer._battle_result_sync(b,data);b.state="caught";caught_result=renderer._battle_result_sync(b,data);b.state="ran";escape_result=renderer._battle_result_sync(b,data);b.state="lost";loss_result=renderer._battle_result_sync(b,data)
         self.assertEqual(len(ENCOUNTER_BACKDROPS),12)
         with Image.open(encounter) as image,Image.open(alternate) as other:
             self.assertEqual(image.size,(800,450))
@@ -363,7 +368,7 @@ class BattleTests(unittest.TestCase):
         with Image.open(party_card) as image:self.assertEqual(image.size,(1200,360))
         with Image.open(collection_card) as image:self.assertEqual(image.size,(900,720))
         with Image.open(registration) as image:self.assertEqual(image.size,(800,450))
-        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(trainer_card) as image:self.assertEqual(image.size,(800,610))
         with Image.open(evolution) as image:self.assertEqual(image.size,(800,450))
         with Image.open(move_card) as image:self.assertEqual(image.size,(800,450))
         with Image.open(starter) as image:
