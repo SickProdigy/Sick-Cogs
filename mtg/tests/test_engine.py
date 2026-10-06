@@ -3367,6 +3367,43 @@ class AlphaClockworkBeastTests(unittest.TestCase):
         with self.assertRaisesRegex(GameError,"only during your upkeep"): restored.activate_ability(10,1,x_value=1,choice_value=1)
 
 
+class AlphaSacrificeTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_sacrifices_as_an_atomic_cost_and_adds_black_equal_to_mana_value(self):
+        game=ready(); spell=self.add(game,10,"lea:124","hand"); swamp=self.add(game,10,"swamp"); victim=self.add(game,10,"lea:156"); value=game.card(victim.uid).cost
+        game.phase="precombat_main"; game.priority_user=10; game.play(10,1,"sacrifice:2")
+        self.assertTrue(swamp.tapped); self.assertIn(victim.uid,game.player(10).graveyard); self.assertNotIn(victim,game.player(10).battlefield)
+        self.assertEqual((game.stack[0].uid,game.stack[0].target,game.stack[0].choice_value),(spell,None,value))
+        restored=Game.from_raw(game.to_raw()); self.resolve_top(restored)
+        self.assertEqual(restored.player(10).mana_pool,{"B":value}); self.assertIn(spell,restored.player(10).graveyard)
+
+    def test_rejects_invalid_cost_choice_or_unpayable_spell_without_sacrificing(self):
+        for target in (None,"bad","sacrifice:99","sacrifice:1"):
+            game=ready(); spell=self.add(game,10,"lea:124","hand"); land=self.add(game,10,"forest")
+            game.phase="precombat_main"; game.priority_user=10
+            with self.subTest(target=target):
+                with self.assertRaises(GameError): game.play(10,1,target)
+                self.assertIn(spell,game.player(10).hand); self.assertIn(land,game.player(10).battlefield); self.assertFalse(game.stack)
+        game=ready(); spell=self.add(game,10,"lea:124","hand"); victim=self.add(game,10,"bear"); game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"cannot pay"): game.play(10,1,"sacrifice:1")
+        self.assertIn(spell,game.player(10).hand); self.assertIn(victim,game.player(10).battlefield)
+
+    def test_additional_cost_feeds_death_triggers_and_tokens_have_zero_mana_value(self):
+        game=ready(); spell=self.add(game,10,"lea:124","hand"); self.add(game,10,"lea:270"); victim=self.add(game,10,"bear"); game.player(10).mana_pool={"B":1}; game.phase="precombat_main"; game.priority_user=10
+        game.play(10,1,"sacrifice:2"); self.assertEqual(game.stack[0].uid,spell); self.assertEqual(game.stack[-1].ability_effect,"death_life")
+
+        token_game=ready(); token_spell=self.add(token_game,10,"lea:124","hand"); token=self.add(token_game,10,"token:wasp"); token_game.player(10).mana_pool={"B":1}; token_game.phase="precombat_main"; token_game.priority_user=10
+        token_game.play(10,1,"sacrifice:1"); self.assertNotIn(token.uid,token_game.cards); self.assertEqual(token_game.stack[0].choice_value,0)
+        self.resolve_top(token_game); self.assertEqual(token_game.player(10).mana_pool,{})
+
+
 class AlphaChannelTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

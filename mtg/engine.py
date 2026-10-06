@@ -774,6 +774,16 @@ class Game:
         if c.kind!="Instant" and (user!=self.active_user or self.phase not in ("precombat_main","postcombat_main") or self.stack): raise GameError("Cast that during your main phase with an empty stack.")
         if c.effect=="berserk" and self.phase not in ("upkeep","draw","precombat_main","after_attackers","after_blockers","after_first_strike"):
             raise GameError("Berserk can be cast only before the combat damage step.")
+        sacrificed=None
+        if c.additional_sacrifice_creature:
+            parts=(target or "").casefold().split(":")
+            if len(parts)!=2 or parts[0]!="sacrifice": raise GameError(f"{c.name} requires sacrifice:FIELD_POSITION.")
+            try: sacrifice_position=int(parts[1])
+            except ValueError as error: raise GameError(f"{c.name} requires sacrifice:FIELD_POSITION.") from error
+            if not 1<=sacrifice_position<=len(p.battlefield): raise GameError("No permanent at that battlefield position.")
+            sacrificed=p.battlefield[sacrifice_position-1]
+            if not self.is_creature(sacrificed): raise GameError(f"{c.name} requires a creature you control.")
+            target=None
         target=self._target_for_cast(c,user,target)
         if c.effect=="counter_mana_value_x":
             target_uid=int(target.split(":",1)[1]); target_spell=next((item for item in self.stack if item.uid==target_uid and not item.ability_effect),None)
@@ -787,8 +797,15 @@ class Game:
         p.mana_pool=remaining
         p.hand.pop(index-1); self.phase_passes=0
         for spell in self.stack: spell.passes=0
-        spell=Spell(user,uid,c.key,target,x_value=x_value)
-        self.stack.append(spell); self.stack.extend(pending_triggers); self.stack.extend(self._spell_cast_triggers(spell)); self._sba(); self._life()
+        sacrifice_value=self.card(sacrificed.uid).cost if sacrificed is not None else 0
+        spell=Spell(user,uid,c.key,target,x_value=x_value,choice_value=sacrifice_value)
+        self.stack.append(spell)
+        if sacrificed is not None:
+            sacrificed_name=self.card(sacrificed.uid).name; was_land=self.card(sacrificed.uid).land; death_sources=self._death_trigger_sources(); batch=self.next_uid
+            self._remember_source_power(sacrificed); self._remove_from_combat(sacrificed.uid); p.battlefield.remove(sacrificed); self._dies(p,sacrificed,batch,death_sources)
+            if was_land and sacrificed.uid in p.graveyard: self.stack.extend(self._land_event_triggers(user,"grave"))
+            self.log.append(f"{user} sacrificed {sacrificed_name} as an additional cost for {c.name}.")
+        self.stack.extend(pending_triggers); self.stack.extend(self._spell_cast_triggers(spell)); self._sba(); self._life()
         if not self.finished: self.priority_user=self.opponent(user)
         suffix=f" with X={x_value}" if uses_x else ""
         self.log.append(f"{user} cast {c.name}{suffix}.")
@@ -1622,6 +1639,9 @@ class Game:
             p.graveyard.append(s.uid)
         elif c.effect=="add_mana":
             p.mana_pool[c.mana_color]=p.mana_pool.get(c.mana_color,0)+c.mana_amount; p.graveyard.append(s.uid)
+        elif c.effect=="sacrifice_mana":
+            if s.choice_value: p.mana_pool[c.sacrifice_mana_color]=p.mana_pool.get(c.sacrifice_mana_color,0)+s.choice_value
+            p.graveyard.append(s.uid)
         elif c.effect=="destroy_all_enchantments":
             for controller in self.players.values():
                 for permanent in list(controller.battlefield):

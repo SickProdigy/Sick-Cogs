@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.84.0"
+    __version__="0.85.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -175,6 +175,7 @@ class MTG(commands.Cog):
                 if item.color_override: label+=f" [{item.color_override}]"
                 if (not item.ability_effect and "{X}" in g.card(item.uid).mana_cost) or g.card(item.uid).activation_x_choice: label+=f" (X={item.x_value})"
                 if item.ability_effect=="add_power_counters": label+=f" (add {item.choice_value})"
+                if not item.ability_effect and g.card(item.uid).effect=="sacrifice_mana": label+=f" (adds {{{g.card(item.uid).sacrifice_mana_color}}}×{item.choice_value})"
                 if item.ability_effect=="upkeep_untapped_land_damage": label+=f" ({item.choice_value} damage snapshot)"
                 if item.ability_effect=="prevent_source_damage" and item.target:
                     source_uid=int(item.target.split(":")[1]); label+=f" (source: {g.card(source_uid).name if source_uid in g.cards else source_uid})"
@@ -442,7 +443,7 @@ class MTG(commands.Cog):
         await self.mutate_ctx(ctx,lambda g:g.activate_ability(ctx.author.id,position,normalized,x_value,choice_value),"activate")
     @mtg.command(name="play")
     async def play(self,ctx,position:int,target:str=None,x_value:int=None):
-        """Play/cast a hand position with optional target and X; modal targets include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, and TYPE:USER_ID:POSITION for Phantasmal Terrain."""
+        """Play/cast a hand position with optional target and X; modal choices include tap:/untap: for Twiddle, life:/prevent: for Healing Salve, TYPE:USER_ID:POSITION for Phantasmal Terrain, and sacrifice:FIELD_POSITION for Sacrifice."""
         normalized=None if target and target.casefold() in {"-","none"} else target
         await self.mutate_ctx(ctx,lambda g:g.play(ctx.author.id,position,normalized,x_value),"play")
     @mtg.command(name="attack")

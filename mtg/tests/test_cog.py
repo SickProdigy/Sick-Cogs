@@ -536,6 +536,12 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Drain Life",rendered); self.assertIn("X=3",rendered); self.assertIn("20",rendered)
 
+    async def test_public_embed_shows_sacrifice_mana_snapshot(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:124"; game.stack=[spell_type(10,uid,"lea:124",choice_value=3)]
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Sacrifice (adds {B}×3)",rendered)
+
     async def test_public_embed_shows_mass_redraw_spell_on_stack(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell

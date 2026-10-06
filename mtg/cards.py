@@ -31,6 +31,8 @@ class Card:
     mana_amount: int = 1
     mana_activation_cost: str = ""
     sacrifice_for_mana: bool = False
+    additional_sacrifice_creature: bool = False
+    sacrifice_mana_color: str = ""
     skip_untap: bool = False
     enters_tapped: bool = False
     target_nonartifact: bool = False
@@ -530,6 +532,7 @@ ALPHA_SPELLS = {
     "lea:34": {"effect":"reanimate_creature"},
     "lea:86": {"effect":"return_creature_hand"},
     "lea:122": {"effect":"return_grave_creature_hand"},
+    "lea:124": {"effect":"sacrifice_mana", "additional_sacrifice_creature":True, "sacrifice_mana_color":"B"},
     "lea:214": {"effect":"return_grave_card_hand"},
 }
 
@@ -615,6 +618,8 @@ for reference in PLAYABLE_ALPHA:
         mana_amount=ALPHA_SPELLS.get(reference.key, {}).get("mana_amount",ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_amount",1)),
         mana_activation_cost=ALPHA_ARTIFACTS.get(reference.key, {}).get("mana_activation_cost",""),
         sacrifice_for_mana=ALPHA_ARTIFACTS.get(reference.key, {}).get("sacrifice_for_mana",False),
+        additional_sacrifice_creature=ALPHA_SPELLS.get(reference.key, {}).get("additional_sacrifice_creature",False),
+        sacrifice_mana_color=ALPHA_SPELLS.get(reference.key, {}).get("sacrifice_mana_color",""),
         skip_untap=ALPHA_ARTIFACTS.get(reference.key, {}).get("skip_untap",False),
         target_nonartifact=ALPHA_SPELLS.get(reference.key, {}).get("target_nonartifact",False),
         target_nonblack=ALPHA_SPELLS.get(reference.key, {}).get("target_nonblack",False),

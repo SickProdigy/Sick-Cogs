@@ -848,5 +848,12 @@ class SoloAITests(unittest.TestCase):
         advance_solo(harmful); self.assertIn(bell,harmful.player(AI).hand); self.assertFalse(harmful.stack)
 
 
+    def test_ai_sacrifices_its_least_valuable_creature_for_mana(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=game.player(AI).kept=True; game.player(AI).hand=[]
+        spell=self.add(game,AI,"lea:124","hand"); bear=self.add(game,AI,"bear"); giant=self.add(game,AI,"giant"); self.add(game,AI,"swamp")
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual((game.stack[0].uid,game.stack[0].choice_value),(spell,game.card(bear.uid).cost)); self.assertIn(bear.uid,game.player(AI).graveyard); self.assertIn(giant,game.player(AI).battlefield)
+
+
 if __name__ == "__main__":
     unittest.main()

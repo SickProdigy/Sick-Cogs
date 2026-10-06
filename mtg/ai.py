@@ -4,7 +4,7 @@ from .engine import Game, GameError
 DIFFICULTIES = ("easy", "normal")
 def _can_target(game,card,permanent): return not game._protected_from(permanent,card)
 
-TARGETED_EFFECTS = {"healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
+TARGETED_EFFECTS = {"sacrifice_mana","healing_salve","mana_short","set_color","pump","pump_blocking","berserk","destroy_land","destroy_permanent","destroy_creature","exile_creature_life","return_creature_hand","return_grave_creature_hand","return_grave_card_hand","reanimate_creature","counter_spell","counter_mana_value_x","elemental_blast","draw_target_x","discard_random_x","pump_power_x","damage_x_exile","drain_life_x","life_target_x","regenerate_target","grant_keyword","tap_or_untap","destroy_wall"}
 
 
 def _target(game, user, card):
@@ -43,6 +43,9 @@ def _target(game, user, card):
         return str(user)
     if card.effect=="discard_random_x":
         opponent=game.player(game.opponent(user)); return str(opponent.user_id) if opponent.hand else None
+    if card.effect=="sacrifice_mana":
+        choices=[(game.card(permanent.uid).cost+sum(game.current_stats(permanent)),position) for position,permanent in enumerate(game.player(user).battlefield,1) if game.is_creature(permanent)]
+        return f"sacrifice:{min(choices)[1]}" if choices else None
     if card.effect=="mana_short":
         opponent=game.player(game.opponent(user))
         return str(opponent.user_id) if opponent.mana_pool or any(game.card(permanent.uid).land and not permanent.tapped for permanent in opponent.battlefield) else None
@@ -291,6 +294,9 @@ def _play_one(game, user, difficulty):
             score=12+(x_value or 0)
         elif card.effect=="drain_life_x":
             score=14+2*(x_value or 0)
+        elif card.effect=="sacrifice_mana":
+            sacrifice_position=int(target.split(":",1)[1]); sacrificed=player.battlefield[sacrifice_position-1]
+            score=4+game.card(sacrificed.uid).cost-sum(game.current_stats(sacrificed))
         elif card.effect in ("draw","draw_target"):
             score = 10 + card.amount
         elif card.effect=="draw_target_x":
