@@ -467,11 +467,12 @@ class Battle:
         if self.rules().move_category(move)=="status":return self._status_action(move,True,rng)
         critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(True)))==0
         category=self.rules().move_category(move)
-        attack_name="special_attack" if category=="special" else "attack"
-        defense_name="special_defense" if category=="special" else "defense"
-        attack=self.stage_stat(self.stat(self.player,attack_name),self.player_stages.get(attack_name,0))
+        attack_name,defense_name=self.rules().damage_stats(move)
+        attack_stage=self.rules().effective_stage(self.player_stages.get(attack_name,0),critical=critical,offensive=True)
+        defense_stage=self.rules().effective_stage(self.wild_stages.get(defense_name,0),critical=critical,offensive=False)
+        attack=self.stage_stat(self.stat(self.player,attack_name),attack_stage)
         if category=="physical" and self.player_status=="burn":attack=self.rules().burned_attack(attack)
-        defense=self.stage_stat(self.wild_stat(defense_name),self.wild_stages.get(defense_name,0))
+        defense=self.stage_stat(self.wild_stat(defense_name),defense_stage)
         damage=self._damage(attack,self.wild_species_id,self.player.level,move,rng,critical,self.wild_hp,SPECIES[self.player.species_id].types,defense)
         self.wild_hp=max(0,self.wild_hp-damage)
         if move.drain>0:self.player_hp=min(self.max_hp(self.player),self.player_hp+max(1,damage*move.drain//100))
@@ -487,11 +488,12 @@ class Battle:
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
         if self.rules().move_category(move)=="status":return self._status_action(move,False,rng)
         critical=rng.randrange(self.rules().critical_denominator(move,self.combat_speed(False)))==0
-        wild=SPECIES[self.wild_species_id];category=self.rules().move_category(move);attack_name="special_attack" if category=="special" else "attack"
-        defense_name="special_defense" if category=="special" else "defense"
-        attack=self.stage_stat(self.wild_stat(attack_name),self.wild_stages.get(attack_name,0))
+        wild=SPECIES[self.wild_species_id];category=self.rules().move_category(move);attack_name,defense_name=self.rules().damage_stats(move)
+        attack_stage=self.rules().effective_stage(self.wild_stages.get(attack_name,0),critical=critical,offensive=True)
+        defense_stage=self.rules().effective_stage(self.player_stages.get(defense_name,0),critical=critical,offensive=False)
+        attack=self.stage_stat(self.wild_stat(attack_name),attack_stage)
         if category=="physical" and self.wild_status=="burn":attack=self.rules().burned_attack(attack)
-        defense=self.stage_stat(self.stat(self.player,defense_name),self.player_stages.get(defense_name,0))
+        defense=self.stage_stat(self.stat(self.player,defense_name),defense_stage)
         damage=self._damage(attack,self.player.species_id,self.wild_level,move,rng,critical,self.player_hp,wild.types,defense)
         self.player_hp=max(0,self.player_hp-damage)
         if move.drain>0:self.wild_hp=min(self.wild_max_hp,self.wild_hp+max(1,damage*move.drain//100))
@@ -551,11 +553,9 @@ class Battle:
         category=self.rules().move_category(move)
         if defense is None:defense=(target.special_defense or target.defense) if category=="special" else target.defense
         base=max(1,(((2*level//5+2)*move.power*attack//max(1,defense))//50)+2)
-        modifier=self.rules().effectiveness(move.type,target.types)
+        modifier=self.rules().damage_modifier(move.type,attacker_types,target.types,critical,rng)
         if modifier==0:return 0
-        if move.type in attacker_types:modifier*=1.5
-        if critical:modifier*=self.rules().critical_multiplier()
-        per_hit=max(1,int(base*modifier*(85+rng.randrange(16))/100))
+        per_hit=max(1,int(base*modifier))
         hits=move.min_hits if move.max_hits<=move.min_hits else move.min_hits+rng.randrange(move.max_hits-move.min_hits+1)
         return per_hit*hits
 
