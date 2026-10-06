@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 from pokemon.data import EVOLUTIONS,SPECIES,effectiveness
 from pokemon.models import Battle,BattleError,OwnedPokemon
-from pokemon.renderer import BattleRenderer
+from pokemon.renderer import BattleRenderer,RETRO
 
 def battle(seed=1,wild=10):
     p=OwnedPokemon("abc",4,10)
@@ -156,7 +156,9 @@ class BattleTests(unittest.TestCase):
         Image.new("RGBA",(64,64),(40,120,220,255)).save(source,"PNG")
         data=source.getvalue();renderer=BattleRenderer(Path("/tmp/unused-pokemon-render-cache"))
         b=battle();encounter=renderer._encounter_sync(10,data);scene=renderer._battle_sync(b,data,data)
-        with Image.open(encounter) as image:self.assertEqual(image.size,(800,450))
+        with Image.open(encounter) as image:
+            self.assertEqual(image.size,(800,450))
+            self.assertEqual(image.getpixel((400,400)),RETRO[5])
         with Image.open(scene) as image:self.assertEqual(image.size,(800,450))
 
 
