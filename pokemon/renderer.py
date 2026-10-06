@@ -151,6 +151,8 @@ class BattleRenderer:
         canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
         maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
         self._status_box(draw,(30,28),SPECIES[species_id].name,level,maximum,maximum,"",gender)
+        draw.rounded_rectangle((20,360,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
+        draw.text((45,385),f"A wild {SPECIES[species_id].name} appeared!",fill=RETRO[0],font=ImageFont.load_default(size=24))
         return self._save(canvas)
 
     def _battle_sync(self, battle, front_data, back_data):
@@ -191,7 +193,7 @@ class BattleRenderer:
     def _status_box(draw,origin,name,level,hp,maximum,status,gender="unknown"):
         x, y = origin
         draw.rounded_rectangle((x, y, x + 320, y + 88), 12, fill=RETRO[7], outline=RETRO[0], width=4)
-        symbol={"female":"♀","male":"♂","genderless":"—"}.get(gender,"")
+        symbol={"female":"♀","male":"♂","genderless":"—"}.get(gender,"?")
         draw.text((x+14,y+10),f"{name}  {symbol}  Lv.{level}",fill=RETRO[0],font=ImageFont.load_default(size=18))
         draw.rectangle((x + 70, y + 45, x + 295, y + 62), outline=RETRO[0], width=2)
         width = int(221 * max(0, hp) / max(1, maximum))
