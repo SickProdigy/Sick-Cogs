@@ -9,6 +9,7 @@ import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
 from .data import SPECIES, sprite
+from .models import pokemon_max_hp
 
 SPRITE_HOST = "raw.githubusercontent.com"
 MAX_SPRITE_BYTES = 2 * 1024 * 1024
@@ -131,6 +132,16 @@ class BattleRenderer:
         except (OSError,ValueError) as exc:
             raise RenderError("Starter selection rendering failed.") from exc
 
+    async def party_card(self,pokemon):
+        data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
+        try:return await self._render(self._party_card_sync,pokemon,data)
+        except (OSError,ValueError) as exc:raise RenderError("Party card rendering failed.") from exc
+
+    async def collection_card(self,pokemon,page,pages,total):
+        data=await asyncio.gather(*(self.get_sprite(item.species_id,shiny=item.shiny) for item in pokemon))
+        try:return await self._render(self._collection_card_sync,pokemon,data,page,pages,total)
+        except (OSError,ValueError) as exc:raise RenderError("Collection card rendering failed.") from exc
+
     async def battle(self, battle):
         front = await self.get_sprite(battle.wild_species_id)
         try:
@@ -250,6 +261,47 @@ class BattleRenderer:
             draw.text((45,407),f"Lv.{pokemon.level}",fill=RETRO[1],font=ImageFont.load_default(size=18))
             self._gender_mark(draw,(84,410),pokemon.gender,RETRO[1])
             draw.text((104,407),"Your journey begins.",fill=RETRO[1],font=ImageFont.load_default(size=18))
+        return self._save(canvas)
+
+    def _party_card_sync(self,pokemon,data):
+        canvas=Image.new("RGB",(1200,360),(236,205,105));draw=ImageDraw.Draw(canvas)
+        for y in range(360):
+            ratio=y/359;draw.line((0,y,1200,y),fill=(int(246-66*ratio),int(220-74*ratio),int(132-63*ratio)))
+        draw.rounded_rectangle((20,18,1180,342),20,fill=(255,244,194),outline=(92,66,25),width=5)
+        draw.text((46,34),"YOUR POKÉMON PARTY",fill=(92,66,25),font=ImageFont.load_default(size=28))
+        self._pokeball(draw,(1138,56),26)
+        slots=list(zip(pokemon,data))
+        for index in range(6):
+            left=38+188*index;cx=left+86;top=78
+            draw.rounded_rectangle((left,top,left+172,top+238),16,fill=(242,224,157),outline=(126,91,34),width=3)
+            draw.ellipse((cx-66,top+137,cx+66,top+181),fill=(190,151,62),outline=(104,75,28),width=3)
+            if index>=len(slots):
+                draw.text((cx-32,top+99),"EMPTY",fill=(143,118,67),font=ImageFont.load_default(size=16));continue
+            item,raw=slots[index];image=self._open(raw,(142,132),trim=True,upscale=True)
+            canvas.paste(image,(cx-image.width//2,top+166-image.height),image)
+            species=SPECIES[item.species_id];maximum=pokemon_max_hp(item);current=maximum if item.current_hp is None else item.current_hp
+            name=item.nickname or species.name;draw.text((left+10,top+10),f"{index+1}. {name}",fill=(61,48,25),font=ImageFont.load_default(size=16))
+            if item.shiny:draw.text((left+10,top+34),"SHINY",fill=(126,91,34),font=ImageFont.load_default(size=12))
+            draw.text((left+10,top+190),f"Lv.{item.level}",fill=(82,62,29),font=ImageFont.load_default(size=15))
+            draw.text((left+10,top+211),f"HP {current}/{maximum}",fill=(82,62,29),font=ImageFont.load_default(size=14))
+        return self._save(canvas)
+
+    def _collection_card_sync(self,pokemon,data,page,pages,total):
+        canvas=Image.new("RGB",(900,720),(225,217,177));draw=ImageDraw.Draw(canvas)
+        for y in range(720):
+            ratio=y/719;draw.line((0,y,900,y),fill=(int(240-36*ratio),int(230-40*ratio),int(181-34*ratio)))
+        draw.rounded_rectangle((20,18,880,702),18,fill=(245,239,207),outline=(54,83,70),width=5)
+        draw.text((44,34),f"GLOBAL COLLECTION · {total} POKÉMON",fill=(42,70,58),font=ImageFont.load_default(size=28))
+        draw.text((735,43),f"PAGE {page}/{pages}",fill=(65,91,78),font=ImageFont.load_default(size=16))
+        for index,(item,raw) in enumerate(zip(pokemon,data)):
+            col=index%3;row=index//3;left=43+280*col;top=82+198*row;cx=left+127
+            draw.rounded_rectangle((left,top,left+254,top+178),14,fill=(221,229,200),outline=(78,105,88),width=3)
+            draw.ellipse((cx-69,top+102,cx+69,top+145),fill=(169,188,132),outline=(76,104,76),width=2)
+            image=self._open(raw,(142,120),trim=True,upscale=True);canvas.paste(image,(cx-image.width//2,top+126-image.height),image)
+            species=SPECIES[item.species_id];name=item.nickname or species.name;number=(page-1)*9+index+1
+            draw.text((left+12,top+10),f"{number}. {name}",fill=(42,70,58),font=ImageFont.load_default(size=18))
+            shiny=" · SHINY" if item.shiny else ""
+            draw.text((left+12,top+151),f"Lv.{item.level}{shiny}",fill=(65,91,78),font=ImageFont.load_default(size=15))
         return self._save(canvas)
 
     def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):

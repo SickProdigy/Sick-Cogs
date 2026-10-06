@@ -43,6 +43,52 @@ class StarterView(discord.ui.View):
         self.cycle(1);await self.refresh(interaction)
 
 
+class CollectionPokemonSelect(discord.ui.Select):
+    def __init__(self,cog,user_id,items):
+        options=[]
+        for number,item in items:
+            species=SPECIES[item["species_id"]];name=item.get("nickname") or species.name
+            options.append(discord.SelectOption(label=f"{number}. {name} · Lv.{item['level']}",value=item["instance_id"]))
+        super().__init__(placeholder="Select a Pokémon for your party…",options=options,row=0)
+        self.cog=cog;self.user_id=user_id
+    async def callback(self,interaction):
+        await self.cog.collection_party_choice(interaction,self.values[0])
+
+class CollectionBrowserView(discord.ui.View):
+    def __init__(self,cog,user_id,page,pages,items):
+        super().__init__(timeout=180);self.cog=cog;self.user_id=user_id;self.page=page;self.pages=pages
+        if items:self.add_item(CollectionPokemonSelect(cog,user_id,items))
+        self.previous.disabled=page<=1;self.next.disabled=page>=pages
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This collection belongs to another trainer.",ephemeral=True);return False
+    async def refresh(self,interaction,page):
+        embed,files,page,pages,items=await self.cog.rendered_collection(interaction.user,page)
+        await interaction.response.edit_message(embed=embed,attachments=files,view=CollectionBrowserView(self.cog,self.user_id,page,pages,items))
+    @discord.ui.button(label="Previous",style=discord.ButtonStyle.secondary,row=1)
+    async def previous(self,interaction,button):await self.refresh(interaction,self.page-1)
+    @discord.ui.button(label="Next",style=discord.ButtonStyle.secondary,row=1)
+    async def next(self,interaction,button):await self.refresh(interaction,self.page+1)
+
+class PartyPlacementButton(discord.ui.Button):
+    def __init__(self,cog,user_id,identity,target,label,row):
+        super().__init__(label=label,style=discord.ButtonStyle.success if target is None else discord.ButtonStyle.primary,row=row)
+        self.cog=cog;self.user_id=user_id;self.identity=identity;self.target=target
+    async def callback(self,interaction):
+        await self.cog.place_collection_pokemon(interaction,self.identity,self.target)
+
+class PartyPlacementView(discord.ui.View):
+    def __init__(self,cog,user_id,identity,party,owned):
+        super().__init__(timeout=120);self.user_id=user_id
+        if len(party)<6:self.add_item(PartyPlacementButton(cog,user_id,identity,None,"Add to open slot",0))
+        for index,target in enumerate(party):
+            raw=owned.get(target);name=SPECIES[raw["species_id"]].name if raw else "Empty"
+            self.add_item(PartyPlacementButton(cog,user_id,identity,target,f"Replace {index+1}: {name}",1+index//3))
+    async def interaction_check(self,interaction):
+        if interaction.user.id==self.user_id:return True
+        await interaction.response.send_message("This party choice belongs to another trainer.",ephemeral=True);return False
+
+
 class EncounterView(discord.ui.View):
     def __init__(self, cog, encounter_id):
         super().__init__(timeout=None)

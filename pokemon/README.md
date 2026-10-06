@@ -6,10 +6,11 @@ Player commands use `[p]pokemon`, with `[p]poke` and `[p]pkmn` available as shor
 
 ## Included
 
-- One global collection per Discord user across every guild served by the same bot.
+- One global collection per Discord user across every guild served by the same bot, shown as an alphabetical nine-Pokémon grid with private add/replace party controls.
 - Level-1 Bulbasaur, Charmander, or Squirtle starter with a generated laboratory carousel and personalized received-Pokémon reveal; immutable owned-Pokémon IDs; six-member parties; ten 30-slot boxes; Pokédex tracking; and profiles.
 - Opt-in spawn channels with randomized thresholds, cooldowns, repeat suppression, owner-bounded generation filters, approachable rarity tiers, 15-minute wild encounter expiry, and administrator recovery.
 - All 151 Generation 1 species bundled from validated PokéAPI records, plus owner-triggered cache sync for later generations.
+- A generated gold six-slot horizontal party lineup with no backend ownership IDs exposed.
 - Persistent level-scaled wild battles with classic Fight/Pokémon/Bag/Run menus, four move slots, PP, accuracy, physical/special damage, priority/Speed ordering, type effectiveness, critical hits, supported status effects, switching, fainting, deterministic action history/recovery, XP, supported move learning, and every Gen 1 level-based evolution.
 - Poké Ball inventory and restart-safe, idempotent catch settlement.
 - Centered encounter art with in-image name, sex, level, and HP plus generated Game Boy-inspired battle scenes, bounded sprite/render caches, and accessible embed text.
@@ -30,7 +31,7 @@ Collections are global only within one bot installation. Separate bots do not sh
 6. Meaningful conversation triggers encounters, or an administrator can use `[p]pokemonset spawn` while testing.
 7. Review the next Kanto Gym with `[p]pokemon gym` and challenge it with `[p]pokemon gym challenge`.
 
-Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, `bag`, `use potion <slot-or-id>`, `use revive <slot-or-id>`, and `center`. Defeating a wild Pokémon awards full XP; catching it awards half that XP and adds the encountered Pokémon at its wild level. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemonset catalogsync <1-9>`.
+Player commands include `[p]pokemon collection`, `pokedex`, `pokedexstyle`, `gym`, `gym challenge`, `party`, `party add`, `party remove`, `profile`, `bag`, `use potion <slot-or-name>`, `use revive <slot-or-name>`, and `center`. Defeating a wild Pokémon awards full XP; catching it awards half that XP and adds the encountered Pokémon at its wild level. The bundled Generation 1 roster works immediately. The bot owner can populate a later-generation cache with `[p]pokemonset catalogsync <1-9>`.
 
 
 ## Encounter fairness and control
@@ -41,7 +42,7 @@ Owner controls are `[p]pokemonset globalstatus`, `[p]pokemonset encountertime <m
 
 ## Healing and persistent health
 
-Battle HP and supported status now persist on owned Pokémon. Use `[p]pokemon center` from the server's configured Pokémon Center channel for free full-party HP, status, PP, and fainting recovery; Center use has a five-minute per-user cooldown. Outside a Center, `[p]pokemon use potion <slot-or-id>` restores up to 20 HP to a conscious Pokémon and `[p]pokemon use revive <slot-or-id>` returns a fainted Pokémon at half HP. New trainers receive five Potions and two Revives. Item consumption and health updates are stored together. The unrestricted development `heal` command has been removed.
+Battle HP and supported status now persist on owned Pokémon. Use `[p]pokemon center` from the server's configured Pokémon Center channel for free full-party HP, status, PP, and fainting recovery; Center use has a five-minute per-user cooldown. Outside a Center, `[p]pokemon use potion <slot-or-name>` restores up to 20 HP to a conscious Pokémon and `[p]pokemon use revive <slot-or-name>` returns a fainted Pokémon at half HP. New trainers receive five Potions and two Revives. Item consumption and health updates are stored together. The unrestricted development `heal` command has been removed.
 
 ## Trainer profile and Kanto Gyms
 
