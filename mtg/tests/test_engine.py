@@ -4218,4 +4218,22 @@ class AlphaWordChangeTests(unittest.TestCase):
         self.pending(terror,10,"lea:78",f"S:{terror_uid}"); terror.choose_word_change(10,"B","G"); terror.stack.pop(); terror._resolve(pending)
         self.assertIsNotNone(terror.find_permanent(target.uid)[1]); self.assertIn(terror_uid,terror.player(10).graveyard)
 
+class AlphaChaosOrbTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_digital_adaptation_destroys_nontoken_target_then_orb(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; orb=self.add(game,10,"lea:235"); target=self.add(game,20,"lea:269"); game.player(10).mana_pool={"C":1}; game.phase="precombat_main"; game.priority_user=10
+        game.activate_ability(10,1,"20:1"); restored=Game.from_raw(game.to_raw()); self.assertTrue(restored.find_permanent(orb.uid)[1].tapped); self.assertEqual(restored.stack[-1].target,f"20:{target.uid}")
+        restored.pass_priority(20); restored.pass_priority(10); self.assertIn(target.uid,restored.player(20).graveyard); self.assertIn(orb.uid,restored.player(10).graveyard)
+
+    def test_orb_source_and_target_resolution_conditions(self):
+        gone=ready(); gone.player(10).battlefield=[]; gone.player(20).battlefield=[]; orb=self.add(gone,10,"lea:235"); target=self.add(gone,20,"lea:269"); gone.player(10).mana_pool={"C":1}; gone.phase="precombat_main"; gone.priority_user=10; gone.activate_ability(10,1,"20:1"); gone.player(10).battlefield.remove(orb); gone.player(10).graveyard.append(orb.uid); gone.pass_priority(20); gone.pass_priority(10); self.assertIsNotNone(gone.find_permanent(target.uid)[1])
+        missing=ready(); missing.player(10).battlefield=[]; missing.player(20).battlefield=[]; orb=self.add(missing,10,"lea:235"); target=self.add(missing,20,"lea:269"); missing.player(10).mana_pool={"C":1}; missing.phase="precombat_main"; missing.priority_user=10; missing.activate_ability(10,1,"20:1"); missing.player(20).battlefield.remove(target); missing.player(20).graveyard.append(target.uid); missing.pass_priority(20); missing.pass_priority(10); self.assertIn(orb.uid,missing.player(10).graveyard)
+
+    def test_orb_rejects_token_target_without_spending_costs(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; orb=self.add(game,10,"lea:235"); token=self.add(game,20,"token:wasp"); game.player(10).mana_pool={"C":1}; game.phase="precombat_main"; game.priority_user=10
+        with self.assertRaisesRegex(GameError,"nontoken"): game.activate_ability(10,1,"20:1")
+        self.assertFalse(orb.tapped); self.assertEqual(game.player(10).mana_pool,{"C":1}); self.assertFalse(game.stack); self.assertIsNotNone(game.find_permanent(token.uid)[1])
+
 if __name__=="__main__": unittest.main()

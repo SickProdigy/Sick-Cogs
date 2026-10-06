@@ -1009,5 +1009,10 @@ class SoloAITests(unittest.TestCase):
         game.stack=[spell_type(AI,uid,"lea:63",f"{HUMAN}:{target.uid}",decision_pending=True,choice_owner=AI)]; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
         advance_solo(game); self.assertTrue(target.land_word_changes); self.assertTrue(any(event["action"]=="ai_word_change" for event in game.history))
 
+    def test_ai_activates_chaos_orb_against_best_nontoken_permanent(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).hand=[]; orb=self.add(game,AI,"lea:235"); target=self.add(game,HUMAN,"lea:269"); self.add(game,HUMAN,"token:wasp")
+        game.player(AI).mana_pool={"C":1}; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; advance_solo(game)
+        self.assertTrue(orb.tapped); self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].target),("chaos_orb_destroy",f"{HUMAN}:{target.uid}")); self.assertTrue(any(event["action"]=="ai_activate" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

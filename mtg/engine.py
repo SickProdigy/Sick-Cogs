@@ -880,6 +880,7 @@ class Game:
         if card.activation_effect in ("untap_land","destroy_land","set_land_forest","add_mire_counter") and not target_card.land: raise GameError("Target must be a land.")
         if card.activation_effect=="add_mire_counter" and self.has_current_land_type(permanent,self.changed_land_word(source.uid,"swamp")): raise GameError("Target must not already have the named basic land type.")
         if card.activation_effect=="tap_permanent" and not any(self.has_current_type(permanent,kind) for kind in ("Artifact","Creature","Land")): raise GameError("Target must be an artifact, creature, or land.")
+        if card.activation_effect=="chaos_orb_destroy" and self.is_token(permanent.uid): raise GameError("Chaos Orb must target a nontoken permanent.")
         return f"{target_user}:{permanent.uid}"
 
     def can_activate(self,user,position,target=None,x_value=None,choice_value=None):
@@ -2611,6 +2612,12 @@ class Game:
             if target_card is None or not target_card.land: fizzle("its target was gone or illegal"); return
             if source is None or source.layer_timestamp!=s.choice_value: fizzle("its source had left the battlefield"); return
             target.land_type_effects.append({"source_uid":s.source_uid,"source_timestamp":s.choice_value,"effect_timestamp":self.next_layer_timestamp,"land_type":self.changed_land_word(s.source_uid,"forest")}); self.next_layer_timestamp+=1
+        elif effect=="chaos_orb_destroy":
+            _,source=self.find_permanent(s.source_uid)
+            if source is None: fizzle("Chaos Orb was no longer on the battlefield"); return
+            if target is not None and not self.is_token(target.uid): self._destroy(self.find_permanent(target.uid)[0],target)
+            source_controller,source=self.find_permanent(s.source_uid)
+            if source is not None: self._destroy(source_controller,source,allow_regeneration=False)
         elif effect=="tap_permanent":
             if target_card is None or not any(self.has_current_type(target,kind) for kind in ("Artifact","Creature","Land")): fizzle("its target was gone or illegal"); return
             target.tapped=True

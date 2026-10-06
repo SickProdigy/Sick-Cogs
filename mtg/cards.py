@@ -412,6 +412,7 @@ ALPHA_ENCHANTMENTS = {
 }
 
 ALPHA_ARTIFACTS = {
+    "lea:235": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"chaos_orb_destroy", "activation_text":"Digital adaptation: destroy target nontoken permanent, then destroy this artifact"},
     "lea:246": {"activation_cost":"{1}", "activation_tap":True, "activation_effect":"grant_banding", "activation_text":"Target creature gains banding until end of turn"},
     "lea:230": {"land_enter_damage":2},
     "lea:240": {"activation_cost":"{2}", "activation_tap":True, "activation_effect":"add_mire_counter", "activation_upkeep_only":True, "activation_text":"Put a mire counter on target non-Swamp land; it is a Swamp while it has one"},
@@ -669,7 +670,7 @@ for reference in PLAYABLE_ALPHA:
     CARDS[reference.key] = Card(
         key=reference.key,
         name=reference.name,
-        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family in {"spell","artifact","enchantment"} else "Creature",
+        kind="Land" if reference.support_family == "land" else reference.kind if reference.support_family in {"spell","artifact","enchantment","digital_adaptation_required"} else "Creature",
         type_line=reference.type_line,
         set_code="lea",
         scryfall_id=reference.scryfall_id,
@@ -858,5 +859,5 @@ if {card.key for card in PLAYABLE_ALPHA if card.support_family == "spell"} != se
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "enchantment"} != set(ALPHA_ENCHANTMENTS) | set(ALPHA_GLOBAL_ENCHANTMENTS) | set(ALPHA_TAP_ENCHANTMENTS) | {"lea:53"}:
     raise RuntimeError("Playable Alpha enchantments do not match the validated enchantment map.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "artifact"} != set(ALPHA_ARTIFACTS):
+if {card.key for card in PLAYABLE_ALPHA if card.support_family in ("artifact","digital_adaptation_required")} != set(ALPHA_ARTIFACTS):
     raise RuntimeError("Playable Alpha artifacts do not match the validated artifact map.")

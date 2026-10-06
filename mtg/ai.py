@@ -643,6 +643,7 @@ def _activation_target(game,user,card,source_uid=None):
         elif card.activation_effect=="destroy_tapped_creature" and game.is_creature(permanent) and permanent.tapped: candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_wall" and "Wall" in target.type_line.split(" — ",1)[-1].split(): candidates.append((sum(game.current_stats(permanent)),position))
         elif card.activation_effect=="destroy_land" and target.land: candidates.append((1+len(target.produces),position))
+        elif card.activation_effect=="chaos_orb_destroy" and not game.is_token(permanent.uid): candidates.append((target.cost+(sum(game.current_stats(permanent)) if game.is_creature(permanent) else 0),position))
     if candidates: return f"{opponent}:{max(candidates)[1]}"
     if card.activation_effect=="grant_banding" and game.active_user==user and game.phase=="precombat_main":
         choices=[(game.current_stats(permanent)[0],position) for position,permanent in enumerate(game.player(user).battlefield,1) if permanent.uid!=source_uid and game.is_creature(permanent) and game.can_attack_permanent(permanent) and "banding" not in game.current_keywords(permanent) and _can_target(game,card,permanent)]

@@ -777,5 +777,11 @@ class WordChangeRenderingTests(unittest.TestCase):
         view=GameView(cog,1); select=next(item for item in view.children if item.custom_id.endswith(":word_change")); passing=next(item for item in view.children if item.custom_id.endswith(":pass"))
         self.assertEqual(len(select.options),20); self.assertTrue(passing.disabled); self.assertIn("choose the word replacement",str(cog.game_embed(game).to_dict()))
 
+class ChaosOrbRenderingTests(unittest.TestCase):
+    def test_public_state_discloses_digital_adaptation_and_stack_target(self):
+        spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell; cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:None); game=Game(1,[10,20],1)
+        orb=Permanent(99,"lea:235",owner=10,sick=False,tapped=True); target=Permanent(100,"lea:269",owner=20,sick=False); game.cards.update({99:"lea:235",100:"lea:269",101:"lea:235"}); game.player(10).battlefield=[orb]; game.player(20).battlefield=[target]; game.stack=[spell_type(10,101,"lea:235",f"20:{target.uid}",ability_effect="chaos_orb_destroy",source_uid=orb.uid)]; game.priority_user=20
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Digital adaptation",rendered); self.assertIn("Chaos Orb ability",rendered)
+
 if __name__ == "__main__":
     unittest.main()

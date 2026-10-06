@@ -14,8 +14,8 @@ from mtg.views import CatalogDetailView, CatalogView
 class CatalogTests(unittest.TestCase):
     def test_catalog_has_stable_base_and_promoted_records(self):
         self.assertEqual(len(BASE_CARDS),60)
-        self.assertEqual(len(CARDS),344)
-        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),344)
+        self.assertEqual(len(CARDS),345)
+        self.assertEqual(len({card.scryfall_id for card in CARDS.values()}),345)
         self.assertTrue(all(card.scryfall_id and card.oracle_id for card in CARDS.values()))
 
     def test_catalog_uses_only_engine_supported_shapes(self):
@@ -42,8 +42,8 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(len({card.oracle_id for card in ALPHA_CARDS}), 290)
         self.assertEqual(len(ALPHA_BY_KEY), 295)
         self.assertEqual(len({card.scryfall_id for card in ALPHA_CARDS}), 295)
-        self.assertEqual(len(PLAYABLE_ALPHA),284)
-        self.assertEqual(len(REFERENCE_ALPHA),11)
+        self.assertEqual(len(PLAYABLE_ALPHA),285)
+        self.assertEqual(len(REFERENCE_ALPHA),10)
         self.assertEqual(Counter(card.support_family for card in ALPHA_CARDS),{
             "creature_ability":77,"spell":70,"enchantment":68,"artifact":42,
             "land":19,"vanilla_creature":15,"excluded_ante":3,
@@ -142,7 +142,7 @@ class CatalogTests(unittest.TestCase):
         self.assertTrue(CARDS["lea:23"].activation_attached); self.assertEqual(CARDS["lea:23"].ability_text,"{W}: Enchanted creature gets +0/+1 until end of turn, Enchanted creature gets +0/+2")
         self.assertTrue(CARDS["lea:7"].activation_attached); self.assertEqual(CARDS["lea:7"].ability_text,"{W}: Enchanted creature gets +1/+1 until end of turn")
         self.assertEqual(CARDS["lea:108"].aura_keyword,"fear"); self.assertTrue(CARDS["lea:184"].aura_forest_scaling)
-        promoted_artifacts={card.key for card in PLAYABLE_ALPHA if card.support_family=="artifact"}
+        promoted_artifacts={card.key for card in PLAYABLE_ALPHA if card.support_family in ("artifact","digital_adaptation_required")}
         self.assertEqual(promoted_artifacts,set(ALPHA_ARTIFACTS))
         self.assertTrue(all(CARDS[key].kind=="Artifact" for key in ALPHA_ARTIFACTS))
         self.assertEqual(CARDS["lea:230"].land_enter_damage,2); self.assertIn("Whenever a land enters",CARDS["lea:230"].ability_text)
@@ -207,7 +207,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Mana",embed.description)
         self.assertIn("Type",embed.description)
         self.assertIn("Status",embed.description)
-        self.assertIn("344 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
+        self.assertIn("345 playable definitions · 60 core + 295 Alpha printings",embed.footer.text)
         self.assertEqual(view.user_id,42)
         self.assertEqual(len(view.records),355)
         select=next(child for child in view.children if hasattr(child,"options"))
@@ -285,7 +285,7 @@ class CatalogCommandTests(unittest.IsolatedAsyncioTestCase):
         cog=MTG.__new__(MTG)
         cog.art_cache=SimpleNamespace(get=AsyncMock(side_effect=ArtError("offline")))
         ctx=SimpleNamespace(send=AsyncMock())
-        await MTG.card_detail.callback(cog,ctx,query="alpha Chaos Orb")
+        await MTG.card_detail.callback(cog,ctx,query="alpha Library of Leng")
         embed=ctx.send.await_args.kwargs["embed"]
         status=next(field.value for field in embed.fields if field.name=="Engine status")
         self.assertIn("Reference only",status)

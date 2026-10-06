@@ -13,7 +13,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Artifacts | 42 | 40 artifacts playable through 0.108.0; 2 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
-| Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
+| Dexterity adaptation | 1 | Chaos Orb is playable through the disclosed deterministic Discord adaptation in 0.113.0 |
 
 The 15 vanilla creatures are Pearled Unicorn, Savannah Lions, Merfolk of the Pearl Trident, Water Elemental, Scathe Zombies, Earth Elemental, Fire Elemental, Gray Ogre, Hill Giant, Hurloon Minotaur, Mons’s Goblin Raiders, Craw Wurm, Grizzly Bears, Ironroot Treefolk, and Obsianus Golem.
 
@@ -98,7 +98,7 @@ The 0.41.0 static-artifact promotion adds Meekstone and Sunglasses of Urza. Meek
 ## Explicit exceptions
 
 - **Contract from Below, Darkpact, and Demonic Attorney:** ante is not implemented. The cog will never transfer actual collection ownership through ante. A future non-ownership digital substitute requires an explicit product decision and must be labeled as adapted behavior.
-- **Chaos Orb:** physical card flipping is unsuitable for Discord. It remains reference-only until a deterministic, disclosed digital targeting adaptation is approved and tested.
+- **Chaos Orb:** physical card flipping is unsuitable for Discord. Version 0.113.0 uses a disclosed deterministic adaptation: pay {1}, tap it, and target one nontoken permanent; if the Orb remains on the battlefield at resolution, destroy that permanent, then destroy the Orb.
 - Future paper-only mechanics such as subgames are excluded by the same policy even though Alpha itself contains no subgame card.
 
 ## Promotion gate
@@ -248,5 +248,7 @@ The 0.106.0 multiple-blocker promotion adds Lure and extends combat to many-to-m
 
 The 0.105.0 multi-block combat promotion adds Two-Headed Giant of Foriys and Blaze of Glory. A blocker may now engage its printed or temporary number of attackers, while a persisted ordered assignment divides its power exactly once and enforces lethal damage before moving to the next attacker in the appropriate first-strike or normal damage step. Blaze grants an eligible defending creature unlimited blocks for the combat and requires it to block every attacker it legally can. Block declaration remains atomic; target loss, protection and evasion legality, reload recovery, public rendering, the `mtg blockdamage` command, cleanup, and solo AI share the same combat model.
 
+
+The 0.113.0 dexterity adaptation promotes Chaos Orb without simulating physical card flipping. Its `{1}, {T}` activation targets one nontoken permanent through the normal stable-target stack; if the Orb remains on the battlefield at resolution, it destroys that permanent and then itself. Target loss still destroys the Orb, source loss prevents the effect, costs are atomic, and persistence, public Discord rendering, explicit adaptation text, and solo AI use the shared activation path.
 
 The 0.112.0 text-word promotion adds Magical Hack and Sleight of Mind. Either spell targets a permanent or another spell on the stack, then pauses at resolution for one of twenty basic-land-type or color-word replacements through a Discord selector or `[p]mtg wording FROM TO`. Changes persist on the affected battlefield object or stack object, compose in timestamp order, alter displayed Oracle text, and feed shared land types, landwalk, characteristic stats, typed destruction, animation, mana and tap effects, protection, color restrictions, Fear, Gloom, and related rules. Target legality is rechecked at resolution; solo AI uses the same target and choice paths.
