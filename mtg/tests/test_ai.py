@@ -996,5 +996,12 @@ class SoloAITests(unittest.TestCase):
         game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
         advance_solo(game); self.assertEqual(aura.attached_to,opposing.uid); self.assertTrue(any(event["action"]=="ai_kudzu_attach" for event in game.history))
 
+    def test_ai_completes_balance_keep_choices(self):
+        game=solo(order=(AI,HUMAN)); game.player(AI).kept=game.player(HUMAN).kept=True; game.player(AI).battlefield=[]; game.player(HUMAN).battlefield=[]; game.player(AI).hand=[]; game.player(HUMAN).hand=[]
+        weak=self.add(game,AI,"plains"); strong=self.add(game,AI,"lea:284"); self.add(game,HUMAN,"forest")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:3"; spell_type=__import__("mtg.engine",fromlist=["Spell"]).Spell
+        game.stack=[spell_type(AI,uid,"lea:3",ability_effect="balance_lands",choice_owner=AI,choice_value=1,decision_pending=True)]; game.active_index=0; game.phase="precombat_main"; game.priority_user=AI
+        advance_solo(game); self.assertIsNone(game.find_permanent(weak.uid)[1]); self.assertIsNotNone(game.find_permanent(strong.uid)[1]); self.assertIn(uid,game.player(AI).graveyard); self.assertTrue(any(event["action"]=="ai_balance_lands" for event in game.history))
+
 if __name__ == "__main__":
     unittest.main()

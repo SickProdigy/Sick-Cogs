@@ -109,6 +109,14 @@ class FalseOrdersSelect(discord.ui.Select):
         value=self.values[0]; position=None if value=="decline" else int(value)
         await self.cog.act(i,self.game_id,lambda g:g.choose_false_orders(i.user.id,position),"false_orders_choice")
 
+class BalanceSelect(discord.ui.Select):
+    def __init__(self,cog,game_id,game):
+        self.cog,self.game_id=cog,game_id; spell=game.stack[-1]; choices=game.balance_choices(spell,spell.choice_owner); required=game._balance_required(spell,spell.choice_owner); stage=spell.ability_effect.split("_",1)[1]
+        options=[discord.SelectOption(label=f"{position}. {game.card(permanent.uid).name}"[:100],description=f"Keep this {stage[:-1]}",value=str(position)) for position,permanent in choices]
+        super().__init__(placeholder=f"Choose exactly {required} {stage} to keep",min_values=required,max_values=required,options=options,custom_id=f"mtg:{game_id}:balance")
+    async def callback(self,i):
+        await self.cog.act(i,self.game_id,lambda g:g.choose_balance(i.user.id,[int(value) for value in self.values]),"balance_choice")
+
 class KudzuSelect(discord.ui.Select):
     def __init__(self,cog,game_id,game):
         self.cog,self.game_id=cog,game_id; trigger=game.stack[-1]
@@ -133,14 +141,14 @@ class GameView(discord.ui.View):
             if game and action=="pass": item.disabled=game.priority_user is None or game.finished or game.phase=="untap" or game.turn_start_pending_user is not None or game.sanctuary_draw_pending or bool(game.stack and game.stack[-1].decision_pending)
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending and (game.stack[-1].ability_effect or game.card(game.stack[-1].uid).effect=="power_sink"))
-                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move"))
+                mandatory=bool(pending and game.stack[-1].ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup","power_leak","vesuvan_copy","kudzu_move","balance_lands","balance_hand","balance_creatures"))
                 item.disabled=not pending or mandatory
                 if pending and action=="pay": item.label=game.trigger_accept_label(game.stack[-1])
                 if pending and action=="decline_trigger" and not game.stack[-1].ability_effect: item.label="Don't pay"
             if game and action=="search":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="search_library")
             if game and action=="private_hand":
-                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand"))
+                item.disabled=not bool(game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("discard_choice","look_hand","balance_hand"))
             if game and action=="natural_selection":
                 item.disabled=not bool(game.stack and game.stack[-1].decision_pending and not game.stack[-1].ability_effect and game.card(game.stack[-1].uid).effect=="natural_selection")
             if game and action=="vault_take": item.disabled=game.turn_start_pending_user is None
@@ -161,6 +169,9 @@ class GameView(discord.ui.View):
             self.add_item(FalseOrdersSelect(self.cog,self.game_id,game))
         if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect=="kudzu_move":
             self.add_item(KudzuSelect(self.cog,self.game_id,game))
+        if game and game.stack and game.stack[-1].decision_pending and game.stack[-1].ability_effect in ("balance_lands","balance_creatures"):
+            choices=game.balance_choices(game.stack[-1],game.stack[-1].choice_owner); required=game._balance_required(game.stack[-1],game.stack[-1].choice_owner)
+            if choices and len(choices)<=25 and 1<=required<=25: self.add_item(BalanceSelect(self.cog,self.game_id,game))
         if game and game.phase=="untap" and game.untap_choices(): self.add_item(UntapSelect(self.cog,self.game_id,game))
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)
@@ -275,11 +286,22 @@ class PrivateHandSelect(discord.ui.Select):
     async def callback(self,interaction):
         await self.browser.cog.complete_private_hand_interaction(interaction,self.browser.game_id,int(self.values[0]))
 
+class BalanceHandSelect(discord.ui.Select):
+    def __init__(self,browser,entries,required):
+        self.browser=browser; start=browser.page*browser.page_size; visible=entries[start:start+browser.page_size]
+        options=[discord.SelectOption(label=f"{position}. {card.name}"[:100],description=f"{card.kind} - {card.mana_cost or 'no mana cost'}"[:100],value=str(position)) for position,card in visible]
+        super().__init__(placeholder=f"Choose exactly {required} cards to discard",min_values=required,max_values=required,options=options,row=0)
+    async def callback(self,interaction):
+        await self.browser.cog.complete_private_hand_interaction(interaction,self.browser.game_id,[int(value) for value in self.values])
+
 class PrivateHandDecisionView(discord.ui.View):
     page_size=25
     def __init__(self,cog,game_id,user_id,page,pages,effect,entries):
         super().__init__(timeout=300); self.cog,self.game_id,self.user_id,self.page,self.pages,self.effect=cog,game_id,user_id,page,pages,effect
         if effect=="discard_choice": self.add_item(PrivateHandSelect(self,entries))
+        if effect=="balance_hand":
+            required=cog.games[game_id]._balance_required(cog.games[game_id].stack[-1],user_id)
+            if pages==1 and 1<=required<=25: self.add_item(BalanceHandSelect(self,entries,required))
         self.previous.disabled=page<=0; self.next.disabled=page>=pages-1
         self.done.disabled=effect!="look_hand"
     async def interaction_check(self,interaction):

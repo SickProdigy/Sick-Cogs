@@ -4153,4 +4153,39 @@ class AlphaKudzuTests(unittest.TestCase):
         gone.pass_priority(20); gone.pass_priority(10)
         self.assertIn(land.uid,gone.player(20).graveyard); self.assertFalse(gone.stack)
 
+class AlphaBalanceTests(unittest.TestCase):
+    def add(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,owner=user,sick=False); game.player(user).battlefield.append(permanent); return permanent
+    def hand(self,game,user,key):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key; game.player(user).hand.append(uid); return uid
+
+    def test_balance_persisted_land_hand_and_creature_choices(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; game.player(10).hand=[]; game.player(20).hand=[]
+        lands=[self.add(game,10,key) for key in ("plains","island","forest")]; other_land=self.add(game,20,"mountain")
+        creatures=[self.add(game,10,key) for key in ("bear","giant")]; other_creature=self.add(game,20,"bear")
+        hand=[self.hand(game,10,key) for key in ("shock","strike","renew")]; other_hand=self.hand(game,20,"growth")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:3"; game.stack=[Spell(10,uid,"lea:3")]; game.phase="precombat_main"; game.priority_user=20
+        game.pass_priority(20); game.pass_priority(10)
+        self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].choice_owner,game.stack[-1].choice_value),("balance_lands",10,1))
+        game=Game.from_raw(game.to_raw()); game.choose_balance(10,[2])
+        self.assertEqual([x.uid for x in game.player(10).battlefield if game.card(x.uid).land],[lands[1].uid]); self.assertIn(other_land.uid,[x.uid for x in game.player(20).battlefield])
+        self.assertEqual((game.stack[-1].ability_effect,game.stack[-1].choice_owner,game._balance_required(game.stack[-1],10)),("balance_hand",10,2))
+        game=Game.from_raw(game.to_raw()); game.choose_balance(10,[1,3])
+        self.assertEqual(game.player(10).hand,[hand[1]]); self.assertEqual(game.player(20).hand,[other_hand]); self.assertEqual(game.stack[-1].ability_effect,"balance_creatures")
+        game.choose_balance(10,[game.balance_choices(game.stack[-1],10)[0][0]])
+        self.assertEqual([x.uid for x in game.player(10).battlefield if game.is_creature(x)],[creatures[0].uid]); self.assertIn(other_creature.uid,[x.uid for x in game.player(20).battlefield]); self.assertIn(uid,game.player(10).graveyard); self.assertFalse(game.stack)
+
+    def test_balance_rejects_inexact_or_duplicate_choices(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; [self.add(game,10,"plains") for _ in range(3)]; self.add(game,20,"forest")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:3"; game.stack=[Spell(10,uid,"lea:3")]; game.phase="precombat_main"; game.priority_user=20; game.pass_priority(20); game.pass_priority(10)
+        with self.assertRaisesRegex(GameError,"exactly 1"): game.choose_balance(10,[1,1])
+
+    def test_balance_queues_land_death_triggers_below_its_remaining_stages(self):
+        game=ready(); game.player(10).battlefield=[]; game.player(20).battlefield=[]; game.player(10).hand=[]; game.player(20).hand=[]
+        self.add(game,10,"plains"); self.add(game,10,"island"); self.add(game,20,"forest"); self.add(game,20,"lea:241")
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:3"; game.stack=[Spell(10,uid,"lea:3")]; game.phase="precombat_main"; game.priority_user=20; game.pass_priority(20); game.pass_priority(10)
+        game.choose_balance(10,[1]); self.assertEqual(game.stack[-1].ability_effect,"land_event_damage"); self.assertIn(uid,game.player(10).graveyard)
+        game.pass_priority(10); game.pass_priority(20); self.assertEqual(game.player(10).life,18)
+
 if __name__=="__main__": unittest.main()

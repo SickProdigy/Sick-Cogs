@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.110.0"
+    __version__="0.111.0"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -247,6 +247,7 @@ class MTG(commands.Cog):
                     elif item.ability_effect=="power_leak": label+=" (enchanted enchantment's controller must choose how much mana to pay)"
                     elif item.ability_effect=="vesuvan_copy": label+=(" (controller must choose its creature target before responses)" if item.choice_value==0 else " (controller must choose whether to become the targeted copy)")
                     elif item.ability_effect=="kudzu_move": label+=" (the controller of the destroyed land may reattach Kudzu or decline)"
+                    elif item.ability_effect.startswith("balance_"): label+=f" ({item.choice_owner} must complete the {item.ability_effect.split('_',1)[1]} choice)"
                     else: label+=(f" (chooser must {g.trigger_accept_label(item)})" if item.ability_effect in ("upkeep_sacrifice","opponent_land_sacrifice","tomb_cleanup") else f" (controller may {g.trigger_accept_label(item)} or Decline)")
                 stack_lines.append(f"S:{position}. {label}")
             e.add_field(name="Stack · spells targetable with S:POSITION",value="\n".join(stack_lines),inline=False)
@@ -361,7 +362,9 @@ class MTG(commands.Cog):
             return
         pages=max(1,math.ceil(len(entries)/PrivateHandDecisionView.page_size)); page=max(0,min(page,pages-1)); start=page*PrivateHandDecisionView.page_size
         visible=entries[start:start+PrivateHandDecisionView.page_size]; name=game.card(item.uid).name
-        heading=f"{name} - choose one card to discard" if item.ability_effect=="discard_choice" else f"{name} - targeted hand"
+        if item.ability_effect=="discard_choice": heading=f"{name} - choose one card to discard"
+        elif item.ability_effect=="balance_hand": heading=f"{name} - privately choose {game._balance_required(item,user)} cards to discard"
+        else: heading=f"{name} - targeted hand"
         text=heading+"\n"+("\n".join(f"**{position}. {card.name}** - {card.kind}, {card.mana_cost or 'no mana cost'}" for position,card in visible) or "The targeted hand is empty.")
         view=PrivateHandDecisionView(self,game_id,user,page,pages,item.ability_effect,entries)
         if editing: await interaction.edit_original_response(content=text,view=view)
@@ -372,7 +375,10 @@ class MTG(commands.Cog):
             await interaction.response.send_message("This match is unavailable.",ephemeral=True); return
         async with self.lock(game.game_id):
             try:
-                effect=game.stack[-1].ability_effect; game.choose_private_hand(interaction.user.id,position); game.record(interaction.user.id,"private_discard" if effect=="discard_choice" else "private_hand_view"); advance_solo(game); await self.save(game)
+                effect=game.stack[-1].ability_effect
+                if effect=="balance_hand": game.choose_balance(interaction.user.id,position); action="balance_hand_choice"
+                else: game.choose_private_hand(interaction.user.id,position); action="private_discard" if effect=="discard_choice" else "private_hand_view"
+                game.record(interaction.user.id,action); advance_solo(game); await self.save(game)
             except (GameError,IndexError,ValueError) as error:
                 await interaction.response.send_message(str(error),ephemeral=True); return
         message="Card discarded." if position is not None else "Hand view completed."
@@ -686,6 +692,11 @@ class MTG(commands.Cog):
             except ValueError: await ctx.send("Use `mtg kudzu USER_ID POSITION` or `mtg kudzu decline`."); return
             if position is None: await ctx.send("Provide the target land battlefield position."); return
         await self.mutate_ctx(ctx,lambda g:g.choose_kudzu(ctx.author.id,controller,position),"kudzu_choice")
+
+    @mtg.command(name="balance")
+    async def balance(self,ctx,*positions:int):
+        """Complete the pending Balance choice with exact battlefield or private-hand positions."""
+        await self.mutate_ctx(ctx,lambda g:g.choose_balance(ctx.author.id,positions),"balance_choice")
 
     @mtg.command(name="leak")
     async def leak(self,ctx,amount:int):

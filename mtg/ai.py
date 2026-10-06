@@ -869,6 +869,12 @@ def advance_solo(game: Game):
             if not trigger.ability_effect and game.card(trigger.uid).effect=="false_orders":
                 choices=game.false_orders_choices(user); position=max(choices,key=lambda item:game.current_stats(item[1])[0])[0] if choices and user!=game.active_user else None
                 game.choose_false_orders(user,position); game.record(user,"ai_false_orders_block" if position is not None else "ai_false_orders_decline"); changed=True; continue
+            if trigger.ability_effect.startswith("balance_"):
+                choices=game.balance_choices(trigger,user); required=game._balance_required(trigger,user); stage=trigger.ability_effect.split("_",1)[1]
+                if stage=="hand": ranked=sorted(choices,key=lambda item:(item[1].cost+item[1].power+item[1].toughness,item[0])); positions=[position for position,_ in ranked[:required]]
+                elif stage=="creatures": ranked=sorted(choices,key=lambda item:(sum(game.current_stats(item[1]))+game.card(item[1].uid).cost,item[0]),reverse=True); positions=[position for position,_ in ranked[:required]]
+                else: ranked=sorted(choices,key=lambda item:(len(game.current_mana_choices(item[1])),item[0]),reverse=True); positions=[position for position,_ in ranked[:required]]
+                game.choose_balance(user,positions); game.record(user,f"ai_balance_{stage}"); changed=True; continue
             if trigger.ability_effect=="kudzu_move":
                 choices=game.kudzu_choices(trigger)
                 opponents=[choice for choice in choices if choice[0]!=user]; pool=opponents or choices

@@ -1333,6 +1333,8 @@ class Game:
                     if self.stack: self.stack[-1].passes=0
                     if not self.finished: self.priority_user=self.active_user
                     return
+                if not s.ability_effect and self.card(s.uid).effect=="balance":
+                    s.ability_effect="balance_lands"; s.mana_choices={}; s.choice_value=min(sum(self.card(x.uid).land for x in player.battlefield) for player in self.players.values()); self._advance_balance(s); return
                 if not s.ability_effect and self.card(s.uid).enters_copy_types and self.copy_choices(s):
                     s.decision_pending=True; s.choice_owner=s.owner; self.priority_user=s.owner; return
                 if s.ability_effect=="upkeep_sacrifice" and not self.trigger_sacrifice_choices(s):
@@ -1506,9 +1508,9 @@ class Game:
 
     def private_hand_decision(self,user):
         if self.finished: raise GameError("Game is over.")
-        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand"):
+        if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].choice_owner!=user or self.stack[-1].ability_effect not in ("discard_choice","look_hand","balance_hand"):
             raise GameError("You do not have a private hand decision to complete.")
-        item=self.stack[-1]; target=self.player(int(item.target))
+        item=self.stack[-1]; target=self.player(user) if item.ability_effect=="balance_hand" else self.player(int(item.target))
         return item,[(position,self.card(uid)) for position,uid in enumerate(target.hand,1)]
 
     def choose_private_hand(self,user,position=None):
@@ -1607,6 +1609,74 @@ class Game:
         self.log.append(f"{user} removed {removed} mire counter{'s' if removed!=1 else ''} from {self.card(permanent.uid).name}.")
         if self.stack: self.stack[-1].passes=0
         self.phase_passes=0; self.priority_user=self.active_user; self._sba(); self._life()
+
+    def balance_choices(self,spell,user):
+        if spell.choice_owner!=user or not spell.ability_effect.startswith("balance_"): return []
+        player=self.player(user); stage=spell.ability_effect.split("_",1)[1]
+        if stage=="lands": return [(position,permanent) for position,permanent in enumerate(player.battlefield,1) if self.card(permanent.uid).land]
+        if stage=="creatures": return [(position,permanent) for position,permanent in enumerate(player.battlefield,1) if self.is_creature(permanent)]
+        if stage=="hand": return [(position,self.card(uid)) for position,uid in enumerate(player.hand,1)]
+        return []
+
+    def _balance_required(self,spell,user):
+        choices=self.balance_choices(spell,user)
+        return len(choices)-spell.choice_value if spell.ability_effect=="balance_hand" else spell.choice_value
+
+    @staticmethod
+    def _balance_selected(spell,stage,user):
+        value=spell.mana_choices.get(f"{stage}:{user}","")
+        return {int(uid) for uid in value.split(",") if uid}
+
+    def _apply_balance_stage(self,spell,stage):
+        self.stack.pop(); before=len(self.stack)
+        if stage=="hand":
+            for user in self.order:
+                player=self.player(user); selected=self._balance_selected(spell,stage,user); discarded=[uid for uid in player.hand if uid in selected]
+                player.hand=[uid for uid in player.hand if uid not in selected]; player.graveyard.extend(discarded)
+        else:
+            doomed=[]
+            for user in self.order:
+                player=self.player(user); kept=self._balance_selected(spell,stage,user)
+                doomed.extend((player,permanent) for permanent in player.battlefield if (self.card(permanent.uid).land if stage=="lands" else self.is_creature(permanent)) and permanent.uid not in kept)
+            trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
+            for player,permanent in doomed: self._remember_source_power(permanent); self._remove_from_combat(permanent.uid); player.battlefield.remove(permanent)
+            for player,permanent in doomed: self._dies(player,permanent,trigger_batch,death_sources)
+            for player,permanent in doomed:
+                if stage=="lands" and permanent.uid in self.permanent_owner(permanent).graveyard: self.stack.extend(self._land_event_triggers(player.user_id,"grave"))
+        queued=self.stack[before:]; del self.stack[before:]; self.stack.extend(queued); self.stack.append(spell)
+
+    def _advance_balance(self,spell):
+        stage=spell.ability_effect.split("_",1)[1]
+        for user in (self.active_user,self.opponent(self.active_user)):
+            key=f"{stage}:{user}"
+            if key in spell.mana_choices: continue
+            spell.choice_owner=user; choices=self.balance_choices(spell,user); required=self._balance_required(spell,user)
+            if required in (0,len(choices)):
+                chosen=choices if required else []; spell.mana_choices[key]=",".join(str(item.uid if stage!="hand" else self.player(user).hand[position-1]) for position,item in chosen)
+                continue
+            spell.decision_pending=True; spell.passes=0; self.priority_user=user; return
+        spell.decision_pending=False; self._apply_balance_stage(spell,stage)
+        if stage=="lands": next_stage="hand"; counts=[len(player.hand) for player in self.players.values()]
+        elif stage=="hand": next_stage="creatures"; counts=[sum(self.is_creature(x) for x in player.battlefield) for player in self.players.values()]
+        else:
+            self.stack.pop(); self.player(spell.owner).graveyard.append(spell.uid); self.log.append("Balance resolved."); self._sba(); self._life()
+            if self.stack: self.stack[-1].passes=0
+            if not self.finished: self.priority_user=self.active_user
+            return
+        spell.ability_effect=f"balance_{next_stage}"; spell.mana_choices={}; spell.choice_value=min(counts); self._advance_balance(spell)
+
+    def choose_balance(self,user,positions):
+        if self.finished: raise GameError("Game is over.")
+        if not self.stack or not self.stack[-1].decision_pending or not self.stack[-1].ability_effect.startswith("balance_") or self.stack[-1].choice_owner!=user:
+            raise GameError("You do not have a Balance choice to make.")
+        spell=self.stack[-1]; stage=spell.ability_effect.split("_",1)[1]; choices=self.balance_choices(spell,user); indexed={position:item for position,item in choices}
+        try: positions=tuple(int(position) for position in positions)
+        except (TypeError,ValueError) as error: raise GameError("Choose valid distinct positions for Balance.") from error
+        required=self._balance_required(spell,user)
+        if len(positions)!=required or len(set(positions))!=required or any(position not in indexed for position in positions): raise GameError(f"Choose exactly {required} distinct {stage} positions for Balance.")
+        if stage=="hand": selected=[self.player(user).hand[position-1] for position in positions]
+        else: selected=[indexed[position].uid for position in positions]
+        spell.mana_choices[f"{stage}:{user}"]=",".join(map(str,selected)); spell.decision_pending=False; self.log.append(f"{user} completed their private Balance choice." if stage=="hand" else f"{user} chose {stage} for Balance."); self._advance_balance(spell)
 
     def kudzu_choices(self,trigger):
         _,aura=self.find_permanent(trigger.source_uid)
@@ -2834,7 +2904,8 @@ class Game:
         if self.sanctuary_draw_pending:
             raise GameError("The active player must choose whether to skip their draw for Island Sanctuary first.")
         if self.stack and self.stack[-1].decision_pending:
-            if self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
+            if self.stack[-1].ability_effect.startswith("balance_"): message="The pending Balance choice must be completed first."
+            elif self.stack[-1].ability_effect=="vesuvan_copy": message="The pending Vesuvan target must be chosen first." if self.stack[-1].choice_value==0 else "The pending Vesuvan copy decision must be completed first."
             elif self.stack[-1].ability_effect=="kudzu_move": message="The destroyed lands controller must reattach Kudzu or decline first."
             elif not self.stack[-1].ability_effect and self.card(self.stack[-1].uid).effect=="false_orders": message="The resolving False Orders assignment must be chosen first."
             elif self.stack[-1].ability_effect: message="The pending trigger controller must pay or decline first."
