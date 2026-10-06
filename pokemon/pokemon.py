@@ -13,7 +13,7 @@ from .data import MOVES,SPECIES,generation_for,sprite
 from .models import Battle,BattleError,OwnedPokemon,pokemon_max_hp
 from .gyms import GYMS,earned_badges,gym_status_embed,next_gym,trainer_profile_embed
 from .pokedex import POKEDEX_STYLES,PokedexSession,PokedexView,render_pokedex,resolve_style
-from .renderer import BattleRenderer,RenderError
+from .renderer import BattleRenderer,ENCOUNTER_BACKDROPS,RenderError
 from .views import BagView,BattleView,EncounterView,FightView,PartyView
 
 log=logging.getLogger("red.sick-cogs.Pokemon")
@@ -59,7 +59,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.9.1";__author__="SickProdigy"
+    __version__="0.10.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -179,14 +179,14 @@ class Pokemon(commands.Cog):
         if not pool:raise RuntimeError("No Pokémon are available for the configured generations.")
         rng=random.SystemRandom()
         chosen=rng.choices(pool,weights=[max(1,item.catch_rate) for item in pool],k=1)[0]
-        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng)
+        sid=chosen.id;level=await self.spawn_level(channel.guild.id);gender=encounter_gender(chosen,rng);backdrop=rng.randrange(len(ENCOUNTER_BACKDROPS))
         embed=discord.Embed(title=f"A wild {SPECIES[sid].name} appeared!",description="Press **Encounter** to battle it.",color=discord.Color.green())
         try:
-            image=await self.renderer.encounter(sid,level,gender);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
+            image=await self.renderer.encounter(sid,level,gender,backdrop);file=discord.File(image,filename="encounter.png");embed.set_image(url="attachment://encounter.png")
             msg=await channel.send(embed=embed,file=file,view=EncounterView(self,eid))
         except RenderError:
             log.exception("Encounter rendering failed");embed.set_image(url=sprite(sid));msg=await channel.send(embed=embed,view=EncounterView(self,eid))
-        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
+        raw={"state":"open","species_id":sid,"level":level,"gender":gender,"backdrop":backdrop,"level_locked":True,"guild_id":channel.guild.id,"channel_id":channel.id,"message_id":msg.id,"created_at":datetime.now(timezone.utc).isoformat(),"expires_at":(datetime.now(timezone.utc)+timedelta(seconds=conf["encounter_timeout"])).isoformat(),"encounter_timeout":conf["encounter_timeout"]}
         await self.put_encounter(eid,raw)
         self.activity[channel.guild.id]=0
         await self.config.guild(channel.guild).active_encounter.set(eid);await self.config.guild(channel.guild).activity.set(0)
