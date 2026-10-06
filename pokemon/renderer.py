@@ -23,6 +23,20 @@ RETRO = [
     (68, 72, 56),
     (255, 255, 255),
 ]
+ENCOUNTER_BACKDROPS = (
+    ((116,190,232),(210,238,220),(116,170,104),(72,142,76),"hills"),
+    ((118,201,224),(225,240,207),(103,166,91),(63,131,68),"forest"),
+    ((244,185,112),(255,226,174),(180,139,82),(120,111,66),"sunset"),
+    ((107,128,190),(194,196,224),(98,111,139),(61,83,91),"mountains"),
+    ((184,221,241),(238,243,220),(157,191,116),(95,151,77),"meadow"),
+    ((89,157,190),(187,222,218),(80,137,124),(52,107,91),"water"),
+    ((204,174,224),(239,222,231),(143,119,162),(89,83,126),"mist"),
+    ((236,213,146),(249,237,190),(190,159,91),(137,116,68),"plains"),
+    ((119,183,160),(213,232,192),(82,137,92),(49,104,70),"grove"),
+    ((145,194,227),(226,238,244),(137,160,171),(81,116,131),"coast"),
+    ((221,156,126),(247,213,176),(159,112,82),(105,83,64),"canyon"),
+    ((103,104,162),(190,176,210),(80,91,126),(48,67,86),"night"),
+)
 
 
 class RenderError(RuntimeError):
@@ -96,10 +110,10 @@ class BattleRenderer:
         async with self.render_slots:
             return await asyncio.to_thread(callback, *args)
 
-    async def encounter(self,species_id:int,level:int=5,gender:str="unknown"):
+    async def encounter(self,species_id:int,level:int=5,gender:str="unknown",backdrop:int=0):
         data=await self.get_sprite(species_id)
         try:
-            return await self._render(self._encounter_sync,species_id,data,level,gender)
+            return await self._render(self._encounter_sync,species_id,data,level,gender,backdrop)
         except (OSError, ValueError) as exc:
             raise RenderError("Encounter rendering failed.") from exc
 
@@ -141,12 +155,9 @@ class BattleRenderer:
         output.seek(0)
         return output
 
-    def _encounter_sync(self,species_id,data,level=5,gender="unknown"):
-        canvas=Image.new("RGB",(800,450),(105,174,93));draw=ImageDraw.Draw(canvas)
-        for y in range(0,330):
-            ratio=y/330;draw.line((0,y,800,y),fill=(90+int(80*ratio),165+int(45*ratio),220))
-        draw.ellipse((70,310,700,470),fill=(72,139,74))
-        draw.ellipse((270,285,610,375),fill=(198,222,165))
+    def _encounter_sync(self,species_id,data,level=5,gender="unknown",backdrop=0):
+        canvas=Image.new("RGB",(800,450),RETRO[4]);draw=ImageDraw.Draw(canvas)
+        self._encounter_backdrop(draw,backdrop)
         pokemon=self._open(data,(250,220),trim=True,upscale=True)
         canvas.paste(pokemon,(440-pokemon.width//2,300-pokemon.height),pokemon)
         maximum=((2*SPECIES[species_id].hp)*level)//100+level+10
@@ -154,6 +165,27 @@ class BattleRenderer:
         draw.rounded_rectangle((20,360,780,440),12,fill=RETRO[5],outline=RETRO[0],width=5)
         draw.text((45,385),f"A wild {SPECIES[species_id].name} appeared!",fill=RETRO[0],font=ImageFont.load_default(size=24))
         return self._save(canvas)
+
+    @staticmethod
+    def _encounter_backdrop(draw,index):
+        sky,low,far,near,kind=ENCOUNTER_BACKDROPS[int(index)%len(ENCOUNTER_BACKDROPS)]
+        for y in range(330):
+            ratio=y/329
+            color=tuple(round(a+(b-a)*ratio) for a,b in zip(sky,low))
+            draw.line((0,y,800,y),fill=color)
+        if kind in {"mountains","canyon","night"}:
+            draw.polygon(((0,275),(120,150),(230,260),(345,125),(500,270),(650,165),(800,260),(800,330),(0,330)),fill=far)
+        elif kind in {"forest","grove"}:
+            for x in range(-30,850,70):draw.ellipse((x,150,x+105,335),fill=far)
+        elif kind in {"water","coast"}:
+            draw.rectangle((0,245,800,330),fill=far)
+            for y in range(260,325,18):draw.line((0,y,800,y),fill=low,width=3)
+        else:
+            draw.ellipse((-180,205,470,430),fill=far);draw.ellipse((300,190,980,430),fill=far)
+        draw.rectangle((0,300,800,360),fill=near)
+        draw.ellipse((255,267,630,352),fill=RETRO[2],outline=RETRO[0],width=4)
+        draw.ellipse((275,280,612,341),fill=(183,205,112),outline=RETRO[1],width=2)
+        for x in range(280,615,28):draw.line((x,289,x+7,275),fill=RETRO[0],width=3)
 
     def _battle_sync(self, battle, front_data, back_data):
         canvas = Image.new("RGB", (800, 450), RETRO[4])
