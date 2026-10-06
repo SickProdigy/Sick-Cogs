@@ -859,6 +859,13 @@ class CommandInteractionRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(kwargs["ephemeral"])
 
 class CommandLayoutTests(unittest.TestCase):
+    def test_root_help_explains_player_entry_points(self):
+        help_text=MTG.mtg.help
+        self.assertIn("Browse Alpha cards",help_text)
+        self.assertIn("solo",help_text)
+        self.assertIn("challenge",help_text)
+        self.assertIn("buttons",help_text)
+
     def test_player_help_keeps_match_controls_and_special_fallbacks_nested(self):
         public={"action","card","catalog","challenge","solo","status"}
         match={"attack","block","concede","graveyard","mana","pass","play","special"}

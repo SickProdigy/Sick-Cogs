@@ -22,7 +22,7 @@ MATCH_TIMEOUT_SECONDS=7*24*60*60
 class MTG(commands.Cog):
     """Play a deliberately bounded solo or two-player Magic rules prototype."""
     __author__="SickProdigy"
-    __version__="0.120.2"
+    __version__="0.120.3"
     def __init__(self,bot):
         self.bot=bot; self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_global(**DEFAULTS); self.games:Dict[int,Game]={}; self.locks={}; self.channels={}
@@ -460,7 +460,11 @@ class MTG(commands.Cog):
         await ctx.message.add_reaction("✅")
     @commands.group(name="mtg",invoke_without_command=True)
     async def mtg(self,ctx):
-        """Play the MTG rules prototype."""
+        """Browse Alpha cards and play solo or challenge another player.
+
+        Start with `solo` or `challenge`. Matches use buttons and private hand controls;
+        `action` provides text fallbacks when a control is unavailable.
+        """
         await ctx.send_help()
     @mtg.command(name="challenge")
     @commands.guild_only()
