@@ -1876,6 +1876,28 @@ class SpellTests(unittest.TestCase):
         g.pass_priority(10); self.assertEqual(len(g.stack),1)
         g.pass_priority(20); self.assertFalse(g.stack); self.assertEqual(opponent.life,16)
 
+class AlphaCombatRequirementTests(unittest.TestCase):
+    def add(self,game,user,key,tapped=False,sick=False):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        permanent=Permanent(uid,key,tapped=tapped,sick=sick); game.player(user).battlefield.append(permanent); return permanent
+
+    def test_juggernaut_must_attack_only_when_able(self):
+        game=ready(); juggernaut=self.add(game,10,"lea:255"); game.phase="attackers"
+        with self.assertRaisesRegex(GameError,"Juggernaut must attack"):
+            game.declare_attackers(10,[])
+        game.declare_attackers(10,[1]); self.assertEqual(game.attackers,[juggernaut.uid]); self.assertTrue(juggernaut.tapped)
+
+        for state in ({"tapped":True},{"sick":True}):
+            unable=ready(); self.add(unable,10,"lea:255",**state); unable.phase="attackers"; unable.declare_attackers(10,[])
+            self.assertEqual(unable.phase,"postcombat_main")
+
+    def test_juggernaut_cannot_be_blocked_by_walls(self):
+        game=ready(); juggernaut=self.add(game,10,"lea:255"); wall=self.add(game,20,"lea:42"); bear=self.add(game,20,"bear")
+        game.phase="blockers"; game.attackers=[juggernaut.uid]
+        legal,reason=game.can_block(juggernaut.uid,wall.uid); self.assertFalse(legal); self.assertIn("Walls",reason)
+        self.assertEqual(game.can_block(juggernaut.uid,bear.uid),(True,""))
+
+
 class AlphaIslandDependentCreatureTests(unittest.TestCase):
     def add(self,game,user,key):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

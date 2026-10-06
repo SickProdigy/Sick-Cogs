@@ -7,7 +7,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Support family | Printings | Current direction |
 | --- | ---: | --- |
 | Vanilla creatures | 15 | All playable since 0.7.0 |
-| Creatures with abilities | 77 | 56 creatures playable through 0.61.0; 21 remain |
+| Creatures with abilities | 77 | 57 creatures playable through 0.62.0; 20 remain |
 | Instants and sorceries | 70 | 49 spells playable through 0.59.0; 21 remain |
 | Enchantments | 68 | 37 enchantments playable through 0.60.0; 31 remain |
 | Artifacts | 42 | Thirty-one artifacts playable through 0.47.0; 11 remain |
@@ -144,3 +144,5 @@ The 0.59.0 exact-mana-value-counter promotion adds Spell Blast. A shared spell m
 The 0.60.0 extra-land promotion adds Fastbond. A persisted per-turn land count preserves old saves while distinguishing the first land from every later land. Each Fastbond controlled by the land player creates its own independent, preventable damage trigger for every extra land; triggers use APNAP ordering alongside Ankh of Mishra, persist through reload, and survive source removal. Removing the final Fastbond immediately restores the ordinary land-play limit. Discord renders the permission and pending triggers, while solo AI values extra lands but refuses a play whose known Fastbond triggers would be lethal.
 
 The 0.61.0 Island-dependent-creature promotion adds Pirate Ship and Sea Serpent. Attack declaration checks the defending battlefield for the Island land type, including Alpha dual lands. A shared state-trigger path detects when either creature's controller has no Islands, creates one persisted trigger per source in APNAP order without duplicates, and sacrifices the source on resolution even if an Island appears later; source removal safely fizzles the trigger, and regeneration cannot replace sacrifice. Pirate Ship reuses the validated summoning-sick tap activation and any-target damage path. Discord renders both restrictions and pending triggers, while solo AI refuses to cast either creature without an Island and obeys the attack restriction.
+
+The 0.62.0 combat-requirement promotion adds Juggernaut. A generic mandatory-attacker check rejects declarations that omit any creature required to attack and currently able to do so, while correctly allowing tapped, summoning-sick, or otherwise unable creatures to remain out of combat. A generic subtype blocking restriction prevents every Wall—including artifact Walls—from blocking Juggernaut without affecting other blockers. Discord surfaces both abilities and actionable declaration errors, and easy and normal solo AI always include mandatory attackers while retaining their existing optional-attack policies.

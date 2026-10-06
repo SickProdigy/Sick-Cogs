@@ -399,6 +399,13 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Enters tapped",rendered); self.assertIn("Destroy all artifacts, creatures, and enchantments",rendered); self.assertIn("Nevinyrral's Disk ability",rendered)
 
+    async def test_public_embed_shows_juggernaut_combat_requirements(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:255"; game.player(10).battlefield=[permanent_type(uid,"lea:255",sick=False)]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("Juggernaut",rendered); self.assertIn("Attacks each combat if able",rendered); self.assertIn("blocked by Walls",rendered)
+
     async def test_public_embed_shows_island_dependent_creature_trigger(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

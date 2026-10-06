@@ -839,6 +839,8 @@ class Game:
             if not self.can_attack_permanent(x): raise GameError(f"{c.name} cannot attack.")
             if x.uid in chosen: raise GameError("Duplicate attacker.")
             chosen.append(x.uid)
+        required=[x for x in p.battlefield if self.card(x.uid).attacks_each_combat and self.can_attack_permanent(x) and x.uid not in chosen]
+        if required: raise GameError(", ".join(self.card(x.uid).name for x in required)+" must attack this combat if able.")
         self.attackers=chosen; self.blocks={}; self.blocked_attackers=[]; self.trample_assignments={}; self.phase_passes=0
         for x in list(p.battlefield):
             if x.uid in chosen and "vigilance" not in self.current_keywords(x): x.tapped=True
@@ -904,6 +906,8 @@ class Game:
         if "fear" in attacker_keywords and not (blocker.has_type("Artifact") or "B" in self.current_colors(blocker_perm)):
             return False,f"{blocker.name} cannot block a creature with fear."
         if set(self.current_colors(blocker_perm)) & self.current_protections(attacker_perm): return False,f"{attacker.name} has protection from {blocker.name}."
+        if attacker.cant_be_blocked_by_subtype and self._has_subtype(blocker,attacker.cant_be_blocked_by_subtype):
+            return False,f"{attacker.name} can't be blocked by {attacker.cant_be_blocked_by_subtype}s."
         if any(self.card(aura.uid).aura_blocked_except_wall for aura in self.attached_auras(attacker_perm)) and not self._has_subtype(blocker,"Wall"):
             return False,f"{attacker.name} can only be blocked by Walls."
         if "flying" in attacker_keywords and not ({"flying","reach"} & blocker_keywords):

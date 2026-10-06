@@ -107,6 +107,8 @@ class Card:
     combat_destroy_nonwall: bool = False
     attack_requires_defender_land_type: str = ""
     sacrifice_without_land_type: str = ""
+    attacks_each_combat: bool = False
+    cant_be_blocked_by_subtype: str = ""
     type_line: str = ""
     set_code: str = ""
 
@@ -178,6 +180,8 @@ class Card:
         if self.combat_destroy_nonwall: abilities.append("Whenever this creature blocks or becomes blocked by a non-Wall creature, destroy that creature at end of combat")
         if self.attack_requires_defender_land_type: abilities.append(f"Can't attack unless defending player controls a {self.attack_requires_defender_land_type.title()}")
         if self.sacrifice_without_land_type: abilities.append(f"When you control no {self.sacrifice_without_land_type.title()}s, sacrifice this creature")
+        if self.attacks_each_combat: abilities.append("Attacks each combat if able")
+        if self.cant_be_blocked_by_subtype: abilities.append(f"Can't be blocked by {self.cant_be_blocked_by_subtype}s")
         if self.death_life: abilities.append("Whenever a creature dies, you may pay {1} to gain 1 life")
         if self.animate_combat: abilities.append("{2}: Becomes a 3/6 Golem artifact creature until end of combat; activate only during combat")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
@@ -330,6 +334,10 @@ ALPHA_ACTIVATED_CREATURES = {
     "lea:155": {"activation_cost":"{R}", "activated_toughness":1},
     "lea:174": {"activation_cost":"{R}", "activated_power":1},
     "lea:181": {"activation_cost":"{R}", "activated_power":1},
+}
+
+ALPHA_COMBAT_REQUIREMENTS = {
+    "lea:255": {"attacks_each_combat":True, "cant_be_blocked_by_subtype":"Wall"},
 }
 
 ALPHA_ISLAND_DEPENDENT_CREATURES = {
@@ -558,6 +566,8 @@ for reference in PLAYABLE_ALPHA:
         combat_destroy_nonwall=ALPHA_COMBAT_TRIGGERS.get(reference.key,{}).get("combat_destroy_nonwall",False),
         attack_requires_defender_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("attack_requires_defender_land_type",""),
         sacrifice_without_land_type=ALPHA_ISLAND_DEPENDENT_CREATURES.get(reference.key,{}).get("sacrifice_without_land_type",""),
+        attacks_each_combat=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("attacks_each_combat",False),
+        cant_be_blocked_by_subtype=ALPHA_COMBAT_REQUIREMENTS.get(reference.key,{}).get("cant_be_blocked_by_subtype",""),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 
@@ -578,7 +588,7 @@ def starter(color):
         return ["forest"]*24 + ["bear"]*12 + ["centaur"]*8 + ["growth"]*8 + ["renew"]*4 + ["inspire"]*4
     raise ValueError("Unknown deck.")
 
-if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | {"lea:159"}:
+if {card.key for card in PLAYABLE_ALPHA if card.support_family == "creature_ability"} != set(ALPHA_KEYWORDS) | set(ALPHA_PROTECTIONS) | set(ALPHA_LORDS) | set(ALPHA_MANA_CREATURES) | set(ALPHA_CHARACTERISTIC_CREATURES) | set(ALPHA_ACTIVATED_CREATURES) | set(ALPHA_COMBAT_TRIGGERS) | set(ALPHA_UPKEEP_CREATURES) | set(ALPHA_ISLAND_DEPENDENT_CREATURES) | set(ALPHA_COMBAT_REQUIREMENTS) | {"lea:159"}:
     raise RuntimeError("Playable Alpha creature abilities do not match the validated keyword map.")
 
 if {card.key for card in PLAYABLE_ALPHA if card.support_family == "land"} != ALPHA_LAND_KEYS:

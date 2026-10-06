@@ -585,6 +585,12 @@ class SoloAITests(unittest.TestCase):
         self.assertTrue(forest.tapped); self.assertEqual(game.stack[-1].uid,birds)
         self.assertTrue(any(event["action"]=="ai_cast" for event in game.history))
 
+    def test_easy_ai_includes_mandatory_attacker(self):
+        game=solo(order=(AI,HUMAN),difficulty="easy"); game.player(AI).kept=True; game.player(HUMAN).kept=True
+        optional=self.add(game,AI,"bear"); juggernaut=self.add(game,AI,"lea:255")
+        game.active_index=0; game.phase="attackers"; game.priority_user=None
+        advance_solo(game); self.assertIn(juggernaut.uid,game.attackers); self.assertIn(optional.uid,game.attackers)
+
     def test_ai_casts_island_dependent_creature_only_with_an_island(self):
         stranded=solo(order=(AI,HUMAN)); stranded.player(AI).kept=True; stranded.player(HUMAN).kept=True; stranded.player(AI).hand=[]
         pirate=self.add(stranded,AI,"lea:70","hand"); [self.add(stranded,AI,"forest") for _ in range(4)]; self.add(stranded,AI,"lea:265")

@@ -322,7 +322,9 @@ def _attack_positions(game, user, difficulty):
         if game.can_attack_permanent(permanent):
             legal.append(position)
     if difficulty == "easy":
-        return legal[::2]
+        required=[position for position in legal if game.card(game.player(user).battlefield[position-1].uid).attacks_each_combat]
+        optional=[position for position in legal if position not in required]
+        return required+optional[::2]
     return legal
 
 
