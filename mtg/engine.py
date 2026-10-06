@@ -3,7 +3,7 @@ import re
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
-from .cards import CARDS, starter
+from .cards import CARDS, TOKENS, starter
 
 class GameError(ValueError): pass
 
@@ -106,7 +106,10 @@ class Game:
     def player(self,user):
         try: return self.players[int(user)]
         except KeyError as e: raise GameError("You are not in this game.") from e
-    def card(self,uid): return CARDS[self.cards[uid]]
+    def card(self,uid):
+        key=self.cards[uid]
+        return CARDS.get(key) or TOKENS[key]
+    def is_token(self,uid): return self.cards.get(uid,"").startswith("token:")
     def is_creature(self,permanent): return self.card(permanent.uid).creature or permanent.animated_until_end_combat
     def has_current_type(self,permanent,card_type): return self.is_creature(permanent) if card_type=="Creature" else self.card(permanent.uid).has_type(card_type)
     def hand(self,user): return [self.card(x) for x in self.player(user).hand]
@@ -402,7 +405,7 @@ class Game:
             spell=self._target_stack(target)
             if card.target_color not in self.spell_colors(spell): raise GameError(f"Target spell must be {card.target_color}.")
             return f"S:{spell.uid}"
-        if card.activation_effect in ("draw_self","destroy_all_nonland"): return str(user)
+        if card.activation_effect in ("draw_self","destroy_all_nonland","create_token"): return str(user)
         if card.activation_effect in ("untap_self","animate_self"): return f"{user}:{source.uid}"
         if card.activation_attached:
             controller,attached=self.find_permanent(source.attached_to)
@@ -872,9 +875,11 @@ class Game:
 
     def _dies(self,controller,permanent,batch_id=None,death_sources=None):
         dies=not permanent.exile_on_death
-        (controller.graveyard if dies else controller.exile).append(permanent.uid)
+        token=self.is_token(permanent.uid)
+        if not token: (controller.graveyard if dies else controller.exile).append(permanent.uid)
         if dies and self.is_creature(permanent):
             self._death_triggers(permanent.uid,self.next_uid if batch_id is None else batch_id,death_sources)
+        if token: self.cards.pop(permanent.uid,None)
 
     def _remove_from_combat(self,uid):
         if uid in self.attackers:
@@ -942,6 +947,9 @@ class Game:
         elif effect=="animate_self":
             if target is None: fizzle("its source was gone"); return
             target.animated_until_end_combat=True
+        elif effect=="create_token":
+            uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.creates_token
+            self.player(s.owner).battlefield.append(Permanent(uid,card.creates_token))
         elif effect=="destroy_all_nonland":
             trigger_batch=self.next_uid; death_sources=self._death_trigger_sources()
             for player in self.players.values():
@@ -1067,7 +1075,10 @@ class Game:
             target=next((x for x in controller.battlefield if x.uid==uid),None)
             if target is None or not self.is_creature(target):
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone."); return
-            controller.battlefield.remove(target); controller.hand.append(target.uid); self._remove_from_combat(target.uid)
+            controller.battlefield.remove(target)
+            if self.is_token(target.uid): self.cards.pop(target.uid,None)
+            else: controller.hand.append(target.uid)
+            self._remove_from_combat(target.uid)
             p.graveyard.append(s.uid)
         elif c.effect in ("return_grave_creature_hand","return_grave_card_hand","reanimate_creature"):
             uid=int(s.target); creature_only=c.effect!="return_grave_card_hand"
@@ -1086,7 +1097,10 @@ class Game:
                 p.graveyard.append(s.uid); self.log.append(f"{c.name} fizzled because its target was gone or illegal."); return
             life_gain=max(0,self.current_stats(target)[0]) if c.effect=="exile_creature_life" else 0
             if c.effect=="exile_creature_life":
-                self._remove_from_combat(target.uid); controller.battlefield.remove(target); controller.exile.append(target.uid); controller.life+=life_gain
+                self._remove_from_combat(target.uid); controller.battlefield.remove(target)
+                if self.is_token(target.uid): self.cards.pop(target.uid,None)
+                else: controller.exile.append(target.uid)
+                controller.life+=life_gain
             else: self._destroy(controller,target,allow_regeneration=False)
             p.graveyard.append(s.uid)
         elif c.effect in ("earthquake_x","hurricane_x"):

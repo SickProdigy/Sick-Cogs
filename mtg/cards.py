@@ -95,6 +95,7 @@ class Card:
     draw_tapped_damage: int = 0
     death_life: bool = False
     animate_combat: bool = False
+    creates_token: str = ""
     type_line: str = ""
     set_code: str = ""
 
@@ -271,6 +272,7 @@ ALPHA_ARTIFACTS = {
     "lea:269": {"produces":("C",), "mana_amount":2},
     "lea:270": {"death_life":True},
     "lea:253": {"activation_cost":"{2}", "activation_effect":"animate_self", "activation_text":"Becomes a 3/6 Golem artifact creature until end of combat", "animate_combat":True},
+    "lea:272": {"activation_cost":"{5}", "activation_tap":True, "activation_effect":"create_token", "activation_text":"Create a 1/1 colorless Insect artifact creature token with flying named Wasp", "creates_token":"token:wasp"},
 }
 
 ALPHA_MANA_CREATURES = {
@@ -484,8 +486,13 @@ for reference in PLAYABLE_ALPHA:
         draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         death_life=ALPHA_ARTIFACTS.get(reference.key,{}).get("death_life",False),
         animate_combat=ALPHA_ARTIFACTS.get(reference.key,{}).get("animate_combat",False),
+        creates_token=ALPHA_ARTIFACTS.get(reference.key,{}).get("creates_token",""),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
+
+TOKENS = {
+    "token:wasp": Card(key="token:wasp",name="Wasp",kind="Creature",type_line="Token Artifact Creature  Insect",scryfall_id="",oracle_id="",power=1,toughness=1,keywords=("flying",),text="Flying"),
+}
 
 PACK_POOLS = {
     slot: tuple(card.key for card in BASE_CARDS.values() if card.pack_slot == slot)

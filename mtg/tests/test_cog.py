@@ -299,6 +299,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Jade Statue 3/6",rendered); self.assertIn("Animated: 3/6 Golem artifact creature",rendered)
 
+    async def test_public_embed_shows_hive_wasp_token(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        hive=game.next_uid; game.next_uid+=1; game.cards[hive]="lea:272"
+        wasp=game.next_uid; game.next_uid+=1; game.cards[wasp]="token:wasp"
+        game.player(10).battlefield=[permanent_type(hive,"lea:272",sick=False),permanent_type(wasp,"token:wasp")]
+        rendered=str(cog.game_embed(game).to_dict())
+        self.assertIn("The Hive",rendered); self.assertIn("Create a 1/1 colorless Insect artifact creature token",rendered)
+        self.assertIn("Wasp 1/1",rendered); self.assertIn("Flying",rendered)
+
     async def test_public_embed_shows_static_artifact_rules(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

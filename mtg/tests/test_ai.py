@@ -433,6 +433,15 @@ class SoloAITests(unittest.TestCase):
         advance_solo(game); self.assertEqual(game.stack[-1].source_uid,aura.uid); self.assertEqual(game.stack[-1].target,f"{AI}:{bear.uid}")
         game.pass_priority(HUMAN); advance_solo(game); self.assertEqual(game.current_stats(bear),(3,2))
 
+    def test_ai_activates_the_hive_and_resolves_a_wasp(self):
+        game=solo(order=(AI,HUMAN)); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
+        hive=self.add(game,AI,"lea:272"); [self.add(game,AI,"forest") for _ in range(5)]
+        game.active_index=0; game.phase="precombat_main"; game.priority_user=AI; game.player(AI).land_played=True
+        advance_solo(game); self.assertEqual(game.stack[-1].source_uid,hive.uid); self.assertEqual(game.stack[-1].ability_effect,"create_token")
+        game.pass_priority(HUMAN); advance_solo(game)
+        wasps=[permanent for permanent in game.player(AI).battlefield if game.card(permanent.uid).name=="Wasp"]
+        self.assertEqual(len(wasps),1); self.assertTrue(wasps[0].sick)
+
     def test_ai_activates_an_attached_regeneration_aura_for_lethal_combat(self):
         game=solo(); game.player(HUMAN).kept=True; game.player(AI).kept=True; game.player(AI).hand=[]
         attacker=self.add(game,HUMAN,"giant"); bear=self.add(game,AI,"bear"); aura=self.add(game,AI,"lea:213"); aura.attached_to=bear.uid; self.add(game,AI,"forest")

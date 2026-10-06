@@ -302,7 +302,7 @@ def _activation_target(game,user,card,source_uid=None):
         for position,spell in enumerate(reversed(game.stack),1):
             if not spell.ability_effect and spell.owner!=user and card.target_color in game.spell_colors(spell): return f"S:{position}"
         return None
-    if card.activation_effect=="draw_self": return str(user)
+    if card.activation_effect in ("draw_self","create_token"): return str(user)
     if card.activation_effect=="animate_self":
         _,source=game.find_permanent(source_uid)
         pending=any(item.ability_effect=="animate_self" and item.source_uid==source_uid for item in game.stack)

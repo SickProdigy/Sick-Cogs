@@ -1955,6 +1955,57 @@ class AlphaJadeStatueTests(unittest.TestCase):
         self.resolve_top(game); self.assertIn("fizzled",game.log[-1])
 
 
+class AlphaHiveTokenTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def create_wasp(self,game,user=10):
+        hive=self.add(game,user,"lea:272"); [self.add(game,user,"forest") for _ in range(5)]
+        game.priority_user=user; game.activate_ability(user,1); self.resolve_top(game)
+        return hive,game.player(user).battlefield[-1]
+
+    def test_hive_pays_taps_and_creates_persisted_wasp(self):
+        game=ready(); hive,wasp=self.create_wasp(game)
+        self.assertTrue(hive.tapped); self.assertTrue(wasp.sick); self.assertTrue(game.is_token(wasp.uid))
+        self.assertTrue(game.is_creature(wasp)); self.assertEqual(game.current_stats(wasp),(1,1))
+        self.assertTrue(game.card(wasp.uid).has_type("Artifact")); self.assertIn("flying",game.current_keywords(wasp))
+        restored=Game.from_raw(game.to_raw()); restored_wasp=restored.player(10).battlefield[-1]
+        self.assertEqual(restored.to_raw(),game.to_raw()); self.assertEqual(restored.card(restored_wasp.uid).name,"Wasp")
+
+    def test_hive_ability_survives_source_removal(self):
+        game=ready(); hive=self.add(game,10,"lea:272"); [self.add(game,10,"forest") for _ in range(5)]
+        game.activate_ability(10,1); game.player(10).battlefield.remove(hive); game.player(10).graveyard.append(hive.uid)
+        self.resolve_top(game); self.assertEqual(game.card(game.player(10).battlefield[-1].uid).name,"Wasp")
+
+    def test_wasp_ceases_instead_of_entering_nonbattlefield_zones(self):
+        destroyed=ready(); _,wasp=self.create_wasp(destroyed); self.add(destroyed,10,"lea:270")
+        destroyed._destroy(destroyed.player(10),wasp,allow_regeneration=False)
+        self.assertNotIn(wasp.uid,destroyed.player(10).graveyard); self.assertNotIn(wasp.uid,destroyed.cards)
+        self.assertEqual(destroyed.stack[-1].ability_effect,"death_life")
+
+        bounced=ready(); _,wasp=self.create_wasp(bounced); spell=self.add(bounced,10,"lea:86","hand"); self.add(bounced,10,"island")
+        bounced.priority_user=10; bounced.play(10,1,f"10:{len(bounced.player(10).battlefield)-1}"); self.resolve_top(bounced)
+        self.assertNotIn(wasp.uid,bounced.player(10).hand); self.assertNotIn(wasp.uid,bounced.cards)
+        self.assertIn(spell,bounced.player(10).graveyard)
+
+        exiled=ready(); _,wasp=self.create_wasp(exiled); spell=self.add(exiled,10,"lea:40","hand"); self.add(exiled,10,"plains")
+        before=exiled.player(10).life; exiled.priority_user=10; exiled.play(10,1,f"10:{len(exiled.player(10).battlefield)-1}"); self.resolve_top(exiled)
+        self.assertNotIn(wasp.uid,exiled.player(10).exile); self.assertNotIn(wasp.uid,exiled.cards)
+        self.assertEqual(exiled.player(10).life,before+1); self.assertIn(spell,exiled.player(10).graveyard)
+
+    def test_wasp_obeys_summoning_sickness_and_flying_combat(self):
+        game=ready(); _,wasp=self.create_wasp(game)
+        game.phase="attackers"; game.priority_user=None
+        with self.assertRaisesRegex(GameError,"cannot attack"): game.declare_attackers(10,[len(game.player(10).battlefield)])
+        wasp.sick=False; game.declare_attackers(10,[len(game.player(10).battlefield)])
+        self.assertEqual(game.attackers,[wasp.uid]); self.assertIn("flying",game.current_keywords(wasp))
+
+
 class AlphaStaticArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

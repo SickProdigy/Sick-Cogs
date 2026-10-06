@@ -10,7 +10,7 @@ The bundled Limited Edition Alpha catalog contains 295 printings representing 29
 | Creatures with abilities | 77 | 48 creatures playable through 0.29.0; 29 remain |
 | Instants and sorceries | 70 | 40 spells playable through 0.30.0; 30 remain |
 | Enchantments | 68 | 31 enchantments playable through 0.37.0; 37 remain |
-| Artifacts | 42 | Twenty-nine artifacts playable through 0.45.0; 13 remain |
+| Artifacts | 42 | Thirty artifacts playable through 0.46.0; 12 remain |
 | Lands | 19 | All playable in 0.10.0 with land types and one-mana production |
 | Ante cards | 3 | Explicitly excluded from literal play |
 | Dexterity adaptation | 1 | Chaos Orb requires a deterministic digital design before promotion |
@@ -112,3 +112,5 @@ The 0.43.0 Mana Vault promotion adds explicit three-colorless-mana activation, t
 The 0.44.0 Soul Net promotion adds persisted Pay {1} or Decline triggers for every creature that dies through ordinary destruction, lethal damage, zero toughness, simultaneous mass destruction, and sacrifice. Regenerated or exiled creatures do not count as dying. Simultaneous events snapshot Soul Net sources before zone movement, batch each controller's triggers in APNAP order, survive source removal and reloads, render through the shared Discord decision controls, and use the shared solo-AI payment path.
 
 The 0.45.0 Jade Statue promotion adds a shared live battlefield-type layer and a respondable combat-only Pay {2} activation. On resolution the Statue becomes a persisted 3/6 Golem artifact creature until end of combat; creature targeting, continuous bonuses, blocking, combat damage, lethal state actions, Soul Net death triggers, public rendering, and solo AI all use that live state. It reverts at end of combat and state-based cleanup removes any Aura that can no longer legally enchant it. Kormus Bell remains gated on full continuous-effect layer and timestamp handling rather than reusing this temporary animation shortcut.
+
+The 0.46.0 The Hive promotion adds the first persisted token definition and a respondable Pay {5}, Tap activation that creates Wasp. Wasp is a 1/1 colorless Insect artifact creature token with flying; it enters with summoning sickness, participates in shared combat and creature rules, and still produces death triggers before ceasing to exist. Bounce and exile also make it cease instead of placing it in a nonbattlefield zone. Token definitions are intentionally separate from the collectible card registry, catalog, fixed beginner decks, and future pack pool. The activated ability remains independent if The Hive leaves the battlefield, and solo AI can use it through the same action path.
