@@ -31,6 +31,7 @@ class GameView(discord.ui.View):
             if game and action in ("pay","decline_trigger"):
                 pending=bool(game.stack and game.stack[-1].decision_pending)
                 item.disabled=not pending
+                if pending and action=="pay": item.label=f"Pay {game.trigger_cost(game.stack[-1])}"
             if game and action=="concede": item.disabled=game.finished
     async def interaction_check(self,i):
         game=self.cog.games.get(self.game_id)

@@ -223,9 +223,11 @@ class Game:
             controller=self.player(controller_id)
             for source in controller.battlefield:
                 card=self.card(source.uid); effect=""
-                if step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
+                if step=="upkeep" and card.upkeep_untap_cost and active==controller.user_id: effect="upkeep_untap"
+                elif step=="upkeep" and card.upkeep_each_damage: effect="upkeep_damage"
                 elif step=="upkeep" and card.upkeep_opponent_hand_damage and active==self.opponent(controller.user_id): effect="upkeep_hand_damage"
                 elif step=="draw" and card.draw_step_extra and not source.tapped: effect="draw_step_draw"
+                elif step=="draw" and card.draw_tapped_damage and active==controller.user_id and source.tapped: effect="draw_tapped_damage"
                 if not effect: continue
                 uid=self.next_uid; self.next_uid+=1; self.cards[uid]=card.key
                 triggers.append(Spell(controller.user_id,uid,card.key,str(active),ability_effect=effect,source_uid=source.uid,color_override=source.color_override))
@@ -669,7 +671,7 @@ class Game:
         if self.stack:
             s=self.stack[-1]; s.passes+=1
             if s.passes==2:
-                if s.ability_effect=="cast_life":
+                if s.ability_effect in ("cast_life","upkeep_untap"):
                     s.decision_pending=True; self.priority_user=s.owner; return
                 self.stack.pop(); self._resolve(s)
                 if self.stack: self.stack[-1].passes=0
@@ -686,19 +688,29 @@ class Game:
                 else:
                     self._empty_mana(); self._advance()
 
+    def trigger_cost(self,trigger):
+        card=self.card(trigger.uid)
+        return card.upkeep_untap_cost if trigger.ability_effect=="upkeep_untap" else "{1}"
+
     def choose_trigger(self,user,pay):
         if self.finished: raise GameError("Game is over.")
         if not self.stack or not self.stack[-1].decision_pending or self.stack[-1].owner!=user:
             raise GameError("You do not have a trigger choice to make.")
-        trigger=self.stack.pop(); card=self.card(trigger.uid); pending=[]
+        trigger=self.stack.pop(); card=self.card(trigger.uid); pending=[]; cost=self.trigger_cost(trigger)
         if pay:
-            player=self.player(user); payment=self._mana_payment(player,card,mana_cost="{1}")
+            player=self.player(user); payment=self._mana_payment(player,card,mana_cost=cost)
             if payment is None:
-                self.stack.append(trigger); raise GameError("You cannot pay {1} for this trigger.")
+                self.stack.append(trigger); raise GameError(f"You cannot pay {cost} for this trigger.")
             sources,remaining,choices=payment
             for source in sources: self._tap_permanent(user,source,choices[source.uid],pending_triggers=pending)
-            player.mana_pool=remaining; player.life+=1
-            self.log.append(f"{user} paid {{1}} for {card.name} and gained 1 life.")
+            player.mana_pool=remaining
+            if trigger.ability_effect=="cast_life":
+                player.life+=1; result=" and gained 1 life"
+            else:
+                _,source=self.find_permanent(trigger.source_uid)
+                if source is not None: source.tapped=False
+                result=" and untapped it" if source is not None else ""
+            self.log.append(f"{user} paid {cost} for {card.name}{result}.")
         else: self.log.append(f"{user} declined {card.name}.")
         self.cards.pop(trigger.uid,None); self.stack.extend(pending)
         if self.stack: self.stack[-1].passes=0
@@ -891,6 +903,9 @@ class Game:
             target_player=self.player(int(s.target)); target_player.life-=max(0,len(target_player.hand)-4)
         elif effect=="draw_step_draw":
             self._draw(self.player(int(s.target)),card.draw_step_extra)
+        elif effect=="draw_tapped_damage":
+            _,source=self.find_permanent(s.source_uid)
+            if source is not None and source.tapped: self.player(int(s.target)).life-=card.draw_tapped_damage
         elif effect=="draw_self":
             self._draw(self.player(s.owner),1)
         elif effect=="untap_self":

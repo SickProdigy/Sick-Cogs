@@ -306,6 +306,16 @@ class PersistenceTests(unittest.IsolatedAsyncioTestCase):
         game.active_index=1; game._start_turn(); rendered=str(cog.game_embed(game).to_dict())
         self.assertIn("Upkeep",rendered); self.assertIn("opponent's upkeep",rendered); self.assertIn("Black Vise ability",rendered)
 
+    async def test_mana_vault_pending_choice_shows_dynamic_cost(self):
+        cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
+        game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]="lea:259"
+        game.player(10).battlefield=[permanent_type(uid,"lea:259",tapped=True,sick=False)]
+        game._start_turn(); game.pass_priority(10); game.pass_priority(20); cog.games[1]=game
+        rendered=str(cog.game_embed(game).to_dict()); self.assertIn("Pay {4} or Decline",rendered)
+        pay=next(item for item in GameView(cog,1).children if item.custom_id.endswith(":pay"))
+        self.assertEqual(pay.label,"Pay {4}"); self.assertFalse(pay.disabled)
+
     async def test_public_embed_shows_disk_and_pending_mass_destruction(self):
         cog=cog_fixture(); cog.bot=SimpleNamespace(get_user=lambda user_id:SimpleNamespace(display_name=str(user_id)))
         game=Game(1,[10,20],1); permanent_type=__import__("mtg.engine",fromlist=["Permanent"]).Permanent

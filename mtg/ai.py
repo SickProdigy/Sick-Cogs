@@ -445,7 +445,9 @@ def advance_solo(game: Game):
         if game.priority_user != user:
             return changed
         if game.stack and game.stack[-1].decision_pending:
-            pay=game._mana_payment(game.player(user),game.card(game.stack[-1].uid),mana_cost="{1}") is not None
+            trigger=game.stack[-1]; source=game.find_permanent(trigger.source_uid)[1]
+            useful=trigger.ability_effect!="upkeep_untap" or (source is not None and source.tapped)
+            pay=useful and game._mana_payment(game.player(user),game.card(trigger.uid),mana_cost=game.trigger_cost(trigger)) is not None
             game.choose_trigger(user,pay); game.record(user,"ai_trigger_pay" if pay else "ai_trigger_decline"); changed=True; continue
         action = _activate_regeneration(game,user) or _activate_targeted_ability(game,user) or _activate_combat_pump(game,user) or _play_one(game, user, difficulty)
         if action:

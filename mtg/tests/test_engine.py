@@ -1808,6 +1808,53 @@ class AlphaCastLifeArtifactTests(unittest.TestCase):
         self.assertTrue(game.stack[-1].decision_pending); game.choose_trigger(10,False)
 
 
+class AlphaManaVaultTests(unittest.TestCase):
+    def add(self,game,user,key,zone="battlefield"):
+        uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key
+        if zone=="hand": game.player(user).hand.insert(0,uid); return uid
+        permanent=Permanent(uid,key,sick=False); game.player(user).battlefield.append(permanent); return permanent
+
+    def resolve_top(self,game):
+        game.pass_priority(game.priority_user); game.pass_priority(game.priority_user)
+
+    def test_mana_vault_produces_three_and_skips_normal_untap(self):
+        game=ready(); vault=self.add(game,10,"lea:259"); game.activate_mana(10,1)
+        self.assertTrue(vault.tapped); self.assertEqual(game.player(10).mana_pool,{"C":3})
+        restored=Game.from_raw(game.to_raw()); restored.player(10).mana_pool.clear(); restored._start_turn()
+        self.assertTrue(next(x for x in restored.player(10).battlefield if x.uid==vault.uid).tapped)
+        self.assertEqual(restored.stack[-1].ability_effect,"upkeep_untap")
+
+    def test_upkeep_choice_pays_four_and_untaps_persistently(self):
+        game=ready(); vault=self.add(game,10,"lea:259"); vault.tapped=True
+        lands=[self.add(game,10,"plains") for _ in range(4)]; game._start_turn(); self.resolve_top(game)
+        self.assertTrue(game.stack[-1].decision_pending); self.assertEqual(game.trigger_cost(game.stack[-1]),"{4}")
+        restored=Game.from_raw(game.to_raw()); restored.choose_trigger(10,True)
+        self.assertFalse(next(x for x in restored.player(10).battlefield if x.uid==vault.uid).tapped)
+        land_uids={x.uid for x in lands}
+        self.assertTrue(all(x.tapped for x in restored.player(10).battlefield if x.uid in land_uids)); self.assertFalse(restored.stack)
+
+    def test_declined_upkeep_leads_to_conditional_draw_damage(self):
+        game=ready(); vault=self.add(game,10,"lea:259"); vault.tapped=True
+        game._start_turn(); self.resolve_top(game); game.choose_trigger(10,False)
+        game.pass_priority(10); game.pass_priority(20)
+        self.assertEqual(game.phase,"draw"); self.assertEqual(game.stack[-1].ability_effect,"draw_tapped_damage")
+        before=game.player(10).life; self.resolve_top(game); self.assertEqual(game.player(10).life,before-1)
+
+    def test_draw_damage_rechecks_tapped_source_and_survives_round_trip(self):
+        game=ready(); vault=self.add(game,10,"lea:259"); vault.tapped=True
+        game.skip_draw_step=False; game._begin_draw_step(); restored=Game.from_raw(game.to_raw())
+        _,source=restored.find_permanent(vault.uid); source.tapped=False; self.resolve_top(restored)
+        self.assertEqual(restored.player(10).life,20)
+        missing=ready(); gone=self.add(missing,10,"lea:259"); gone.tapped=True; missing._begin_draw_step()
+        missing.player(10).battlefield.remove(gone); missing.player(10).graveyard.append(gone.uid); self.resolve_top(missing)
+        self.assertEqual(missing.player(10).life,20)
+
+    def test_mana_vault_triggers_only_for_its_controller_steps(self):
+        game=ready(); vault=self.add(game,20,"lea:259"); vault.tapped=True
+        game._start_turn(); self.assertFalse(any(x.key=="lea:259" for x in game.stack))
+        game.active_index=1; game._start_turn(); self.assertEqual(game.stack[-1].ability_effect,"upkeep_untap")
+
+
 class AlphaStaticArtifactTests(unittest.TestCase):
     def add(self,game,user,key,zone="battlefield"):
         uid=game.next_uid; game.next_uid+=1; game.cards[uid]=key

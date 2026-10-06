@@ -91,6 +91,8 @@ class Card:
     untap_power_limit: int = 0
     white_as_red: bool = False
     cast_life_color: str = ""
+    upkeep_untap_cost: str = ""
+    draw_tapped_damage: int = 0
     type_line: str = ""
     set_code: str = ""
 
@@ -154,6 +156,8 @@ class Card:
         if self.cast_life_color:
             color_name={"W":"white","U":"blue","B":"black","R":"red","G":"green"}[self.cast_life_color]
             abilities.append(f"Whenever a player casts a {color_name} spell, you may pay {{1}} to gain 1 life")
+        if self.upkeep_untap_cost: abilities.append(f"At your upkeep, you may pay {self.upkeep_untap_cost} to untap this artifact")
+        if self.draw_tapped_damage: abilities.append(f"At your draw step, if tapped, deals {self.draw_tapped_damage} damage to you")
         if self.land_enter_damage: abilities.append(f"Whenever a land enters, deals {self.land_enter_damage} damage to its controller")
         if self.land_grave_damage: abilities.append(f"Whenever a land goes from battlefield to graveyard, deals {self.land_grave_damage} damage to its controller")
         if self.upkeep_each_damage: abilities.append(f"At each player's upkeep, deals {self.upkeep_each_damage} damage to that player")
@@ -246,6 +250,7 @@ ALPHA_ARTIFACTS = {
     "lea:233": {"upkeep_opponent_hand_damage":True},
     "lea:238": {"upkeep_each_damage":1},
     "lea:247": {"draw_step_extra":1},
+    "lea:259": {"produces":("C",), "mana_amount":3, "skip_untap":True, "upkeep_untap_cost":"{4}", "draw_tapped_damage":1},
     "lea:260": {"untap_power_limit":3},
     "lea:271": {"white_as_red":True},
     "lea:239": {"cast_life_color":"U"},
@@ -469,6 +474,8 @@ for reference in PLAYABLE_ALPHA:
         untap_power_limit=ALPHA_ARTIFACTS.get(reference.key,{}).get("untap_power_limit",0),
         white_as_red=ALPHA_ARTIFACTS.get(reference.key,{}).get("white_as_red",False),
         cast_life_color=ALPHA_ARTIFACTS.get(reference.key,{}).get("cast_life_color",""),
+        upkeep_untap_cost=ALPHA_ARTIFACTS.get(reference.key,{}).get("upkeep_untap_cost",""),
+        draw_tapped_damage=ALPHA_ARTIFACTS.get(reference.key,{}).get("draw_tapped_damage",0),
         activation_attached=ALPHA_ENCHANTMENTS.get(reference.key,{}).get("activation_attached",False),
     )
 

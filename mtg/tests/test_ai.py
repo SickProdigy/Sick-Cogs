@@ -481,6 +481,17 @@ class SoloAITests(unittest.TestCase):
         conversion.active_index=0; conversion.phase="precombat_main"; conversion.priority_user=AI; conversion.player(AI).land_played=True
         advance_solo(conversion); self.assertEqual(conversion.stack[-1].uid,glasses)
 
+    def test_ai_pays_or_declines_mana_vault_upkeep_choice(self):
+        paid=solo(order=(AI,HUMAN)); paid.player(AI).kept=True; paid.player(HUMAN).kept=True; paid.player(AI).hand=[]
+        vault=self.add(paid,AI,"lea:259"); vault.tapped=True; [self.add(paid,AI,"forest") for _ in range(4)]
+        paid.active_index=0; paid._start_turn(); advance_solo(paid); paid.pass_priority(HUMAN); advance_solo(paid)
+        self.assertFalse(vault.tapped); self.assertTrue(any(event["action"]=="ai_trigger_pay" for event in paid.history))
+
+        declined=solo(order=(AI,HUMAN)); declined.player(AI).kept=True; declined.player(HUMAN).kept=True; declined.player(AI).hand=[]
+        vault=self.add(declined,AI,"lea:259"); vault.tapped=True; declined.active_index=0; declined._start_turn()
+        advance_solo(declined); declined.pass_priority(HUMAN); advance_solo(declined)
+        self.assertTrue(vault.tapped); self.assertTrue(any(event["action"]=="ai_trigger_decline" for event in declined.history))
+
     def test_ai_casts_turn_step_artifacts_but_avoids_lethal_copper_tablet(self):
         for key in ("lea:233","lea:247"):
             with self.subTest(key=key):
