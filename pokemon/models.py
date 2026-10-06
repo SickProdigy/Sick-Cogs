@@ -325,6 +325,8 @@ class Battle:
         player_order=(player_move.priority,player_speed)
         wild_order=(wild_move.priority,wild_speed)
         player_first=(self.rng().randrange(2)==0) if player_order==wild_order else player_order>wild_order
+        self.player_acted=self.wild_acted=False
+        self.player_flinched=self.wild_flinched=False
         actions = (
             (self._player_attack, player_move),
             (self._wild_attack, wild_move),
@@ -361,6 +363,10 @@ class Battle:
     def _set_status(self,status,target_player,rng):
         species=SPECIES[self.player.species_id] if target_player else SPECIES[self.wild_species_id]
         target_name=species.name
+        if status=="flinch":
+            acted="player_acted" if target_player else "wild_acted"
+            if getattr(self,acted,False):return ""
+            setattr(self,"player_flinched" if target_player else "wild_flinched",True);return status
         if status=="confusion":
             attr="player_confusion_turns" if target_player else "wild_confusion_turns"
             if getattr(self,attr)>0:return ""
@@ -385,11 +391,13 @@ class Battle:
             if player:self.player_hp=min(maximum,self.player_hp+amount)
             else:self.wild_hp=min(maximum,self.wild_hp+amount)
             changes.append(f"restored {amount} HP")
+        if move.name=="Haze":
+            self.player_stages.clear();self.wild_stages.clear();changes.append("all stat changes were eliminated")
         if move.name=="Rest":
             if player:self.player_hp=self.max_hp(self.player);self.player_status="sleep";self.player_status_turns=2
             else:self.wild_hp=self.wild_max_hp;self.wild_status="sleep";self.wild_status_turns=2
             changes.append("fell asleep and restored its HP")
-        if move.status in {"burn","poison","paralysis","sleep","freeze","confusion"}:
+        if move.status in {"burn","poison","paralysis","sleep","freeze","confusion","flinch"}:
             applied=self._set_status(move.status,not player,rng)
             if applied:changes.append(f"{target_name} is {applied}")
         if move.name in {"Teleport","Roar","Whirlwind"} and self.battle_kind=="wild":
@@ -408,6 +416,11 @@ class Battle:
         return max(1,base*(85+rng.randrange(16))//100)
 
     def _can_act(self, player, rng):
+        flinch="player_flinched" if player else "wild_flinched"
+        if getattr(self,flinch,False):
+            setattr(self,flinch,False)
+            name=SPECIES[self.player.species_id].name if player else f"Wild {SPECIES[self.wild_species_id].name}"
+            return False,f"{name} flinched and could not move."
         status=self.player_status if player else self.wild_status
         name=SPECIES[self.player.species_id].name if player else f"Wild {SPECIES[self.wild_species_id].name}"
         if status=="paralysis" and rng.randrange(100)<25:return False,f"{name} is paralyzed."
@@ -461,6 +474,7 @@ class Battle:
         return " ".join(parts)
 
     def _player_attack(self, move):
+        self.player_acted=True
         rng=self.rng();allowed,message=self._can_act(True,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.player.species_id].name} used {move.name}, but it missed."
@@ -483,6 +497,7 @@ class Battle:
         return self.attack_line(SPECIES[self.player.species_id].name,self.wild_species_id,move,damage,critical,applied_status,stat_changes,ruleset=self.ruleset)
 
     def _wild_attack(self, move):
+        self.wild_acted=True
         rng=self.rng();allowed,message=self._can_act(False,rng)
         if not allowed:return message
         if rng.randrange(100)>=move.accuracy:return f"{SPECIES[self.wild_species_id].name} used {move.name}, but it missed."
