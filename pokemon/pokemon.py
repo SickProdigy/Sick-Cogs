@@ -84,7 +84,7 @@ def encounter_returns_after_timeout(raw):
 
 class Pokemon(commands.Cog):
     """Catch globally owned Pokémon in opt-in guild channels."""
-    __version__="0.13.0";__author__="SickProdigy"
+    __version__="0.14.0";__author__="SickProdigy"
     def __init__(self,bot):
         self.bot=bot;self.config=Config.get_conf(self,identifier=CONFIG_IDENTIFIER,force_registration=True)
         self.config.register_guild(**GUILD);self.config.register_user(**USER);self.config.register_global(**GLOBAL)
@@ -371,20 +371,22 @@ class Pokemon(commands.Cog):
         """
         conf=await self.config.user(ctx.author).all()
         if not conf["starter_chosen"] and not conf["collection"]:
-            embed=self.starter_embed(ctx.author)
+            setup_hint=f"{ctx.clean_prefix}pokemonset";embed=self.starter_embed(ctx.author,setup_hint=setup_hint)
             embed.add_field(name="How to begin",value="Choose a partner, find a wild encounter, battle it, then use a Poké Ball to catch it.",inline=False)
-            embed.set_footer(text=f"Server setup is separate: {ctx.clean_prefix}pokemonset")
-            await ctx.send(embed=embed,view=StarterView(self,ctx.author.id))
+            await ctx.send(embed=embed,view=StarterView(self,ctx.author.id,setup_hint=setup_hint))
             return
         await ctx.send_help()
     @staticmethod
-    def starter_embed(user):
-        embed=discord.Embed(title="Choose your first Pokémon",description="Every trainer begins with one partner. Choose carefully—this can only be done once.",color=discord.Color.green())
-        embed.add_field(name="Bulbasaur 🌿",value="Grass / Poison",inline=True)
-        embed.add_field(name="Charmander 🔥",value="Fire",inline=True)
-        embed.add_field(name="Squirtle 💧",value="Water",inline=True)
+    def starter_embed(user,selected=0,setup_hint=None):
+        starter_ids=(1,4,7);sid=starter_ids[int(selected)%len(starter_ids)];species=SPECIES[sid]
+        embed=discord.Embed(title=f"Choose {species.name}?",description="Use ◀ and ▶ to view each starter, then press **Choose**. Your first partner can only be selected once.",color=discord.Color.green())
+        embed.add_field(name="Type",value=" / ".join(value.title() for value in species.types),inline=True)
+        embed.add_field(name="Starter",value=f"{int(selected)%len(starter_ids)+1} of {len(starter_ids)}",inline=True)
+        embed.set_image(url=sprite(sid))
         trainer=getattr(user,"display_name",getattr(user,"name",str(user)))
-        embed.set_footer(text=f"Trainer: {trainer}")
+        footer=f"Trainer: {trainer}"
+        if setup_hint:footer+=f" · Server setup: {setup_hint}"
+        embed.set_footer(text=footer)
         return embed
 
     async def grant_starter(self,user,sid):

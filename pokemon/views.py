@@ -3,29 +3,40 @@ import discord
 from .data import MOVES, SPECIES
 
 
-STARTERS = ((1, "Bulbasaur", "🌿"), (4, "Charmander", "🔥"), (7, "Squirtle", "💧"))
-
-
-class StarterButton(discord.ui.Button):
-    def __init__(self,cog,user_id,species_id,label,emoji,encounter_id=None):
-        super().__init__(label=label,emoji=emoji,style=discord.ButtonStyle.primary,custom_id=f"pokemon:starter:{species_id}")
-        self.cog=cog;self.user_id=user_id;self.species_id=species_id;self.encounter_id=encounter_id
-
-    async def callback(self,interaction):
-        await self.cog.choose_starter(interaction,self.species_id,self.encounter_id)
+STARTERS = (1,4,7)
 
 
 class StarterView(discord.ui.View):
-    def __init__(self,cog,user_id,encounter_id=None):
+    def __init__(self,cog,user_id,encounter_id=None,setup_hint=None):
         super().__init__(timeout=180)
-        self.user_id=user_id
-        for species_id,label,emoji in STARTERS:
-            self.add_item(StarterButton(cog,user_id,species_id,label,emoji,encounter_id))
+        self.cog=cog;self.user_id=user_id;self.encounter_id=encounter_id;self.setup_hint=setup_hint;self.selected=0
+
+    @property
+    def species_id(self):return STARTERS[self.selected]
+
+    def cycle(self,offset):
+        self.selected=(self.selected+offset)%len(STARTERS)
+        return self.species_id
 
     async def interaction_check(self,interaction):
         if interaction.user.id==self.user_id:return True
         await interaction.response.send_message("This starter choice belongs to another trainer.",ephemeral=True)
         return False
+
+    async def refresh(self,interaction):
+        await interaction.response.edit_message(embed=self.cog.starter_embed(interaction.user,self.selected,self.setup_hint),view=self)
+
+    @discord.ui.button(label="◀",style=discord.ButtonStyle.secondary,custom_id="pokemon:starter:previous")
+    async def previous(self,interaction,button):
+        self.cycle(-1);await self.refresh(interaction)
+
+    @discord.ui.button(label="Choose",emoji="✅",style=discord.ButtonStyle.success,custom_id="pokemon:starter:choose")
+    async def choose(self,interaction,button):
+        await self.cog.choose_starter(interaction,self.species_id,self.encounter_id)
+
+    @discord.ui.button(label="▶",style=discord.ButtonStyle.secondary,custom_id="pokemon:starter:next")
+    async def next(self,interaction,button):
+        self.cycle(1);await self.refresh(interaction)
 
 
 class EncounterView(discord.ui.View):
